@@ -11,14 +11,18 @@
 use std::sync::Arc;
 
 use foton_core::event::{
-    PlayerFailMoveEvent, PlayerToggleFlightEvent, PlayerVelocityEvent,
+    PlayerArmorChangeEvent, PlayerFailMoveEvent, PlayerItemConsumeEvent,
+    PlayerToggleFlightEvent, PlayerVelocityEvent,
 };
+use foton_registry::equipment::EquipmentSlot;
+use foton_utils::types::InteractionHand;
 use foton_core::server::Server;
 use glam::DVec3;
 use jni::JavaVM;
 use jni::objects::{JObject, JString, JValue};
 
 use crate::forward::{BridgeEnv, owner};
+use crate::natives::{describe_slot, parse_slot};
 
 /// The Java class these events are built in.
 const RELAY: &str = "foton/EventRelay";
@@ -156,4 +160,58 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: &Arc<JavaVM>) {
             event.set_velocity(velocity);
         }
     });
+
+    let jvm = Arc::clone(vm);
+    events.on::<PlayerArmorChangeEvent, _>(owner(), move |event| {
+        let Some(slot) = armor_slot_name(event.slot()) else {
+            return;
+        };
+        let _ = text_call(
+            &jvm,
+            "fireArmorChange",
+            &[
+                &event.player().to_string(),
+                slot,
+                &describe_slot(event.old_item()),
+                &describe_slot(event.new_item()),
+            ],
+        );
+    });
+
+    let jvm = Arc::clone(vm);
+    events.on::<PlayerItemConsumeEvent, _>(owner(), move |event| {
+        let hand = match event.hand() {
+            InteractionHand::MainHand => "HAND",
+            InteractionHand::OffHand => "OFF_HAND",
+        };
+        let Some(answer) = text_call(
+            &jvm,
+            "fireItemConsume",
+            &[&event.player().to_string(), hand, &describe_slot(event.item())],
+        ) else {
+            return;
+        };
+        let answer = fields(&answer);
+        if flag(answer.first()) == Some(true) {
+            event.set_cancelled(true);
+            return;
+        }
+        if let Some(item) = answer.get(1).and_then(|text| parse_slot(text)) {
+            event.set_item(item);
+        }
+        if flag(answer.get(2)) == Some(true) {
+            event.set_replacement(answer.get(3).and_then(|text| parse_slot(text)));
+        }
+    });
+}
+
+/// The Bukkit `SlotType` name of an armor slot.
+const fn armor_slot_name(slot: EquipmentSlot) -> Option<&'static str> {
+    match slot {
+        EquipmentSlot::Head => Some("HEAD"),
+        EquipmentSlot::Chest => Some("CHEST"),
+        EquipmentSlot::Legs => Some("LEGS"),
+        EquipmentSlot::Feet => Some("FEET"),
+        _ => None,
+    }
 }

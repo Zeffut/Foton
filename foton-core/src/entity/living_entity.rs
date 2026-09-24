@@ -1,6 +1,7 @@
 use std::f32::consts::PI;
 
 use foton_registry::DyeColor;
+use foton_registry::equipment::EquipmentSlotType;
 use foton_registry::attribute::AttributeRef;
 use foton_registry::data_components::components::ItemDamageFunction;
 use foton_registry::data_components::vanilla_components::{
@@ -15,7 +16,7 @@ use crate::behavior::ITEM_BEHAVIORS;
 use crate::behavior::item::apply_one_consume_effect;
 use crate::entity::kill_score;
 use crate::event::EntityDeathEvent;
-use crate::event::{EntityResurrectEvent, Event};
+use crate::event::{EntityResurrectEvent, Event, PlayerArmorChangeEvent};
 use crate::inventory::lock::{ContainerId, ContainerLockGuard, ContainerRef};
 use crate::physics::collision;
 use crate::player::player_inventory::PlayerInventory;
@@ -2479,7 +2480,17 @@ pub trait LivingEntity: Entity {
             return;
         };
         if active.remaining_ticks() <= 0 {
+            let mut replacement = None;
+            if let Some(player) = self.as_player() {
+                let Some(decision) = player.fire_item_consume(hand, item) else {
+                    return;
+                };
+                (item, replacement) = decision;
+            }
             item = behavior.finish_using(&mut item, &world, user);
+            if let Some(replacement) = replacement {
+                item = replacement;
+            }
             self.stop_using_item();
         }
 
@@ -2957,6 +2968,25 @@ pub trait LivingEntity: Entity {
             self.on_equipment_changed(*slot, previous, current);
             self.living_base()
                 .refresh_equipment_attribute_modifiers(*slot, current);
+        }
+
+        // Paper parity: `PlayerArmorChangeEvent`, fired from this same
+        // comparison for a player's four armor slots.
+        if let Some(player) = self.as_player()
+            && let Some(world) = self.level()
+        {
+            for (slot, previous, current) in &changes {
+                if slot.slot_type() != EquipmentSlotType::HumanoidArmor {
+                    continue;
+                }
+                let mut event = PlayerArmorChangeEvent::new(
+                    player.gameprofile.id,
+                    *slot,
+                    previous.clone(),
+                    current.clone(),
+                );
+                world.fire_event(&mut event);
+            }
         }
 
         let main_hand = changes

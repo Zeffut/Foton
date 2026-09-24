@@ -33,6 +33,8 @@ pub mod command;
 pub mod command_preprocess;
 /// Events about entities that are not players.
 pub mod entity;
+/// What a player wears and what they finish using.
+pub mod equipment;
 mod fertilize;
 pub mod inventory;
 mod lectern;
@@ -58,6 +60,7 @@ pub use entity::{
     ExpBottleEvent, ExplosionPrimeEvent, HangingBreakEvent, HangingPlaceEvent, ItemSpawnEvent,
     LightningStrikeEvent, PreCreatureSpawnEvent, ProjectileLaunchEvent,
 };
+pub use equipment::{PlayerArmorChangeEvent, PlayerItemConsumeEvent};
 pub use fertilize::BlockFertilizeEvent;
 pub use inventory::{
     CrafterCraftEvent, InventoryClickEvent, InventoryCloseEvent, InventoryDragEvent,

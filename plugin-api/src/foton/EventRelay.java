@@ -90,4 +90,25 @@ public final class EventRelay {
         EventBridge.dispatch(event);
         return answer(event.isCancelled(), encode(event.getVelocity()));
     }
+
+    /** Answers nothing: the change has already happened. */
+    public static String fireArmorChange(String uuid, String slot, String oldItem, String newItem) {
+        com.destroystokyo.paper.event.player.PlayerArmorChangeEvent event =
+            new com.destroystokyo.paper.event.player.PlayerArmorChangeEvent(player(uuid),
+                com.destroystokyo.paper.event.player.PlayerArmorChangeEvent.SlotType.valueOf(slot),
+                FotonInventory.decode(oldItem), FotonInventory.decode(newItem));
+        EventBridge.dispatch(event);
+        return "";
+    }
+
+    /** Answers `cancelled, item, hasReplacement, replacement`. */
+    public static String fireItemConsume(String uuid, String hand, String item) {
+        org.bukkit.event.player.PlayerItemConsumeEvent event =
+            new org.bukkit.event.player.PlayerItemConsumeEvent(player(uuid),
+                FotonInventory.decode(item), org.bukkit.inventory.EquipmentSlot.valueOf(hand));
+        EventBridge.dispatch(event);
+        org.bukkit.inventory.ItemStack replacement = event.getReplacement();
+        return answer(event.isCancelled(), FotonInventory.encode(event.getItem()),
+            replacement != null, replacement == null ? "" : FotonInventory.encode(replacement));
+    }
 }
