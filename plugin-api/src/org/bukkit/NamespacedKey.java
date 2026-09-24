@@ -4,11 +4,16 @@ import org.bukkit.plugin.Plugin;
 
 /** A namespaced identifier.
  *
- * <p>An Adventure {@code Key}, as in Paper: Paper methods such as
- * {@code AttributeInstance.removeModifier(Key)} and {@code Player.getCooldown(Key)}
- * are handed a {@code NamespacedKey} by plugins and call it through the
- * {@code Key} interface. */
+ * <p>An Adventure {@link net.kyori.adventure.key.Key}, as in Paper: a plugin
+ * compiled against Paper passes {@code material.getKey()} wherever a
+ * {@code Key} is wanted ({@code TypedKey.create(RegistryKey.ITEM, ...)}), and
+ * the first {@code Key} method called on it would otherwise throw
+ * {@code IncompatibleClassChangeError}.</p>
+ */
 public final class NamespacedKey implements net.kyori.adventure.key.Key {
+    /** The namespace of everything vanilla. */
+    public static final String MINECRAFT = "minecraft";
+
     private final String namespace;
     private final String key;
 
@@ -28,6 +33,8 @@ public final class NamespacedKey implements net.kyori.adventure.key.Key {
 
     public String getNamespace() { return namespace; }
     public String getKey() { return key; }
+    @Override public String namespace() { return namespace; }
+    @Override public String value() { return key; }
 
     /** Reads `namespace:key`, defaulting the namespace to minecraft.
      *
@@ -59,6 +66,4 @@ public final class NamespacedKey implements net.kyori.adventure.key.Key {
 
     @Override public String toString() { return namespace + ":" + key; }
     @Override public String asString() { return toString(); }
-    @Override public String namespace() { return namespace; }
-    @Override public String value() { return key; }
 }

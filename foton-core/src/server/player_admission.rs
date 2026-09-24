@@ -256,6 +256,7 @@ impl Server {
         // player's profile. Vanilla publishes player info before adding the player to
         // the level, which can immediately start entity tracking for existing players.
         self.sync_tab_list(&player);
+        self.send_domain_teams(&player, None, state.world.domain());
         let admitted = player.spawn(pos, rotation, ResetReason::InitialJoin);
         if !admitted {
             self.remove_online_player_sync(&player);

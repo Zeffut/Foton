@@ -53,6 +53,8 @@ public final class Bukkit {
         if (type == org.bukkit.Particle.class) return (Registry<T>) Registry.PARTICLE_TYPE;
         if (type == org.bukkit.inventory.meta.trim.TrimPattern.class) return (Registry<T>) Registry.TRIM_PATTERN;
         if (type == org.bukkit.inventory.meta.trim.TrimMaterial.class) return (Registry<T>) Registry.TRIM_MATERIAL;
+        if (type == org.bukkit.block.banner.PatternType.class) return (Registry<T>) Registry.BANNER_PATTERN;
+        if (type == org.bukkit.MusicInstrument.class) return (Registry<T>) Registry.INSTRUMENT;
         throw new IllegalArgumentException("Unsupported registry type: " + type);
     }
     private static volatile boolean stopping;
@@ -277,7 +279,7 @@ public final class Bukkit {
     }
 
     public static <T extends Keyed> Tag<T> getTag(String registry, NamespacedKey key, Class<T> type) {
-        return key == null || type == null ? null : new Tag<>(key, type, registry);
+        return key == null || type == null ? null : new foton.FotonTag<>(registry, key, type);
     }
 
     /** Every tag in a registry.

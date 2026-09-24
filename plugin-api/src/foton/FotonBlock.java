@@ -57,10 +57,7 @@ public final class FotonBlock implements Block {
     @Override
     public org.bukkit.block.Biome getBiome() {
         String key = world == null ? null : Native.biomeKey(world.getName(), x, y, z);
-        if (key == null) return null;
-        int colon = key.indexOf(':');
-        String name = (colon < 0 ? key : key.substring(colon + 1)).toUpperCase(java.util.Locale.ROOT);
-        try { return org.bukkit.block.Biome.valueOf(name); } catch (IllegalArgumentException ignored) { return null; }
+        return key == null ? null : org.bukkit.Registry.BIOME.get(org.bukkit.NamespacedKey.fromString(key));
     }
 
     @Override
@@ -103,6 +100,9 @@ public final class FotonBlock implements Block {
         }
         if (text != null && text.startsWith("minecraft:piston_head")) {
             return new org.bukkit.block.data.type.SimplePistonHeadData(text);
+        }
+        if (text != null && (text.contains("[age=") || text.contains(",age="))) {
+            return new org.bukkit.block.data.SimpleAgeableData(text);
         }
         if (text != null && text.contains("[rotation=")) {
             return new org.bukkit.block.data.SimpleRotatableData(text);

@@ -24,7 +24,8 @@ jni = "0.21"
 log.workspace = true
 libloading = "0.8"
 rustc-hash.workspace = true
-# Adventure components cross as vanilla JSON text.
+# Adventure components and book pages cross as vanilla JSON text.
+serde.workspace = true
 serde_json.workspace = true
 simdnbt.workspace = true
 thiserror.workspace = true

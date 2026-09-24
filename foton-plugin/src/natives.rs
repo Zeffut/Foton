@@ -120,10 +120,11 @@ use foton_registry::data_components::components::{
     CustomModelData, ItemEnchantments, ItemLore, TooltipDisplay,
 };
 use foton_registry::data_components::vanilla_components::{
-    CUSTOM_MODEL_DATA, CUSTOM_NAME, ENCHANTMENTS, FIREWORKS, FireworkExplosion,
-    FireworkExplosionShape, Fireworks, ITEM_MODEL, ITEM_NAME, LORE, STORED_ENCHANTMENTS,
-    TOOLTIP_DISPLAY, TOOLTIP_STYLE, UNBREAKABLE, WRITABLE_BOOK_CONTENT, WRITTEN_BOOK_CONTENT,
+    CUSTOM_MODEL_DATA, ENCHANTMENTS, FIREWORKS, FireworkExplosion, FireworkExplosionShape,
+    Fireworks, ITEM_MODEL, ITEM_NAME, LORE, STORED_ENCHANTMENTS, TOOLTIP_DISPLAY, TOOLTIP_STYLE,
+    UNBREAKABLE, WRITABLE_BOOK_CONTENT, WRITTEN_BOOK_CONTENT,
 };
+use foton_registry::enchantment::{Enchantment, EnchantmentRef};
 use foton_registry::entity_type::EntityTypeRef;
 use foton_registry::entity_type::MobCategory;
 use foton_registry::entity_variant::AxolotlVariant;
@@ -180,6 +181,8 @@ mod merchants;
 mod particles;
 mod players;
 mod support;
+use crate::item_components;
+use crate::scoreboard_natives;
 
 /// The server the natives answer about.
 ///
@@ -318,14 +321,14 @@ pub(crate) fn player(env: &mut JNIEnv<'_>, uuid: &JString<'_>) -> Option<Arc<Pla
 }
 
 /// Returns a Java string, or Java's null when there is nothing to say.
-fn to_java(env: &mut JNIEnv<'_>, value: Option<String>) -> jstring {
+pub(crate) fn to_java(env: &mut JNIEnv<'_>, value: Option<String>) -> jstring {
     value
         .and_then(|text| env.new_string(text).ok())
         .map_or_else(null_mut, JString::into_raw)
 }
 
 /// Returns a Java `String[]`, or null if the array could not be built.
-fn string_array(env: &mut JNIEnv<'_>, values: &[String]) -> jobjectArray {
+pub(crate) fn string_array(env: &mut JNIEnv<'_>, values: &[String]) -> jobjectArray {
     let Ok(empty) = env.new_string("") else {
         return null_mut();
     };
@@ -412,6 +415,104 @@ extern "system" fn enchantment_can_enchant(
     jboolean::from(enchantment.can_enchant(item))
 }
 
+fn enchantment_named(env: &mut JNIEnv<'_>, key: &JString<'_>) -> Option<EnchantmentRef> {
+    let key: Identifier = env.get_string(key).ok()?.to_str().ok()?.parse().ok()?;
+    REGISTRY.enchantments.by_key(&key)
+}
+
+/// `foton.Native.blockPropertyValues`
+extern "system" fn block_property_values(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    block: JString<'_>,
+    property: JString<'_>,
+) -> jobjectArray {
+    let Some(block) = env
+        .get_string(&block)
+        .ok()
+        .and_then(|text| text.to_str().ok()?.parse::<Identifier>().ok())
+        .and_then(|key| REGISTRY.blocks.by_key(&key))
+    else {
+        return null_mut();
+    };
+    let Ok(property) = env.get_string(&property) else {
+        return null_mut();
+    };
+    let property = String::from(property);
+    let Some(found) = block
+        .properties
+        .iter()
+        .find(|candidate| candidate.get_name() == property)
+    else {
+        return null_mut();
+    };
+    let values: Vec<String> = found
+        .get_possible_value_names()
+        .iter()
+        .map(|value| (*value).to_owned())
+        .collect();
+    string_array(&mut env, &values)
+}
+
+/// `foton.Native.enchantmentsConflict`
+extern "system" fn enchantments_conflict(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    enchantment: JString<'_>,
+    other: JString<'_>,
+) -> jboolean {
+    let (Some(enchantment), Some(other)) = (
+        enchantment_named(&mut env, &enchantment),
+        enchantment_named(&mut env, &other),
+    ) else {
+        return 0;
+    };
+    jboolean::from(!Enchantment::are_compatible(enchantment, other))
+}
+
+/// `foton.Native.enchantmentItems`: the item keys an enchantment's primary or
+/// supported holder set names, or null when it names none.
+extern "system" fn enchantment_items(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    enchantment: JString<'_>,
+    primary: jboolean,
+) -> jobjectArray {
+    let Some(enchantment) = enchantment_named(&mut env, &enchantment) else {
+        return null_mut();
+    };
+    let holders = if primary == 0 {
+        Some(enchantment.supported_items)
+    } else {
+        enchantment.primary_items
+    };
+    let Some(holders) = holders else {
+        return null_mut();
+    };
+    // The data pack writes these as a tag (`#minecraft:enchantable/sword`) or
+    // a single item, never inline lists, which is also all Foton parses.
+    let items: Vec<String> = match holders.strip_prefix('#') {
+        Some(tag) => {
+            let Ok(tag) = tag.parse::<Identifier>() else {
+                return null_mut();
+            };
+            REGISTRY
+                .items
+                .iter_tag(&tag)
+                .map(|item| item.key.to_string())
+                .collect()
+        }
+        None => holders
+            .parse::<Identifier>()
+            .ok()
+            .and_then(|key| REGISTRY.items.by_key(&key))
+            .map(|item| item.key.to_string())
+            .into_iter()
+            .collect(),
+    };
+    string_array(&mut env, &items)
+}
+
 fn parse_item_snbt_patch(input: &str) -> Option<NbtCompound> {
     let text = input.trim();
     let compound = if text.starts_with('{') {
@@ -465,6 +566,38 @@ extern "system" fn server_motd(mut env: JNIEnv<'_>, _class: JClass<'_>) -> jstri
     to_java(&mut env, server().map(|value| value.config.motd.clone()))
 }
 
+/// The members of `tag` in the registry a plugin names, or `None` when that
+/// registry has no such tag.
+///
+/// Registries are named as Paper's `RegistryKey`s are (`item`,
+/// `worldgen/biome`), and also as Bukkit's `Tag.REGISTRY_*` strings
+/// (`items`, `blocks`, `fluids`, `entity_types`, `game_events`).
+fn tag_members(registry: &str, tag: &Identifier) -> Option<Vec<String>> {
+    fn keys<T: foton_registry::RegistryEntry + 'static>(
+        entries: Option<Vec<&'static T>>,
+    ) -> Option<Vec<String>> {
+        entries.map(|entries| {
+            entries
+                .iter()
+                .map(|entry| entry.key().to_string())
+                .collect()
+        })
+    }
+    match registry.strip_prefix("minecraft:").unwrap_or(registry) {
+        "item" | "items" => keys(REGISTRY.items.get_tag(tag)),
+        "block" | "blocks" => keys(REGISTRY.blocks.get_tag(tag)),
+        "fluid" | "fluids" => keys(REGISTRY.fluids.get_tag(tag)),
+        "entity_type" | "entity_types" => keys(REGISTRY.entity_types.get_tag(tag)),
+        "game_event" | "game_events" => keys(REGISTRY.game_events.get_tag(tag)),
+        "enchantment" => keys(REGISTRY.enchantments.get_tag(tag)),
+        "banner_pattern" => keys(REGISTRY.banner_patterns.get_tag(tag)),
+        "instrument" => keys(REGISTRY.instruments.get_tag(tag)),
+        "worldgen/biome" => keys(REGISTRY.biomes.get_tag(tag)),
+        "potion" => keys(REGISTRY.potions.get_tag(tag)),
+        _ => None,
+    }
+}
+
 extern "system" fn is_tagged(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -489,19 +622,23 @@ extern "system" fn is_tagged(
     };
     let registry = String::from(registry);
     let answer = match registry.as_str() {
-        "minecraft:items" | "items" => REGISTRY
+        // The two a plugin asks about every tick keep their direct lookup.
+        "minecraft:items" | "items" | "item" => REGISTRY
             .items
             .by_key(&value)
             .is_some_and(|item| REGISTRY.items.is_in_tag(item, &tag)),
-        "minecraft:blocks" | "blocks" => REGISTRY
+        "minecraft:blocks" | "blocks" | "block" => REGISTRY
             .blocks
             .by_key(&value)
             .is_some_and(|block| REGISTRY.blocks.is_in_tag(block, &tag)),
-        _ => false,
+        other => tag_members(other, &tag)
+            .is_some_and(|members| members.iter().any(|member| *member == value.to_string())),
     };
     jboolean::from(answer)
 }
 
+/// `foton.Native.tagValues`: the tag's members, or null when the registry has
+/// no such tag -- which is how `Registry#hasTag` tells absent from empty.
 extern "system" fn tag_values(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -517,19 +654,8 @@ extern "system" fn tag_values(
     let Ok(tag) = String::from(tag).parse::<Identifier>() else {
         return null_mut();
     };
-    let registry = String::from(registry);
-    let values: Vec<String> = match registry.as_str() {
-        "minecraft:items" | "items" => REGISTRY
-            .items
-            .iter_tag(&tag)
-            .map(|entry| entry.key().to_string())
-            .collect(),
-        "minecraft:blocks" | "blocks" => REGISTRY
-            .blocks
-            .iter_tag(&tag)
-            .map(|entry| entry.key().to_string())
-            .collect(),
-        _ => Vec::new(),
+    let Some(values) = tag_members(&String::from(registry), &tag) else {
+        return null_mut();
     };
     string_array(&mut env, &values)
 }
@@ -7317,22 +7443,6 @@ pub(crate) fn describe_slot(stack: &ItemStack) -> String {
         value.push_str("nbthex=");
         value.push_str(&hex_encode(opaque.as_bytes()));
     }
-    if let Some(name) = stack.get(CUSTOM_NAME) {
-        value.push('\u{1d}');
-        value.push_str("namehex=");
-        for byte in name.to_string().as_bytes() {
-            let _ = write!(value, "{byte:02x}");
-        }
-    }
-    if let Some(lore) = stack.get(LORE) {
-        for line in lore.lines() {
-            value.push('\u{1d}');
-            value.push_str("lorehex=");
-            for byte in line.to_string().as_bytes() {
-                let _ = write!(value, "{byte:02x}");
-            }
-        }
-    }
     if stack.has(UNBREAKABLE) {
         value.push('\u{1d}');
         value.push_str("unbreakable");
@@ -7399,6 +7509,7 @@ pub(crate) fn describe_slot(stack: &ItemStack) -> String {
             );
         }
     }
+    item_components::describe(stack, &mut value);
     value
 }
 
@@ -7577,22 +7688,12 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
     if !stored.is_empty() {
         stack.set(STORED_ENCHANTMENTS, stored);
     }
-    if let Some(effects) = metadata.iter().find(|value| {
-        !value.starts_with("damage=")
-            && !value.starts_with("namehex=")
-            && !value.starts_with("lorehex=")
-            && !value.starts_with("enchhex=")
-            && !value.starts_with("storedenchhex=")
-            && !value.starts_with("model=")
-            && !value.starts_with("modelfloat=")
-            && !value.starts_with("modelflag=")
-            && !value.starts_with("modelstrhex=")
-            && !value.starts_with("modelcolor=")
-            && !value.starts_with("itemmodelhex=")
-            && !value.starts_with("tooltipstylehex=")
-            && **value != "hidetooltip"
-            && **value != "unbreakable"
-    }) {
+    item_components::parse(&mut stack, &metadata);
+    // Potion effects are the one field with no name.
+    if let Some(effects) = metadata
+        .iter()
+        .find(|value| !value.contains('=') && **value != "hidetooltip" && **value != "unbreakable")
+    {
         use foton_registry::data_components::components::PotionContents;
         use foton_registry::data_components::vanilla_components::POTION_CONTENTS;
         use foton_registry::mob_effect::instance::MobEffectInstance;
@@ -10960,6 +11061,21 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             enchantment_can_enchant as *mut c_void,
         ),
         method(
+            "blockPropertyValues",
+            "(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;",
+            block_property_values as *mut c_void,
+        ),
+        method(
+            "enchantmentsConflict",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            enchantments_conflict as *mut c_void,
+        ),
+        method(
+            "enchantmentItems",
+            "(Ljava/lang/String;Z)[Ljava/lang/String;",
+            enchantment_items as *mut c_void,
+        ),
+        method(
             "dyeFireworkColor",
             "(I)I",
             dye_firework_color as *mut c_void,
@@ -11399,6 +11515,41 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "scoreboardTeamEntries",
             "(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;",
             scoreboard_team_entries as *mut c_void,
+        ),
+        method(
+            "scoreboardTeamNames",
+            "(Ljava/lang/String;)[Ljava/lang/String;",
+            scoreboard_natives::team_names as *mut c_void,
+        ),
+        method(
+            "scoreboardRegisterTeam",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            scoreboard_natives::register_team as *mut c_void,
+        ),
+        method(
+            "scoreboardUnregisterTeam",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            scoreboard_natives::unregister_team as *mut c_void,
+        ),
+        method(
+            "scoreboardAddTeamEntry",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+            scoreboard_natives::add_team_entry as *mut c_void,
+        ),
+        method(
+            "scoreboardRemoveTeamEntry",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+            scoreboard_natives::remove_team_entry as *mut c_void,
+        ),
+        method(
+            "scoreboardTeamProperty",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            scoreboard_natives::team_property as *mut c_void,
+        ),
+        method(
+            "scoreboardSetTeamProperty",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+            scoreboard_natives::set_team_property as *mut c_void,
         ),
         method(
             "scoreboardEntryTeam",
@@ -13369,5 +13520,37 @@ mod snbt_tests {
     fn malformed_or_unknown_prefix_is_rejected() {
         assert!(parse_item_snbt_patch("not valid{foo:1}").is_none());
         assert!(parse_item_snbt_patch("minecraft:stone{foo:}").is_none());
+    }
+}
+
+#[cfg(test)]
+mod tag_tests {
+    use super::tag_members;
+    use foton_utils::Identifier;
+
+    fn tag(path: &'static str) -> Identifier {
+        Identifier::vanilla_static(path)
+    }
+
+    /// `Registry#hasTag` reads absence from `None`, so an unknown tag must not
+    /// look like an empty one.
+    #[test]
+    fn an_unknown_tag_is_absent_rather_than_empty() {
+        foton_registry::init_vanilla_registry();
+        assert!(tag_members("enchantment", &tag("not_a_tag")).is_none());
+        assert!(tag_members("not_a_registry", &tag("in_enchanting_table")).is_none());
+    }
+
+    /// Paper's registry names and Bukkit's legacy ones reach the same tags.
+    #[test]
+    fn registries_are_named_either_way() {
+        foton_registry::init_vanilla_registry();
+        let table = tag_members("enchantment", &tag("in_enchanting_table")).unwrap_or_default();
+        assert!(table.iter().any(|key| key == "minecraft:sharpness"));
+        assert!(!table.iter().any(|key| key == "minecraft:mending"));
+        assert_eq!(
+            tag_members("items", &tag("trimmable_armor")),
+            tag_members("minecraft:item", &tag("trimmable_armor"))
+        );
     }
 }

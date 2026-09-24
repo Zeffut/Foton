@@ -27,6 +27,10 @@ public final class Native {
     public static native String[] tagValues(String registry, String tag);
     public static native int dyeFireworkColor(int dyeOrdinal);
     public static native boolean enchantmentCanEnchant(String enchantment, String item);
+    /** Whether vanilla refuses the two on one item; an enchantment conflicts with itself. */
+    public static native boolean enchantmentsConflict(String enchantment, String other);
+    /** The primary (or, when false, supported) items as item keys; null when the enchantment names none. */
+    public static native String[] enchantmentItems(String enchantment, boolean primary);
 
     /** Merges a Vanilla SNBT compound into an item opaque component. */
     public static native String mergeItemSnbt(String existing, String patch);
@@ -176,6 +180,19 @@ public final class Native {
     public static native String worldDropItem(String world, double x, double y, double z, String item);
     public static native String[] scoreboardTeamEntries(String world, String team);
     public static native String scoreboardEntryTeam(String world, String entry);
+    public static native String[] scoreboardTeamNames(String world);
+    /** False when the name is already a team, or empty. */
+    public static native boolean scoreboardRegisterTeam(String world, String team);
+    public static native boolean scoreboardUnregisterTeam(String world, String team);
+    /** Moves the entry onto the team; false when the team is gone. */
+    public static native boolean scoreboardAddTeamEntry(String world, String team, String entry);
+    /** Takes the entry off the team, only if it is on that team. */
+    public static native boolean scoreboardRemoveTeamEntry(String world, String team, String entry);
+    /** displayName, prefix, suffix (JSON text, "" for none), color, nameTagVisibility,
+     * collisionRule (snake-case names), friendlyFire, seeFriendlyInvisibles (true/false);
+     * null when the team does not exist. */
+    public static native String scoreboardTeamProperty(String world, String team, String property);
+    public static native boolean scoreboardSetTeamProperty(String world, String team, String property, String value);
 
     /** A player's name, or null once they are gone. */
     public static native String playerName(String uuid);
@@ -549,6 +566,8 @@ public final class Native {
     /** One block as `minecraft:name[state=value]`, or null if unreadable. */
     public static native String blockPistonReaction(String world, int x, int y, int z);
     public static native String blockState(String world, int x, int y, int z);
+    /** Every value a block's property can take, in registry order; null for an unknown block or property. */
+    public static native String[] blockPropertyValues(String block, String property);
     public static native String biomeKey(String world, int x, int y, int z);
     public static native String recipeResult(String key);
     public static native String[] recipeList();

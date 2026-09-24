@@ -37,8 +37,10 @@ use jni::{JavaVM, errors::Error as JniError};
 use thiserror::Error;
 
 mod forward;
+mod item_components;
 mod natives;
 mod packet_tap;
+mod scoreboard_natives;
 
 /// The class the Java side exposes to this one.
 const HOST_CLASS: &str = "foton/PluginHost";

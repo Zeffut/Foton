@@ -2,25 +2,37 @@ package org.bukkit.inventory;
 
 import org.bukkit.entity.HumanEntity;
 
-/** A read/write view of the inventories participating in a player's menu. */
-public abstract class InventoryView {
-    public org.bukkit.event.inventory.InventoryType getType() { return org.bukkit.event.inventory.InventoryType.CHEST; }
-    public abstract Inventory getTopInventory();
-    public abstract Inventory getBottomInventory();
-    public abstract HumanEntity getPlayer();
-    public abstract String getTitle();
+/** A read/write view of the inventories participating in a player's menu.
+ *
+ * <p>An interface, as in Paper since 1.21: plugins call
+ * {@code getTopInventory()} with {@code invokeinterface}, which an abstract
+ * class answers with {@code IncompatibleClassChangeError}.</p>
+ */
+public interface InventoryView {
+    /** The raw slot of a click outside the window. */
+    int OUTSIDE = -999;
+
+    default org.bukkit.event.inventory.InventoryType getType() { return org.bukkit.event.inventory.InventoryType.CHEST; }
+    Inventory getTopInventory();
+    Inventory getBottomInventory();
+    HumanEntity getPlayer();
+    String getTitle();
+
+    default net.kyori.adventure.text.Component title() {
+        return net.kyori.adventure.text.Component.text(getTitle());
+    }
 
     /** Closes this view for its owning human entity when supported. */
-    public void close() {
+    default void close() {
         HumanEntity owner = getPlayer();
         if (owner instanceof org.bukkit.entity.Player player) player.closeInventory();
     }
 
-    public int countSlots() {
+    default int countSlots() {
         return getTopInventory().getSize() + getBottomInventory().getSize();
     }
 
-    public Inventory getInventory(int rawSlot) {
+    default Inventory getInventory(int rawSlot) {
         if (rawSlot < 0) return null;
         int top = getTopInventory().getSize();
         if (rawSlot < top) return getTopInventory();
@@ -28,7 +40,7 @@ public abstract class InventoryView {
         return null;
     }
 
-    public int convertSlot(int rawSlot) {
+    default int convertSlot(int rawSlot) {
         int top = getTopInventory().getSize();
         if (rawSlot < 0) return -1;
         if (rawSlot < top) return rawSlot;
@@ -38,13 +50,13 @@ public abstract class InventoryView {
         return bottom < 27 ? bottom + 9 : bottom - 27;
     }
 
-    public ItemStack getItem(int rawSlot) {
+    default ItemStack getItem(int rawSlot) {
         Inventory inventory = getInventory(rawSlot);
         int slot = convertSlot(rawSlot);
         return inventory == null || slot < 0 ? null : inventory.getItem(slot);
     }
 
-    public void setItem(int rawSlot, ItemStack item) {
+    default void setItem(int rawSlot, ItemStack item) {
         Inventory inventory = getInventory(rawSlot);
         int slot = convertSlot(rawSlot);
         if (inventory != null && slot >= 0) inventory.setItem(slot, item);

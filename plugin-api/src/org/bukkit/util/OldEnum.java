@@ -1,14 +1,20 @@
 package org.bukkit.util;
 
-/** The enum-like surface Paper keeps on types that became registry interfaces.
+/** What a value that used to be an enum keeps of one.
  *
- * <p>Plugins written when these were enums still call {@code name()},
- * {@code ordinal()} and {@code compareTo()} on them. */
+ * <p>Paper's bridge for registry values that were enums before 1.21: plugins
+ * written then still call {@code name()}, {@code ordinal()} and
+ * {@code compareTo}, and those calls resolve here.</p>
+ */
 @Deprecated
 public interface OldEnum<T extends OldEnum<T>> extends Comparable<T> {
-    @Deprecated @Override int compareTo(T other);
+    @Deprecated
+    @Override
+    int compareTo(T other);
 
-    @Deprecated String name();
+    @Deprecated
+    String name();
 
-    @Deprecated int ordinal();
+    @Deprecated
+    int ordinal();
 }

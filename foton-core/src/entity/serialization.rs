@@ -103,7 +103,7 @@ mod tests {
 
     use super::{deserialize_entity, serialize_entity};
     use crate::entity::entities::PigEntity;
-    use crate::entity::{Entity, Mob as _, init_entities};
+    use crate::entity::{Entity, Mob, init_entities};
     use crate::test_support::test_world;
 
     #[test]
@@ -130,7 +130,7 @@ mod tests {
         assert_ne!(copy.uuid(), pig.uuid());
         assert_eq!(copy.position(), pig.position());
         assert_eq!(copy.tags(), vec!["stabled".to_owned()]);
-        assert!(copy.as_mob().is_some_and(|mob| mob.is_no_ai()));
+        assert!(copy.as_mob().is_some_and(Mob::is_no_ai));
 
         let Some(same) = deserialize_entity(&bytes, world, true) else {
             panic!("the blob should read back twice");

@@ -15,6 +15,12 @@ public class ShapelessRecipe extends CraftingRecipe {
     public ShapelessRecipe addIngredient(RecipeChoice choice) { if (choice != null) choices.add(choice); return this; }
     public ShapelessRecipe addIngredient(Material material) { return addIngredient(new RecipeChoice.MaterialChoice(material)); }
     public ShapelessRecipe addIngredient(ItemStack stack) { return addIngredient(new RecipeChoice.ExactChoice(stack)); }
+    /** Adds {@code count} of the material; a crafting grid holds nine, as Paper checks. */
+    public ShapelessRecipe addIngredient(int count, Material material) {
+        if (choices.size() + count > 9) throw new IllegalArgumentException("Shapeless recipes cannot have more than 9 ingredients");
+        for (int i = 0; i < count; i++) addIngredient(material);
+        return this;
+    }
     public List<RecipeChoice> getChoiceList() { return Collections.unmodifiableList(choices); }
     /** Bukkit compatibility name for the ingredient choices. */
     public List<RecipeChoice> getIngredientList() { return getChoiceList(); }

@@ -6,7 +6,7 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryView;
 
 /** Live view facade for the menu currently installed on one player. */
-public final class FotonInventoryView extends InventoryView {
+public final class FotonInventoryView implements InventoryView {
     private final FotonPlayer player;
     private final Inventory top;
     private final String title;

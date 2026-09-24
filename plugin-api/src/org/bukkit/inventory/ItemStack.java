@@ -86,6 +86,7 @@ public class ItemStack implements Cloneable {
             durability = value instanceof Number number ? (short) number.intValue() : 0;
             return;
         }
+        if (setMetaComponent(type, value)) return;
         if (value == null) dataComponents.remove(type); else dataComponents.put(type, value);
         if (type == io.papermc.paper.datacomponent.DataComponentTypes.CUSTOM_MODEL_DATA && value instanceof io.papermc.paper.datacomponent.item.CustomModelData model) {
             ItemMeta copy = getItemMeta();
@@ -99,7 +100,57 @@ public class ItemStack implements Cloneable {
         if (type == io.papermc.paper.datacomponent.DataComponentTypes.DAMAGE) {
             return (T) Integer.valueOf(durability);
         }
+        if (isMetaComponent(type)) return (T) metaComponent(type);
         return (T) dataComponents.get(type);
+    }
+
+    /** Whether the stack carries this component. */
+    public boolean hasData(io.papermc.paper.datacomponent.DataComponentType<?> type) {
+        if (type == null) return false;
+        if (type == io.papermc.paper.datacomponent.DataComponentTypes.DAMAGE) return durability != 0;
+        if (isMetaComponent(type)) return metaComponent(type) != null;
+        return dataComponents.containsKey(type);
+    }
+
+    private static boolean isMetaComponent(io.papermc.paper.datacomponent.DataComponentType<?> type) {
+        return type == io.papermc.paper.datacomponent.DataComponentTypes.BANNER_PATTERNS
+            || type == io.papermc.paper.datacomponent.DataComponentTypes.BASE_COLOR
+            || type == io.papermc.paper.datacomponent.DataComponentTypes.TRIM;
+    }
+
+    /** A component that lives in the meta, as a Paper component value; null when absent. */
+    private Object metaComponent(io.papermc.paper.datacomponent.DataComponentType<?> type) {
+        if (!(meta instanceof SimpleItemMeta simple)) return null;
+        if (type == io.papermc.paper.datacomponent.DataComponentTypes.BANNER_PATTERNS) {
+            List<org.bukkit.block.banner.Pattern> patterns = simple.getBannerPatternsComponent();
+            return patterns == null ? null : io.papermc.paper.datacomponent.item.BannerPatternLayers.bannerPatternLayers(patterns);
+        }
+        if (type == io.papermc.paper.datacomponent.DataComponentTypes.BASE_COLOR) return simple.getBaseColorComponent();
+        org.bukkit.inventory.meta.trim.ArmorTrim trim = simple.getTrimComponent();
+        return trim == null ? null : io.papermc.paper.datacomponent.item.ItemArmorTrim.itemArmorTrim(trim).build();
+    }
+
+    /** Writes a meta-held component (null removes it); false when the type is not one. */
+    private boolean setMetaComponent(io.papermc.paper.datacomponent.DataComponentType<?> type, Object value) {
+        if (!isMetaComponent(type)) return false;
+        if (!(getItemMeta() instanceof SimpleItemMeta copy)) return true;
+        if (type == io.papermc.paper.datacomponent.DataComponentTypes.BANNER_PATTERNS) {
+            copy.setBannerPatternsComponent(value == null ? null
+                : ((io.papermc.paper.datacomponent.item.BannerPatternLayers) value).patterns());
+        } else if (type == io.papermc.paper.datacomponent.DataComponentTypes.BASE_COLOR) {
+            copy.setBaseColorComponent((org.bukkit.DyeColor) value);
+        } else {
+            copy.setTrimComponent(value == null ? null
+                : ((io.papermc.paper.datacomponent.item.ItemArmorTrim) value).armorTrim());
+        }
+        setItemMeta(copy);
+        return true;
+    }
+
+    /** The stack's persistent data, read-only: a copy, so writing to it changes nothing. */
+    public io.papermc.paper.persistence.PersistentDataContainerView getPersistentDataContainer() {
+        if (!(meta instanceof SimpleItemMeta simple)) return new foton.FotonPersistentDataContainer();
+        return ((foton.FotonPersistentDataContainer) simple.getPersistentDataContainer()).copy();
     }
 
     /** Reads a valued component. Same answer as the wider overload; Paper
@@ -117,6 +168,7 @@ public class ItemStack implements Cloneable {
             durability = 0;
             return;
         }
+        if (setMetaComponent(type, null)) return;
         dataComponents.remove(type);
     }
 
@@ -276,8 +328,9 @@ public class ItemStack implements Cloneable {
         return in.readBoolean() ? in.readUTF() : null;
     }
 
+    /** The item's max_stack_size component when it has one, else its type's. */
     public int getMaxStackSize() {
-        return type.getMaxStackSize();
+        return meta != null && meta.hasMaxStackSize() ? meta.getMaxStackSize() : type.getMaxStackSize();
     }
 
     public boolean containsEnchantment(org.bukkit.enchantments.Enchantment enchantment) { return getEnchantmentLevel(enchantment) > 0; }
@@ -354,6 +407,12 @@ public class ItemStack implements Cloneable {
         if (type == Material.CROSSBOW) return new org.bukkit.inventory.meta.SimpleCrossbowMeta();
         if (type == Material.SUSPICIOUS_STEW) return new org.bukkit.inventory.meta.SimpleSuspiciousStewMeta();
         if (type.name().endsWith("_BANNER")) return new org.bukkit.inventory.meta.SimpleBannerMeta();
+        if (type == Material.GOAT_HORN) return new org.bukkit.inventory.meta.SimpleMusicInstrumentMeta();
+        if (java.util.Arrays.asList(foton.FotonRegistryData.TRIMMABLE_ARMOR).contains(type.getKeyName())) {
+            return type.name().startsWith("LEATHER_")
+                ? new org.bukkit.inventory.meta.SimpleLeatherArmorMeta()
+                : new org.bukkit.inventory.meta.SimpleArmorMeta();
+        }
         if (type == Material.ENCHANTED_BOOK) return new org.bukkit.inventory.meta.SimpleEnchantmentStorageMeta();
         return isBook() ? new org.bukkit.inventory.meta.SimpleBookMeta() : new SimpleItemMeta();
     }

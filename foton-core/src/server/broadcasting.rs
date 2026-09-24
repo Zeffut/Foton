@@ -258,4 +258,45 @@ impl Server {
             ),
         }
     }
+
+    /// Sends each domain's queued team packets to the players in that domain.
+    ///
+    /// Vanilla parity: `ServerScoreboard` broadcasting its team changes to
+    /// `PlayerList.broadcastAll`. Foton's scoreboards are per domain, so a
+    /// player sees the teams of the domain they are in.
+    pub(super) fn flush_team_updates(&self) {
+        for (domain, scoreboard) in self.scoreboards.iter() {
+            let updates = scoreboard.take_team_updates();
+            if updates.is_empty() {
+                continue;
+            }
+            self.online_players.iter_players(|_, player| {
+                if player.get_world().domain() == domain {
+                    for update in &updates {
+                        player.send_packet(update.clone());
+                    }
+                }
+                true
+            });
+        }
+    }
+
+    /// Sends a player every team of a domain they have just entered, after
+    /// taking off the teams of the one they left.
+    ///
+    /// Vanilla parity: the team half of `PlayerList.updateEntireScoreboard`,
+    /// sent on login; on a domain switch the client still holds the previous
+    /// domain's teams, which would otherwise keep colouring names there.
+    pub(super) fn send_domain_teams(&self, player: &Player, left: Option<&str>, entered: &str) {
+        if let Some(scoreboard) = left.and_then(|domain| self.scoreboards.get(domain)) {
+            for removal in scoreboard.team_removals() {
+                player.send_packet(removal);
+            }
+        }
+        if let Some(scoreboard) = self.scoreboards.get(entered) {
+            for team in scoreboard.team_snapshot() {
+                player.send_packet(team);
+            }
+        }
+    }
 }
