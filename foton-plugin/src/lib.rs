@@ -38,6 +38,7 @@ use thiserror::Error;
 
 mod forward;
 mod natives;
+mod relay;
 
 /// The class the Java side exposes to this one.
 const HOST_CLASS: &str = "foton/PluginHost";

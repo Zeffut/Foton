@@ -179,7 +179,7 @@ pub use weather::Precipitation;
 pub(crate) use worldgen_level::WorldGenLevel;
 
 use crate::entity::RemovalReason::Discarded;
-use crate::event::{ChunkLoadEvent, ChunkPopulateEvent, Event};
+use crate::event::{ChunkLoadEvent, ChunkPopulateEvent, Event, PlayerVelocityEvent};
 use foton_registry::entity_type::MobCategory;
 #[cfg(test)]
 use level_effects::sound_is_within_range;
@@ -465,6 +465,33 @@ impl SaveCoordinator {
 
 impl World {
     /// Fires a plugin event when this world is attached to a server.
+    /// Asks plugins about each velocity the tracker is about to push to a
+    /// player.
+    ///
+    /// Paper parity: the `PlayerVelocityEvent` in `ServerEntity.sendChanges`,
+    /// fired where the motion packet would be built. Done here, just before
+    /// the tracker runs, because the tracker iterates under its own map lock
+    /// and a listener is free to call back into the world.
+    fn fire_player_velocity_events(&self) {
+        let mut pushed = Vec::new();
+        self.players.iter_players(|_, player| {
+            if player.hurt_marked() {
+                pushed.push(Arc::clone(player));
+            }
+            true
+        });
+        for player in pushed {
+            let velocity = player.velocity();
+            let mut event = PlayerVelocityEvent::new(player.gameprofile.id, velocity);
+            self.fire_event(&mut event);
+            if event.is_cancelled() {
+                player.clear_hurt_mark();
+            } else if event.velocity() != velocity {
+                player.set_velocity(event.velocity());
+            }
+        }
+    }
+
     pub(crate) fn fire_event<E: Event>(&self, event: &mut E) {
         if let Some(server) = self.server.get().and_then(Weak::upgrade) {
             server.events.fire(event);
@@ -966,6 +993,8 @@ impl World {
             self.block_entity_tickers.tick(self, runs_normally);
             chunk_map_timings.tick_block_entities = start.elapsed();
         }
+
+        self.fire_player_velocity_events();
 
         {
             let _span = tracing::trace_span!("entity_tracker_send_changes").entered();

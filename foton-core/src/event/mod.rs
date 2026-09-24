@@ -36,6 +36,8 @@ pub mod entity;
 mod fertilize;
 pub mod inventory;
 mod lectern;
+/// How a player moves, and the server correcting it.
+pub mod movement;
 pub mod player;
 pub mod server;
 /// Events about a world rather than anyone in it.
@@ -62,6 +64,9 @@ pub use inventory::{
     InventoryOpenEvent, PrepareGrindstoneEvent, PrepareItemCraftEvent,
 };
 pub use lectern::PlayerTakeLecternBookEvent;
+pub use movement::{
+    FailMoveReason, PlayerFailMoveEvent, PlayerToggleFlightEvent, PlayerVelocityEvent,
+};
 pub use player::{
     AsyncPlayerPreLoginEvent, AsyncPlayerPreLoginResult, FoodLevelChangeEvent,
     PlayerAdvancementCriterionGrantEvent, PlayerAdvancementDoneEvent, PlayerBucketEmptyEvent,

@@ -24,7 +24,7 @@ use glam::DVec3;
 use crate::entity::{
     AcceptedClientMovement, AcceptedClientMovementOutcome, Entity, EntityMoveError, LivingEntity,
 };
-use crate::event::{Event as _, PlayerMoveEvent};
+use crate::event::{Event as _, FailMoveReason, PlayerFailMoveEvent, PlayerMoveEvent};
 use crate::physics::{
     MOVEMENT_ERROR_THRESHOLD, MovementCollisionValidation, MoverType, WorldCollisionProvider,
     is_colliding_with_new_shapes, movement_error_delta,
@@ -188,6 +188,31 @@ impl Player {
         true
     }
 
+    /// Tells plugins a move is about to be refused, and returns what they
+    /// decided.
+    ///
+    /// Paper parity: `ServerGamePacketListenerImpl.fireFailMove`. Vanilla has no
+    /// such hook; without it a plugin sees the player snap back with no
+    /// teleport and no reason.
+    fn fire_fail_move(
+        &self,
+        reason: FailMoveReason,
+        from: (DVec3, (f32, f32)),
+        to: (DVec3, (f32, f32)),
+        log_warning: bool,
+    ) -> PlayerFailMoveEvent {
+        let mut event = PlayerFailMoveEvent::new(
+            self.gameprofile.id,
+            self.get_world().key.to_string(),
+            reason,
+            from,
+            to,
+            log_warning,
+        );
+        self.fire_event(&mut event);
+        event
+    }
+
     /// Handles a move player packet.
     ///
     /// Matches vanilla `ServerGamePacketListenerImpl.handleMovePlayer()`.
@@ -303,15 +328,32 @@ impl Player {
                 } * f64::from(delta_packets);
 
                 if moved_dist_sq - self.velocity().length_squared() > threshold {
-                    if let Err(error) =
-                        self.teleport(start_pos, current_rotation.0, current_rotation.1)
-                    {
-                        log::warn!(
-                            "Failed to correct too-fast player {} movement: {error}",
-                            self.id()
-                        );
+                    let event = self.fire_fail_move(
+                        FailMoveReason::MovedTooQuickly,
+                        (start_pos, current_rotation),
+                        (target_pos, (target_yaw, target_pitch)),
+                        true,
+                    );
+                    if !event.allowed() {
+                        if event.log_warning() {
+                            log::warn!(
+                                "{} moved too quickly! {},{},{}",
+                                self.gameprofile.name,
+                                dx,
+                                dy,
+                                dz
+                            );
+                        }
+                        if let Err(error) =
+                            self.teleport(start_pos, current_rotation.0, current_rotation.1)
+                        {
+                            log::warn!(
+                                "Failed to correct too-fast player {} movement: {error}",
+                                self.id()
+                            );
+                        }
+                        return;
                     }
-                    return;
                 }
             }
         }
@@ -338,10 +380,23 @@ impl Player {
         let error_delta = movement_error_delta(target_pos, self.position());
         let error_dist_sq = error_delta.length_squared();
         let in_impulse_grace = self.is_in_post_impulse_grace_time();
-        let fail = error_dist_sq > MOVEMENT_ERROR_THRESHOLD
+        let mut fail = error_dist_sq > MOVEMENT_ERROR_THRESHOLD
             && !is_creative
             && !is_spectator
             && !in_impulse_grace;
+        if fail {
+            let event = self.fire_fail_move(
+                FailMoveReason::MovedWrongly,
+                (start_pos, current_rotation),
+                (target_pos, (target_yaw, target_pitch)),
+                true,
+            );
+            if event.allowed() {
+                fail = false;
+            } else if event.log_warning() {
+                log::warn!("{} moved wrongly!", self.gameprofile.name);
+            }
+        }
 
         let new_aabb = self.bounding_box().translate(target_pos - self.position());
         let collision_world = WorldCollisionProvider::for_entity(&world, self);
@@ -353,14 +408,22 @@ impl Player {
         let new_collision =
             is_colliding_with_new_shapes(&collision_world, old_aabb, new_aabb, self.is_crouching());
 
-        if (MovementCollisionValidation {
+        let rejected = (MovementCollisionValidation {
             no_physics: self.no_physics(),
             moved_wrongly: fail,
             old_collision,
             new_collision,
         })
         .rejects()
-        {
+            && !self
+                .fire_fail_move(
+                    FailMoveReason::ClippedIntoBlock,
+                    (start_pos, current_rotation),
+                    (target_pos, (target_yaw, target_pitch)),
+                    false,
+                )
+                .allowed();
+        if rejected {
             if let Err(error) = self.teleport(start_pos, target_yaw, target_pitch) {
                 log::warn!(
                     "Failed to correct collided player {} movement: {error}",

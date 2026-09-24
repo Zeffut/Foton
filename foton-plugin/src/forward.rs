@@ -79,12 +79,12 @@ const MESSENGER: &str = "foton/FotonMessenger";
 ///
 /// Clearing on scope exit puts the reset at the one place every callback passes
 /// through, instead of at the seventy that swallow an error.
-struct BridgeEnv<'local> {
+pub(crate) struct BridgeEnv<'local> {
     guard: AttachGuard<'local>,
 }
 
 impl<'local> BridgeEnv<'local> {
-    fn attach(vm: &'local JavaVM) -> Option<Self> {
+    pub(crate) fn attach(vm: &'local JavaVM) -> Option<Self> {
         Some(Self {
             guard: vm.attach_current_thread().ok()?,
         })
@@ -118,7 +118,7 @@ impl Drop for BridgeEnv<'_> {
     }
 }
 
-fn owner() -> Identifier {
+pub(crate) fn owner() -> Identifier {
     Identifier::from_foton("plugins")
 }
 
@@ -1155,6 +1155,8 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
             event.payload(),
         );
     });
+
+    crate::relay::subscribe(server, &vm);
 
     // The tick. Not a gameplay event: it is what makes `runTask` mean what
     // Bukkit says it means. A plugin hands over a Runnable from whatever
