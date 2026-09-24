@@ -16,4 +16,7 @@ pub use item_display::{ItemDisplayContext, ItemDisplayEntity};
 pub use item_frame::ItemFrameEntity;
 pub use leash_fence_knot::LeashFenceKnotEntity;
 pub use painting::PaintingEntity;
-pub use text_display::{TextAlign, TextDisplayEntity};
+pub use text_display::{
+    FLAG_SEE_THROUGH, FLAG_SHADOW, FLAG_USE_DEFAULT_BACKGROUND, INITIAL_BACKGROUND, TextAlign,
+    TextDisplayEntity,
+};

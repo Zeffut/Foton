@@ -39,12 +39,9 @@ use foton_core::entity::PatrollingMonster;
 use foton_core::entity::Projectile;
 use foton_core::entity::SharedEntity;
 use foton_core::entity::TamableAnimal;
-use foton_core::entity::attribute::AttributeModifier;
-use foton_core::entity::attribute::AttributeModifierOperation;
 use foton_core::entity::conversion::{
     ConversionParams, ConversionReason, convert_to, replace_entity,
 };
-use foton_core::entity::damage::DamageSource;
 use foton_core::entity::entities::TropicalFishPattern;
 use foton_core::entity::entities::decoration::ArmorStandEntity;
 use foton_core::entity::entities::mobs::hostile::PhantomEntity;
@@ -127,21 +124,18 @@ use foton_registry::data_components::vanilla_components::{
     FireworkExplosionShape, Fireworks, ITEM_MODEL, ITEM_NAME, LORE, STORED_ENCHANTMENTS,
     TOOLTIP_DISPLAY, TOOLTIP_STYLE, UNBREAKABLE, WRITABLE_BOOK_CONTENT, WRITTEN_BOOK_CONTENT,
 };
-use foton_registry::entity_data::{Quaternionf, Vector3f};
 use foton_registry::entity_type::EntityTypeRef;
 use foton_registry::entity_type::MobCategory;
 use foton_registry::entity_variant::AxolotlVariant;
 use foton_registry::game_rules::GameRuleType;
 use foton_registry::game_rules::GameRuleValue;
 use foton_registry::item_stack::ItemStack;
-use foton_registry::particle_type::ParticleData;
 use foton_registry::recipe::{
     CraftingCategory, Ingredient, RecipeResult, ShapedRecipe, ShapelessRecipe,
 };
 use foton_registry::trading::ItemCost;
 use foton_registry::trading::MerchantOffer;
 use foton_registry::vanilla_block_entity_types::SIGN;
-use foton_registry::vanilla_damage_types::PLAYER_ATTACK;
 use foton_registry::vanilla_game_rules::TNT_EXPLOSION_DROP_DECAY;
 use foton_registry::{
     REGISTRY, RegistryEntry as _, RegistryExt as _, TaggedRegistryExt as _, vanilla_entities,
@@ -177,6 +171,16 @@ use simdnbt::owned::NbtTag;
 use text_components::{TextComponent, content::Content as TextContent};
 use uuid::Uuid;
 
+mod attributes;
+mod blocks;
+mod displays;
+mod entities;
+mod lifecycle;
+mod merchants;
+mod particles;
+mod players;
+mod support;
+
 /// The server the natives answer about.
 ///
 /// A `static` because a JNI native is a bare function pointer with nowhere to
@@ -208,7 +212,8 @@ const ABANDONED_CHUNK_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 static BOSS_BARS: OnceLock<SyncRwLock<FxHashMap<Uuid, Arc<ServerBossEvent>>>> = OnceLock::new();
 
 /// Bukkit updates header and footer independently, while the protocol packet carries both.
-static PLAYER_TAB_LISTS: OnceLock<SyncRwLock<FxHashMap<Uuid, (String, String)>>> = OnceLock::new();
+static PLAYER_TAB_LISTS: OnceLock<SyncRwLock<FxHashMap<Uuid, (TextComponent, TextComponent)>>> =
+    OnceLock::new();
 
 /// Plugin world-creation requests. Requests are polled from JVM threads;
 /// actual construction and attachment remain owned by the server safe-point.
@@ -291,7 +296,7 @@ fn boss_bars() -> &'static SyncRwLock<FxHashMap<Uuid, Arc<ServerBossEvent>>> {
     BOSS_BARS.get_or_init(|| SyncRwLock::new(FxHashMap::default()))
 }
 
-fn player_tab_lists() -> &'static SyncRwLock<FxHashMap<Uuid, (String, String)>> {
+fn player_tab_lists() -> &'static SyncRwLock<FxHashMap<Uuid, (TextComponent, TextComponent)>> {
     PLAYER_TAB_LISTS.get_or_init(|| SyncRwLock::new(FxHashMap::default()))
 }
 
@@ -1036,7 +1041,7 @@ fn entity_by_uuid(uuid: &Uuid) -> Option<(Arc<World>, SharedEntity)> {
             return Some((Arc::clone(world), entity));
         }
     }
-    None
+    lifecycle::pending_entity(uuid)
 }
 
 extern "system" fn set_entity_custom_name_visible(
@@ -1332,6 +1337,9 @@ extern "system" fn remove_entity(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: 
     else {
         return;
     };
+    if lifecycle::discard_pending(&id) {
+        return;
+    }
     let Some((world, entity)) = entity_by_uuid(&id) else {
         return;
     };
@@ -4822,47 +4830,6 @@ extern "system" fn mushroom_cow_variant<'a>(
     }
 }
 
-extern "system" fn spawn_particle(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    world_name: JString<'_>,
-    particle: JString<'_>,
-    x: jdouble,
-    y: jdouble,
-    z: jdouble,
-    count: jint,
-    ox: jdouble,
-    oy: jdouble,
-    oz: jdouble,
-    speed: jdouble,
-) {
-    let Ok(world_text): Result<String, _> = env.get_string(&world_name).map(Into::into) else {
-        return;
-    };
-    let Ok(particle_text): Result<String, _> = env.get_string(&particle).map(Into::into) else {
-        return;
-    };
-    let Ok(world_key) = world_text.parse::<Identifier>() else {
-        return;
-    };
-    let Ok(particle_key) = particle_text.parse::<Identifier>() else {
-        return;
-    };
-    let Some(world) = server().and_then(|server| server.worlds.get_owned(&world_key)) else {
-        return;
-    };
-    let Some(particle_type) = REGISTRY.particle_types.by_key(&particle_key) else {
-        return;
-    };
-    world.send_particles(
-        ParticleData::simple(particle_type),
-        DVec3::new(x, y, z),
-        count,
-        DVec3::new(ox, oy, oz),
-        speed,
-    );
-}
-
 extern "system" fn set_block_display_block(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -4961,108 +4928,6 @@ extern "system" fn set_boat_type(
             BoatEntity::new(target, new_id, pos, weak)
         });
     }
-}
-
-extern "system" fn set_block_display_brightness(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    block: jint,
-    sky: jint,
-) {
-    let Ok(text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
-        return;
-    };
-    let Ok(id) = text.parse() else {
-        return;
-    };
-    if let Some((_, entity)) = entity_by_uuid(&id)
-        && let Some(display) = entity.as_ref().downcast_ref::<BlockDisplayEntity>()
-    {
-        display.set_brightness(block, sky);
-    }
-}
-
-extern "system" fn set_block_display_view_range(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    value: jfloat,
-) {
-    let Ok(text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
-        return;
-    };
-    let Ok(id) = text.parse() else {
-        return;
-    };
-    if let Some((_, entity)) = entity_by_uuid(&id)
-        && let Some(display) = entity.as_ref().downcast_ref::<BlockDisplayEntity>()
-    {
-        display.set_view_range(value);
-    }
-}
-
-extern "system" fn set_block_display_shadow_radius(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    value: jfloat,
-) {
-    let Ok(text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
-        return;
-    };
-    let Ok(id) = text.parse() else {
-        return;
-    };
-    if let Some((_, entity)) = entity_by_uuid(&id)
-        && let Some(display) = entity.as_ref().downcast_ref::<BlockDisplayEntity>()
-    {
-        display.set_shadow_radius(value);
-    }
-}
-
-extern "system" fn set_block_display_transformation(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    tx: jfloat,
-    ty: jfloat,
-    tz: jfloat,
-    sx: jfloat,
-    sy: jfloat,
-    sz: jfloat,
-    lx: jfloat,
-    ly: jfloat,
-    lz: jfloat,
-    lw: jfloat,
-    rx: jfloat,
-    ry: jfloat,
-    rz: jfloat,
-    rw: jfloat,
-) {
-    let Ok(text) = env.get_string(&uuid) else {
-        return;
-    };
-    let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
-        return;
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return;
-    };
-    let Some(display) = entity.as_ref().downcast_ref::<BlockDisplayEntity>() else {
-        return;
-    };
-    let mut data = display.entity_data().lock();
-    data.display_mut()
-        .translation
-        .set(Vector3f::new(tx, ty, tz));
-    data.display_mut().scale.set(Vector3f::new(sx, sy, sz));
-    data.display_mut()
-        .left_rotation
-        .set(Quaternionf::new(lx, ly, lz, lw));
-    data.display_mut()
-        .right_rotation
-        .set(Quaternionf::new(rx, ry, rz, rw));
 }
 
 extern "system" fn entity_type(
@@ -6869,48 +6734,6 @@ extern "system" fn max_health(
     player(&mut env, &uuid).map_or(20.0, |player| f64::from(player.get_max_health()))
 }
 
-extern "system" fn player_attribute(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    attribute: JString<'_>,
-) -> jstring {
-    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
-        return null_mut();
-    };
-    let Ok(name): Result<String, _> = env.get_string(&attribute).map(Into::into) else {
-        return null_mut();
-    };
-    let Some(id) = Uuid::parse_str(&uuid_text).ok() else {
-        return null_mut();
-    };
-    let key_name = name
-        .strip_prefix("GENERIC_")
-        .or_else(|| name.strip_prefix("PLAYER_"))
-        .unwrap_or(&name)
-        .to_ascii_lowercase();
-    let Ok(key) = Identifier::from_str(&key_name) else {
-        return null_mut();
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return null_mut();
-    };
-    let Some(living) = entity.as_living_entity() else {
-        return null_mut();
-    };
-    let Some(attribute_ref) = foton_registry::REGISTRY.attributes.by_key(&key) else {
-        return null_mut();
-    };
-    let attrs = living.attributes().lock();
-    let Some(base) = attrs.get_base_value(attribute_ref) else {
-        return null_mut();
-    };
-    let Some(value) = attrs.get_value(attribute_ref) else {
-        return null_mut();
-    };
-    to_java(&mut env, Some(format!("{base}|{value}")))
-}
-
 fn attribute_ref_from_name(name: &str) -> Option<AttributeRef> {
     let key_name = name
         .strip_prefix("GENERIC_")
@@ -6947,150 +6770,6 @@ extern "system" fn set_attribute_base(
         return;
     };
     living.attributes().lock().set_base_value(attribute, value);
-}
-
-extern "system" fn add_attribute_modifier(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    attribute: JString<'_>,
-    modifier_id: JString<'_>,
-    amount: jdouble,
-    operation: JString<'_>,
-) -> jboolean {
-    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
-        return 0;
-    };
-    let Ok(attribute_name): Result<String, _> = env.get_string(&attribute).map(Into::into) else {
-        return 0;
-    };
-    let Ok(id_text): Result<String, _> = env.get_string(&modifier_id).map(Into::into) else {
-        return 0;
-    };
-    let Ok(operation): Result<String, _> = env.get_string(&operation).map(Into::into) else {
-        return 0;
-    };
-    let Some(id) = Uuid::parse_str(&uuid_text).ok() else {
-        return 0;
-    };
-    let Some(attribute) = attribute_ref_from_name(&attribute_name) else {
-        return 0;
-    };
-    let Ok(modifier_uuid) = Uuid::parse_str(&id_text) else {
-        return 0;
-    };
-    let Ok(modifier_id) = Identifier::from_str(&format!("plugin:{modifier_uuid}")) else {
-        return 0;
-    };
-    let operation = match operation.as_str() {
-        "ADD_NUMBER" => AttributeModifierOperation::AddValue,
-        "ADD_SCALAR" => AttributeModifierOperation::AddMultipliedBase,
-        "MULTIPLY_SCALAR_1" => AttributeModifierOperation::AddMultipliedTotal,
-        _ => return 0,
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return 0;
-    };
-    let Some(living) = entity.as_living_entity() else {
-        return 0;
-    };
-    jboolean::from(living.attributes().lock().add_modifier(
-        attribute,
-        AttributeModifier {
-            id: modifier_id,
-            amount,
-            operation,
-        },
-        true,
-    ))
-}
-
-extern "system" fn remove_attribute_modifier(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    attribute: JString<'_>,
-    modifier_id: JString<'_>,
-) -> jboolean {
-    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
-        return 0;
-    };
-    let Ok(attribute_name): Result<String, _> = env.get_string(&attribute).map(Into::into) else {
-        return 0;
-    };
-    let Ok(id_text): Result<String, _> = env.get_string(&modifier_id).map(Into::into) else {
-        return 0;
-    };
-    let Some(id) = Uuid::parse_str(&uuid_text).ok() else {
-        return 0;
-    };
-    let Some(attribute) = attribute_ref_from_name(&attribute_name) else {
-        return 0;
-    };
-    let Ok(modifier_uuid) = Uuid::parse_str(&id_text) else {
-        return 0;
-    };
-    let Ok(modifier_id) = Identifier::from_str(&format!("plugin:{modifier_uuid}")) else {
-        return 0;
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return 0;
-    };
-    let Some(living) = entity.as_living_entity() else {
-        return 0;
-    };
-    jboolean::from(
-        living
-            .attributes()
-            .lock()
-            .remove_modifier(attribute, &modifier_id),
-    )
-}
-
-extern "system" fn attribute_modifiers(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    attribute: JString<'_>,
-) -> jobjectArray {
-    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
-        return null_mut();
-    };
-    let Ok(attribute_name): Result<String, _> = env.get_string(&attribute).map(Into::into) else {
-        return null_mut();
-    };
-    let Some(id) = Uuid::parse_str(&uuid_text).ok() else {
-        return null_mut();
-    };
-    let Some(attribute) = attribute_ref_from_name(&attribute_name) else {
-        return null_mut();
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return null_mut();
-    };
-    let Some(living) = entity.as_living_entity() else {
-        return null_mut();
-    };
-    let attrs = living.attributes().lock();
-    let Some(instance) = attrs.get_instance(attribute) else {
-        return null_mut();
-    };
-    let values: Vec<String> = instance
-        .modifiers()
-        .iter()
-        .map(|modifier| {
-            let operation = match modifier.operation {
-                AttributeModifierOperation::AddValue => "ADD_NUMBER",
-                AttributeModifierOperation::AddMultipliedBase => "ADD_SCALAR",
-                AttributeModifierOperation::AddMultipliedTotal => "MULTIPLY_SCALAR_1",
-            };
-            format!(
-                "{}|{}|{}|{operation}",
-                modifier.id.path, modifier.id.path, modifier.amount
-            )
-        })
-        .collect();
-    string_array(&mut env, &values)
 }
 
 /// `foton.Native.playerRespawnWorld`
@@ -7319,22 +6998,20 @@ fn set_player_tab_list(
     let mut lists = player_tab_lists().write();
     let entry = lists
         .entry(id)
-        .or_insert_with(|| (String::new(), String::new()));
+        .or_insert_with(|| (TextComponent::plain(""), TextComponent::plain("")));
     if let Some(header) = header {
         let Ok(value) = env.get_string(&header) else {
             return;
         };
-        entry.0 = String::from(value);
+        entry.0 = String::from(value).into();
     }
     if let Some(footer) = footer {
         let Ok(value) = env.get_string(&footer) else {
             return;
         };
-        entry.1 = String::from(value);
+        entry.1 = String::from(value).into();
     }
-    let header: TextComponent = entry.0.clone().into();
-    let footer: TextComponent = entry.1.clone().into();
-    player.send_packet(CTabList::new(&header, &footer, player.as_ref()));
+    player.send_packet(CTabList::new(&entry.0, &entry.1, player.as_ref()));
 }
 
 /// `foton.Native.setPlayerListHeader`
@@ -8999,30 +8676,6 @@ extern "system" fn open_loom(
         move |context| loom(inventory, context.container_id, BlockPos::new(x, y, z)),
     );
     1
-}
-
-extern "system" fn damage_player(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    amount: jdouble,
-    source_uuid: JString<'_>,
-) {
-    let Some(player) = player(&mut env, &uuid) else {
-        return;
-    };
-    let source_id = env
-        .get_string(&source_uuid)
-        .ok()
-        .and_then(|value| value.to_str().ok().and_then(|text| text.parse().ok()));
-    let world = player.get_world();
-    let mut source = DamageSource::environment(&PLAYER_ATTACK);
-    if let Some(id) =
-        source_id.and_then(|id| world.get_entity_by_uuid(&id).map(|entity| entity.id()))
-    {
-        source = source.with_causing_entity(id).with_direct_entity(id);
-    }
-    let _ = player.hurt(&world, &source, amount as f32);
 }
 
 extern "system" fn open_cartography_table(
@@ -11295,7 +10948,7 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         }
     }
 
-    let mut methods = vec![
+    let mut bindings = vec![
         method(
             "mergeItemSnbt",
             "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
@@ -12498,11 +12151,6 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             set_horse_inventory_slot as *mut c_void,
         ),
         method(
-            "spawnParticle",
-            "(Ljava/lang/String;Ljava/lang/String;DDDIDDDD)V",
-            spawn_particle as *mut c_void,
-        ),
-        method(
             "setBlockDisplayBlock",
             "(Ljava/lang/String;Ljava/lang/String;)V",
             set_block_display_block as *mut c_void,
@@ -12516,26 +12164,6 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "setBoatType",
             "(Ljava/lang/String;Ljava/lang/String;)V",
             set_boat_type as *mut c_void,
-        ),
-        method(
-            "setBlockDisplayBrightness",
-            "(Ljava/lang/String;II)V",
-            set_block_display_brightness as *mut c_void,
-        ),
-        method(
-            "setBlockDisplayViewRange",
-            "(Ljava/lang/String;F)V",
-            set_block_display_view_range as *mut c_void,
-        ),
-        method(
-            "setBlockDisplayShadowRadius",
-            "(Ljava/lang/String;F)V",
-            set_block_display_shadow_radius as *mut c_void,
-        ),
-        method(
-            "setBlockDisplayTransformation",
-            "(Ljava/lang/String;FFFFFFFFFFFFFF)V",
-            set_block_display_transformation as *mut c_void,
         ),
         method(
             "areaEffectCloudRadius",
@@ -13119,11 +12747,6 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             open_loom as *mut c_void,
         ),
         method(
-            "damagePlayer",
-            "(Ljava/lang/String;DLjava/lang/String;)V",
-            damage_player as *mut c_void,
-        ),
-        method(
             "openCartographyTable",
             "(Ljava/lang/String;Ljava/lang/String;III)Z",
             open_cartography_table as *mut c_void,
@@ -13600,29 +13223,9 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             max_health as *mut c_void,
         ),
         method(
-            "playerAttribute",
-            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
-            player_attribute as *mut c_void,
-        ),
-        method(
             "setAttributeBase",
             "(Ljava/lang/String;Ljava/lang/String;D)V",
             set_attribute_base as *mut c_void,
-        ),
-        method(
-            "addAttributeModifier",
-            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;DLjava/lang/String;)Z",
-            add_attribute_modifier as *mut c_void,
-        ),
-        method(
-            "removeAttributeModifier",
-            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
-            remove_attribute_modifier as *mut c_void,
-        ),
-        method(
-            "attributeModifiers",
-            "(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;",
-            attribute_modifiers as *mut c_void,
         ),
         method(
             "playerEntityEffect",
@@ -13740,9 +13343,18 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             effective_permissions as *mut c_void,
         ),
     ];
+    // Entities, players and world queries live in their own modules.
+    bindings.extend(attributes::bindings());
+    bindings.extend(blocks::bindings());
+    bindings.extend(particles::bindings());
+    bindings.extend(entities::bindings());
+    bindings.extend(displays::bindings());
+    bindings.extend(lifecycle::bindings());
+    bindings.extend(merchants::bindings());
+    bindings.extend(players::bindings());
     // Beside the table rather than in it: the packet tap is its own module.
-    methods.extend(packet_tap::bindings());
-    methods
+    bindings.extend(packet_tap::bindings());
+    bindings
 }
 
 #[cfg(test)]

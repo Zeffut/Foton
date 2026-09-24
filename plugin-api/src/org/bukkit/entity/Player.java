@@ -5,7 +5,7 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.command.CommandSender;
 
 /** A player on the server, as a plugin sees one. */
-public interface Player extends HumanEntity {
+public interface Player extends HumanEntity, org.bukkit.OfflinePlayer {
     default void playEffect(org.bukkit.EntityEffect effect) { }
     default void playEffect(org.bukkit.Location location, org.bukkit.Effect effect, Object data) {
         if (location != null && location.getWorld() != null && data instanceof Number number)
@@ -152,7 +152,6 @@ public interface Player extends HumanEntity {
     default org.bukkit.inventory.InventoryView openStonecutter(org.bukkit.Location location, boolean force) { return null; }
     default org.bukkit.inventory.InventoryView openAnvil(org.bukkit.Location location, boolean force) { return null; }
     default org.bukkit.inventory.InventoryView openCartographyTable(org.bukkit.Location location, boolean force) { return null; }
-    default void damage(double amount, Entity source) { }
     boolean teleport(org.bukkit.Location location);
     void kickPlayer(String message);
     void kick(net.kyori.adventure.text.Component message);
@@ -160,15 +159,85 @@ public interface Player extends HumanEntity {
     void setPlayerListHeader(String header);
     void setPlayerListFooter(String footer);
     void setPlayerListHeaderFooter(String header, String footer);
+    // Paper's overloads, down to the force = false a player-targeted spawn
+    // defaults to and the extra = 1 of the overloads that take data but no extra.
     default void spawnParticle(org.bukkit.Particle particle, org.bukkit.Location location, int count) {
-        spawnParticle(particle, location, count, null);
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count);
     }
-    default void spawnParticle(org.bukkit.Particle particle, org.bukkit.Location location, int count, Object data) { }
+    default void spawnParticle(org.bukkit.Particle particle, double x, double y, double z, int count) {
+        this.spawnParticle(particle, x, y, z, count, null);
+    }
+    default <T> void spawnParticle(org.bukkit.Particle particle, org.bukkit.Location location, int count, T data) {
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count, data);
+    }
+    default <T> void spawnParticle(org.bukkit.Particle particle, double x, double y, double z, int count, T data) {
+        this.spawnParticle(particle, x, y, z, count, 0, 0, 0, data);
+    }
+    default void spawnParticle(org.bukkit.Particle particle, org.bukkit.Location location, int count, double offsetX, double offsetY, double offsetZ) {
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count, offsetX, offsetY, offsetZ);
+    }
+    default void spawnParticle(org.bukkit.Particle particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ) {
+        this.spawnParticle(particle, x, y, z, count, offsetX, offsetY, offsetZ, null);
+    }
+    default <T> void spawnParticle(org.bukkit.Particle particle, org.bukkit.Location location, int count, double offsetX, double offsetY, double offsetZ, T data) {
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count, offsetX, offsetY, offsetZ, data);
+    }
+    default <T> void spawnParticle(org.bukkit.Particle particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, T data) {
+        this.spawnParticle(particle, x, y, z, count, offsetX, offsetY, offsetZ, 1, data);
+    }
+    default void spawnParticle(org.bukkit.Particle particle, org.bukkit.Location location, int count, double offsetX, double offsetY, double offsetZ, double extra) {
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count, offsetX, offsetY, offsetZ, extra);
+    }
+    default void spawnParticle(org.bukkit.Particle particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, double extra) {
+        this.spawnParticle(particle, x, y, z, count, offsetX, offsetY, offsetZ, extra, null);
+    }
+    default <T> void spawnParticle(org.bukkit.Particle particle, org.bukkit.Location location, int count, double offsetX, double offsetY, double offsetZ, double extra, T data) {
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count, offsetX, offsetY, offsetZ, extra, data);
+    }
+    default <T> void spawnParticle(org.bukkit.Particle particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, double extra, T data) {
+        this.spawnParticle(particle, x, y, z, count, offsetX, offsetY, offsetZ, extra, data, false);
+    }
+    default <T> void spawnParticle(org.bukkit.Particle particle, org.bukkit.Location location, int count, double offsetX, double offsetY, double offsetZ, double extra, T data, boolean force) {
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count, offsetX, offsetY, offsetZ, extra, data, force);
+    }
+    /** Sends particles to this player alone, wherever they are; {@code force}
+     * asks the client to show them past its particle setting. */
+    default <T> void spawnParticle(org.bukkit.Particle particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, double extra, T data, boolean force) {
+        foton.FotonParticles.spawn(this, particle, x, y, z, count, offsetX, offsetY, offsetZ, extra, data, force);
+    }
 
     void sendActionBar(String message);
 
+    @Override
     default void sendActionBar(net.kyori.adventure.text.Component message) {
-        sendActionBar(message == null ? "" : net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(message));
+        if (message != null) foton.Native.sendActionBarComponent(getUniqueId().toString(), foton.FotonComponents.toJson(message));
+    }
+
+    /** Clears the title and subtitle, keeping the fade times. */
+    default void clearTitle() { foton.Native.clearPlayerTitle(getUniqueId().toString()); }
+
+    /** The movement keys the client last reported. */
+    default org.bukkit.Input getCurrentInput() { return new foton.FotonInput(foton.Native.playerInput(getUniqueId().toString())); }
+
+    /** Experience as an orb gives it: with {@code applyMending}, damaged
+     * mending gear soaks it up first. */
+    default void giveExp(int amount, boolean applyMending) {
+        foton.Native.givePlayerExperience(getUniqueId().toString(), amount, applyMending);
+    }
+
+    /** The name shown in the tab list; null restores the player's own. */
+    default void playerListName(net.kyori.adventure.text.Component name) {
+        foton.Native.setPlayerListNameComponent(getUniqueId().toString(), name == null ? null : foton.FotonComponents.toJson(name));
+    }
+
+    /** Sets both halves of the tab list decoration. */
+    default void sendPlayerListHeaderAndFooter(net.kyori.adventure.text.Component header, net.kyori.adventure.text.Component footer) {
+        foton.Native.setPlayerListHeaderFooterComponents(getUniqueId().toString(),
+            header == null ? null : foton.FotonComponents.toJson(header),
+            footer == null ? null : foton.FotonComponents.toJson(footer));
+    }
+    default void sendPlayerListHeader(net.kyori.adventure.text.Component header) {
+        sendPlayerListHeaderAndFooter(header, null);
     }
 
     default void showTitle(net.kyori.adventure.title.Title title) { }

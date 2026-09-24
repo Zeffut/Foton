@@ -1,24 +1,48 @@
 package org.bukkit.entity;
 
+import org.bukkit.Color;
 import org.bukkit.util.Transformation;
 
-/** A renderable display entity. */
+/** A display entity: a block, item or text rendered by the client, with no
+ * collision, animated by interpolating between the values it is sent. */
 public interface Display extends Entity {
-    final class Brightness {
-        private final int blockLight;
-        private final int skyLight;
-        public Brightness(int blockLight, int skyLight) { this.blockLight = blockLight; this.skyLight = skyLight; }
-        public int getBlockLight() { return blockLight; }
-        public int getSkyLight() { return skyLight; }
-    }
+    Transformation getTransformation();
+    void setTransformation(Transformation transformation);
 
+    int getInterpolationDuration();
+    void setInterpolationDuration(int duration);
 
-    /** How a display entity turns to face the viewer.
-     *
-     * <p>{@code CENTER} is the one plugins name explicitly -- it is what makes
-     * a floating label readable from every angle, and it is not the default,
-     * so a hologram library that could not reference it would have no way to
-     * ask for the behavior its users expect. */
+    /** Ticks a position or rotation change is spread over, 0 to 59. */
+    int getTeleportDuration();
+    void setTeleportDuration(int duration);
+
+    float getViewRange();
+    void setViewRange(float range);
+    float getShadowRadius();
+    void setShadowRadius(float radius);
+    float getShadowStrength();
+    void setShadowStrength(float strength);
+    float getDisplayWidth();
+    void setDisplayWidth(float width);
+    float getDisplayHeight();
+    void setDisplayHeight(float height);
+
+    /** Ticks before an interpolation starts; setting it (re)starts one. */
+    int getInterpolationDelay();
+    void setInterpolationDelay(int ticks);
+
+    Billboard getBillboard();
+    void setBillboard(Billboard billboard);
+
+    /** The glow outline colour, or null for the team colour. */
+    Color getGlowColorOverride();
+    void setGlowColorOverride(Color color);
+
+    /** The fixed light level, or null for the light where the display stands. */
+    Brightness getBrightness();
+    void setBrightness(Brightness brightness);
+
+    /** How a display turns to face the viewer; ordinals are vanilla's ids. */
     enum Billboard {
         /** Fixed in world space; no rotation towards the viewer. */
         FIXED,
@@ -30,20 +54,25 @@ public interface Display extends Entity {
         CENTER
     }
 
-    default Billboard getBillboard() { return Billboard.FIXED; }
+    /** A block and sky light level, each 0 to 15. */
+    class Brightness {
+        private final int blockLight;
+        private final int skyLight;
 
-    default void setBillboard(Billboard billboard) { }
+        public Brightness(int blockLight, int skyLight) {
+            if (blockLight < 0 || blockLight > 15) throw new IllegalArgumentException("Block brightness out of range: " + blockLight);
+            if (skyLight < 0 || skyLight > 15) throw new IllegalArgumentException("Sky brightness out of range: " + skyLight);
+            this.blockLight = blockLight;
+            this.skyLight = skyLight;
+        }
 
-    default Brightness getBrightness() { return null; }
+        public int getBlockLight() { return blockLight; }
+        public int getSkyLight() { return skyLight; }
 
-    default void setBrightness(Brightness brightness) { }
-
-    default float getViewRange() { return 1.0f; }
-
-    default void setViewRange(float range) { }
-
-    default Transformation getTransformation() {
-        return new Transformation(new org.joml.Vector3f(), new org.joml.Quaternionf(), new org.joml.Vector3f(1, 1, 1), new org.joml.Quaternionf());
+        @Override public int hashCode() { return 47 * (47 * 7 + blockLight) + skyLight; }
+        @Override public boolean equals(Object other) {
+            return other instanceof Brightness brightness && brightness.blockLight == blockLight && brightness.skyLight == skyLight;
+        }
+        @Override public String toString() { return "Brightness{blockLight=" + blockLight + ", skyLight=" + skyLight + '}'; }
     }
-    default void setTransformation(Transformation transformation) { }
 }

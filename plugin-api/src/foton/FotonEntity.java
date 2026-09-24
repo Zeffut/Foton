@@ -21,7 +21,10 @@ public class FotonEntity implements Entity, org.bukkit.projectiles.ProjectileSou
     @Override public float getYaw() { double[] p = Native.entityPosition(getUniqueId().toString()); return p == null || p.length < 4 ? 0.0f : (float) p[3]; }
     @Override public float getPitch() { double[] p = Native.entityPosition(getUniqueId().toString()); return p == null || p.length < 5 ? 0.0f : (float) p[4]; }
     @Override public boolean isOnGround() { return Native.entityOnGround(id.toString()); }
-    @Override public boolean isValid() { return Native.entityWorld(getUniqueId().toString()) != null; }
+    @Override public boolean isValid() {
+        String id = getUniqueId().toString();
+        return Native.entityWorld(id) != null && !Native.entityIsPending(id);
+    }
     @Override public boolean isInvulnerable() { return Native.entityInvulnerable(id.toString()); }
     @Override public void setInvulnerable(boolean invulnerable) { Native.setEntityInvulnerable(id.toString(), invulnerable); }
     @Override public boolean isGlowing() { return Native.entityGlowing(id.toString()); }
@@ -30,6 +33,10 @@ public class FotonEntity implements Entity, org.bukkit.projectiles.ProjectileSou
         new java.util.concurrent.ConcurrentHashMap<>();
     private final UUID id;
     public FotonEntity(UUID id) { this.id = id; }
+    /** The Bukkit handle for any entity, players included. */
+    public static Entity of(UUID id) {
+        return id == null ? null : FotonWorld.wrapEntity(id, id.toString());
+    }
     public static FotonEntity handle(UUID id) {
         if (id == null) return null;
         org.bukkit.entity.Entity wrapped = FotonWorld.wrapEntity(id, Native.entityType(id.toString()));
@@ -52,7 +59,7 @@ public class FotonEntity implements Entity, org.bukkit.projectiles.ProjectileSou
         double[] p = Native.entityPosition(id.toString());
         String world = Native.entityWorld(id.toString());
         return p == null || world == null ? null
-            : new Location(new FotonWorld(world), p[0], p[1], p[2]);
+            : new Location(new FotonWorld(world), p[0], p[1], p[2], (float) p[3], (float) p[4]);
     }
     @Override public Location getOrigin() {
         double[] p = Native.entityOrigin(id.toString());
@@ -127,7 +134,27 @@ public class FotonEntity implements Entity, org.bukkit.projectiles.ProjectileSou
     }
     @Override public int getEntityId() { return Native.entityId(id.toString()); }
     @Override public boolean teleport(Location location) {
+        return teleport(location, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.PLUGIN);
+    }
+    @Override public boolean teleport(Location location, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause) {
+        return teleport(location, cause, new io.papermc.paper.entity.TeleportFlag[0]);
+    }
+
+    /** CraftEntity's rules: a vehicle with riders stays put unless its
+     * passengers are retained, and a rider is dismounted unless its vehicle
+     * is. Retained passengers follow the vehicle on the next tick. */
+    @Override public boolean teleport(Location location, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause,
+            io.papermc.paper.entity.TeleportFlag... flags) {
         if (location == null || location.getWorld() == null) return false;
+        java.util.List<io.papermc.paper.entity.TeleportFlag> set = flags == null ? java.util.List.of() : java.util.Arrays.asList(flags);
+        boolean retainPassengers = set.contains(io.papermc.paper.entity.TeleportFlag.EntityState.RETAIN_PASSENGERS);
+        boolean dismount = !set.contains(io.papermc.paper.entity.TeleportFlag.EntityState.RETAIN_VEHICLE);
+        boolean sameWorld = location.getWorld().getName().equals(Native.entityWorld(id.toString()));
+        boolean vehicle = !getPassengers().isEmpty();
+        if (retainPassengers && vehicle && !sameWorld) return false;
+        if (!dismount && getVehicle() != null && !sameWorld) return false;
+        if ((!retainPassengers && vehicle) || isDead()) return false;
+        if (dismount) leaveVehicle();
         return Native.teleportEntity(id.toString(), location.getWorld().getName(), location.getX(), location.getY(), location.getZ(), location.getYaw(), location.getPitch());
     }
 

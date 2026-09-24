@@ -215,11 +215,7 @@ public final class Native {
     public static native double health(String uuid);
     public static native void setHealth(String uuid, double health);
     public static native double maxHealth(String uuid);
-    public static native String playerAttribute(String uuid, String attribute);
     public static native void setAttributeBase(String uuid, String attribute, double value);
-    public static native boolean addAttributeModifier(String uuid, String attribute, String id, double amount, String operation);
-    public static native boolean removeAttributeModifier(String uuid, String attribute, String id);
-    public static native String[] attributeModifiers(String uuid, String attribute);
     public static native int airSupply(String uuid);
     public static native void setAirSupply(String uuid, int ticks);
     public static native int maxAirSupply(String uuid);
@@ -409,12 +405,6 @@ public final class Native {
     public static native void setBlockDisplayBlock(String uuid, String state);
     public static native String boatType(String uuid);
     public static native void setBoatType(String uuid, String type);
-    public static native void setBlockDisplayBrightness(String uuid, int block, int sky);
-    public static native void setBlockDisplayViewRange(String uuid, float range);
-    public static native void setBlockDisplayShadowRadius(String uuid, float radius);
-    public static native void setBlockDisplayTransformation(String uuid, float tx, float ty, float tz,
-            float sx, float sy, float sz, float lx, float ly, float lz, float lw,
-            float rx, float ry, float rz, float rw);
     public static native boolean entityEject(String uuid);
     public static native String entityVehicle(String uuid);
     public static native boolean entityLeaveVehicle(String uuid);
@@ -502,7 +492,6 @@ public final class Native {
     public static native boolean openStonecutter(String uuid, String world, int x, int y, int z);
     public static native boolean openAnvil(String uuid, String world, int x, int y, int z);
     public static native boolean openCartographyTable(String uuid, String world, int x, int y, int z);
-    public static native void damagePlayer(String uuid, double amount, String sourceUuid);
 
     /** One inventory slot as `minecraft:name count`, or the empty string.
      *
@@ -571,7 +560,6 @@ public final class Native {
     public static native boolean blockIndirectlyPowered(String world, int x, int y, int z);
     public static native byte skyLight(String world, int x, int y, int z);
     public static native boolean blockPassable(String world, int x, int y, int z);
-    public static native void spawnParticle(String world, String particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, double speed);
     public static native String lecternBook(String world, int x, int y, int z);
     public static native String[] lecternBookPages(String world, int x, int y, int z);
     public static native void lecternClearBook(String world, int x, int y, int z);
@@ -601,7 +589,146 @@ public final class Native {
     public static native int worldMinHeight(String world);
     public static native int worldMaxHeight(String world);
 
-    static UUID parse(String uuid) {
+    // Entities, players and world queries (plugin compatibility, lot B).
+    // Attributes are named by registry key, modifiers by their full key.
+    public static native double[] attributeValues(String uuid, String attribute);
+    public static native String[] attributeModifierList(String uuid, String attribute);
+    public static native boolean addAttributeModifierKeyed(String uuid, String attribute, String key, double amount, String operation, boolean persistent);
+    public static native boolean removeAttributeModifierKeyed(String uuid, String attribute, String key);
+
+    /** Particles in a world: to every player in range when {@code receivers} is null. */
+    public static native void spawnParticles(String world, String[] receivers, String particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, double extra, String data, boolean force);
+    /** Particles sent to one player, wherever they are. */
+    public static native void playerParticles(String uuid, String particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, double extra, String data, boolean force);
+
+    /** An entity's container -- a mob's carried inventory or a chest boat's
+     * chest: -1 when it has none. */
+    public static native int entityContainerSize(String uuid);
+    public static native String entityContainerSlot(String uuid, int slot);
+    public static native void setEntityContainerSlot(String uuid, int slot, String item);
+    /** A mannequin's profile as {@code [id, name, (name, value, signature)...]}. */
+    public static native String[] mannequinProfile(String uuid);
+    public static native void setMannequinProfile(String uuid, String profileId, String name, String[] properties);
+    public static native boolean mannequinImmovable(String uuid);
+    public static native void setMannequinImmovable(String uuid, boolean immovable);
+    public static native void setMannequinDescription(String uuid, String json);
+    /** {@code {raw peek, 0, dye colour id or -1}}. */
+    public static native double[] shulkerState(String uuid);
+    public static native String shulkerAttachedFace(String uuid);
+    public static native void setShulkerAttachedFace(String uuid, String face);
+    public static native void setShulkerPeek(String uuid, int peek);
+    public static native void setShulkerColor(String uuid, int color);
+    /** Every {@code Display} field at once; see {@code FotonDisplay} for the layout. */
+    public static native double[] displayState(String uuid);
+    public static native void setDisplayInterpolationDuration(String uuid, int ticks);
+    public static native void setDisplayInterpolationDelay(String uuid, int ticks);
+    public static native void setDisplayTeleportDuration(String uuid, int ticks);
+    public static native void setDisplayBillboard(String uuid, int billboard);
+    public static native void setDisplayBrightness(String uuid, int block, int sky);
+    public static native void setDisplayGlowColor(String uuid, int argb);
+    public static native void setDisplayFloat(String uuid, int field, float value);
+    public static native void setDisplayTransformation(String uuid, float tx, float ty, float tz,
+            float sx, float sy, float sz, float lx, float ly, float lz, float lw,
+            float rx, float ry, float rz, float rw);
+    public static native String blockDisplayBlock(String uuid);
+    public static native String itemDisplayItem(String uuid);
+    public static native void setItemDisplayItem(String uuid, String item);
+    public static native String itemDisplayTransform(String uuid);
+    public static native void setItemDisplayTransform(String uuid, String transform);
+    public static native void setTextDisplayText(String uuid, String json);
+    public static native String textDisplayPlainText(String uuid);
+    /** {@code {line width, background ARGB, text opacity, style flags}}. */
+    public static native double[] textDisplayState(String uuid);
+    public static native void setTextDisplayLineWidth(String uuid, int width);
+    public static native void setTextDisplayBackground(String uuid, int argb);
+    public static native void resetTextDisplayBackground(String uuid);
+    public static native void setTextDisplayOpacity(String uuid, byte opacity);
+    public static native void setTextDisplayFlag(String uuid, String flag, boolean enabled);
+    public static native void setTextDisplayAlignment(String uuid, String alignment);
+    /** {@code {width, height, responsive}}. */
+    public static native double[] interactionState(String uuid);
+    /** Width (0), height (1) or responsiveness (2). */
+    public static native void setInteractionValue(String uuid, int field, float value);
+
+    public static native String[] entityTags(String uuid);
+    public static native boolean addEntityTag(String uuid, String tag);
+    public static native boolean removeEntityTag(String uuid, String tag);
+    /** Sets a custom name from vanilla component JSON; null clears it. */
+    public static native void setEntityCustomNameComponent(String uuid, String json);
+    public static native boolean entityGravity(String uuid);
+    public static native void setEntityGravity(String uuid, boolean gravity);
+    public static native boolean entitySilent(String uuid);
+    public static native void setEntitySilent(String uuid, boolean silent);
+    public static native void setEntityRotation(String uuid, float yaw, float pitch);
+    public static native int entityPose(String uuid);
+    public static native void damageEntity(String uuid, double amount, String source);
+    public static native boolean entityHasAi(String uuid);
+    public static native void setEntityAi(String uuid, boolean ai);
+    public static native boolean mobAware(String uuid);
+    public static native void setMobAware(String uuid, boolean aware);
+    public static native boolean entityCollidable(String uuid);
+    public static native void setEntityCollidable(String uuid, boolean collidable);
+    public static native String itemThrower(String uuid);
+    public static native String itemOwner(String uuid);
+    public static native void setItemOwner(String uuid, String owner);
+    public static native int itemPickupDelay(String uuid);
+    public static native void setItemPickupDelay(String uuid, int delay);
+    public static native void setItemFrameItem(String uuid, String item, boolean playSound);
+    public static native String fireworkAttachedTo(String uuid);
+    /** An equipment slot by Bukkit {@code EquipmentSlot} ordinal. */
+    public static native String entityEquipmentItem(String uuid, int slot);
+    public static native void setEntityEquipmentItem(String uuid, int slot, String item);
+
+    /** The entity as Paper's serializeEntity writes it: gzipped vanilla NBT. */
+    public static native byte[] serializeEntity(String uuid);
+    /** Builds an unspawned entity from such a blob; the UUID it is held under. */
+    public static native String deserializeEntity(byte[] data, String world, boolean preserveUuid);
+    public static native boolean entityIsPending(String uuid);
+    public static native boolean spawnPendingEntity(String uuid, String world, double x, double y, double z, float yaw, float pitch, String reason);
+    public static native boolean mobMoveTo(String uuid, double x, double y, double z, double speed);
+    public static native void mobStopPathfinding(String uuid);
+    public static native boolean mobHasPath(String uuid);
+    /** {@code {next index, reaches (0/1), x, y, z...}} or null. */
+    public static native double[] mobCurrentPath(String uuid);
+
+    /** The stack the living entity is using, inventory-encoded; "" for none. */
+    public static native String activeItem(String uuid);
+    /** Bits: 1 climbing, 2 in lava, 4 in water, 8 riptiding, 16 in rain. */
+    public static native int entitySurroundings(String uuid);
+    public static native void clearPlayerTitle(String uuid);
+    public static native int playerCooldown(String uuid, String group);
+    public static native void setPlayerCooldown(String uuid, String group, int ticks);
+    public static native void setPlayerItemCooldown(String uuid, String item, int ticks);
+    /** Vanilla's Input flags from the player's last input packet. */
+    public static native int playerInput(String uuid);
+    public static native String playerCursor(String uuid);
+    public static native void setPlayerCursor(String uuid, String item);
+    public static native void givePlayerExperience(String uuid, int amount, boolean mending);
+    public static native void sendActionBarComponent(String uuid, String json);
+    public static native void setPlayerListNameComponent(String uuid, String json);
+    public static native void setPlayerListHeaderFooterComponents(String uuid, String header, String footer);
+    public static native void setEntityGliding(String uuid, boolean gliding);
+    public static native void setEntitySwimming(String uuid, boolean swimming);
+    /** A new plugin merchant titled with a component's JSON; its handle. */
+    public static native String createMerchant(String titleJson);
+    public static native void releaseMerchant(String handle);
+    public static native String[] merchantOffers(String handle);
+    public static native boolean setMerchantOffers(String handle, String[] offers);
+    public static native boolean setMerchantOffer(String handle, int index, String offer);
+    /** The trader of a plugin merchant (by handle) or of a villager or wandering trader (by UUID). */
+    public static native String merchantTrader(String handle);
+    public static native boolean openMerchant(String uuid, String handle, boolean force);
+
+    /** A block's outline (kind 0) or collision (kind 1) boxes, six values each, block-local. */
+    public static native double[] blockShapeBoxes(String world, int x, int y, int z, int kind);
+    /** Flags of a block data string: 1 liquid, 2 occluding. */
+    public static native int blockStateFlags(String data);
+    /** {hit x, y, z, block x, y, z, BlockFace ordinal} or null on a miss. */
+    public static native double[] rayTraceBlocks(String world, double startX, double startY, double startZ,
+        double endX, double endY, double endZ, int fluidMode, boolean ignorePassable);
+
+    public static UUID parse(String uuid) {
+        if (uuid == null) return null;
         try {
             return UUID.fromString(uuid);
         } catch (IllegalArgumentException error) {

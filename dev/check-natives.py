@@ -61,10 +61,10 @@ def declared():
 
 def registered():
     """The (name, signature) of every method handed to RegisterNatives."""
-    # Every module may register natives; `natives.rs` extends its table
-    # with the others'.
-    source = "\n".join(
-        path.read_text(encoding="utf-8") for path in sorted(NATIVES_SRC.glob("*.rs")))
+    # Every module of the crate may register natives: natives.rs, the modules
+    # under natives/ whose tables it extends, and packet_tap.rs beside it.
+    files = sorted(NATIVES_SRC.rglob("*.rs"))
+    source = "\n".join(path.read_text(encoding="utf-8") for path in files)
     # method(\n  "name",\n  "signature",\n  rust_fn as *mut c_void,\n)
     pattern = re.compile(
         r'method\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,', re.MULTILINE)

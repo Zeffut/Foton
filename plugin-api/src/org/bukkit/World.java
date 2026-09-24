@@ -4,12 +4,6 @@ import java.util.UUID;
 
 /** One world on the server. */
 public interface World extends org.bukkit.generator.WorldInfo, RegionAccessor, org.bukkit.metadata.Metadatable {
-    default void spawnParticle(org.bukkit.Particle particle, Location location, int count,
-            double offsetX, double offsetY, double offsetZ, double extra) {
-        if (particle == null || location == null || location.getWorld() != this) return;
-        foton.Native.spawnParticle(getName(), "minecraft:" + particle.name().toLowerCase(java.util.Locale.ROOT),
-            location.getX(), location.getY(), location.getZ(), count, offsetX, offsetY, offsetZ, extra);
-    }
     String getName();
     default long getSeed() { return 0L; }
     default double getCoordinateScale() { return 1.0D; }
@@ -126,6 +120,19 @@ public interface World extends org.bukkit.generator.WorldInfo, RegionAccessor, o
     default org.bukkit.entity.LightningStrike strikeLightning(Location location) { return null; }
     default org.bukkit.entity.LightningStrike strikeLightningEffect(Location location) { return null; }
     default <T extends org.bukkit.entity.Entity> T spawn(Location location, Class<T> clazz) { return null; }
+
+    /** Every entity in this world that is a {@code cls}. */
+    default <T extends org.bukkit.entity.Entity> java.util.Collection<T> getEntitiesByClass(Class<T> cls) {
+        java.util.ArrayList<T> found = new java.util.ArrayList<>();
+        if (cls != null) for (org.bukkit.entity.Entity entity : getEntities()) if (cls.isInstance(entity)) found.add(cls.cast(entity));
+        return found;
+    }
+
+    @SuppressWarnings("unchecked")
+    default <T extends org.bukkit.entity.Entity> java.util.Collection<T> getEntitiesByClass(Class<T>... classes) {
+        return (java.util.Collection<T>) getEntitiesByClasses(classes);
+    }
+
     default <T extends org.bukkit.entity.Entity> T spawn(Location location, Class<T> clazz,
             java.util.function.Consumer<? super T> function) {
         T entity = spawn(location, clazz);
@@ -273,26 +280,59 @@ public interface World extends org.bukkit.generator.WorldInfo, RegionAccessor, o
         return found;
     }
 
-    /** Particles with offsets, an extra value and particle-specific data.
-     *
-     * <p>The widest overload Bukkit has. `data` carries the thing the particle
-     * needs and nothing else can express -- a `DustOptions` for redstone, an
-     * `ItemStack` for item crack -- and is ignored by particles that take none. */
-    default void spawnParticle(Particle particle, Location location, int count,
-            double offsetX, double offsetY, double offsetZ, double extra, Object data) {
-        spawnParticle(particle, location, count, offsetX, offsetY, offsetZ, extra);
-    }
-
+    // Every overload funnels into the receivers/source/force form, with the
+    // defaults Paper gives them -- including force = true for a world-wide
+    // spawn, which is the 512-block recipient radius, and extra = 1 for the
+    // overloads that take data but no extra.
     default void spawnParticle(Particle particle, Location location, int count) {
-        spawnParticle(particle, location, count, 0, 0, 0, 0);
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count);
     }
-    default void spawnParticle(Particle particle, Location location, int count, Object data) {
-        spawnParticle(particle, location, count, 0, 0, 0, 0);
+    default void spawnParticle(Particle particle, double x, double y, double z, int count) {
+        this.spawnParticle(particle, x, y, z, count, null);
     }
-
-    default void spawnParticle(Particle particle, Location location, int count,
-            double offsetX, double offsetY, double offsetZ, Object data) {
-        spawnParticle(particle, location, count, offsetX, offsetY, offsetZ, 0);
+    default <T> void spawnParticle(Particle particle, Location location, int count, T data) {
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count, data);
+    }
+    default <T> void spawnParticle(Particle particle, double x, double y, double z, int count, T data) {
+        this.spawnParticle(particle, x, y, z, count, 0, 0, 0, data);
+    }
+    default void spawnParticle(Particle particle, Location location, int count, double offsetX, double offsetY, double offsetZ) {
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count, offsetX, offsetY, offsetZ);
+    }
+    default void spawnParticle(Particle particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ) {
+        this.spawnParticle(particle, x, y, z, count, offsetX, offsetY, offsetZ, null);
+    }
+    default <T> void spawnParticle(Particle particle, Location location, int count, double offsetX, double offsetY, double offsetZ, T data) {
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count, offsetX, offsetY, offsetZ, data);
+    }
+    default <T> void spawnParticle(Particle particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, T data) {
+        this.spawnParticle(particle, x, y, z, count, offsetX, offsetY, offsetZ, 1, data);
+    }
+    default void spawnParticle(Particle particle, Location location, int count, double offsetX, double offsetY, double offsetZ, double extra) {
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count, offsetX, offsetY, offsetZ, extra);
+    }
+    default void spawnParticle(Particle particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, double extra) {
+        this.spawnParticle(particle, x, y, z, count, offsetX, offsetY, offsetZ, extra, null);
+    }
+    default <T> void spawnParticle(Particle particle, Location location, int count, double offsetX, double offsetY, double offsetZ, double extra, T data) {
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count, offsetX, offsetY, offsetZ, extra, data);
+    }
+    default <T> void spawnParticle(Particle particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, double extra, T data) {
+        this.spawnParticle(particle, null, null, x, y, z, count, offsetX, offsetY, offsetZ, extra, data, true);
+    }
+    default <T> void spawnParticle(Particle particle, java.util.List<org.bukkit.entity.Player> receivers, org.bukkit.entity.Player source, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, double extra, T data) {
+        spawnParticle(particle, receivers, source, x, y, z, count, offsetX, offsetY, offsetZ, extra, data, true);
+    }
+    /** Sends particles to {@code receivers} (every player in this world when null)
+     * who can see {@code source}, within 32 blocks -- or 512 when {@code force}. */
+    default <T> void spawnParticle(Particle particle, java.util.List<org.bukkit.entity.Player> receivers, org.bukkit.entity.Player source, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, double extra, T data, boolean force) {
+        foton.FotonParticles.spawn(this, particle, receivers, source, x, y, z, count, offsetX, offsetY, offsetZ, extra, data, force);
+    }
+    default <T> void spawnParticle(Particle particle, Location location, int count, double offsetX, double offsetY, double offsetZ, double extra, T data, boolean force) {
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count, offsetX, offsetY, offsetZ, extra, data, force);
+    }
+    default <T> void spawnParticle(Particle particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, double extra, T data, boolean force) {
+        this.spawnParticle(particle, null, null, x, y, z, count, offsetX, offsetY, offsetZ, extra, data, force);
     }
     default void playSound(Location location, String sound, float volume, float pitch) { }
     default void playSound(Location location, Sound sound, SoundCategory category, float volume, float pitch) {
@@ -328,5 +368,114 @@ public interface World extends org.bukkit.generator.WorldInfo, RegionAccessor, o
         public int getId() {
             return id;
         }
+    }
+
+    default Material getType(int x, int y, int z) { return getBlockAt(x, y, z).getType(); }
+    default Material getType(Location location) { return getBlockAt(location).getType(); }
+
+    /** Every entity whose box overlaps {@code box}. */
+    default java.util.Collection<org.bukkit.entity.Entity> getNearbyEntities(org.bukkit.util.BoundingBox box) {
+        return getNearbyEntities(box, null);
+    }
+    default java.util.Collection<org.bukkit.entity.Entity> getNearbyEntities(org.bukkit.util.BoundingBox box,
+            java.util.function.Predicate<? super org.bukkit.entity.Entity> filter) {
+        if (box == null) throw new IllegalArgumentException("BoundingBox cannot be null");
+        return getNearbyEntities(new Location(this, box.getCenterX(), box.getCenterY(), box.getCenterZ()),
+            box.getWidthX() / 2, box.getHeight() / 2, box.getWidthZ() / 2,
+            filter == null ? null : filter::test);
+    }
+
+    private static void checkRay(World world, Location start, org.bukkit.util.Vector direction) {
+        if (start == null) throw new IllegalArgumentException("Location start cannot be null");
+        if (start.getWorld() != null && !world.getName().equals(start.getWorld().getName()))
+            throw new IllegalArgumentException("Location start cannot be in a different world");
+        if (!Double.isFinite(start.getX()) || !Double.isFinite(start.getY()) || !Double.isFinite(start.getZ()))
+            throw new IllegalArgumentException("Location start is not finite");
+        if (direction == null) throw new IllegalArgumentException("Vector direction cannot be null");
+        if (!Double.isFinite(direction.getX()) || !Double.isFinite(direction.getY()) || !Double.isFinite(direction.getZ()))
+            throw new IllegalArgumentException("Vector direction is not finite");
+        if (direction.lengthSquared() <= 0) throw new IllegalArgumentException("Direction's magnitude (0) need to be greater than 0");
+    }
+
+    default org.bukkit.util.RayTraceResult rayTraceEntities(Location start, org.bukkit.util.Vector direction, double maxDistance) {
+        return rayTraceEntities(start, direction, maxDistance, 0.0, null);
+    }
+    default org.bukkit.util.RayTraceResult rayTraceEntities(Location start, org.bukkit.util.Vector direction, double maxDistance, double raySize) {
+        return rayTraceEntities(start, direction, maxDistance, raySize, null);
+    }
+    default org.bukkit.util.RayTraceResult rayTraceEntities(Location start, org.bukkit.util.Vector direction, double maxDistance,
+            java.util.function.Predicate<? super org.bukkit.entity.Entity> filter) {
+        return rayTraceEntities(start, direction, maxDistance, 0.0, filter);
+    }
+
+    /** The nearest entity whose box, grown by {@code raySize}, the ray meets within {@code maxDistance}. */
+    default org.bukkit.util.RayTraceResult rayTraceEntities(Location start, org.bukkit.util.Vector direction, double maxDistance,
+            double raySize, java.util.function.Predicate<? super org.bukkit.entity.Entity> filter) {
+        checkRay(this, start, direction);
+        if (maxDistance < 0.0) return null;
+        org.bukkit.util.Vector startPos = start.toVector();
+        org.bukkit.util.Vector dir = direction.clone().normalize().multiply(maxDistance);
+        org.bukkit.util.BoundingBox aabb = org.bukkit.util.BoundingBox.of(startPos, startPos).expandDirectional(dir).expand(raySize);
+        org.bukkit.entity.Entity nearestHitEntity = null;
+        org.bukkit.util.RayTraceResult nearestHitResult = null;
+        double nearestDistanceSq = Double.MAX_VALUE;
+        for (org.bukkit.entity.Entity entity : getNearbyEntities(aabb, filter)) {
+            org.bukkit.util.BoundingBox box = entity.getBoundingBox();
+            if (box == null) continue;
+            org.bukkit.util.RayTraceResult hitResult = box.expand(raySize).rayTrace(startPos, direction, maxDistance);
+            if (hitResult == null) continue;
+            double distanceSq = startPos.distanceSquared(hitResult.getHitPosition());
+            if (distanceSq < nearestDistanceSq) {
+                nearestHitEntity = entity;
+                nearestHitResult = hitResult;
+                nearestDistanceSq = distanceSq;
+            }
+        }
+        return nearestHitEntity == null ? null
+            : new org.bukkit.util.RayTraceResult(nearestHitResult.getHitPosition(), nearestHitEntity, nearestHitResult.getHitBlockFace());
+    }
+
+    default org.bukkit.util.RayTraceResult rayTraceBlocks(Location start, org.bukkit.util.Vector direction, double maxDistance) {
+        return rayTraceBlocks(start, direction, maxDistance, FluidCollisionMode.NEVER, false);
+    }
+    default org.bukkit.util.RayTraceResult rayTraceBlocks(Location start, org.bukkit.util.Vector direction, double maxDistance,
+            FluidCollisionMode fluidCollisionMode) {
+        return rayTraceBlocks(start, direction, maxDistance, fluidCollisionMode, false);
+    }
+
+    /** The first block the ray meets within {@code maxDistance}: its
+     * collision shape when passable blocks are ignored, its outline
+     * otherwise, and fluids as the mode says. */
+    default org.bukkit.util.RayTraceResult rayTraceBlocks(Location start, org.bukkit.util.Vector direction, double maxDistance,
+            FluidCollisionMode fluidCollisionMode, boolean ignorePassableBlocks) {
+        checkRay(this, start, direction);
+        if (fluidCollisionMode == null) throw new IllegalArgumentException("FluidCollisionMode cannot be null");
+        if (maxDistance < 0.0) return null;
+        org.bukkit.util.Vector dir = direction.clone().normalize().multiply(maxDistance);
+        double[] hit = foton.Native.rayTraceBlocks(getName(), start.getX(), start.getY(), start.getZ(),
+            start.getX() + dir.getX(), start.getY() + dir.getY(), start.getZ() + dir.getZ(),
+            fluidCollisionMode.ordinal(), ignorePassableBlocks);
+        if (hit == null || hit.length < 7) return null;
+        org.bukkit.block.Block block = getBlockAt((int) hit[3], (int) hit[4], (int) hit[5]);
+        return new org.bukkit.util.RayTraceResult(new org.bukkit.util.Vector(hit[0], hit[1], hit[2]), block,
+            org.bukkit.block.BlockFace.values()[(int) hit[6]]);
+    }
+
+    /** Blocks and entities together: whichever the ray meets first. */
+    default org.bukkit.util.RayTraceResult rayTrace(Location start, org.bukkit.util.Vector direction, double maxDistance,
+            FluidCollisionMode fluidCollisionMode, boolean ignorePassableBlocks, double raySize,
+            java.util.function.Predicate<? super org.bukkit.entity.Entity> filter) {
+        org.bukkit.util.RayTraceResult blockHit = rayTraceBlocks(start, direction, maxDistance, fluidCollisionMode, ignorePassableBlocks);
+        org.bukkit.util.Vector startVec = null;
+        double blockHitDistance = maxDistance;
+        if (blockHit != null) {
+            startVec = start.toVector();
+            blockHitDistance = startVec.distance(blockHit.getHitPosition());
+        }
+        org.bukkit.util.RayTraceResult entityHit = rayTraceEntities(start, direction, blockHitDistance, raySize, filter);
+        if (blockHit == null) return entityHit;
+        if (entityHit == null) return blockHit;
+        double entityHitDistanceSquared = startVec.distanceSquared(entityHit.getHitPosition());
+        return entityHitDistanceSquared < blockHitDistance * blockHitDistance ? entityHit : blockHit;
     }
 }

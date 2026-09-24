@@ -8,4 +8,5 @@ import org.bukkit.inventory.MerchantRecipe;
 public abstract class AbstractVillager extends FotonLivingEntity implements org.bukkit.entity.AbstractVillager {
     protected AbstractVillager(UUID id) { super(id); }
     public abstract List<MerchantRecipe> getRecipes();
+    @Override public org.bukkit.inventory.Inventory getInventory() { return new FotonCarriedInventory(this); }
 }

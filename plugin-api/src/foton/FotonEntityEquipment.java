@@ -3,35 +3,46 @@ package foton;
 import org.bukkit.inventory.EntityEquipment;
 import org.bukkit.inventory.ItemStack;
 
-/** Equipment view backed by a player's live inventory slots. */
+/** Live equipment of any living entity, player or mob, slot by slot. */
 final class FotonEntityEquipment implements EntityEquipment {
     private static final java.util.concurrent.ConcurrentHashMap<String, float[]> CHANCES = new java.util.concurrent.ConcurrentHashMap<>();
-    private final FotonInventory inventory;
     private final String owner;
     private final float[] dropChances;
     FotonEntityEquipment(String owner) {
         this.owner = owner;
-        inventory = new FotonInventory(owner);
         dropChances = CHANCES.computeIfAbsent(owner, ignored -> new float[] {0.085f, 0.085f, 0.085f, 0.085f, 0.085f});
     }
-    @Override public org.bukkit.entity.Entity getHolder() {
-        try { return new FotonEntity(java.util.UUID.fromString(owner)); }
-        catch (IllegalArgumentException ignored) { return null; }
+    @Override public org.bukkit.entity.Entity getHolder() { return FotonEntity.of(Native.parse(owner)); }
+
+    @Override public ItemStack getItem(org.bukkit.inventory.EquipmentSlot slot) {
+        if (slot == null) throw new IllegalArgumentException("slot");
+        return FotonInventory.decode(Native.entityEquipmentItem(owner, slot.ordinal()));
     }
-    @Override public ItemStack[] getArmorContents() { return inventory.getArmorContents(); }
-    @Override public ItemStack getHelmet() { return inventory.getItem(39); }
-    @Override public void setHelmet(ItemStack item) { inventory.setItem(39, item); }
-    @Override public ItemStack getChestplate() { return inventory.getItem(38); }
-    @Override public void setChestplate(ItemStack item) { inventory.setItem(38, item); }
-    @Override public ItemStack getBoots() { return inventory.getItem(36); }
-    @Override public void setBoots(ItemStack item) { inventory.setItem(36, item); }
-    @Override public ItemStack getLeggings() { return inventory.getItem(38); }
-    @Override public void setLeggings(ItemStack item) { inventory.setItem(38, item); }
-    @Override public void setArmorContents(ItemStack[] items) { for (int i = 0; i < 4; i++) inventory.setItem(36 + i, items != null && i < items.length ? items[i] : null); }
-    @Override public ItemStack getItemInMainHand() { return inventory.getItemInMainHand(); }
-    @Override public void setItemInMainHand(ItemStack item) { inventory.setItemInMainHand(item); }
-    @Override public ItemStack getItemInOffHand() { return inventory.getItemInOffHand(); }
-    @Override public void setItemInOffHand(ItemStack item) { inventory.setItemInOffHand(item); }
+    @Override public void setItem(org.bukkit.inventory.EquipmentSlot slot, ItemStack item) {
+        if (slot == null) throw new IllegalArgumentException("slot");
+        Native.setEntityEquipmentItem(owner, slot.ordinal(), FotonInventory.encode(item));
+    }
+    @Override public ItemStack[] getArmorContents() {
+        return new ItemStack[] { getBoots(), getLeggings(), getChestplate(), getHelmet() };
+    }
+    @Override public ItemStack getHelmet() { return getItem(org.bukkit.inventory.EquipmentSlot.HEAD); }
+    @Override public void setHelmet(ItemStack item) { setItem(org.bukkit.inventory.EquipmentSlot.HEAD, item); }
+    @Override public ItemStack getChestplate() { return getItem(org.bukkit.inventory.EquipmentSlot.CHEST); }
+    @Override public void setChestplate(ItemStack item) { setItem(org.bukkit.inventory.EquipmentSlot.CHEST, item); }
+    @Override public ItemStack getLeggings() { return getItem(org.bukkit.inventory.EquipmentSlot.LEGS); }
+    @Override public void setLeggings(ItemStack item) { setItem(org.bukkit.inventory.EquipmentSlot.LEGS, item); }
+    @Override public ItemStack getBoots() { return getItem(org.bukkit.inventory.EquipmentSlot.FEET); }
+    @Override public void setBoots(ItemStack item) { setItem(org.bukkit.inventory.EquipmentSlot.FEET, item); }
+    @Override public void setArmorContents(ItemStack[] items) {
+        org.bukkit.inventory.EquipmentSlot[] slots = {
+            org.bukkit.inventory.EquipmentSlot.FEET, org.bukkit.inventory.EquipmentSlot.LEGS,
+            org.bukkit.inventory.EquipmentSlot.CHEST, org.bukkit.inventory.EquipmentSlot.HEAD };
+        for (int i = 0; i < slots.length; i++) setItem(slots[i], items != null && i < items.length ? items[i] : null);
+    }
+    @Override public ItemStack getItemInMainHand() { return getItem(org.bukkit.inventory.EquipmentSlot.HAND); }
+    @Override public void setItemInMainHand(ItemStack item) { setItem(org.bukkit.inventory.EquipmentSlot.HAND, item); }
+    @Override public ItemStack getItemInOffHand() { return getItem(org.bukkit.inventory.EquipmentSlot.OFF_HAND); }
+    @Override public void setItemInOffHand(ItemStack item) { setItem(org.bukkit.inventory.EquipmentSlot.OFF_HAND, item); }
     @Override public float getItemInHandDropChance() { return nativeChance(0, 4); }
     @Override public void setItemInHandDropChance(float chance) { setNativeChance(0, 4, chance); }
     @Override public float getItemInMainHandDropChance() { return getItemInHandDropChance(); }
@@ -51,6 +62,6 @@ final class FotonEntityEquipment implements EntityEquipment {
         return chance;
     }
     @Override public void clear() {
-        for (int slot = 36; slot <= 40; slot++) inventory.setItem(slot, null);
+        for (org.bukkit.inventory.EquipmentSlot slot : org.bukkit.inventory.EquipmentSlot.values()) setItem(slot, null);
     }
 }

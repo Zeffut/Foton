@@ -1,7 +1,7 @@
 package org.bukkit.entity;
 
 /** A fox with a vanilla biome variant. */
-public interface Fox extends Animal {
+public interface Fox extends Animals {
     enum Type { RED, SNOW }
     default Type getFoxType() { return Type.RED; }
     default void setFoxType(Type type) { }

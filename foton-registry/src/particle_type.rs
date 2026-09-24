@@ -95,6 +95,20 @@ impl ParticleData {
         }
     }
 
+    /// Pairs a particle type with options, or `None` when the type is
+    /// registered with a different payload.
+    ///
+    /// For options that arrive from outside the server -- a plugin names the
+    /// particle and supplies the data separately -- where a mismatch is input
+    /// to refuse rather than a bug to panic on.
+    #[must_use]
+    pub fn try_new<T: ParticleOptions>(particle_type: ParticleTypeRef, options: T) -> Option<Self> {
+        (particle_type.expected_type_key == T::TYPE_KEY).then(|| Self {
+            particle_type,
+            options: Box::new(options),
+        })
+    }
+
     #[must_use]
     pub fn simple(particle_type: ParticleTypeRef) -> Self {
         Self::new(particle_type, SimpleParticleOptions)
@@ -961,6 +975,24 @@ mod tests {
         let result = BlockParticleOption::new(invalid_state).write_network(&mut encoded);
         assert!(result.is_err());
         assert!(encoded.is_empty());
+    }
+
+    #[test]
+    fn try_new_refuses_a_payload_the_type_is_not_registered_with() {
+        assert!(
+            ParticleData::try_new(
+                &vanilla_particle_types::FLAME,
+                PowerParticleOption::new(1.0)
+            )
+            .is_none()
+        );
+        assert!(
+            ParticleData::try_new(
+                &vanilla_particle_types::DRAGON_BREATH,
+                PowerParticleOption::new(1.0)
+            )
+            .is_some()
+        );
     }
 
     #[test]

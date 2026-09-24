@@ -1,7 +1,7 @@
 package org.bukkit.entity;
 
 /** An entity with living characteristics. */
-public interface LivingEntity extends Damageable, org.bukkit.attribute.Attributable {
+public interface LivingEntity extends Damageable, org.bukkit.attribute.Attributable, org.bukkit.projectiles.ProjectileSource {
     default org.bukkit.block.Block getTargetBlock(java.util.Set<org.bukkit.Material> transparent, int maxDistance) {
         if (maxDistance <= 0 || getLocation() == null || getWorld() == null) return null;
         org.bukkit.Location origin = getEyeLocation();
@@ -17,11 +17,17 @@ public interface LivingEntity extends Damageable, org.bukkit.attribute.Attributa
         return null;
     }
 
+    /** Whether the entity thinks: always false for anything that is not a mob. */
+    default boolean hasAI() { return foton.Native.entityHasAi(getUniqueId().toString()); }
+    /** Vanilla's NoAI switch: a mob without AI does not move at all. */
+    default void setAI(boolean ai) { foton.Native.setEntityAi(getUniqueId().toString(), ai); }
+    default boolean isCollidable() { return foton.Native.entityCollidable(getUniqueId().toString()); }
+    /** Whether other entities push this one, and it them. */
+    default void setCollidable(boolean collidable) { foton.Native.setEntityCollidable(getUniqueId().toString(), collidable); }
     default org.bukkit.event.entity.EntityDamageEvent getLastDamageCause() { return null; }
     default void setLastDamageCause(org.bukkit.event.entity.EntityDamageEvent event) { }
     default boolean isHandRaised() { return false; }
     default void clearActiveItem() { }
-    default org.bukkit.util.BoundingBox getBoundingBox() { return null; }
     default boolean isInvisible() { return false; }
     default boolean isCustomNameVisible() { return false; }
     default double getEyeHeight() { return 1.62; }
@@ -53,4 +59,18 @@ public interface LivingEntity extends Damageable, org.bukkit.attribute.Attributa
     default void setRemoveWhenFarAway(boolean remove) { }
     default boolean getCanPickupItems() { return true; }
     default void setCanPickupItems(boolean pickup) { }
+
+    /** The item being used -- a drawn bow, a raised shield, food being eaten -- or air. */
+    default org.bukkit.inventory.ItemStack getActiveItem() {
+        org.bukkit.inventory.ItemStack item = foton.FotonInventory.decode(foton.Native.activeItem(getUniqueId().toString()));
+        return item == null ? new org.bukkit.inventory.ItemStack(org.bukkit.Material.AIR) : item;
+    }
+    /** Whether the entity is on a ladder, vine or other climbable block. */
+    default boolean isClimbing() { return (foton.Native.entitySurroundings(getUniqueId().toString()) & 1) != 0; }
+    /** Whether the entity is in a riptide spin attack. */
+    default boolean isRiptiding() { return (foton.Native.entitySurroundings(getUniqueId().toString()) & 8) != 0; }
+    /** Vanilla's fall-flying flag; the server clears it again when the entity cannot glide. */
+    default void setGliding(boolean gliding) { foton.Native.setEntityGliding(getUniqueId().toString(), gliding); }
+    /** Vanilla's swimming flag; a player's is recomputed every tick from where they are. */
+    default void setSwimming(boolean swimming) { foton.Native.setEntitySwimming(getUniqueId().toString(), swimming); }
 }

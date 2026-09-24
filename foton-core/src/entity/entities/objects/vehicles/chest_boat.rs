@@ -112,6 +112,14 @@ macro_rules! chest_boat_body {
                 self.loot
                     .unpack_at(&world, self.position(), &container, player);
             }
+
+            /// The chest's 27 slots, with any still-packed loot rolled first,
+            /// as vanilla's `ContainerEntity` accessors do.
+            #[must_use]
+            pub fn container(&self) -> &Shared<SimpleContainer> {
+                self.unpack_loot_table(None);
+                &self.container
+            }
         }
 
         impl Entity for $name {

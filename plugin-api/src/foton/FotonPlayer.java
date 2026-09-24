@@ -75,13 +75,7 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
     }
 
     @Override public org.bukkit.attribute.AttributeInstance getAttribute(org.bukkit.attribute.Attribute attribute) {
-        if (attribute == null) return null;
-        String value = Native.playerAttribute(id.toString(), attribute.name());
-        if (value == null) return null;
-        String[] fields = value.split("\\|", -1);
-        if (fields.length != 2) return null;
-        try { return new org.bukkit.attribute.AttributeInstance(attribute, Double.parseDouble(fields[0]), Double.parseDouble(fields[1])); }
-        catch (NumberFormatException ignored) { return null; }
+        return FotonAttributeInstance.of(id, attribute);
     }
 
     public FotonPlayer(UUID id) {
@@ -253,12 +247,6 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
         if (!Native.openLoom(id.toString(), location.getWorld().getName(),
                 location.getBlockX(), location.getBlockY(), location.getBlockZ())) return null;
         return getOpenInventory();
-    }
-
-    @Override
-    public void damage(double amount, org.bukkit.entity.Entity source) {
-        if (amount > 0.0 && Double.isFinite(amount))
-            Native.damagePlayer(id.toString(), amount, source == null ? null : source.getUniqueId().toString());
     }
 
     @Override
@@ -565,6 +553,18 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
     @Override
     public void sendActionBar(net.kyori.adventure.text.Component message) {
         Player.super.sendActionBar(message);
+    }
+
+    @Override public void clearTitle() { Player.super.clearTitle(); }
+
+    @Override
+    public void sendPlayerListHeaderAndFooter(net.kyori.adventure.text.Component header, net.kyori.adventure.text.Component footer) {
+        Player.super.sendPlayerListHeaderAndFooter(header, footer);
+    }
+
+    @Override
+    public void sendPlayerListHeader(net.kyori.adventure.text.Component header) {
+        Player.super.sendPlayerListHeader(header);
     }
 
     @Override
