@@ -215,11 +215,7 @@ public final class Native {
     public static native double health(String uuid);
     public static native void setHealth(String uuid, double health);
     public static native double maxHealth(String uuid);
-    public static native String playerAttribute(String uuid, String attribute);
     public static native void setAttributeBase(String uuid, String attribute, double value);
-    public static native boolean addAttributeModifier(String uuid, String attribute, String id, double amount, String operation);
-    public static native boolean removeAttributeModifier(String uuid, String attribute, String id);
-    public static native String[] attributeModifiers(String uuid, String attribute);
     public static native int airSupply(String uuid);
     public static native void setAirSupply(String uuid, int ticks);
     public static native int maxAirSupply(String uuid);
@@ -593,6 +589,13 @@ public final class Native {
     public static native boolean createExplosionAdvanced(String name, double x, double y, double z, float power, boolean fire, boolean breakBlocks);
     public static native int worldMinHeight(String world);
     public static native int worldMaxHeight(String world);
+
+    // Entities, players and world queries (plugin compatibility, lot B).
+    // Attributes are named by registry key, modifiers by their full key.
+    public static native double[] attributeValues(String uuid, String attribute);
+    public static native String[] attributeModifierList(String uuid, String attribute);
+    public static native boolean addAttributeModifierKeyed(String uuid, String attribute, String key, double amount, String operation, boolean persistent);
+    public static native boolean removeAttributeModifierKeyed(String uuid, String attribute, String key);
 
     static UUID parse(String uuid) {
         try {

@@ -38,8 +38,6 @@ use foton_core::entity::PatrollingMonster;
 use foton_core::entity::Projectile;
 use foton_core::entity::SharedEntity;
 use foton_core::entity::TamableAnimal;
-use foton_core::entity::attribute::AttributeModifier;
-use foton_core::entity::attribute::AttributeModifierOperation;
 use foton_core::entity::conversion::{
     ConversionParams, ConversionReason, convert_to, replace_entity,
 };
@@ -175,6 +173,9 @@ use simdnbt::owned::NbtCompound;
 use simdnbt::owned::NbtTag;
 use text_components::{TextComponent, content::Content as TextContent};
 use uuid::Uuid;
+
+mod attributes;
+mod support;
 
 /// The server the natives answer about.
 ///
@@ -6868,48 +6869,6 @@ extern "system" fn max_health(
     player(&mut env, &uuid).map_or(20.0, |player| f64::from(player.get_max_health()))
 }
 
-extern "system" fn player_attribute(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    attribute: JString<'_>,
-) -> jstring {
-    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
-        return null_mut();
-    };
-    let Ok(name): Result<String, _> = env.get_string(&attribute).map(Into::into) else {
-        return null_mut();
-    };
-    let Some(id) = Uuid::parse_str(&uuid_text).ok() else {
-        return null_mut();
-    };
-    let key_name = name
-        .strip_prefix("GENERIC_")
-        .or_else(|| name.strip_prefix("PLAYER_"))
-        .unwrap_or(&name)
-        .to_ascii_lowercase();
-    let Ok(key) = Identifier::from_str(&key_name) else {
-        return null_mut();
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return null_mut();
-    };
-    let Some(living) = entity.as_living_entity() else {
-        return null_mut();
-    };
-    let Some(attribute_ref) = foton_registry::REGISTRY.attributes.by_key(&key) else {
-        return null_mut();
-    };
-    let attrs = living.attributes().lock();
-    let Some(base) = attrs.get_base_value(attribute_ref) else {
-        return null_mut();
-    };
-    let Some(value) = attrs.get_value(attribute_ref) else {
-        return null_mut();
-    };
-    to_java(&mut env, Some(format!("{base}|{value}")))
-}
-
 fn attribute_ref_from_name(name: &str) -> Option<AttributeRef> {
     let key_name = name
         .strip_prefix("GENERIC_")
@@ -6946,150 +6905,6 @@ extern "system" fn set_attribute_base(
         return;
     };
     living.attributes().lock().set_base_value(attribute, value);
-}
-
-extern "system" fn add_attribute_modifier(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    attribute: JString<'_>,
-    modifier_id: JString<'_>,
-    amount: jdouble,
-    operation: JString<'_>,
-) -> jboolean {
-    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
-        return 0;
-    };
-    let Ok(attribute_name): Result<String, _> = env.get_string(&attribute).map(Into::into) else {
-        return 0;
-    };
-    let Ok(id_text): Result<String, _> = env.get_string(&modifier_id).map(Into::into) else {
-        return 0;
-    };
-    let Ok(operation): Result<String, _> = env.get_string(&operation).map(Into::into) else {
-        return 0;
-    };
-    let Some(id) = Uuid::parse_str(&uuid_text).ok() else {
-        return 0;
-    };
-    let Some(attribute) = attribute_ref_from_name(&attribute_name) else {
-        return 0;
-    };
-    let Ok(modifier_uuid) = Uuid::parse_str(&id_text) else {
-        return 0;
-    };
-    let Ok(modifier_id) = Identifier::from_str(&format!("plugin:{modifier_uuid}")) else {
-        return 0;
-    };
-    let operation = match operation.as_str() {
-        "ADD_NUMBER" => AttributeModifierOperation::AddValue,
-        "ADD_SCALAR" => AttributeModifierOperation::AddMultipliedBase,
-        "MULTIPLY_SCALAR_1" => AttributeModifierOperation::AddMultipliedTotal,
-        _ => return 0,
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return 0;
-    };
-    let Some(living) = entity.as_living_entity() else {
-        return 0;
-    };
-    jboolean::from(living.attributes().lock().add_modifier(
-        attribute,
-        AttributeModifier {
-            id: modifier_id,
-            amount,
-            operation,
-        },
-        true,
-    ))
-}
-
-extern "system" fn remove_attribute_modifier(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    attribute: JString<'_>,
-    modifier_id: JString<'_>,
-) -> jboolean {
-    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
-        return 0;
-    };
-    let Ok(attribute_name): Result<String, _> = env.get_string(&attribute).map(Into::into) else {
-        return 0;
-    };
-    let Ok(id_text): Result<String, _> = env.get_string(&modifier_id).map(Into::into) else {
-        return 0;
-    };
-    let Some(id) = Uuid::parse_str(&uuid_text).ok() else {
-        return 0;
-    };
-    let Some(attribute) = attribute_ref_from_name(&attribute_name) else {
-        return 0;
-    };
-    let Ok(modifier_uuid) = Uuid::parse_str(&id_text) else {
-        return 0;
-    };
-    let Ok(modifier_id) = Identifier::from_str(&format!("plugin:{modifier_uuid}")) else {
-        return 0;
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return 0;
-    };
-    let Some(living) = entity.as_living_entity() else {
-        return 0;
-    };
-    jboolean::from(
-        living
-            .attributes()
-            .lock()
-            .remove_modifier(attribute, &modifier_id),
-    )
-}
-
-extern "system" fn attribute_modifiers(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    attribute: JString<'_>,
-) -> jobjectArray {
-    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
-        return null_mut();
-    };
-    let Ok(attribute_name): Result<String, _> = env.get_string(&attribute).map(Into::into) else {
-        return null_mut();
-    };
-    let Some(id) = Uuid::parse_str(&uuid_text).ok() else {
-        return null_mut();
-    };
-    let Some(attribute) = attribute_ref_from_name(&attribute_name) else {
-        return null_mut();
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return null_mut();
-    };
-    let Some(living) = entity.as_living_entity() else {
-        return null_mut();
-    };
-    let attrs = living.attributes().lock();
-    let Some(instance) = attrs.get_instance(attribute) else {
-        return null_mut();
-    };
-    let values: Vec<String> = instance
-        .modifiers()
-        .iter()
-        .map(|modifier| {
-            let operation = match modifier.operation {
-                AttributeModifierOperation::AddValue => "ADD_NUMBER",
-                AttributeModifierOperation::AddMultipliedBase => "ADD_SCALAR",
-                AttributeModifierOperation::AddMultipliedTotal => "MULTIPLY_SCALAR_1",
-            };
-            format!(
-                "{}|{}|{}|{operation}",
-                modifier.id.path, modifier.id.path, modifier.amount
-            )
-        })
-        .collect();
-    string_array(&mut env, &values)
 }
 
 /// `foton.Native.playerRespawnWorld`
@@ -11294,7 +11109,7 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         }
     }
 
-    vec![
+    let mut bindings = vec![
         method(
             "mergeItemSnbt",
             "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
@@ -13599,29 +13414,9 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             max_health as *mut c_void,
         ),
         method(
-            "playerAttribute",
-            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
-            player_attribute as *mut c_void,
-        ),
-        method(
             "setAttributeBase",
             "(Ljava/lang/String;Ljava/lang/String;D)V",
             set_attribute_base as *mut c_void,
-        ),
-        method(
-            "addAttributeModifier",
-            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;DLjava/lang/String;)Z",
-            add_attribute_modifier as *mut c_void,
-        ),
-        method(
-            "removeAttributeModifier",
-            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
-            remove_attribute_modifier as *mut c_void,
-        ),
-        method(
-            "attributeModifiers",
-            "(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;",
-            attribute_modifiers as *mut c_void,
         ),
         method(
             "playerEntityEffect",
@@ -13738,7 +13533,10 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "(Ljava/lang/String;)[Ljava/lang/String;",
             effective_permissions as *mut c_void,
         ),
-    ]
+    ];
+    // Entities, players and world queries live in their own modules.
+    bindings.extend(attributes::bindings());
+    bindings
 }
 
 #[cfg(test)]

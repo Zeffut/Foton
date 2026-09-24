@@ -61,7 +61,9 @@ def declared():
 
 def registered():
     """The (name, signature) of every method handed to RegisterNatives."""
-    source = NATIVES_RS.read_text(encoding="utf-8")
+    # natives.rs, and the modules under natives/ whose tables it extends.
+    files = [NATIVES_RS, *sorted(NATIVES_RS.with_suffix("").glob("*.rs"))]
+    source = "\n".join(path.read_text(encoding="utf-8") for path in files)
     # method(\n  "name",\n  "signature",\n  rust_fn as *mut c_void,\n)
     pattern = re.compile(
         r'method\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,', re.MULTILINE)

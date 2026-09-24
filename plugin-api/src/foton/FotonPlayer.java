@@ -75,13 +75,7 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
     }
 
     @Override public org.bukkit.attribute.AttributeInstance getAttribute(org.bukkit.attribute.Attribute attribute) {
-        if (attribute == null) return null;
-        String value = Native.playerAttribute(id.toString(), attribute.name());
-        if (value == null) return null;
-        String[] fields = value.split("\\|", -1);
-        if (fields.length != 2) return null;
-        try { return new org.bukkit.attribute.AttributeInstance(attribute, Double.parseDouble(fields[0]), Double.parseDouble(fields[1])); }
-        catch (NumberFormatException ignored) { return null; }
+        return FotonAttributeInstance.of(id, attribute);
     }
 
     public FotonPlayer(UUID id) {

@@ -2,7 +2,13 @@ package org.bukkit;
 
 import org.bukkit.plugin.Plugin;
 
-public final class NamespacedKey {
+/** A namespaced identifier.
+ *
+ * <p>An Adventure {@code Key}, as in Paper: Paper methods such as
+ * {@code AttributeInstance.removeModifier(Key)} and {@code Player.getCooldown(Key)}
+ * are handed a {@code NamespacedKey} by plugins and call it through the
+ * {@code Key} interface. */
+public final class NamespacedKey implements net.kyori.adventure.key.Key {
     private final String namespace;
     private final String key;
 
@@ -52,5 +58,7 @@ public final class NamespacedKey {
     }
 
     @Override public String toString() { return namespace + ":" + key; }
-    public String asString() { return toString(); }
+    @Override public String asString() { return toString(); }
+    @Override public String namespace() { return namespace; }
+    @Override public String value() { return key; }
 }
