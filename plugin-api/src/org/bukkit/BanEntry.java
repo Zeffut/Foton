@@ -5,6 +5,8 @@ import java.util.Date;
 /** A server ban record. */
 public interface BanEntry<T> {
     T getTarget();
+    /** What is banned; Paper's name for {@link #getTarget()}. */
+    default T getBanTarget() { return getTarget(); }
     Date getCreated();
     void setCreated(Date created);
     Date getExpiration();

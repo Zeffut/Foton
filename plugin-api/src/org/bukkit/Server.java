@@ -201,9 +201,18 @@ public interface Server {
     Logger getLogger();
 
     default BanList<?> getBanList(BanList.Type type) { return null; }
-    default BanList<?> getBanList(io.papermc.paper.ban.BanListType type) {
-        return getBanList(type == io.papermc.paper.ban.BanListType.IP ? BanList.Type.IP : BanList.Type.NAME);
+    /** The ban list of a Paper list type: the profile list, or the IP one. */
+    @SuppressWarnings("unchecked")
+    default <B extends BanList<E>, E> B getBanList(io.papermc.paper.ban.BanListType<B> type) {
+        return (B) getBanList((Object) type == io.papermc.paper.ban.BanListType.IP ? BanList.Type.IP : BanList.Type.PROFILE);
     }
+    /** Whether admission is limited to the whitelist. */
+    boolean hasWhitelist();
+    /** The player a name belongs to, if the server has seen them; null
+     * otherwise, and never a lookup. */
+    OfflinePlayer getOfflinePlayerIfCached(String name);
+    /** Every advancement the server knows. */
+    java.util.Iterator<org.bukkit.advancement.Advancement> advancementIterator();
     default java.util.Set<OfflinePlayer> getBannedPlayers() { return Bukkit.getBannedPlayers(); }
     /** Returns players currently permitted by the server whitelist. */
     default java.util.Set<OfflinePlayer> getWhitelistedPlayers() { return java.util.Collections.emptySet(); }

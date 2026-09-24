@@ -290,6 +290,15 @@ public final class Native {
     public static native void playerEntityEffect(String uuid, String effect);
     public static native String playerAddress(String uuid);
     public static native String[] advancementCriteria(String key);
+    /** Every advancement the server knows. */
+    public static native String[] advancementKeys();
+    /** `1`/`0` for done, then each criterion as its name, followed by a unit
+     * separator and the epoch millisecond when met; null for a player not online or an unknown advancement. */
+    public static native String[] playerAdvancementProgress(String uuid, String key);
+    /** Awards (on the main thread only) or revokes one criterion. */
+    public static native boolean playerAdvancementCriterion(String uuid, String key, String criterion, boolean award);
+    /** Whether admission is limited to the whitelist. */
+    public static native boolean whitelistEnabled();
     public static native String[] advancementDisplay(String key);
     public static native String playerRespawnWorld(String uuid);
     public static native double[] playerRespawnPosition(String uuid);

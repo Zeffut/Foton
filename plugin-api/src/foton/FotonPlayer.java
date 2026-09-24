@@ -183,6 +183,12 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
     }
 
     @Override
+    public org.bukkit.advancement.AdvancementProgress getAdvancementProgress(org.bukkit.advancement.Advancement advancement) {
+        if (advancement == null) throw new IllegalArgumentException("advancement");
+        return new FotonAdvancementProgress(id.toString(), advancement);
+    }
+
+    @Override
     public org.bukkit.inventory.InventoryView getOpenInventory() {
         return new FotonInventoryView(this);
     }

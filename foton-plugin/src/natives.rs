@@ -18,6 +18,7 @@ use std::thread::{self, ThreadId};
 use std::time::{Duration, Instant};
 
 use foton_core::behavior::blocks::vegetation::tree_grower::generate_tree as grow_tree;
+use foton_core::advancement::ADVANCEMENT_TREE;
 use foton_core::block_entity::entities::BannerBlockEntity;
 use foton_core::block_entity::entities::FurnaceBlockEntity;
 use foton_core::block_entity::entities::HopperBlockEntity;
@@ -7246,6 +7247,89 @@ extern "system" fn advancement_criteria(
     string_array(&mut env, &values)
 }
 
+/// `foton.Native.advancementKeys`: every advancement the server knows.
+extern "system" fn advancement_keys(mut env: JNIEnv<'_>, _class: JClass<'_>) -> jobjectArray {
+    let keys = REGISTRY
+        .advancements
+        .iter()
+        .map(|advancement| advancement.key.to_string())
+        .collect::<Vec<_>>();
+    string_array(&mut env, &keys)
+}
+
+/// An online player and the tree node of an advancement, from their Java
+/// names.
+fn player_and_advancement(
+    env: &mut JNIEnv<'_>,
+    uuid: &JString<'_>,
+    key: &JString<'_>,
+) -> Option<(Arc<Player>, usize)> {
+    let player = player(env, uuid)?;
+    let key: String = env.get_string(key).ok()?.into();
+    let node = ADVANCEMENT_TREE.index_of(&key.parse::<Identifier>().ok()?)?;
+    Some((player, node))
+}
+
+/// `foton.Native.playerAdvancementProgress`: `1` or `0` for whether the
+/// player has the advancement, then one entry per criterion -- its name, and
+/// after a unit separator the epoch millisecond it was met, when it was.
+/// Null for a player not online or an unknown advancement.
+extern "system" fn player_advancement_progress(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    key: JString<'_>,
+) -> jobjectArray {
+    let Some((player, node)) = player_and_advancement(&mut env, &uuid, &key) else {
+        return null_mut();
+    };
+    let mut values = vec![if player.has_advancement(node) { "1" } else { "0" }.to_owned()];
+    values.extend(
+        player
+            .advancement_criteria(node)
+            .into_iter()
+            .map(|(name, obtained)| match obtained {
+                Some(millis) => format!("{name}\u{1f}{millis}"),
+                None => name.to_owned(),
+            }),
+    );
+    string_array(&mut env, &values)
+}
+
+/// `foton.Native.playerAdvancementCriterion`: awards or revokes one
+/// criterion, answering whether that changed anything.
+///
+/// Awarding can finish the advancement and hand out its rewards, which
+/// touches the world, so it is done on the tick thread only.
+extern "system" fn player_advancement_criterion(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    key: JString<'_>,
+    criterion: JString<'_>,
+    award: jboolean,
+) -> jboolean {
+    let Some((player, node)) = player_and_advancement(&mut env, &uuid, &key) else {
+        return 0;
+    };
+    let Ok(criterion) = env.get_string(&criterion).map(String::from) else {
+        return 0;
+    };
+    if award == 0 {
+        return jboolean::from(player.revoke_advancement_criterion(node, &criterion));
+    }
+    if !on_tick() {
+        return 0;
+    }
+    jboolean::from(player.award_advancement_criterion(node, &criterion).granted)
+}
+
+/// `foton.Native.whitelistEnabled`: whether admission is limited to the
+/// whitelist.
+extern "system" fn whitelist_enabled(_env: JNIEnv<'_>, _class: JClass<'_>) -> jboolean {
+    jboolean::from(server().is_some_and(|server| server.config.whitelist_enabled))
+}
+
 extern "system" fn player_address(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -13811,6 +13895,22 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "(Ljava/lang/String;)[Ljava/lang/String;",
             advancement_criteria as *mut c_void,
         ),
+        method(
+            "advancementKeys",
+            "()[Ljava/lang/String;",
+            advancement_keys as *mut c_void,
+        ),
+        method(
+            "playerAdvancementProgress",
+            "(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;",
+            player_advancement_progress as *mut c_void,
+        ),
+        method(
+            "playerAdvancementCriterion",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z)Z",
+            player_advancement_criterion as *mut c_void,
+        ),
+        method("whitelistEnabled", "()Z", whitelist_enabled as *mut c_void),
         method(
             "playerRespawnWorld",
             "(Ljava/lang/String;)Ljava/lang/String;",

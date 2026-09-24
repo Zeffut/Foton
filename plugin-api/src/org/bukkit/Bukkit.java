@@ -226,11 +226,24 @@ public final class Bukkit {
 
     public static java.util.Set<OfflinePlayer> getBannedPlayers() {
         java.util.LinkedHashSet<OfflinePlayer> result = new java.util.LinkedHashSet<>();
-        for (BanEntry<?> entry : server.getBanList(BanList.Type.NAME).getBanEntries()) {
-            Object target = entry.getTarget();
-            if (target instanceof String name) result.add(server.getOfflinePlayer(name));
+        for (BanEntry<?> entry : server.getBanList(BanList.Type.PROFILE).getBanEntries()) {
+            if (!(entry.getTarget() instanceof org.bukkit.profile.PlayerProfile profile)) continue;
+            if (profile.getUniqueId() != null) result.add(server.getOfflinePlayer(profile.getUniqueId()));
+            else if (profile.getName() != null) result.add(server.getOfflinePlayer(profile.getName()));
         }
         return java.util.Collections.unmodifiableSet(result);
+    }
+
+    public static java.util.Iterator<org.bukkit.advancement.Advancement> advancementIterator() {
+        return server.advancementIterator();
+    }
+
+    public static boolean hasWhitelist() { return server.hasWhitelist(); }
+
+    public static OfflinePlayer getOfflinePlayerIfCached(String name) { return server.getOfflinePlayerIfCached(name); }
+
+    public static <B extends BanList<E>, E> B getBanList(io.papermc.paper.ban.BanListType<B> type) {
+        return server.getBanList(type);
     }
 
     public static org.bukkit.advancement.Advancement getAdvancement(NamespacedKey key) {

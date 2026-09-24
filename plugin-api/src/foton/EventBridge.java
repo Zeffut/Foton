@@ -201,9 +201,14 @@ public final class EventBridge {
         try {
             org.bukkit.event.player.AsyncPlayerPreLoginEvent event = new org.bukkit.event.player.AsyncPlayerPreLoginEvent(
                 name, UUID.fromString(uuid), java.net.InetAddress.getByName(address));
-            if (FotonServer.isNameBanned(name) || FotonServer.isIpBanned(address)) {
+            org.bukkit.BanEntry<?> ban = FotonServer.profileBan(UUID.fromString(uuid), name);
+            org.bukkit.BanEntry<?> ipBan = ban == null ? FotonServer.ipBan(address) : null;
+            if (ban != null) {
                 event.disallow(org.bukkit.event.player.AsyncPlayerPreLoginEvent.Result.KICK_BANNED,
-                    "You are banned from this server.");
+                    FotonProfileBanList.kickMessage(ban, false));
+            } else if (ipBan != null) {
+                event.disallow(org.bukkit.event.player.AsyncPlayerPreLoginEvent.Result.KICK_BANNED,
+                    FotonProfileBanList.kickMessage(ipBan, true));
             } else {
                 dispatch(event);
             }
