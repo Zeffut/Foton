@@ -146,7 +146,7 @@ use foton_registry::{
     REGISTRY, RegistryEntry as _, RegistryExt as _, TaggedRegistryExt as _, vanilla_entities,
     vanilla_items,
 };
-use foton_registry::{stat::Stat, vanilla_custom_stats};
+use foton_registry::stat::{CustomStatRef, Stat};
 use foton_utils::entity_events::EntityStatus;
 use foton_utils::locks::{SyncMutex, SyncRwLock};
 use foton_utils::nbt::{merge_nbt_compounds, parse_snbt_compound, to_canonical_snbt};
@@ -7948,7 +7948,7 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
 }
 
 /// A block state as `minecraft:name[facing=north]`, the way `/setblock` writes it.
-fn describe_state(state: BlockStateId) -> Option<String> {
+pub(crate) fn describe_state(state: BlockStateId) -> Option<String> {
     let block = REGISTRY.blocks.by_state_id(state)?;
     let properties = REGISTRY.blocks.get_properties(state);
     if properties.is_empty() {
@@ -7994,12 +7994,28 @@ extern "system" fn statistic_value(
     let Some(player) = player(&mut env, &uuid) else {
         return 0;
     };
-    let stat = match statistic.to_str().ok() {
-        Some("TIME_SINCE_REST") => Stat::custom(&vanilla_custom_stats::TIME_SINCE_REST),
-        Some("JUMP") => Stat::custom(&vanilla_custom_stats::JUMP),
-        _ => return 0,
+    let Some(stat) = statistic.to_str().ok().and_then(bukkit_custom_stat) else {
+        return 0;
     };
-    player.stat_value(stat)
+    player.stat_value(Stat::custom(stat))
+}
+
+/// The vanilla custom statistic an untyped Bukkit `Statistic` names.
+///
+/// Bukkit keys one `minecraft:<lowercase name>`, which is vanilla's own key
+/// except where vanilla renamed the statistic since; those go through the
+/// rename vanilla's `DataFixers` applies to old saves.
+fn bukkit_custom_stat(name: &str) -> Option<CustomStatRef> {
+    let legacy = name.to_ascii_lowercase();
+    let current = match legacy.as_str() {
+        // Vanilla `DataFixers`: the `StatsRenameFix` pair
+        // `minecraft:play_one_minute` -> `minecraft:play_time`.
+        "play_one_minute" => "play_time",
+        other => other,
+    };
+    REGISTRY
+        .custom_stats
+        .by_key(&Identifier::vanilla(current.to_owned()))
 }
 
 extern "system" fn offline_statistic(
@@ -8017,9 +8033,10 @@ extern "system" fn offline_statistic(
     let Ok(uuid) = Uuid::parse_str(uuid_text.to_str().unwrap_or_default()) else {
         return 0;
     };
-    server().map_or(0, |server| {
-        server.offline_statistic(uuid, statistic_text.to_str().unwrap_or_default())
-    })
+    let Some(stat) = bukkit_custom_stat(statistic_text.to_str().unwrap_or_default()) else {
+        return 0;
+    };
+    server().map_or(0, |server| server.offline_statistic(uuid, &stat.key))
 }
 
 extern "system" fn is_operator(
