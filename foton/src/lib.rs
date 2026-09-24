@@ -198,8 +198,20 @@ impl FotonServer {
                     || PathBuf::from("plugin-api/build/foton-plugin-api.jar"),
                     PathBuf::from,
                 );
-                let library_directory =
-                    env::var_os("FOTON_PLUGIN_LIBRARY_DIRECTORY").map(PathBuf::from);
+                // A Paper server puts Adventure, Gson, Guava and the rest on
+                // every plugin's class path, and plugins do not ship them.
+                // plugin-api/lib holds exactly the set Paper declares, beside
+                // the API jar; without it, the first plugin to print a
+                // Component fails to load. So it is the default.
+                let library_directory = env::var_os("FOTON_PLUGIN_LIBRARY_DIRECTORY")
+                    .map(PathBuf::from)
+                    .or_else(|| {
+                        api_jar
+                            .parent()
+                            .and_then(Path::parent)
+                            .map(|root| root.join("lib"))
+                            .filter(|lib| lib.is_dir())
+                    });
                 let host = PluginHost::start(
                     &PluginHostConfig {
                         java_home: java_home.into(),

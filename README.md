@@ -78,8 +78,9 @@ The JVM must be **Java 21 or newer** -- the API jar is compiled with
 `--release 21`, matching what Paper 26.2 itself requires.
 
 The API jar defaults to `plugin-api/build/foton-plugin-api.jar`. Override it
-with FOTON_PLUGIN_API_JAR; external dependency jars may be placed in a
-folder selected by FOTON_PLUGIN_LIBRARY_DIRECTORY. With no
+with FOTON_PLUGIN_API_JAR. The libraries a Paper server puts on every
+plugin's class path -- Adventure, Gson, Guava and the rest -- come from
+`plugin-api/lib` beside it, or from FOTON_PLUGIN_LIBRARY_DIRECTORY. With no
 FOTON_PLUGIN_DIRECTORY, no JVM is started and the normal server path is
 unchanged.
 
