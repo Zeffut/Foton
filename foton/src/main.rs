@@ -129,23 +129,32 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 #[global_allocator]
 static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+// The server never runs on the process's primordial thread, for two reasons.
+//
 // Windows defaults to a 1 MB main thread stack, which overflows in debug
 // builds due to deeply nested generated density functions.
+//
+// And the plugin host creates a JVM on whichever thread starts the server.
+// HotSpot does not support being created on the primordial thread -- the
+// `java` launcher itself never does it -- and on Linux the guard pages it
+// places there land inside the stack Foton still needs: the first deep
+// registry initialisation after the JVM exists faults, with no JVM crash
+// report and no Rust panic, just SIGSEGV. A spawned thread with an explicit
+// stack is an ordinary thread to HotSpot, and the size below is the same 8 MB
+// Linux gives the primordial one.
 fn main() {
-    #[cfg(all(windows, debug_assertions))]
-    {
-        thread::Builder::new()
-            .name("foton-main".to_owned())
-            .stack_size(8 * 1024 * 1024)
-            .spawn(foton_main)
-            .expect("failed to spawn foton-main bootstrap thread")
-            .join()
-            .expect("foton-main thread panicked");
-    }
-
-    #[cfg(not(all(windows, debug_assertions)))]
-    {
-        foton_main();
+    let bootstrap = thread::Builder::new()
+        .name("foton-main".to_owned())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(foton_main);
+    match bootstrap.map(thread::JoinHandle::join) {
+        Ok(Ok(())) => {}
+        // The panic hook has already reported the panic.
+        Ok(Err(_)) => process::exit(101),
+        Err(error) => {
+            eprintln!("could not start the foton-main thread: {error}");
+            process::exit(1);
+        }
     }
 }
 
