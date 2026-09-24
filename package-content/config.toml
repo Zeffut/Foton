@@ -48,6 +48,9 @@ command_spam_threshold_seconds = 10
 enable = false
 # Port rcon listens on
 port = 25575
+# Address rcon listens on. Rcon is plaintext; expose it remotely only behind a
+# trusted private network or encrypted tunnel.
+bind_address = "127.0.0.1"
 # Password every rcon client must send before it may run a command.
 # The server refuses to start with rcon enabled and this left blank.
 password = ""

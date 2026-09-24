@@ -70,6 +70,13 @@ enum ChatSessionUpdateOutcome {
     Invalid(profile_key::ValidationError),
 }
 
+/// Vanilla's `StringUtil.isAllowedChatCharacter` rule for player chat and commands.
+pub(crate) fn is_chat_message_illegal(message: &str) -> bool {
+    message
+        .chars()
+        .any(|character| character == '\u{a7}' || character < ' ' || character == '\u{7f}')
+}
+
 fn validate_chat_session_update(
     old_profile_key: Option<&profile_key::ProfilePublicKeyData>,
     new_session: profile_key::RemoteChatSessionData,
@@ -262,6 +269,10 @@ impl Player {
 
     /// Handles a chat message from the player.
     pub fn handle_chat(&self, packet: SChat, player: Arc<Player>) {
+        if is_chat_message_illegal(&packet.message) {
+            self.disconnect(translations::MULTIPLAYER_DISCONNECT_ILLEGAL_CHARACTERS.msg());
+            return;
+        }
         let chat_message = packet.message.clone();
 
         let verification_result = if let Some(_signature) = &packet.signature {
@@ -583,8 +594,26 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        ChatSessionUpdateOutcome, ChatState, Player, profile_key, validate_chat_session_update,
+        ChatSessionUpdateOutcome, ChatState, Player, is_chat_message_illegal, profile_key,
+        validate_chat_session_update,
     };
+
+    #[test]
+    fn chat_and_command_character_validation_matches_vanilla_security_boundaries() {
+        assert!(!is_chat_message_illegal("bonjour émoji 😀"));
+        for illegal in [
+            "line\nforge",
+            "return\rforge",
+            "\u{1b}[2J",
+            "§cformat",
+            "\u{7f}",
+        ] {
+            assert!(
+                is_chat_message_illegal(illegal),
+                "{illegal:?} should be rejected before it reaches logs"
+            );
+        }
+    }
 
     struct FixedValidator(bool);
 

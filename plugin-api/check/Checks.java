@@ -8,13 +8,17 @@ public final class Checks {
     public static void main(String[] args) throws Exception {
         Services.check();
         Events.check(args[0]);
+        PluginLifecycle.check();
+        NetworkHooks.check();
+        foton.LibraryCacheChecks.check();
         Config.check();
         Geometry.check();
         InventoryViewCheck.check();
         Items.check();
         Colors.check();
         Commands.check();
-        foton.PluginHost.disableAll();
+        Permissions.check();
+        PluginLifecycle.concurrentDisableAllKeepsLoaderAlive();
         Checks.expect(foton.CommandMap.get("fixture") == null,
             "disabling a plugin should release the names it claimed");
         Checks.expect(org.bukkit.Bukkit.getMessenger().getIncomingChannels().isEmpty()
@@ -22,8 +26,8 @@ public final class Checks {
             "disabling a plugin should release its custom channels");
         YamlCheck.check();
         System.out.println(
-            "plugin API checked: services, events, scheduler, YAML, configuration,\n"
-                + "    geometry, items, colors and commands");
+            "plugin API checked: services, events, scheduler, lifecycle, network hooks, YAML,\n"
+                + "    configuration, geometry, items, colors, commands and permissions");
     }
 
     static void expect(boolean condition, String what) {

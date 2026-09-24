@@ -30,7 +30,7 @@ public abstract class JavaPlugin implements Plugin {
     private PluginDescriptionFile description;
     private File dataFolder;
     private Logger logger;
-    private boolean enabled;
+    private volatile boolean enabled;
     private FileConfiguration config;
     private final java.util.Map<String, PluginCommand> commands = new java.util.HashMap<>();
     private final io.papermc.paper.plugin.lifecycle.event.LifecycleEventManager lifecycleManager =

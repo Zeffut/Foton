@@ -74,6 +74,10 @@ impl Server {
         };
         let ((), game_result, chunk_send_result) =
             tokio::join!(packet_workers, game_handle, chunk_send_handle);
+        // The game task normally closes and drains these itself. Repeat the
+        // idempotent barrier here so a panicking game task cannot let its
+        // accepted plugin writes escape the server lifetime.
+        self.close_and_drain_plugin_persistence_updates().await;
         for (task, result) in [
             ("Game tick", game_result),
             ("Chunk sending tick", chunk_send_result),
@@ -243,6 +247,10 @@ impl Server {
             }
         }
 
+        // Stop accepting JNI-originated op/whitelist writes before cancelling
+        // tick jobs, then wait for every update admitted before this boundary.
+        // The final player/world saves happen only after `Server::run` returns.
+        self.close_and_drain_plugin_persistence_updates().await;
         self.jobs.cancel_all();
         pending_command_executions.cancel_all();
         self.command_requests.clear();

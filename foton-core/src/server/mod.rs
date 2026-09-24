@@ -226,6 +226,63 @@ fn packet_workers_for_available(
     ((available_threads / 2).max(2)).min(available_threads)
 }
 
+const fn merge_gameplay_global_player_data(
+    current: Option<&GlobalPlayerData>,
+    mut incoming: GlobalPlayerData,
+) -> GlobalPlayerData {
+    if let Some(current) = current {
+        incoming.whitelisted = current.whitelisted;
+    }
+    incoming
+}
+
+fn merge_whitelist_global_player_data(
+    current: Option<&GlobalPlayerData>,
+    incoming: GlobalPlayerData,
+) -> GlobalPlayerData {
+    let Some(current) = current else {
+        return incoming;
+    };
+    let mut merged = current.clone();
+    merged.whitelisted = incoming.whitelisted;
+    merged
+}
+
+#[cfg(test)]
+mod global_player_publication_tests {
+    use super::{
+        GlobalPlayerData, merge_gameplay_global_player_data, merge_whitelist_global_player_data,
+    };
+
+    fn data(domain: &str, whitelisted: bool) -> GlobalPlayerData {
+        GlobalPlayerData {
+            last_active_domain: domain.to_owned(),
+            first_played: 1,
+            last_played: 2,
+            statistics: Vec::new(),
+            whitelisted,
+        }
+    }
+
+    #[test]
+    fn stale_gameplay_publication_cannot_revoke_cached_whitelist_membership() {
+        let current = data("old", true);
+        let merged = merge_gameplay_global_player_data(Some(&current), data("new", false));
+
+        assert_eq!(merged.last_active_domain, "new");
+        assert!(merged.whitelisted);
+    }
+
+    #[test]
+    fn stale_whitelist_publication_cannot_overwrite_cached_gameplay_metadata() {
+        let current = data("new", false);
+        let merged = merge_whitelist_global_player_data(Some(&current), data("old", true));
+
+        assert_eq!(merged.last_active_domain, "new");
+        assert!(merged.whitelisted);
+    }
+}
+
 #[cfg(test)]
 mod tests;
 
@@ -398,6 +455,9 @@ pub enum PlayerPermissionUpdateError<E> {
     /// The permission snapshot could not be persisted.
     #[error("failed to update player permissions: {0}")]
     Storage(io::Error),
+    /// A newer queued plugin update replaced this one before it reached storage.
+    #[error("the player permission update was superseded by a newer request")]
+    Superseded,
 }
 
 impl<E> From<io::Error> for PlayerPermissionUpdateError<E> {
@@ -492,6 +552,13 @@ pub struct Server {
     player_permission_states: SyncRwLock<PermissionSubjectIndex>,
     /// Serializes persistence and cache publication for player permission edits.
     player_permission_updates: AsyncMutex<()>,
+    /// Tracks plugin-requested player-list persistence through shutdown.
+    plugin_persistence_tasks: permissions::PluginPersistenceTasks,
+    /// Latest queued whitelist generation for each player. Arc identity avoids
+    /// counter wraparound while preserving enqueue order across tracked tasks.
+    queued_whitelist_update_revisions: SyncMutex<FxHashMap<Uuid, Arc<()>>>,
+    /// Latest queued operator generation for each player.
+    queued_operator_update_revisions: SyncMutex<FxHashMap<Uuid, Arc<()>>>,
     /// Player identities and coalesced persistence state.
     known_players: SyncMutex<KnownPlayerCacheState>,
     /// Wakes shutdown when the single known-player save worker becomes idle.
@@ -660,7 +727,16 @@ impl Server {
 
     /// Publishes the latest server-wide player metadata for synchronous plugin lookups.
     pub fn publish_global_player_data(&self, uuid: Uuid, data: GlobalPlayerData) {
-        self.global_player_data.write().insert(uuid, data);
+        let mut global_player_data = self.global_player_data.write();
+        let data = merge_gameplay_global_player_data(global_player_data.get(&uuid), data);
+        global_player_data.insert(uuid, data);
+    }
+
+    /// Publishes an authoritative whitelist update together with the disk-merged metadata.
+    pub(crate) fn publish_player_whitelist(&self, uuid: Uuid, data: GlobalPlayerData) {
+        let mut global_player_data = self.global_player_data.write();
+        let data = merge_whitelist_global_player_data(global_player_data.get(&uuid), data);
+        global_player_data.insert(uuid, data);
     }
 
     /// Returns the cached server-wide player metadata without performing I/O.
@@ -1121,6 +1197,9 @@ impl Server {
             global_player_data: SyncRwLock::new(global_player_data),
             player_permission_states: SyncRwLock::new(player_permission_states),
             player_permission_updates: AsyncMutex::new(()),
+            plugin_persistence_tasks: permissions::PluginPersistenceTasks::new(),
+            queued_whitelist_update_revisions: SyncMutex::new(FxHashMap::default()),
+            queued_operator_update_revisions: SyncMutex::new(FxHashMap::default()),
             known_players: SyncMutex::new(KnownPlayerCacheState::new(known_players)),
             known_player_save_idle: Notify::new(),
             profile_lookup_client: reqwest::Client::new(),

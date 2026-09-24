@@ -48,7 +48,7 @@ public class PermissibleBase implements Permissible {
     }
 
     @Override public PermissionAttachment addAttachment(Plugin plugin) {
-        PermissionAttachment attachment = new PermissionAttachment(plugin);
+        PermissionAttachment attachment = new PermissionAttachment(plugin, this);
         attachments.add(attachment);
         recalculatePermissions();
         return attachment;
@@ -64,7 +64,6 @@ public class PermissibleBase implements Permissible {
     @Override public void removeAttachment(PermissionAttachment attachment) {
         if (attachment == null) return;
         attachments.remove(attachment);
-        attachment.remove();
         recalculatePermissions();
     }
 

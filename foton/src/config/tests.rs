@@ -1,6 +1,6 @@
 use crate::config::server::BugReportsConfig;
 use std::{
-    env,
+    env, fs,
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -154,10 +154,12 @@ fn server_config_defaults_backward_compatible_fields() {
 #[test]
 fn configured_auth_server_flows_to_runtime_config() {
     let auth_server = "https://auth.example.com/session/minecraft/hasJoined";
-    let config_toml = DEFAULT_CONFIG.replace(
-        "online_mode = true",
-        &format!("online_mode = true\nauth_server = \"{auth_server}\""),
-    );
+    let config_toml = DEFAULT_CONFIG
+        .replace(
+            "online_mode = true",
+            &format!("online_mode = true\nauth_server = \"{auth_server}\""),
+        )
+        .replace("use_favicon = true", "use_favicon = false");
     let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
 
     assert_eq!(config.server.auth_server.as_deref(), Some(auth_server));
@@ -175,10 +177,12 @@ fn configured_auth_server_flows_to_runtime_config() {
 #[test]
 fn configured_profile_server_flows_to_runtime_config() {
     let profile_server = "https://profiles.example.com/lookup/name";
-    let config_toml = DEFAULT_CONFIG.replace(
-        "online_mode = true",
-        &format!("online_mode = true\nprofile_server = \"{profile_server}\""),
-    );
+    let config_toml = DEFAULT_CONFIG
+        .replace(
+            "online_mode = true",
+            &format!("online_mode = true\nprofile_server = \"{profile_server}\""),
+        )
+        .replace("use_favicon = true", "use_favicon = false");
     let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
 
     assert_eq!(
@@ -199,10 +203,12 @@ fn configured_profile_server_flows_to_runtime_config() {
 #[test]
 fn configured_services_server_flows_to_runtime_config() {
     let services_server = "https://services.example.com/publickeys";
-    let config_toml = DEFAULT_CONFIG.replace(
-        "online_mode = true",
-        &format!("online_mode = true\nservices_server = \"{services_server}\""),
-    );
+    let config_toml = DEFAULT_CONFIG
+        .replace(
+            "online_mode = true",
+            &format!("online_mode = true\nservices_server = \"{services_server}\""),
+        )
+        .replace("use_favicon = true", "use_favicon = false");
     let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
 
     assert_eq!(
@@ -227,7 +233,8 @@ fn configured_thread_counts_parse_and_flow_to_runtime_config() {
         .replace("chunk_runtime = 0", "chunk_runtime = 4")
         .replace("packet_workers = 0", "packet_workers = 5")
         .replace("chunk_generation = 0", "chunk_generation = 6")
-        .replace("chunk_encoding = 0", "chunk_encoding = 7");
+        .replace("chunk_encoding = 0", "chunk_encoding = 7")
+        .replace("use_favicon = true", "use_favicon = false");
     let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
 
     assert_eq!(config.server.threads.main_runtime, Some(3));
@@ -252,6 +259,43 @@ fn configured_thread_counts_parse_and_flow_to_runtime_config() {
     assert_eq!(runtime_config.chunk_encoding_threads, Some(7));
 }
 
+#[test]
+fn runtime_config_preloads_the_favicon_before_the_source_disappears() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let path = directory.path().join("server-icon.png");
+    fs::write(
+        &path,
+        include_bytes!("../../../package-content/favicon.png"),
+    )
+    .expect("write favicon fixture");
+    let mut config: FotonConfig = toml::from_str(DEFAULT_CONFIG).expect("default config parses");
+    config.server.favicon = path.display().to_string();
+
+    let runtime = config
+        .server
+        .into_runtime_config()
+        .expect("valid favicon should resolve during startup");
+    fs::remove_file(path).expect("remove favicon after startup");
+
+    assert!(runtime.favicon.starts_with("data:image/png;base64,"));
+    assert!(runtime.favicon.len() > "data:image/png;base64,".len());
+}
+
+#[test]
+fn an_unusable_favicon_does_not_stop_startup() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let mut config: FotonConfig = toml::from_str(DEFAULT_CONFIG).expect("default config parses");
+    config.server.favicon = directory.path().join("missing.png").display().to_string();
+
+    let runtime = config
+        .server
+        .into_runtime_config()
+        .expect("a missing favicon must not fail startup");
+
+    assert!(!runtime.use_favicon);
+    assert!(runtime.favicon.is_empty());
+}
+
 /// `bedrock.port = 0` means "share `server_port`"
 /// ([`crate::config::server::validate`]'s Bedrock rules rely on this too),
 /// and a TCP bind on port 0 takes an ephemeral port rather than failing --
@@ -263,6 +307,38 @@ fn validate_rejects_a_server_port_of_zero() {
     let config: FotonConfig = toml::from_str(&config_toml).expect("config parses");
 
     assert_eq!(validate(&config.server), Err("server_port must not be 0"));
+}
+
+#[test]
+fn validate_rejects_zero_max_players() {
+    let mut config: FotonConfig = toml::from_str(DEFAULT_CONFIG).expect("default config parses");
+    config.server.max_players = 0;
+
+    assert_eq!(
+        validate(&config.server),
+        Err("max_players must be in range 1..=2147483647")
+    );
+}
+
+#[test]
+fn validate_accepts_max_players_protocol_boundaries() {
+    let mut config: FotonConfig = toml::from_str(DEFAULT_CONFIG).expect("default config parses");
+    config.server.max_players = 1;
+    validate(&config.server).expect("one player should validate");
+
+    config.server.max_players = i32::MAX as u32;
+    validate(&config.server).expect("the signed protocol maximum should validate");
+}
+
+#[test]
+fn validate_rejects_max_players_above_the_protocol_limit() {
+    let mut config: FotonConfig = toml::from_str(DEFAULT_CONFIG).expect("default config parses");
+    config.server.max_players = i32::MAX as u32 + 1;
+
+    assert_eq!(
+        validate(&config.server),
+        Err("max_players must be in range 1..=2147483647")
+    );
 }
 
 #[test]

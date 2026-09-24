@@ -26,6 +26,9 @@ toml.workspace = true
 parking_lot = { workspace = true, features = [
     "deadlock_detection",
 ], optional = true }
+rustc-hash.workspace = true
+subtle.workspace = true
+sha2.workspace = true
 
 
 # Logging
@@ -57,6 +60,7 @@ workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+tempfile = "3"
 
 [features]
 default = ["mimalloc"]

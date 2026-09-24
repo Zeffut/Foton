@@ -4,11 +4,12 @@
 //! are driven from a single place and the rest assert on what can be decided
 //! without starting anything.
 
+use std::env;
 use std::fs::write;
 use std::path::PathBuf;
 use std::sync::Weak;
 
-use super::{PluginHostConfig, PluginHostError};
+use super::{JVM_RUNTIMES, PluginHost, PluginHostConfig, PluginHostError, forward};
 
 fn config() -> PluginHostConfig {
     PluginHostConfig {
@@ -81,4 +82,43 @@ fn the_class_path_is_ordered() {
     );
 }
 
-use super::PluginHost;
+/// Exercises the real JNI descriptors against the built Java API. Clean
+/// Cargo-only checkouts do not have that generated jar yet, so build the API
+/// before running this targeted integration check.
+#[test]
+fn login_attempt_lifecycle_crosses_the_rust_java_bridge() {
+    let Some(java_home) = env::var_os("JAVA_HOME").map(PathBuf::from) else {
+        eprintln!("skipping Rust/Java bridge check because JAVA_HOME is unset");
+        return;
+    };
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("the plugin crate should be inside the repository")
+        .to_owned();
+    let api_jar = repository.join("plugin-api/build/foton-plugin-api.jar");
+    if !api_jar.is_file() {
+        eprintln!("skipping Rust/Java bridge check because the API jar is not built");
+        return;
+    }
+    let plugins = tempfile::tempdir().expect("temporary plugin directory");
+    let host = PluginHost::start(
+        &PluginHostConfig {
+            java_home,
+            api_jar,
+            library_directory: Some(repository.join("plugin-api/lib")),
+            plugin_directory: plugins.path().to_owned(),
+        },
+        &Weak::new(),
+    )
+    .expect("the test JVM should start");
+
+    assert!(
+        forward::login_lifecycle_bridge_check(&host.vm),
+        "Rust login/abort/join calls did not reach the Java attempt lifecycle"
+    );
+    drop(host);
+    assert!(
+        !JVM_RUNTIMES.lock().is_empty(),
+        "dropping the host must not unmap the process-lifetime JVM runtime"
+    );
+}

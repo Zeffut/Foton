@@ -7,7 +7,10 @@ use std::net::SocketAddr;
 
 mod java;
 
-pub use java::{BundleBuilder, JavaConnection, JavaNetworkWriter, OutboundPacket};
+pub use java::{
+    BundleBuilder, JavaConnection, JavaNetworkWriter, OutboundPacket, OutboundPacketReceiver,
+    OutboundPacketSender, outbound_packet_channel,
+};
 pub(crate) use java::{ScheduledPacketExecution, ScheduledPlayPacket};
 
 use enum_dispatch::enum_dispatch;

@@ -10,12 +10,15 @@ import org.bukkit.event.inventory.PrepareItemCraftEvent;
 import org.bukkit.event.block.CrafterCraftEvent;
 
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Hanging;
 import org.bukkit.event.Cancellable;
@@ -53,43 +56,109 @@ public final class EventBridge {
     private static final java.util.concurrent.ConcurrentHashMap<java.util.UUID, DamageRecord> LAST_DAMAGE = new java.util.concurrent.ConcurrentHashMap<>();
     private record DamageRecord(org.bukkit.event.entity.EntityDamageEvent event, long tick) {}
 
-    private static final Map<Class<?>, List<Handler>> handlers = new HashMap<>();
+    private static final Map<Class<?>, CopyOnWriteArrayList<Handler>> handlers =
+        new ConcurrentHashMap<>();
 
     private EventBridge() {}
 
     /** Reflects over a listener and remembers every annotated handler. */
     public static void register(Listener listener, Plugin plugin) {
-        for (Method method : listener.getClass().getMethods()) {
-            EventHandler annotation = method.getAnnotation(EventHandler.class);
-            if (annotation == null || method.getParameterCount() != 1) {
+        synchronized (PluginHost.lifecycleLock()) {
+            PluginHost.requireEnabled(plugin, "register an event listener");
+            for (Method method : eventHandlerMethods(listener.getClass())) {
+                EventHandler annotation = method.getAnnotation(EventHandler.class);
+                if (annotation == null || method.getParameterCount() != 1) {
+                    continue;
+                }
+                Class<?> event = method.getParameterTypes()[0];
+                method.setAccessible(true);
+                CopyOnWriteArrayList<Handler> list =
+                    handlers.computeIfAbsent(event, key -> new CopyOnWriteArrayList<>());
+                list.add(new Handler(listener, method, annotation.priority(),
+                    annotation.ignoreCancelled(), plugin));
+                list.sort(Comparator.comparing(handler -> handler.priority));
+            }
+        }
+    }
+
+    /** Finds handlers at every visibility level without registering an override twice. */
+    private static List<Method> eventHandlerMethods(Class<?> listenerClass) {
+        List<Method> candidates = new ArrayList<>();
+        for (Class<?> type = listenerClass; type != null && type != Object.class;
+                type = type.getSuperclass()) {
+            candidates.addAll(Arrays.asList(type.getDeclaredMethods()));
+        }
+
+        // Public interface defaults are not part of a class's declared-method
+        // hierarchy. getMethods supplies those, and Method.equals removes the
+        // public class methods already collected above.
+        for (Method method : listenerClass.getMethods()) {
+            if (!candidates.contains(method)) candidates.add(method);
+        }
+
+        List<Method> result = new ArrayList<>();
+        for (Method method : candidates) {
+            if (method.isBridge() || method.isSynthetic() || isOverridden(method, candidates)) {
                 continue;
             }
-            Class<?> event = method.getParameterTypes()[0];
-            method.setAccessible(true);
-            handlers.computeIfAbsent(event, key -> new ArrayList<>())
-                .add(new Handler(listener, method, annotation.priority(),
-                    annotation.ignoreCancelled(), plugin));
-            handlers.get(event).sort(Comparator.comparing(handler -> handler.priority));
+            if (method.getAnnotation(EventHandler.class) != null) result.add(method);
         }
+        return result;
+    }
+
+    /** Whether a more-derived declaration replaces this virtual method. */
+    private static boolean isOverridden(Method parent, List<Method> candidates) {
+        int parentModifiers = parent.getModifiers();
+        if (Modifier.isPrivate(parentModifiers) || Modifier.isStatic(parentModifiers)) {
+            return false;
+        }
+        for (Method child : candidates) {
+            if (child == parent || !parent.getName().equals(child.getName())
+                    || !Arrays.equals(parent.getParameterTypes(), child.getParameterTypes())) {
+                continue;
+            }
+            Class<?> parentClass = parent.getDeclaringClass();
+            Class<?> childClass = child.getDeclaringClass();
+            if (parentClass == childClass || !parentClass.isAssignableFrom(childClass)) continue;
+            int childModifiers = child.getModifiers();
+            if (Modifier.isPrivate(childModifiers) || Modifier.isStatic(childModifiers)) continue;
+            if (Modifier.isPublic(parentModifiers) || Modifier.isProtected(parentModifiers)
+                    || parentClass.getPackageName().equals(childClass.getPackageName())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Forgets everything one plugin registered. */
     public static void unregister(Plugin plugin) {
-        for (List<Handler> list : handlers.values()) {
-            list.removeIf(handler -> handler.plugin == plugin);
+        synchronized (PluginHost.lifecycleLock()) {
+            for (Map.Entry<Class<?>, CopyOnWriteArrayList<Handler>> entry
+                    : handlers.entrySet()) {
+                CopyOnWriteArrayList<Handler> list = entry.getValue();
+                list.removeIf(handler -> handler.plugin == plugin);
+                if (list.isEmpty()) handlers.remove(entry.getKey(), list);
+            }
         }
     }
 
     /** Forgets everything one listener object registered. */
     public static void unregister(Listener listener) {
-        for (List<Handler> list : handlers.values()) {
-            list.removeIf(handler -> handler.listener == listener);
+        synchronized (PluginHost.lifecycleLock()) {
+            for (Map.Entry<Class<?>, CopyOnWriteArrayList<Handler>> entry
+                    : handlers.entrySet()) {
+                CopyOnWriteArrayList<Handler> list = entry.getValue();
+                list.removeIf(handler -> handler.listener == listener);
+                if (list.isEmpty()) handlers.remove(entry.getKey(), list);
+            }
         }
     }
 
     /** Forgets every handler on the server. */
     public static void unregisterAll() {
-        handlers.clear();
+        synchronized (PluginHost.lifecycleLock()) {
+            handlers.clear();
+        }
     }
 
     /** Registers one handler by hand, for a plugin that builds its listeners
@@ -104,9 +173,13 @@ public final class EventBridge {
     public static void register(
             Listener listener, Class<?> event, EventPriority priority, EventExecutor executor,
             Plugin plugin, boolean ignoreCancelled) {
-        handlers.computeIfAbsent(event, key -> new ArrayList<>())
-            .add(new Handler(listener, null, executor, priority, ignoreCancelled, plugin));
-        handlers.get(event).sort(Comparator.comparing(handler -> handler.priority));
+        synchronized (PluginHost.lifecycleLock()) {
+            PluginHost.requireEnabled(plugin, "register an event listener");
+            CopyOnWriteArrayList<Handler> list =
+                handlers.computeIfAbsent(event, key -> new CopyOnWriteArrayList<>());
+            list.add(new Handler(listener, null, executor, priority, ignoreCancelled, plugin));
+            list.sort(Comparator.comparing(handler -> handler.priority));
+        }
     }
 
     /** Runs every handler registered for an event's type, in priority order.
@@ -145,7 +218,7 @@ public final class EventBridge {
 
     public static void dispatch(Object event) {
         List<Handler> list = new ArrayList<>();
-        for (Map.Entry<Class<?>, List<Handler>> entry : handlers.entrySet()) {
+        for (Map.Entry<Class<?>, CopyOnWriteArrayList<Handler>> entry : handlers.entrySet()) {
             if (entry.getKey().isAssignableFrom(event.getClass())) {
                 list.addAll(entry.getValue());
             }
@@ -159,7 +232,9 @@ public final class EventBridge {
             if (cancellable && ((Cancellable) event).isCancelled() && handler.ignoreCancelled) {
                 continue;
             }
-            try {
+            try (PluginHost.Invocation invocation =
+                    PluginHost.beginInvocation(handler.plugin)) {
+                if (invocation == null) continue;
                 handler.call(event);
             } catch (Throwable error) {
                 // One plugin throwing must not stop the others, and must not
@@ -183,15 +258,33 @@ public final class EventBridge {
 
     /** A player joined. Returns what to announce, or null to announce nothing. */
     public static String fireJoin(String uuid, String message) {
-        PlayerJoinEvent event = new PlayerJoinEvent(player(uuid), message);
+        return fireJoin(uuid, 0, message);
+    }
+
+    public static String fireJoin(String uuid, int attemptId, String message) {
+        PlayerJoinEvent event = new PlayerJoinEvent(
+            FotonPlayer.commitLoginAttempt(uuid, attemptId), message);
         dispatch(event);
         return event.getJoinMessage();
     }
 
     public static String fireLogin(String uuid) {
-        PlayerLoginEvent event = new PlayerLoginEvent(player(uuid));
+        return fireLogin(uuid, 0);
+    }
+
+    public static String fireLogin(String uuid, int attemptId) {
+        Player loginPlayer = FotonPlayer.beginLoginAttempt(uuid, attemptId);
+        PlayerLoginEvent event = new PlayerLoginEvent(loginPlayer);
         dispatch(event);
-        return event.isCancelled() ? event.getKickMessage() : "";
+        if (event.isCancelled()) {
+            FotonPlayer.abortLoginAttempt(uuid, attemptId);
+            return event.getKickMessage();
+        }
+        return "";
+    }
+
+    public static void abortLogin(String uuid, int attemptId) {
+        FotonPlayer.abortLoginAttempt(uuid, attemptId);
     }
 
     public static String fireAsyncPreLogin(String name, String uuid, String address) {
@@ -503,8 +596,10 @@ public final class EventBridge {
 
     /** A player left. Returns what to announce, or null to announce nothing. */
     public static String fireQuit(String uuid, String message) {
-        PlayerQuitEvent event = new PlayerQuitEvent(player(uuid), message);
+        Player quittingPlayer = player(uuid);
+        PlayerQuitEvent event = new PlayerQuitEvent(quittingPlayer, message);
         dispatch(event);
+        if (quittingPlayer instanceof FotonPlayer fotonPlayer) fotonPlayer.closeSession();
         FotonMessenger.forgetPlayer(uuid);
         return event.getQuitMessage();
     }
@@ -1085,12 +1180,17 @@ public final class EventBridge {
 
     /** How many handlers are registered for one event type. For diagnostics. */
     public static int handlerCount(String className) {
-        for (Map.Entry<Class<?>, List<Handler>> entry : handlers.entrySet()) {
+        for (Map.Entry<Class<?>, CopyOnWriteArrayList<Handler>> entry : handlers.entrySet()) {
             if (entry.getKey().getName().equals(className)) {
                 return entry.getValue().size();
             }
         }
         return 0;
+    }
+
+    /** How many distinct event-type keys are retained. For lifecycle diagnostics. */
+    public static int handlerTypeCount() {
+        return handlers.size();
     }
 
     /** One handler, however the plugin gave it to us.

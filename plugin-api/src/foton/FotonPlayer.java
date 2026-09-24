@@ -49,8 +49,16 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
     }
     private static final java.util.concurrent.ConcurrentHashMap<UUID, FotonPersistentDataContainer> DATA =
         new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.concurrent.ConcurrentHashMap<SessionKey, PlayerPermissions> PERMISSIONS =
+        new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Object SESSION_LIFECYCLE = new Object();
+    private static final java.util.Map<UUID, Long> OPEN_SESSION_GENERATIONS =
+        new java.util.HashMap<>();
+    private static final java.util.Map<LoginAttempt, SessionKey> PENDING_LOGIN_SESSIONS =
+        new java.util.HashMap<>();
+    private static long nextSessionGeneration = 1;
     private final UUID id;
-    private final java.util.concurrent.CopyOnWriteArrayList<org.bukkit.permissions.PermissionAttachment> attachments = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private final long sessionGeneration;
     @Override public int getPing() { return Native.playerPing(id.toString()); }
     @Override public float getWalkSpeed() { return Native.playerWalkSpeed(id.toString()); }
     @Override public void setWalkSpeed(float speed) { Native.setPlayerWalkSpeed(id.toString(), speed); }
@@ -86,6 +94,57 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
 
     public FotonPlayer(UUID id) {
         this.id = id;
+        synchronized (SESSION_LIFECYCLE) {
+            this.sessionGeneration = OPEN_SESSION_GENERATIONS.getOrDefault(id, 0L);
+        }
+    }
+
+    private FotonPlayer(SessionKey session) {
+        this.id = session.playerId;
+        this.sessionGeneration = session.generation;
+    }
+
+    static FotonPlayer beginLoginAttempt(String uuid, int attemptId) {
+        UUID id = Native.parse(uuid);
+        if (id == null) return null;
+        synchronized (SESSION_LIFECYCLE) {
+            LoginAttempt attempt = new LoginAttempt(id, attemptId);
+            SessionKey session = PENDING_LOGIN_SESSIONS.get(attempt);
+            if (session == null) {
+                session = new SessionKey(id, nextSessionGeneration++);
+                PENDING_LOGIN_SESSIONS.put(attempt, session);
+            }
+            return new FotonPlayer(session);
+        }
+    }
+
+    static FotonPlayer commitLoginAttempt(String uuid, int attemptId) {
+        UUID id = Native.parse(uuid);
+        if (id == null) return null;
+        synchronized (SESSION_LIFECYCLE) {
+            SessionKey session = PENDING_LOGIN_SESSIONS.remove(new LoginAttempt(id, attemptId));
+            if (session == null) {
+                long generation = OPEN_SESSION_GENERATIONS.getOrDefault(id, 0L);
+                session = generation == 0
+                    ? new SessionKey(id, nextSessionGeneration++)
+                    : new SessionKey(id, generation);
+            }
+            long previous = OPEN_SESSION_GENERATIONS.getOrDefault(id, 0L);
+            OPEN_SESSION_GENERATIONS.put(id, session.generation);
+            if (previous != 0 && previous != session.generation) {
+                PERMISSIONS.remove(new SessionKey(id, previous));
+            }
+            return new FotonPlayer(session);
+        }
+    }
+
+    static void abortLoginAttempt(String uuid, int attemptId) {
+        UUID id = Native.parse(uuid);
+        if (id == null) return;
+        synchronized (SESSION_LIFECYCLE) {
+            SessionKey session = PENDING_LOGIN_SESSIONS.remove(new LoginAttempt(id, attemptId));
+            if (session != null) PERMISSIONS.remove(session);
+        }
     }
 
     @Override public com.destroystokyo.paper.profile.PlayerProfile getPlayerProfile() {
@@ -605,22 +664,43 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
     @Override
     public boolean hasPermission(String permission) {
         if (permission == null) return false;
-        for (int index = attachments.size() - 1; index >= 0; index--) {
-            Boolean value = attachments.get(index).getPermissions().get(permission);
-            if (value != null) return value;
-        }
+        PlayerPermissions state = PERMISSIONS.get(sessionKey());
+        ResolvedPermission explicit = state == null ? null : state.resolved.get(permission.toLowerCase(java.util.Locale.ROOT));
+        if (explicit != null) return explicit.value;
         return Native.hasPermission(id.toString(), permission);
     }
 
     @Override public org.bukkit.permissions.PermissionAttachment addAttachment(Plugin plugin) {
-        org.bukkit.permissions.PermissionAttachment attachment = new org.bukkit.permissions.PermissionAttachment(plugin);
-        attachments.add(attachment);
-        return attachment;
+        synchronized (PluginHost.lifecycleLock()) {
+            PluginHost.requireEnabled(plugin, "add a permission attachment");
+            synchronized (SESSION_LIFECYCLE) {
+                SessionKey session = sessionKey();
+                if (sessionGeneration == 0 || !isSessionOpen(session)) {
+                    throw new IllegalStateException(
+                        "Cannot add a permission attachment to a closed player session: " + id);
+                }
+                org.bukkit.permissions.PermissionAttachment attachment =
+                    new org.bukkit.permissions.PermissionAttachment(plugin, this);
+                PERMISSIONS.compute(session, (ignored, state) -> {
+                    PlayerPermissions current = state == null ? new PlayerPermissions() : state;
+                    current.add(attachment);
+                    return current;
+                });
+                return attachment;
+            }
+        }
     }
     @Override public void removeAttachment(org.bukkit.permissions.PermissionAttachment attachment) {
-        if (attachment != null && attachments.remove(attachment)) attachment.remove();
+        if (attachment == null) return;
+        PERMISSIONS.computeIfPresent(sessionKey(), (ignored, state) -> {
+            state.remove(attachment);
+            return state.isEmpty() ? null : state;
+        });
     }
-    @Override public void recalculatePermissions() { }
+    @Override public void recalculatePermissions() {
+        PlayerPermissions state = PERMISSIONS.get(sessionKey());
+        if (state != null) state.recalculate();
+    }
 
     @Override public java.util.Set<org.bukkit.permissions.PermissionAttachmentInfo> getEffectivePermissions() {
         java.util.LinkedHashSet<org.bukkit.permissions.PermissionAttachmentInfo> result = new java.util.LinkedHashSet<>();
@@ -631,20 +711,110 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
             if (separator <= 0) continue;
             result.add(new org.bukkit.permissions.PermissionAttachmentInfo(this, entry.substring(0, separator), null, "1".equals(entry.substring(separator + 1))));
         }
-        for (org.bukkit.permissions.PermissionAttachment attachment : attachments)
-            for (java.util.Map.Entry<String, Boolean> entry : attachment.getPermissions().entrySet())
-                result.removeIf(info -> info.getPermission().equalsIgnoreCase(entry.getKey()));
-        for (org.bukkit.permissions.PermissionAttachment attachment : attachments)
-            for (java.util.Map.Entry<String, Boolean> entry : attachment.getPermissions().entrySet())
-                result.add(new org.bukkit.permissions.PermissionAttachmentInfo(this, entry.getKey(), attachment, entry.getValue()));
+        PlayerPermissions state = PERMISSIONS.get(sessionKey());
+        if (state != null) for (java.util.Map.Entry<String, ResolvedPermission> entry : state.resolved.entrySet()) {
+            result.removeIf(info -> info.getPermission().equalsIgnoreCase(entry.getKey()));
+            ResolvedPermission permission = entry.getValue();
+            result.add(new org.bukkit.permissions.PermissionAttachmentInfo(
+                this, entry.getKey(), permission.attachment, permission.value));
+        }
         return java.util.Collections.unmodifiableSet(result);
     }
 
     @Override public boolean isPermissionSet(String permission) {
         if (permission == null) return false;
-        for (int index = attachments.size() - 1; index >= 0; index--)
-            if (attachments.get(index).getPermissions().containsKey(permission)) return true;
+        PlayerPermissions state = PERMISSIONS.get(sessionKey());
+        if (state != null && state.resolved.containsKey(permission.toLowerCase(java.util.Locale.ROOT))) return true;
         return Native.isPermissionSet(id.toString(), permission);
+    }
+
+    /** Releases every attachment owned by a plugin across all player handles. */
+    public static void removeAttachments(Plugin plugin) {
+        if (plugin == null) return;
+        for (SessionKey session : PERMISSIONS.keySet()) {
+            PERMISSIONS.computeIfPresent(session, (ignored, state) -> {
+                state.removeOwnedBy(plugin);
+                return state.isEmpty() ? null : state;
+            });
+        }
+    }
+
+    /** Releases this handle's session without disturbing a newer reconnect. */
+    void closeSession() {
+        synchronized (SESSION_LIFECYCLE) {
+            if (OPEN_SESSION_GENERATIONS.getOrDefault(id, 0L) != sessionGeneration) return;
+            OPEN_SESSION_GENERATIONS.remove(id);
+            PERMISSIONS.remove(sessionKey());
+        }
+    }
+
+    private SessionKey sessionKey() {
+        return new SessionKey(id, sessionGeneration);
+    }
+
+    private static boolean isSessionOpen(SessionKey session) {
+        if (OPEN_SESSION_GENERATIONS.getOrDefault(session.playerId, 0L) == session.generation) {
+            return true;
+        }
+        return PENDING_LOGIN_SESSIONS.containsValue(session);
+    }
+
+    /** Whether one active or pending session owns attachment state. For diagnostics. */
+    public static boolean hasAttachmentState(UUID id) {
+        return PERMISSIONS.keySet().stream().anyMatch(session -> session.playerId.equals(id));
+    }
+
+    private record SessionKey(UUID playerId, long generation) {}
+    private record LoginAttempt(UUID playerId, int attemptId) {}
+
+    private static final class PlayerPermissions {
+        private final java.util.ArrayList<org.bukkit.permissions.PermissionAttachment> attachments =
+            new java.util.ArrayList<>();
+        private volatile java.util.Map<String, ResolvedPermission> resolved = java.util.Map.of();
+
+        private synchronized void add(org.bukkit.permissions.PermissionAttachment attachment) {
+            attachments.add(attachment);
+            recalculateLocked();
+        }
+
+        private synchronized void remove(org.bukkit.permissions.PermissionAttachment attachment) {
+            if (attachments.remove(attachment)) recalculateLocked();
+        }
+
+        private synchronized void removeOwnedBy(Plugin plugin) {
+            if (attachments.removeIf(attachment -> attachment.getPlugin() == plugin)) {
+                recalculateLocked();
+            }
+        }
+
+        private synchronized boolean isEmpty() {
+            return attachments.isEmpty();
+        }
+
+        private synchronized void recalculate() {
+            recalculateLocked();
+        }
+
+        private void recalculateLocked() {
+            java.util.LinkedHashMap<String, ResolvedPermission> next = new java.util.LinkedHashMap<>();
+            for (org.bukkit.permissions.PermissionAttachment attachment : attachments) {
+                for (java.util.Map.Entry<String, Boolean> permission : attachment.getPermissions().entrySet()) {
+                    String node = permission.getKey().toLowerCase(java.util.Locale.ROOT);
+                    next.put(node, new ResolvedPermission(attachment, permission.getValue()));
+                }
+            }
+            resolved = java.util.Collections.unmodifiableMap(next);
+        }
+    }
+
+    private static final class ResolvedPermission {
+        private final org.bukkit.permissions.PermissionAttachment attachment;
+        private final boolean value;
+
+        private ResolvedPermission(org.bukkit.permissions.PermissionAttachment attachment, boolean value) {
+            this.attachment = attachment;
+            this.value = value;
+        }
     }
 
     @Override

@@ -269,24 +269,32 @@ impl RegionManager {
     }
 
     fn validate_region_entries(header: &RegionHeader, file_sectors: u32) -> io::Result<()> {
-        let mut occupied = vec![false; file_sectors as usize];
-        for sector in occupied.iter_mut().take(FIRST_DATA_SECTOR as usize) {
-            *sector = true;
-        }
+        // A sparse corrupt file may report billions of sectors while the
+        // header can name at most 1,024 allocations. Track those allocations,
+        // not every logical sector in the file.
+        let mut allocations = Vec::new();
         for (index, &entry) in header.entries.iter().enumerate() {
             if !entry.exists() {
                 continue;
             }
             Self::validate_chunk_entry(entry, file_sectors)?;
-            let start = entry.sector_offset as usize;
-            let end = start + entry.sector_count() as usize;
-            if occupied[start..end].iter().any(|is_occupied| *is_occupied) {
+            allocations.push((
+                entry.sector_offset,
+                entry.sector_offset + entry.sector_count(),
+                index,
+            ));
+        }
+        allocations.sort_unstable_by_key(|&(start, _, _)| start);
+        for pair in allocations.windows(2) {
+            let [(_, previous_end, _), (next_start, _, next_index)] = pair else {
+                continue;
+            };
+            if next_start < previous_end {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("chunk table entry {index} overlaps another region allocation"),
+                    format!("chunk table entry {next_index} overlaps another region allocation"),
                 ));
             }
-            occupied[start..end].fill(true);
         }
         Ok(())
     }
@@ -889,6 +897,22 @@ mod tests {
         .await?;
         file.write_all(payload).await?;
         file.flush().await
+    }
+
+    #[test]
+    fn sparse_region_size_does_not_drive_validation_memory() {
+        RegionManager::validate_region_entries(&RegionHeader::new(), u32::MAX)
+            .expect("an empty sparse region header has no invalid allocations");
+    }
+
+    #[test]
+    fn interval_validation_still_rejects_overlapping_chunks() {
+        let mut header = RegionHeader::new();
+        header.entries[0] = ChunkEntry::new(FIRST_DATA_SECTOR, 1, ChunkStatus::Empty);
+        header.entries[1] = ChunkEntry::new(FIRST_DATA_SECTOR, 1, ChunkStatus::Empty);
+
+        let result = RegionManager::validate_region_entries(&header, FIRST_DATA_SECTOR + 1);
+        assert!(matches!(result, Err(error) if error.kind() == io::ErrorKind::InvalidData));
     }
 
     fn test_thread_pool() -> rayon::ThreadPool {

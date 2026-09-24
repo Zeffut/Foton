@@ -1,11 +1,15 @@
 //! This module contains the `JavaConnection` struct, which is used to represent a connection to a Java client.
 use std::io::Cursor;
 use std::net::SocketAddr;
-use std::sync::{Arc, Weak};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, LazyLock, Weak};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::vec::IntoIter;
 
 use foton_protocol::packet_reader::TCPNetworkDecoder;
-use foton_protocol::packet_traits::{ClientPacket, CompressionInfo, EncodedPacket, ServerPacket};
+use foton_protocol::packet_traits::{
+    ClientPacket, CompressionInfo, EncodedPacket, PacketDirection, PacketTranslation, ServerPacket,
+    TranslationBatch,
+};
 use foton_protocol::packet_writer::TCPNetworkEncoder;
 use foton_protocol::packets::common::{
     CDisconnect, CKeepAlive, CPongResponse, SClientInformation, SCustomClickAction, SCustomPayload,
@@ -24,7 +28,7 @@ use foton_protocol::packets::game::{
     SSetStructureBlock, SSignUpdate, SSpectatorAction, SSwing, SUseItem, SUseItemOn,
 };
 
-use foton_protocol::utils::{ConnectionProtocol, PacketError, RawPacket};
+use foton_protocol::utils::{ConnectionProtocol, MAX_PACKET_DATA_SIZE, PacketError, RawPacket};
 use foton_registry::packets::play;
 use foton_utils::locks::{AsyncMutex, SyncMutex};
 use foton_utils::translations;
@@ -35,18 +39,25 @@ use text_components::{Modifier, TextComponent, format::Color};
 use tokio::io::{BufReader, BufWriter};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::select;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, error::TryRecvError};
+use tokio::sync::{
+    OwnedSemaphorePermit, Semaphore, TryAcquireError,
+    mpsc::{self, Receiver, Sender, error::TryRecvError},
+};
+use tokio::time::{MissedTickBehavior, interval, timeout};
 use tokio_util::sync::CancellationToken;
 
 use crate::command::{handle_client_request, sender::CommandSender};
 use crate::event::PlayerClientLoadedWorldEvent;
 use crate::event::PlayerCommandPreprocessEvent;
 use crate::player::Player;
+use crate::player::chat::is_chat_message_illegal;
 use crate::player::connection::NetworkConnection;
 use crate::server::Server;
 
 /// Shared Java socket writer.
-pub type JavaNetworkWriter = Arc<AsyncMutex<Option<TCPNetworkEncoder<BufWriter<OwnedWriteHalf>>>>>;
+type JavaNetworkEncoder = TCPNetworkEncoder<BufWriter<OwnedWriteHalf>>;
+/// Shared, closeable writer for one Java Edition socket.
+pub type JavaNetworkWriter = Arc<AsyncMutex<Option<JavaNetworkEncoder>>>;
 
 /// Outbound packet queue message for Java connections.
 pub enum OutboundPacket {
@@ -54,6 +65,709 @@ pub enum OutboundPacket {
     Packet(EncodedPacket),
     /// Final disconnect packet that must be flushed before closing the socket.
     Disconnect(EncodedPacket),
+}
+
+/// Maximum encoded bytes retained while a Java peer is not reading.
+const OUTBOUND_PACKET_QUEUE_BYTE_BUDGET: usize = MAX_PACKET_DATA_SIZE * 2;
+
+/// Secondary bound for empty and tiny reliable packets, whose allocation overhead is not encoded bytes.
+const OUTBOUND_PACKET_QUEUE_ENTRY_CAPACITY: usize = 4096;
+
+/// Entry bound for atomic chunk batches.
+const OUTBOUND_CHUNK_QUEUE_ENTRY_CAPACITY: usize = 256;
+
+/// Queue entries kept outside the chunk-stream budget for control traffic.
+const OUTBOUND_CONTROL_ENTRY_RESERVE: usize = 16;
+
+/// Envelope slots covering every possible lane admission.
+const OUTBOUND_ENVELOPE_QUEUE_CAPACITY: usize =
+    OUTBOUND_PACKET_QUEUE_ENTRY_CAPACITY + OUTBOUND_CHUNK_QUEUE_ENTRY_CAPACITY;
+
+/// Process-wide ceiling for retained packet entries, including tiny packets.
+const GLOBAL_OUTBOUND_ENTRY_BUDGET: usize = OUTBOUND_PACKET_QUEUE_ENTRY_CAPACITY * 16;
+
+/// Global entries inaccessible to ordinary and chunk traffic.
+const GLOBAL_OUTBOUND_CONTROL_ENTRY_RESERVE: usize = OUTBOUND_CONTROL_ENTRY_RESERVE * 16;
+
+/// Encoded bytes kept outside the chunk-stream budget for small control traffic.
+const OUTBOUND_CONTROL_BYTE_RESERVE: usize = 64 * 1024;
+
+/// Encoded bytes kept outside the chunk-stream budget for reliable gameplay packets.
+const OUTBOUND_RELIABLE_BYTE_RESERVE: usize = 1024 * 1024;
+
+/// Process-wide ceiling across every Java connection.
+const GLOBAL_OUTBOUND_PACKET_BYTE_BUDGET: usize = MAX_PACKET_DATA_SIZE * 32;
+
+/// Global capacity unavailable to bulk and ordinary gameplay packets.
+const GLOBAL_OUTBOUND_CONTROL_BYTE_RESERVE: usize = MAX_PACKET_DATA_SIZE * 4;
+
+/// Global capacity unavailable to chunk batches, but available to reliable gameplay packets.
+const GLOBAL_OUTBOUND_RELIABLE_BYTE_RESERVE: usize = MAX_PACKET_DATA_SIZE * 2;
+
+/// Maximum time a socket write may keep a connection task alive.
+const NETWORK_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Bounded sender for a Java connection's outbound packets.
+#[derive(Clone)]
+pub struct OutboundPacketSender {
+    sender: Sender<QueuedOutboundEnvelope>,
+    control_sender: Sender<QueuedOutboundEnvelope>,
+    budgets: Arc<OutboundPacketBudgets>,
+}
+
+struct OutboundPacketBudgets {
+    reliable_entry_budget: Arc<Semaphore>,
+    chunk_entry_budget: Arc<Semaphore>,
+    control_entry_budget: Arc<Semaphore>,
+    byte_budget: Arc<Semaphore>,
+    non_control_byte_budget: Arc<Semaphore>,
+    chunk_byte_budget: Arc<Semaphore>,
+    chunk_byte_capacity: usize,
+    global_budget: Arc<GlobalOutboundBudget>,
+}
+
+struct GlobalOutboundBudget {
+    entry_budget: Arc<Semaphore>,
+    non_control_entry_budget: Arc<Semaphore>,
+    byte_budget: Arc<Semaphore>,
+    non_control_byte_budget: Arc<Semaphore>,
+    chunk_byte_budget: Arc<Semaphore>,
+}
+
+static GLOBAL_OUTBOUND_BUDGET: LazyLock<Arc<GlobalOutboundBudget>> = LazyLock::new(|| {
+    Arc::new(GlobalOutboundBudget {
+        entry_budget: Arc::new(Semaphore::new(GLOBAL_OUTBOUND_ENTRY_BUDGET)),
+        non_control_entry_budget: Arc::new(Semaphore::new(
+            GLOBAL_OUTBOUND_ENTRY_BUDGET - GLOBAL_OUTBOUND_CONTROL_ENTRY_RESERVE,
+        )),
+        byte_budget: Arc::new(Semaphore::new(GLOBAL_OUTBOUND_PACKET_BYTE_BUDGET)),
+        non_control_byte_budget: Arc::new(Semaphore::new(
+            GLOBAL_OUTBOUND_PACKET_BYTE_BUDGET - GLOBAL_OUTBOUND_CONTROL_BYTE_RESERVE,
+        )),
+        chunk_byte_budget: Arc::new(Semaphore::new(
+            GLOBAL_OUTBOUND_PACKET_BYTE_BUDGET
+                - GLOBAL_OUTBOUND_CONTROL_BYTE_RESERVE
+                - GLOBAL_OUTBOUND_RELIABLE_BYTE_RESERVE,
+        )),
+    })
+});
+
+struct PacketBatchBudget {
+    _entry_budget: OwnedSemaphorePermit,
+    _global_entry_budget: OwnedSemaphorePermit,
+    _global_non_control_entry_budget: OwnedSemaphorePermit,
+    _byte_budget: OwnedSemaphorePermit,
+    _non_control_byte_budget: OwnedSemaphorePermit,
+    _chunk_byte_budget: Option<OwnedSemaphorePermit>,
+    _global_byte_budget: OwnedSemaphorePermit,
+    _global_non_control_byte_budget: OwnedSemaphorePermit,
+    _global_chunk_byte_budget: Option<OwnedSemaphorePermit>,
+}
+
+enum QueuedPacketBudget {
+    Normal {
+        _entry_budget: OwnedSemaphorePermit,
+        _global_entry_budget: OwnedSemaphorePermit,
+        _global_non_control_entry_budget: OwnedSemaphorePermit,
+        _byte_budget: OwnedSemaphorePermit,
+        _non_control_byte_budget: OwnedSemaphorePermit,
+        _global_byte_budget: OwnedSemaphorePermit,
+        _global_non_control_byte_budget: OwnedSemaphorePermit,
+    },
+    Control {
+        _entry_budget: OwnedSemaphorePermit,
+        _global_entry_budget: OwnedSemaphorePermit,
+        _byte_budget: OwnedSemaphorePermit,
+        _global_byte_budget: OwnedSemaphorePermit,
+    },
+    Batch {
+        _budget: Arc<PacketBatchBudget>,
+    },
+}
+
+pub(crate) enum QueuedOutboundEnvelope {
+    Single(QueuedOutboundPacket),
+    Batch(Vec<QueuedOutboundPacket>),
+}
+
+/// A queued packet together with the encoded-byte budget it owns.
+///
+/// The permit remains alive while the socket write borrows this value, so a
+/// slow writer cannot free queue capacity before it releases the packet bytes.
+pub struct QueuedOutboundPacket {
+    packet: OutboundPacket,
+    _budget: QueuedPacketBudget,
+}
+
+impl QueuedOutboundPacket {
+    /// Returns the encoded packet and whether the connection closes after it is written.
+    #[must_use]
+    pub const fn write_parts(&self) -> (&EncodedPacket, bool) {
+        match &self.packet {
+            OutboundPacket::Packet(packet) => (packet, false),
+            OutboundPacket::Disconnect(packet) => (packet, true),
+        }
+    }
+}
+
+/// Receiver half of a Java connection's byte-budgeted outbound queue.
+pub struct OutboundPacketReceiver {
+    envelopes: Receiver<QueuedOutboundEnvelope>,
+    control_envelopes: Receiver<QueuedOutboundEnvelope>,
+    active_batch: IntoIter<QueuedOutboundPacket>,
+    control_was_selected: bool,
+}
+
+impl OutboundPacketReceiver {
+    /// Receives one wire-indivisible envelope.
+    ///
+    /// At most one control envelope overtakes the data FIFO before data gets
+    /// another turn. Batch contents never participate in this selection.
+    pub(crate) async fn recv_envelope(&mut self) -> Option<QueuedOutboundEnvelope> {
+        if let Ok(envelope) = self.try_recv_envelope() {
+            return Some(envelope);
+        }
+        if self.control_was_selected {
+            return select! {
+                biased;
+                Some(envelope) = self.envelopes.recv() => {
+                    self.control_was_selected = false;
+                    Some(envelope)
+                }
+                Some(envelope) = self.control_envelopes.recv() => Some(envelope),
+                else => None,
+            };
+        }
+        select! {
+            biased;
+            Some(envelope) = self.control_envelopes.recv() => {
+                self.control_was_selected = true;
+                Some(envelope)
+            }
+            Some(envelope) = self.envelopes.recv() => Some(envelope),
+            else => None,
+        }
+    }
+
+    fn try_recv_envelope(&mut self) -> Result<QueuedOutboundEnvelope, TryRecvError> {
+        if self.control_was_selected {
+            match self.envelopes.try_recv() {
+                Ok(envelope) => {
+                    self.control_was_selected = false;
+                    Ok(envelope)
+                }
+                Err(data_error) => match self.control_envelopes.try_recv() {
+                    Ok(envelope) => Ok(envelope),
+                    Err(control_error) => {
+                        Err(Self::combined_empty_error(data_error, control_error))
+                    }
+                },
+            }
+        } else {
+            match self.control_envelopes.try_recv() {
+                Ok(envelope) => {
+                    self.control_was_selected = true;
+                    Ok(envelope)
+                }
+                Err(control_error) => match self.envelopes.try_recv() {
+                    Ok(envelope) => Ok(envelope),
+                    Err(data_error) => Err(Self::combined_empty_error(data_error, control_error)),
+                },
+            }
+        }
+    }
+
+    const fn combined_empty_error(
+        data_error: TryRecvError,
+        control_error: TryRecvError,
+    ) -> TryRecvError {
+        if matches!(data_error, TryRecvError::Disconnected)
+            && matches!(control_error, TryRecvError::Disconnected)
+        {
+            TryRecvError::Disconnected
+        } else {
+            TryRecvError::Empty
+        }
+    }
+
+    /// Receives the next queued packet.
+    pub async fn recv(&mut self) -> Option<QueuedOutboundPacket> {
+        if let Some(packet) = self.active_batch.next() {
+            return Some(packet);
+        }
+        loop {
+            let envelope = self.recv_envelope().await?;
+            match envelope {
+                QueuedOutboundEnvelope::Single(packet) => return Some(packet),
+                QueuedOutboundEnvelope::Batch(packets) => {
+                    self.active_batch = packets.into_iter();
+                    if let Some(packet) = self.active_batch.next() {
+                        return Some(packet);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Attempts to receive a packet without waiting.
+    pub fn try_recv(&mut self) -> Result<QueuedOutboundPacket, TryRecvError> {
+        if let Some(packet) = self.active_batch.next() {
+            return Ok(packet);
+        }
+        loop {
+            match self.try_recv_envelope()? {
+                QueuedOutboundEnvelope::Single(packet) => return Ok(packet),
+                QueuedOutboundEnvelope::Batch(packets) => {
+                    self.active_batch = packets.into_iter();
+                    if let Some(packet) = self.active_batch.next() {
+                        return Ok(packet);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Creates the bounded outbound channel shared by login and play.
+#[must_use]
+pub fn outbound_packet_channel() -> (OutboundPacketSender, OutboundPacketReceiver) {
+    outbound_packet_channel_with_budget(OUTBOUND_PACKET_QUEUE_BYTE_BUDGET)
+}
+
+fn outbound_packet_channel_with_budget(
+    byte_budget: usize,
+) -> (OutboundPacketSender, OutboundPacketReceiver) {
+    outbound_packet_channel_with_budgets(byte_budget, Arc::clone(&GLOBAL_OUTBOUND_BUDGET))
+}
+
+fn outbound_packet_channel_with_budgets(
+    byte_budget: usize,
+    global_budget: Arc<GlobalOutboundBudget>,
+) -> (OutboundPacketSender, OutboundPacketReceiver) {
+    let (sender, receiver) = mpsc::channel(OUTBOUND_ENVELOPE_QUEUE_CAPACITY);
+    let (control_sender, control_receiver) = mpsc::channel(OUTBOUND_CONTROL_ENTRY_RESERVE);
+    let control_byte_reserve = OUTBOUND_CONTROL_BYTE_RESERVE.min(byte_budget / 4);
+    let non_control_byte_capacity = byte_budget.saturating_sub(control_byte_reserve);
+    let reliable_byte_reserve = OUTBOUND_RELIABLE_BYTE_RESERVE.min(non_control_byte_capacity / 4);
+    let chunk_byte_capacity = non_control_byte_capacity.saturating_sub(reliable_byte_reserve);
+    (
+        OutboundPacketSender {
+            sender,
+            control_sender,
+            budgets: Arc::new(OutboundPacketBudgets {
+                reliable_entry_budget: Arc::new(Semaphore::new(
+                    OUTBOUND_PACKET_QUEUE_ENTRY_CAPACITY,
+                )),
+                chunk_entry_budget: Arc::new(Semaphore::new(OUTBOUND_CHUNK_QUEUE_ENTRY_CAPACITY)),
+                control_entry_budget: Arc::new(Semaphore::new(OUTBOUND_CONTROL_ENTRY_RESERVE)),
+                byte_budget: Arc::new(Semaphore::new(byte_budget)),
+                non_control_byte_budget: Arc::new(Semaphore::new(non_control_byte_capacity)),
+                chunk_byte_budget: Arc::new(Semaphore::new(chunk_byte_capacity)),
+                chunk_byte_capacity,
+                global_budget,
+            }),
+        },
+        OutboundPacketReceiver {
+            envelopes: receiver,
+            control_envelopes: control_receiver,
+            active_batch: Vec::new().into_iter(),
+            control_was_selected: false,
+        },
+    )
+}
+
+impl OutboundPacketSender {
+    /// Attempts to enqueue a packet without waiting for queue capacity.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "all reliable-lane permit acquisitions and their exact rollback values stay together so no byte or entry budget can be omitted"
+    )]
+    pub fn try_send(
+        &self,
+        packet: OutboundPacket,
+    ) -> Result<(), mpsc::error::TrySendError<OutboundPacket>> {
+        let encoded_bytes = packet.encoded_packet().encoded_data.len().max(1);
+        let Ok(encoded_bytes) = u32::try_from(encoded_bytes) else {
+            return Err(mpsc::error::TrySendError::Full(packet));
+        };
+        let entry_budget = match Arc::clone(&self.budgets.reliable_entry_budget).try_acquire_owned()
+        {
+            Ok(permit) => permit,
+            Err(TryAcquireError::NoPermits) => {
+                return Err(mpsc::error::TrySendError::Full(packet));
+            }
+            Err(TryAcquireError::Closed) => {
+                return Err(mpsc::error::TrySendError::Closed(packet));
+            }
+        };
+        let global_entry_budget =
+            match Arc::clone(&self.budgets.global_budget.entry_budget).try_acquire_owned() {
+                Ok(permit) => permit,
+                Err(TryAcquireError::NoPermits) => {
+                    return Err(mpsc::error::TrySendError::Full(packet));
+                }
+                Err(TryAcquireError::Closed) => {
+                    return Err(mpsc::error::TrySendError::Closed(packet));
+                }
+            };
+        let global_non_control_entry_budget =
+            match Arc::clone(&self.budgets.global_budget.non_control_entry_budget)
+                .try_acquire_owned()
+            {
+                Ok(permit) => permit,
+                Err(TryAcquireError::NoPermits) => {
+                    return Err(mpsc::error::TrySendError::Full(packet));
+                }
+                Err(TryAcquireError::Closed) => {
+                    return Err(mpsc::error::TrySendError::Closed(packet));
+                }
+            };
+        let byte_budget =
+            match Arc::clone(&self.budgets.byte_budget).try_acquire_many_owned(encoded_bytes) {
+                Ok(byte_budget) => byte_budget,
+                Err(TryAcquireError::NoPermits) => {
+                    return Err(mpsc::error::TrySendError::Full(packet));
+                }
+                Err(TryAcquireError::Closed) => {
+                    return Err(mpsc::error::TrySendError::Closed(packet));
+                }
+            };
+        let non_control_byte_budget = match Arc::clone(&self.budgets.non_control_byte_budget)
+            .try_acquire_many_owned(encoded_bytes)
+        {
+            Ok(permit) => permit,
+            Err(TryAcquireError::NoPermits) => {
+                return Err(mpsc::error::TrySendError::Full(packet));
+            }
+            Err(TryAcquireError::Closed) => {
+                return Err(mpsc::error::TrySendError::Closed(packet));
+            }
+        };
+        let global_byte_budget = match Arc::clone(&self.budgets.global_budget.byte_budget)
+            .try_acquire_many_owned(encoded_bytes)
+        {
+            Ok(permit) => permit,
+            Err(TryAcquireError::NoPermits) => {
+                return Err(mpsc::error::TrySendError::Full(packet));
+            }
+            Err(TryAcquireError::Closed) => {
+                return Err(mpsc::error::TrySendError::Closed(packet));
+            }
+        };
+        let global_non_control_byte_budget =
+            match Arc::clone(&self.budgets.global_budget.non_control_byte_budget)
+                .try_acquire_many_owned(encoded_bytes)
+            {
+                Ok(permit) => permit,
+                Err(TryAcquireError::NoPermits) => {
+                    return Err(mpsc::error::TrySendError::Full(packet));
+                }
+                Err(TryAcquireError::Closed) => {
+                    return Err(mpsc::error::TrySendError::Closed(packet));
+                }
+            };
+        let channel_permit = match self.sender.try_reserve() {
+            Ok(permit) => permit,
+            Err(mpsc::error::TrySendError::Full(())) => {
+                return Err(mpsc::error::TrySendError::Full(packet));
+            }
+            Err(mpsc::error::TrySendError::Closed(())) => {
+                return Err(mpsc::error::TrySendError::Closed(packet));
+            }
+        };
+        channel_permit.send(QueuedOutboundEnvelope::Single(QueuedOutboundPacket {
+            packet,
+            _budget: QueuedPacketBudget::Normal {
+                _entry_budget: entry_budget,
+                _global_entry_budget: global_entry_budget,
+                _global_non_control_entry_budget: global_non_control_entry_budget,
+                _byte_budget: byte_budget,
+                _non_control_byte_budget: non_control_byte_budget,
+                _global_byte_budget: global_byte_budget,
+                _global_non_control_byte_budget: global_non_control_byte_budget,
+            },
+        }));
+        Ok(())
+    }
+
+    fn try_send_control(
+        &self,
+        packet: OutboundPacket,
+    ) -> Result<(), mpsc::error::TrySendError<OutboundPacket>> {
+        let encoded_bytes = packet.encoded_packet().encoded_data.len().max(1);
+        let Ok(encoded_bytes) = u32::try_from(encoded_bytes) else {
+            return Err(mpsc::error::TrySendError::Full(packet));
+        };
+        let entry_budget = match Arc::clone(&self.budgets.control_entry_budget).try_acquire_owned()
+        {
+            Ok(permit) => permit,
+            Err(TryAcquireError::NoPermits) => {
+                return Err(mpsc::error::TrySendError::Full(packet));
+            }
+            Err(TryAcquireError::Closed) => {
+                return Err(mpsc::error::TrySendError::Closed(packet));
+            }
+        };
+        let global_entry_budget =
+            match Arc::clone(&self.budgets.global_budget.entry_budget).try_acquire_owned() {
+                Ok(permit) => permit,
+                Err(TryAcquireError::NoPermits) => {
+                    return Err(mpsc::error::TrySendError::Full(packet));
+                }
+                Err(TryAcquireError::Closed) => {
+                    return Err(mpsc::error::TrySendError::Closed(packet));
+                }
+            };
+        let byte_budget =
+            match Arc::clone(&self.budgets.byte_budget).try_acquire_many_owned(encoded_bytes) {
+                Ok(permit) => permit,
+                Err(TryAcquireError::NoPermits) => {
+                    return Err(mpsc::error::TrySendError::Full(packet));
+                }
+                Err(TryAcquireError::Closed) => {
+                    return Err(mpsc::error::TrySendError::Closed(packet));
+                }
+            };
+        let global_byte_budget = match Arc::clone(&self.budgets.global_budget.byte_budget)
+            .try_acquire_many_owned(encoded_bytes)
+        {
+            Ok(permit) => permit,
+            Err(TryAcquireError::NoPermits) => {
+                return Err(mpsc::error::TrySendError::Full(packet));
+            }
+            Err(TryAcquireError::Closed) => {
+                return Err(mpsc::error::TrySendError::Closed(packet));
+            }
+        };
+        let channel_permit = match self.control_sender.try_reserve() {
+            Ok(permit) => permit,
+            Err(mpsc::error::TrySendError::Full(())) => {
+                return Err(mpsc::error::TrySendError::Full(packet));
+            }
+            Err(mpsc::error::TrySendError::Closed(())) => {
+                return Err(mpsc::error::TrySendError::Closed(packet));
+            }
+        };
+        channel_permit.send(QueuedOutboundEnvelope::Single(QueuedOutboundPacket {
+            packet,
+            _budget: QueuedPacketBudget::Control {
+                _entry_budget: entry_budget,
+                _global_entry_budget: global_entry_budget,
+                _byte_budget: byte_budget,
+                _global_byte_budget: global_byte_budget,
+            },
+        }));
+        Ok(())
+    }
+
+    /// Attempts to admit an entire packet batch without blocking.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "keeping every atomic reservation in one scope makes rollback auditable"
+    )]
+    fn try_send_packet_batch(
+        &self,
+        packets: Vec<EncodedPacket>,
+        lane: OutboundBatchLane,
+    ) -> Result<(), mpsc::error::TrySendError<Vec<EncodedPacket>>> {
+        if packets.is_empty() {
+            return Ok(());
+        }
+
+        let packet_count = packets.len();
+        let Ok(packet_count_u32) = u32::try_from(packet_count) else {
+            return self.full_or_closed(packets);
+        };
+        let Some(encoded_bytes) = packets.iter().try_fold(0_usize, |total, packet| {
+            total.checked_add(packet.encoded_data.len().max(1))
+        }) else {
+            return self.full_or_closed(packets);
+        };
+        let Ok(encoded_bytes_u32) = u32::try_from(encoded_bytes) else {
+            return self.full_or_closed(packets);
+        };
+
+        let entry_budget = match lane {
+            OutboundBatchLane::Reliable => Arc::clone(&self.budgets.reliable_entry_budget)
+                .try_acquire_many_owned(packet_count_u32),
+            OutboundBatchLane::Chunk => Arc::clone(&self.budgets.chunk_entry_budget)
+                .try_acquire_many_owned(packet_count_u32),
+        };
+        let entry_budget = match entry_budget {
+            Ok(permit) => permit,
+            Err(TryAcquireError::NoPermits) => {
+                return Err(mpsc::error::TrySendError::Full(packets));
+            }
+            Err(TryAcquireError::Closed) => {
+                return Err(mpsc::error::TrySendError::Closed(packets));
+            }
+        };
+        let global_entry_budget = match Arc::clone(&self.budgets.global_budget.entry_budget)
+            .try_acquire_many_owned(packet_count_u32)
+        {
+            Ok(permit) => permit,
+            Err(TryAcquireError::NoPermits) => {
+                return Err(mpsc::error::TrySendError::Full(packets));
+            }
+            Err(TryAcquireError::Closed) => {
+                return Err(mpsc::error::TrySendError::Closed(packets));
+            }
+        };
+        let global_non_control_entry_budget =
+            match Arc::clone(&self.budgets.global_budget.non_control_entry_budget)
+                .try_acquire_many_owned(packet_count_u32)
+            {
+                Ok(permit) => permit,
+                Err(TryAcquireError::NoPermits) => {
+                    return Err(mpsc::error::TrySendError::Full(packets));
+                }
+                Err(TryAcquireError::Closed) => {
+                    return Err(mpsc::error::TrySendError::Closed(packets));
+                }
+            };
+        let byte_budget =
+            match Arc::clone(&self.budgets.byte_budget).try_acquire_many_owned(encoded_bytes_u32) {
+                Ok(permit) => permit,
+                Err(TryAcquireError::NoPermits) => {
+                    return Err(mpsc::error::TrySendError::Full(packets));
+                }
+                Err(TryAcquireError::Closed) => {
+                    return Err(mpsc::error::TrySendError::Closed(packets));
+                }
+            };
+        let non_control_byte_budget = match Arc::clone(&self.budgets.non_control_byte_budget)
+            .try_acquire_many_owned(encoded_bytes_u32)
+        {
+            Ok(permit) => permit,
+            Err(TryAcquireError::NoPermits) => {
+                return Err(mpsc::error::TrySendError::Full(packets));
+            }
+            Err(TryAcquireError::Closed) => {
+                return Err(mpsc::error::TrySendError::Closed(packets));
+            }
+        };
+        let global_byte_budget = match Arc::clone(&self.budgets.global_budget.byte_budget)
+            .try_acquire_many_owned(encoded_bytes_u32)
+        {
+            Ok(permit) => permit,
+            Err(TryAcquireError::NoPermits) => {
+                return Err(mpsc::error::TrySendError::Full(packets));
+            }
+            Err(TryAcquireError::Closed) => {
+                return Err(mpsc::error::TrySendError::Closed(packets));
+            }
+        };
+        let global_non_control_byte_budget =
+            match Arc::clone(&self.budgets.global_budget.non_control_byte_budget)
+                .try_acquire_many_owned(encoded_bytes_u32)
+            {
+                Ok(permit) => permit,
+                Err(TryAcquireError::NoPermits) => {
+                    return Err(mpsc::error::TrySendError::Full(packets));
+                }
+                Err(TryAcquireError::Closed) => {
+                    return Err(mpsc::error::TrySendError::Closed(packets));
+                }
+            };
+        let chunk_byte_budget = if lane == OutboundBatchLane::Chunk {
+            match Arc::clone(&self.budgets.chunk_byte_budget)
+                .try_acquire_many_owned(encoded_bytes_u32)
+            {
+                Ok(permit) => Some(permit),
+                Err(TryAcquireError::NoPermits) => {
+                    return Err(mpsc::error::TrySendError::Full(packets));
+                }
+                Err(TryAcquireError::Closed) => {
+                    return Err(mpsc::error::TrySendError::Closed(packets));
+                }
+            }
+        } else {
+            None
+        };
+        let global_chunk_byte_budget = if lane == OutboundBatchLane::Chunk {
+            match Arc::clone(&self.budgets.global_budget.chunk_byte_budget)
+                .try_acquire_many_owned(encoded_bytes_u32)
+            {
+                Ok(permit) => Some(permit),
+                Err(TryAcquireError::NoPermits) => {
+                    return Err(mpsc::error::TrySendError::Full(packets));
+                }
+                Err(TryAcquireError::Closed) => {
+                    return Err(mpsc::error::TrySendError::Closed(packets));
+                }
+            }
+        } else {
+            None
+        };
+        let channel_permit = match self.sender.try_reserve() {
+            Ok(permit) => permit,
+            Err(mpsc::error::TrySendError::Full(())) => {
+                return Err(mpsc::error::TrySendError::Full(packets));
+            }
+            Err(mpsc::error::TrySendError::Closed(())) => {
+                return Err(mpsc::error::TrySendError::Closed(packets));
+            }
+        };
+        let budget = Arc::new(PacketBatchBudget {
+            _entry_budget: entry_budget,
+            _global_entry_budget: global_entry_budget,
+            _global_non_control_entry_budget: global_non_control_entry_budget,
+            _byte_budget: byte_budget,
+            _non_control_byte_budget: non_control_byte_budget,
+            _chunk_byte_budget: chunk_byte_budget,
+            _global_byte_budget: global_byte_budget,
+            _global_non_control_byte_budget: global_non_control_byte_budget,
+            _global_chunk_byte_budget: global_chunk_byte_budget,
+        });
+
+        let queued_packets = packets
+            .into_iter()
+            .map(|packet| QueuedOutboundPacket {
+                packet: OutboundPacket::Packet(packet),
+                _budget: QueuedPacketBudget::Batch {
+                    _budget: Arc::clone(&budget),
+                },
+            })
+            .collect();
+        channel_permit.send(QueuedOutboundEnvelope::Batch(queued_packets));
+        Ok(())
+    }
+
+    pub(crate) fn try_send_chunk_batch(
+        &self,
+        packets: Vec<EncodedPacket>,
+    ) -> Result<(), mpsc::error::TrySendError<Vec<EncodedPacket>>> {
+        self.try_send_packet_batch(packets, OutboundBatchLane::Chunk)
+    }
+
+    fn full_or_closed(
+        &self,
+        packets: Vec<EncodedPacket>,
+    ) -> Result<(), mpsc::error::TrySendError<Vec<EncodedPacket>>> {
+        if self.sender.is_closed() {
+            Err(mpsc::error::TrySendError::Closed(packets))
+        } else {
+            Err(mpsc::error::TrySendError::Full(packets))
+        }
+    }
+
+    fn chunk_batch_byte_capacity(&self) -> usize {
+        self.budgets.chunk_byte_capacity
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum OutboundBatchLane {
+    Reliable,
+    Chunk,
+}
+
+impl OutboundPacket {
+    const fn encoded_packet(&self) -> &EncodedPacket {
+        match self {
+            Self::Packet(packet) | Self::Disconnect(packet) => packet,
+        }
+    }
 }
 
 /// A decoded play packet whose handler runs in the server's inter-tick packet phase.
@@ -259,6 +973,14 @@ impl ScheduledPlayPacket {
         )
     }
 
+    fn has_illegal_command_characters(&self) -> bool {
+        matches!(
+            &self.0,
+            ScheduledPlayPacketKind::ChatCommand(packet)
+                if is_chat_message_illegal(&packet.command)
+        )
+    }
+
     /// Routes the packets a player sends while a menu is open.
     ///
     /// Split out of `handle` because the match there is long enough already;
@@ -336,6 +1058,10 @@ impl ScheduledPlayPacket {
     )]
     pub(crate) fn handle(self, player: Arc<Player>, server: &Arc<Server>) {
         if !player.has_joined_world() && !self.can_process_before_join() {
+            return;
+        }
+        if self.has_illegal_command_characters() {
+            player.disconnect(translations::MULTIPLAYER_DISCONNECT_ILLEGAL_CHARACTERS.msg());
             return;
         }
 
@@ -535,12 +1261,14 @@ struct KeepAliveTracker {
 
 /// A connection to a Java client.
 pub struct JavaConnection {
-    outgoing_packets: UnboundedSender<OutboundPacket>,
+    outgoing_packets: OutboundPacketSender,
     cancel_token: CancellationToken,
     compression: Option<CompressionInfo>,
     network_writer: JavaNetworkWriter,
     id: u64,
     remote_address: SocketAddr,
+    translation: Option<PacketTranslation>,
+    translated_serverbound: Option<Sender<Vec<u8>>>,
 
     player: Weak<Player>,
     keep_alive_tracker: SyncMutex<KeepAliveTracker>,
@@ -551,14 +1279,20 @@ pub struct JavaConnection {
 
 impl JavaConnection {
     /// Creates a new `JavaConnection`.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the constructor receives the established socket state plus its optional protocol bridge; hiding it in another bag would not simplify ownership"
+    )]
     pub const fn new(
-        outgoing_packets: UnboundedSender<OutboundPacket>,
+        outgoing_packets: OutboundPacketSender,
         cancel_token: CancellationToken,
         compression: Option<CompressionInfo>,
         network_writer: JavaNetworkWriter,
         id: u64,
         remote_address: SocketAddr,
         player: Weak<Player>,
+        translation: Option<PacketTranslation>,
+        translated_serverbound: Option<Sender<Vec<u8>>>,
     ) -> Self {
         Self {
             outgoing_packets,
@@ -567,6 +1301,8 @@ impl JavaConnection {
             network_writer,
             id,
             remote_address,
+            translation,
+            translated_serverbound,
             player,
             keep_alive_tracker: SyncMutex::new(KeepAliveTracker {
                 alive_time: 0,
@@ -588,7 +1324,106 @@ impl JavaConnection {
         let Some(network_writer) = network_writer.as_mut() else {
             return Err(PacketError::ConnectionClosed);
         };
-        network_writer.write_packet(packet).await
+        self.write_packet_with_writer(packet, network_writer).await
+    }
+
+    async fn write_packet_with_writer(
+        &self,
+        packet: &EncodedPacket,
+        network_writer: &mut JavaNetworkEncoder,
+    ) -> Result<(), PacketError> {
+        let Some(translation) = &self.translation else {
+            return Self::write_encoded_with_writer(packet, network_writer).await;
+        };
+        let batch = translation
+            .exchange(
+                PacketDirection::Clientbound,
+                packet.to_packet_data(self.compression)?,
+            )
+            .await?;
+        let Some(serverbound_sender) = &self.translated_serverbound else {
+            return Err(PacketError::ConnectionClosed);
+        };
+        for serverbound in batch.serverbound {
+            serverbound_sender.try_send(serverbound).map_err(|_| {
+                PacketError::SendError("translated serverbound queue is full or closed".to_owned())
+            })?;
+        }
+        for clientbound in batch.clientbound {
+            let encoded = EncodedPacket::from_packet_data(&clientbound, self.compression)?;
+            Self::write_encoded_with_writer(&encoded, network_writer).await?;
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    async fn write_encoded_raw(&self, packet: &EncodedPacket) -> Result<(), PacketError> {
+        let mut network_writer = self.network_writer.lock().await;
+        let Some(network_writer) = network_writer.as_mut() else {
+            return Err(PacketError::ConnectionClosed);
+        };
+        Self::write_encoded_with_writer(packet, network_writer).await
+    }
+
+    async fn write_encoded_with_writer(
+        packet: &EncodedPacket,
+        network_writer: &mut JavaNetworkEncoder,
+    ) -> Result<(), PacketError> {
+        timeout(NETWORK_WRITE_TIMEOUT, network_writer.write_packet(packet))
+            .await
+            .map_err(|_| PacketError::WriteTimeout)?
+    }
+
+    async fn process_translation_batch(
+        &self,
+        batch: TranslationBatch,
+        player: &Arc<Player>,
+        server: &Arc<Server>,
+    ) -> Result<(), PacketError> {
+        if !batch.clientbound.is_empty() {
+            let mut network_writer = self.network_writer.lock().await;
+            let Some(network_writer) = network_writer.as_mut() else {
+                return Err(PacketError::ConnectionClosed);
+            };
+            for clientbound in batch.clientbound {
+                let encoded = EncodedPacket::from_packet_data(&clientbound, self.compression)?;
+                Self::write_encoded_with_writer(&encoded, network_writer).await?;
+            }
+        }
+        for serverbound in batch.serverbound {
+            self.process_packet(
+                RawPacket::from_packet_data(serverbound)?,
+                Arc::clone(player),
+                server,
+            )?;
+        }
+        Ok(())
+    }
+
+    async fn write_envelope(&self, envelope: QueuedOutboundEnvelope) -> Result<bool, PacketError> {
+        let mut network_writer = self.network_writer.lock().await;
+        let Some(network_writer) = network_writer.as_mut() else {
+            return Err(PacketError::ConnectionClosed);
+        };
+        match envelope {
+            QueuedOutboundEnvelope::Single(outbound) => {
+                let (packet, close_after_write) = outbound.write_parts();
+                self.write_packet_with_writer(packet, network_writer)
+                    .await?;
+                Ok(close_after_write)
+            }
+            QueuedOutboundEnvelope::Batch(packets) => {
+                for outbound in packets {
+                    let (packet, close_after_write) = outbound.write_parts();
+                    self.write_packet_with_writer(packet, network_writer)
+                        .await?;
+                    if close_after_write {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            }
+        }
     }
 
     async fn release_network_writer(&self) {
@@ -617,7 +1452,7 @@ impl JavaConnection {
                 tracker.alive_pending = true;
                 tracker.alive_id = now;
                 tracker.alive_time = now;
-                self.send_packet(CKeepAlive::new(tracker.alive_id as i64));
+                self.send_control_packet(CKeepAlive::new(tracker.alive_id as i64));
             }
         }
     }
@@ -668,7 +1503,7 @@ impl JavaConnection {
         };
         if self
             .outgoing_packets
-            .send(OutboundPacket::Disconnect(packet))
+            .try_send_control(OutboundPacket::Disconnect(packet))
             .is_err()
         {
             self.close();
@@ -696,9 +1531,27 @@ impl JavaConnection {
             self.close();
             return;
         };
+        match self
+            .outgoing_packets
+            .try_send(OutboundPacket::Packet(packet))
+        {
+            Ok(()) => {}
+            Err(mpsc::error::TrySendError::Full(_) | mpsc::error::TrySendError::Closed(_)) => {
+                self.close();
+            }
+        }
+    }
+
+    fn send_control_packet<P: ClientPacket>(&self, packet: P) {
+        let Ok(packet) =
+            EncodedPacket::from_bare(packet, self.compression, ConnectionProtocol::Play)
+        else {
+            self.close();
+            return;
+        };
         if self
             .outgoing_packets
-            .send(OutboundPacket::Packet(packet))
+            .try_send_control(OutboundPacket::Packet(packet))
             .is_err()
         {
             self.close();
@@ -707,16 +1560,57 @@ impl JavaConnection {
 
     /// Sends an encoded packet to the client.
     ///
-    /// # Panics
-    /// - If the packet fails to be sent through the channel.
+    /// Saturation closes the connection rather than silently losing an
+    /// arbitrary state transition. Chunk streams use the retryable atomic path.
     pub fn send_encoded_packet(&self, packet: EncodedPacket) {
+        match self
+            .outgoing_packets
+            .try_send(OutboundPacket::Packet(packet))
+        {
+            Ok(()) => {}
+            Err(mpsc::error::TrySendError::Full(_) | mpsc::error::TrySendError::Closed(_)) => {
+                self.close();
+            }
+        }
+    }
+
+    /// Atomically queues every encoded packet in a chunk batch.
+    pub(crate) fn try_send_chunk_batch(
+        &self,
+        packets: Vec<EncodedPacket>,
+    ) -> Result<(), mpsc::error::TrySendError<Vec<EncodedPacket>>> {
+        self.outgoing_packets.try_send_chunk_batch(packets)
+    }
+
+    fn send_encoded_packet_bundle(&self, content: Vec<EncodedPacket>) {
+        let Ok(start) =
+            EncodedPacket::from_bare(CBundleDelimiter, self.compression, ConnectionProtocol::Play)
+        else {
+            self.close();
+            return;
+        };
+        let Ok(finished) =
+            EncodedPacket::from_bare(CBundleDelimiter, self.compression, ConnectionProtocol::Play)
+        else {
+            self.close();
+            return;
+        };
+        let mut packets = Vec::with_capacity(content.len() + 2);
+        packets.push(start);
+        packets.extend(content);
+        packets.push(finished);
         if self
             .outgoing_packets
-            .send(OutboundPacket::Packet(packet))
+            .try_send_packet_batch(packets, OutboundBatchLane::Reliable)
             .is_err()
         {
             self.close();
         }
+    }
+
+    /// Maximum encoded bytes an otherwise-empty chunk queue can admit atomically.
+    pub(crate) fn chunk_batch_byte_capacity(&self) -> usize {
+        self.outgoing_packets.chunk_batch_byte_capacity()
     }
 
     /// Closes the connection.
@@ -1037,7 +1931,25 @@ impl JavaConnection {
         &self,
         mut reader: TCPNetworkDecoder<BufReader<OwnedReadHalf>>,
         server: Arc<Server>,
+        pending_serverbound: Vec<Vec<u8>>,
+        mut translated_serverbound_recv: Receiver<Vec<u8>>,
     ) {
+        if let Some(player) = self.player.upgrade() {
+            for pending in pending_serverbound {
+                let result = RawPacket::from_packet_data(pending)
+                    .and_then(|packet| self.process_packet(packet, Arc::clone(&player), &server));
+                if let Err(error) = result {
+                    log::warn!(
+                        "Translated handoff packet failed for client {}: {error}",
+                        self.id
+                    );
+                    self.close();
+                    return;
+                }
+            }
+        }
+        let mut translation_poll = interval(Duration::from_millis(50));
+        translation_poll.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
             select! {
                 () = self.wait_for_close() => {
@@ -1046,8 +1958,19 @@ impl JavaConnection {
                 packet = reader.get_raw_packet() => {
                     match packet {
                         Ok(packet) => {
-                            if let Some(player) = self.player.upgrade()
-                                && let Err(err) = self.process_packet(packet, player, &server) {
+                            if let Some(player) = self.player.upgrade() {
+                                let processed = if let Some(translation) = &self.translation {
+                                    match packet.to_packet_data() {
+                                        Ok(data) => match translation.exchange(PacketDirection::Serverbound, data).await {
+                                            Ok(batch) => self.process_translation_batch(batch, &player, &server).await,
+                                            Err(error) => Err(error),
+                                        },
+                                        Err(error) => Err(error),
+                                    }
+                                } else {
+                                    self.process_packet(packet, player, &server)
+                                };
+                                if let Err(err) = processed {
                                 // Vanilla parity: `Connection.exceptionCaught`
                                 // disconnects on anything but a
                                 // `SkipPacketException`. Logging and carrying on
@@ -1063,6 +1986,7 @@ impl JavaConnection {
                                     self.id
                                 );
                                 self.close();
+                                }
                             }
                         }
                         Err(err) => {
@@ -1071,13 +1995,38 @@ impl JavaConnection {
                         }
                     }
                 }
+                translated = translated_serverbound_recv.recv() => {
+                    let Some(translated) = translated else { self.close(); break; };
+                    if let Some(player) = self.player.upgrade() {
+                        let result = RawPacket::from_packet_data(translated)
+                            .and_then(|packet| self.process_packet(packet, player, &server));
+                        if let Err(error) = result {
+                            log::warn!("Translated packet failed for client {}: {error}", self.id);
+                            self.close();
+                        }
+                    }
+                }
+                _ = translation_poll.tick(), if self.translation.is_some() => {
+                    let Some(player) = self.player.upgrade() else { self.close(); break; };
+                    let result = match &self.translation {
+                        Some(translation) => translation.poll().await,
+                        None => continue,
+                    };
+                    if let Err(error) = match result {
+                        Ok(batch) => self.process_translation_batch(batch, &player, &server).await,
+                        Err(error) => Err(error),
+                    } {
+                        log::warn!("Via scheduled output failed for client {}: {error}", self.id);
+                        self.close();
+                    }
+                }
             }
         }
     }
 
     /// Sends packets to the client.
     ///
-    pub async fn sender(&self, mut sender_recv: UnboundedReceiver<OutboundPacket>) {
+    pub async fn sender(&self, mut sender_recv: OutboundPacketReceiver) {
         loop {
             select! {
                 biased;
@@ -1085,34 +2034,23 @@ impl JavaConnection {
                     self.write_queued_disconnect(&mut sender_recv).await;
                     break;
                 }
-                outbound = sender_recv.recv() => {
-                    if let Some(outbound) = outbound {
-                        let (packet, close_after_write) = match outbound {
-                            OutboundPacket::Packet(packet) => (packet, false),
-                            OutboundPacket::Disconnect(packet) => (packet, true),
-                        };
-
-                        if close_after_write {
-                            if let Err(err) = self.write_packet_now(&packet).await {
-                                log::warn!("Failed to send disconnect packet to client {}: {err}", self.id);
-                            }
-                            self.close();
-                            break;
-                        }
-
-                        let write_result = self.write_packet_now(&packet);
-                        select! {
-                            biased;
-                            () = self.wait_for_close() => {
-                                self.write_queued_disconnect(&mut sender_recv).await;
+                envelope = sender_recv.recv_envelope() => {
+                    if let Some(envelope) = envelope {
+                        // Once an envelope starts, it owns the wire until its
+                        // final translated output is written. Cancelling this
+                        // future halfway through a bundle would expose a
+                        // partial chunk batch and let a disconnect or a Via
+                        // scheduled packet split the bundle.
+                        match self.write_envelope(envelope).await {
+                            Ok(true) => {
+                                self.close();
                                 break;
-                            },
-                            result = write_result => {
-                                if let Err(err) = result {
-                                    log::warn!("Failed to send packet to client {}: {err}", self.id);
-                                    self.close();
-                                    break;
-                                }
+                            }
+                            Ok(false) => {}
+                            Err(err) => {
+                                log::warn!("Failed to send packet envelope to client {}: {err}", self.id);
+                                self.close();
+                                break;
                             }
                         }
                     } else {
@@ -1127,6 +2065,14 @@ impl JavaConnection {
         }
 
         self.release_network_writer().await;
+        if let Some(translation) = &self.translation
+            && let Err(error) = translation.close().await
+        {
+            log::debug!(
+                "Failed to close protocol translator for client {}: {error}",
+                self.id
+            );
+        }
 
         let Some(player) = self.player.upgrade() else {
             return;
@@ -1137,20 +2083,19 @@ impl JavaConnection {
         player.server().queue_player_disconnect(player);
     }
 
-    async fn write_queued_disconnect(&self, sender_recv: &mut UnboundedReceiver<OutboundPacket>) {
+    async fn write_queued_disconnect(&self, sender_recv: &mut OutboundPacketReceiver) {
         let mut disconnect_packet = None;
-        loop {
-            match sender_recv.try_recv() {
-                Ok(OutboundPacket::Packet(_)) => {}
-                Ok(OutboundPacket::Disconnect(packet)) => disconnect_packet = Some(packet),
-                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+        while let Ok(outbound) = sender_recv.try_recv() {
+            if outbound.write_parts().1 {
+                disconnect_packet = Some(outbound);
             }
         }
 
-        let Some(packet) = disconnect_packet else {
+        let Some(outbound) = disconnect_packet else {
             return;
         };
-        if let Err(err) = self.write_packet_now(&packet).await {
+        let (packet, _) = outbound.write_parts();
+        if let Err(err) = self.write_packet_now(packet).await {
             log::warn!(
                 "Failed to send disconnect packet to client {} during close: {err}",
                 self.id
@@ -1183,11 +2128,7 @@ impl NetworkConnection for JavaConnection {
     }
 
     fn send_encoded_bundle(&self, packets: Vec<EncodedPacket>) {
-        self.send_packet(CBundleDelimiter);
-        for packet in packets {
-            self.send_encoded_packet(packet);
-        }
-        self.send_packet(CBundleDelimiter);
+        self.send_encoded_packet_bundle(packets);
     }
 
     fn disconnect_with_reason(&self, reason: TextComponent) {
@@ -1228,9 +2169,431 @@ mod tests {
     use foton_registry::{blocks::properties::Direction, item_stack::ItemStack};
     use foton_utils::{BlockPos, codec::VarInt, types::InteractionHand};
     use rustc_hash::FxHashMap;
+    use tokio::io::AsyncReadExt;
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio::time::sleep;
     use uuid::Uuid;
 
     use super::*;
+
+    fn encoded_packet(byte_len: usize) -> EncodedPacket {
+        let mut encoded_data = foton_utils::FrontVec::new(0);
+        encoded_data.extend_from_slice(&vec![0; byte_len]);
+        EncodedPacket {
+            encoded_data: Arc::new(encoded_data),
+        }
+    }
+
+    fn encoded_packets(count: usize, byte_len: usize) -> Vec<EncodedPacket> {
+        (0..count).map(|_| encoded_packet(byte_len)).collect()
+    }
+
+    fn tagged_packet(tag: u8) -> EncodedPacket {
+        let mut encoded_data = foton_utils::FrontVec::new(0);
+        encoded_data.push(tag);
+        EncodedPacket {
+            encoded_data: Arc::new(encoded_data),
+        }
+    }
+
+    fn tagged_packet_with_size(tag: u8, byte_len: usize) -> EncodedPacket {
+        let mut encoded_data = foton_utils::FrontVec::new(0);
+        encoded_data.extend_from_slice(&vec![tag; byte_len]);
+        EncodedPacket {
+            encoded_data: Arc::new(encoded_data),
+        }
+    }
+
+    fn queued_tag(packet: &QueuedOutboundPacket) -> u8 {
+        packet
+            .write_parts()
+            .0
+            .encoded_data
+            .first()
+            .copied()
+            .expect("tagged packets are non-empty")
+    }
+
+    async fn test_java_connection(sender: OutboundPacketSender) -> (JavaConnection, TcpStream) {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("test listener should have an address");
+        let (client, accepted) = tokio::join!(TcpStream::connect(address), listener.accept());
+        let client = client.expect("test client should connect");
+        let (server_stream, remote_address) = accepted.expect("test listener should accept");
+        let (_read_half, write_half) = server_stream.into_split();
+        let connection = JavaConnection::new(
+            sender,
+            CancellationToken::new(),
+            None,
+            Arc::new(AsyncMutex::new(Some(TCPNetworkEncoder::new(
+                BufWriter::new(write_half),
+            )))),
+            1,
+            remote_address,
+            Weak::new(),
+            None,
+            None,
+        );
+        (connection, client)
+    }
+
+    #[tokio::test]
+    async fn outbound_packet_queue_holds_its_byte_budget_through_the_write() {
+        let (sender, mut receiver) = outbound_packet_channel_with_budget(8);
+        assert!(
+            sender
+                .try_send(OutboundPacket::Packet(encoded_packet(5)))
+                .is_ok()
+        );
+        assert!(matches!(
+            sender.try_send(OutboundPacket::Packet(encoded_packet(4))),
+            Err(mpsc::error::TrySendError::Full(_))
+        ));
+
+        let queued = receiver
+            .recv()
+            .await
+            .expect("the queued packet should still be available");
+        assert!(matches!(
+            sender.try_send(OutboundPacket::Packet(encoded_packet(4))),
+            Err(mpsc::error::TrySendError::Full(_))
+        ));
+
+        drop(queued);
+        assert!(
+            sender
+                .try_send(OutboundPacket::Packet(encoded_packet(4)))
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn sixty_four_chunk_batch_is_atomic_and_recovers_after_one_entry_drains() {
+        let (sender, mut receiver) = outbound_packet_channel_with_budget(1024);
+        for _ in 0..191 {
+            assert!(sender.try_send_chunk_batch(encoded_packets(1, 1)).is_ok());
+        }
+
+        assert!(matches!(
+            sender.try_send_chunk_batch(encoded_packets(66, 1)),
+            Err(mpsc::error::TrySendError::Full(_))
+        ));
+
+        let first = receiver
+            .recv()
+            .await
+            .expect("the chunk packet used to fill the queue should be available");
+        drop(first);
+        assert!(sender.try_send_chunk_batch(encoded_packets(66, 1)).is_ok());
+
+        let mut queued = 0;
+        while let Ok(packet) = receiver.try_recv() {
+            queued += 1;
+            drop(packet);
+        }
+        assert_eq!(queued, OUTBOUND_CHUNK_QUEUE_ENTRY_CAPACITY);
+    }
+
+    #[tokio::test]
+    async fn chunk_saturation_preserves_control_admission_and_fifo_fairness() {
+        let (sender, mut receiver) = outbound_packet_channel_with_budget(1024);
+        for _ in 0..OUTBOUND_CHUNK_QUEUE_ENTRY_CAPACITY {
+            assert!(sender.try_send_chunk_batch(vec![tagged_packet(1)]).is_ok());
+        }
+        assert!(matches!(
+            sender.try_send_chunk_batch(encoded_packets(1, 1)),
+            Err(mpsc::error::TrySendError::Full(_))
+        ));
+
+        assert!(
+            sender
+                .try_send_control(OutboundPacket::Packet(tagged_packet(2)))
+                .is_ok()
+        );
+        assert!(
+            sender
+                .try_send(OutboundPacket::Packet(tagged_packet(3)))
+                .is_ok()
+        );
+        let control = receiver
+            .recv()
+            .await
+            .expect("reserved control must bypass the bounded data backlog");
+        assert_eq!(queued_tag(&control), 2);
+        for _ in 0..OUTBOUND_CHUNK_QUEUE_ENTRY_CAPACITY {
+            let chunk = receiver
+                .recv()
+                .await
+                .expect("each admitted chunk must drain");
+            assert_eq!(queued_tag(&chunk), 1);
+        }
+        let reliable = receiver.recv().await.expect("reliable traffic must drain");
+        assert_eq!(queued_tag(&reliable), 3);
+    }
+
+    #[tokio::test]
+    async fn data_causal_order_and_batch_boundaries_are_preserved_at_receiver() {
+        let (sender, mut receiver) = outbound_packet_channel_with_budget(1024);
+        assert!(
+            sender
+                .try_send(OutboundPacket::Packet(tagged_packet(1)))
+                .is_ok()
+        );
+        assert!(
+            sender
+                .try_send_chunk_batch(vec![tagged_packet(2), tagged_packet(3), tagged_packet(4)])
+                .is_ok()
+        );
+        assert!(
+            sender
+                .try_send(OutboundPacket::Packet(tagged_packet(6)))
+                .is_ok()
+        );
+
+        let mut actual = Vec::new();
+        for _ in 0..5 {
+            let packet = receiver.recv().await.expect("every packet must drain");
+            actual.push(queued_tag(&packet));
+        }
+        assert_eq!(actual, [1, 2, 3, 4, 6]);
+    }
+
+    #[tokio::test]
+    async fn batch_is_written_without_control_or_reliable_interleaving() {
+        let (sender, receiver) = outbound_packet_channel_with_budget(1024);
+        assert!(
+            sender
+                .try_send_chunk_batch(vec![tagged_packet(1), tagged_packet(2), tagged_packet(3)])
+                .is_ok()
+        );
+        assert!(
+            sender
+                .try_send_control(OutboundPacket::Packet(tagged_packet(4)))
+                .is_ok()
+        );
+        assert!(
+            sender
+                .try_send_control(OutboundPacket::Packet(tagged_packet(5)))
+                .is_ok()
+        );
+        assert!(
+            sender
+                .try_send(OutboundPacket::Packet(tagged_packet(6)))
+                .is_ok()
+        );
+        let (connection, mut client) = test_java_connection(sender).await;
+        let mut wire = [0; 6];
+
+        tokio::join!(connection.sender(receiver), async {
+            client
+                .read_exact(&mut wire)
+                .await
+                .expect("all queued bytes must reach the wire");
+            connection.close();
+        });
+
+        assert_eq!(wire, [4, 1, 2, 3, 5, 6]);
+    }
+
+    #[tokio::test]
+    async fn synthetic_write_waits_for_the_complete_outbound_envelope() {
+        const FIRST_PACKET_BYTES: usize = 4 * 1024 * 1024;
+
+        let (sender, receiver) = outbound_packet_channel();
+        assert!(
+            sender
+                .try_send_chunk_batch(vec![
+                    tagged_packet_with_size(1, FIRST_PACKET_BYTES),
+                    tagged_packet(2),
+                ])
+                .is_ok()
+        );
+        let (connection, mut client) = test_java_connection(sender).await;
+
+        tokio::join!(connection.sender(receiver), async {
+            let mut first_byte = [0];
+            client
+                .read_exact(&mut first_byte)
+                .await
+                .expect("the batch should start writing");
+            assert_eq!(first_byte, [1]);
+
+            let synthetic_packet = tagged_packet(9);
+            let synthetic_write = connection.write_encoded_raw(&synthetic_packet);
+            tokio::pin!(synthetic_write);
+            tokio::select! {
+                biased;
+                result = &mut synthetic_write => panic!("synthetic write crossed the active envelope: {result:?}"),
+                () = sleep(Duration::from_millis(10)) => {}
+            }
+
+            let mut remaining = vec![0; FIRST_PACKET_BYTES + 1];
+            let (read, synthetic) =
+                tokio::join!(client.read_exact(&mut remaining), &mut synthetic_write,);
+            read.expect("the complete batch and synthetic packet should arrive");
+            synthetic.expect("synthetic packet should write after the batch");
+            assert!(
+                remaining[..FIRST_PACKET_BYTES - 1]
+                    .iter()
+                    .all(|byte| *byte == 1)
+            );
+            assert_eq!(&remaining[FIRST_PACKET_BYTES - 1..], &[2, 9]);
+            connection.close();
+        });
+    }
+
+    #[test]
+    fn chunk_batches_leave_the_control_byte_reserve_available() {
+        let (sender, _receiver) = outbound_packet_channel_with_budget(1024);
+        assert!(sender.try_send_chunk_batch(encoded_packets(1, 576)).is_ok());
+        assert!(
+            sender
+                .try_send(OutboundPacket::Packet(encoded_packet(192)))
+                .is_ok()
+        );
+        assert!(
+            sender
+                .try_send_control(OutboundPacket::Packet(encoded_packet(256)))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn chunk_batch_admission_distinguishes_a_closed_receiver() {
+        let (sender, receiver) = outbound_packet_channel_with_budget(1024);
+        drop(receiver);
+
+        assert!(matches!(
+            sender.try_send_chunk_batch(encoded_packets(1, 1)),
+            Err(mpsc::error::TrySendError::Closed(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn process_budget_is_shared_and_keeps_global_control_headroom() {
+        let global_budget = Arc::new(GlobalOutboundBudget {
+            entry_budget: Arc::new(Semaphore::new(10)),
+            non_control_entry_budget: Arc::new(Semaphore::new(8)),
+            byte_budget: Arc::new(Semaphore::new(10)),
+            non_control_byte_budget: Arc::new(Semaphore::new(8)),
+            chunk_byte_budget: Arc::new(Semaphore::new(6)),
+        });
+        let (first, mut first_receiver) =
+            outbound_packet_channel_with_budgets(100, Arc::clone(&global_budget));
+        let (second, _second_receiver) = outbound_packet_channel_with_budgets(100, global_budget);
+
+        assert!(
+            first
+                .try_send(OutboundPacket::Packet(encoded_packet(8)))
+                .is_ok()
+        );
+        assert!(matches!(
+            second.try_send(OutboundPacket::Packet(encoded_packet(1))),
+            Err(mpsc::error::TrySendError::Full(_))
+        ));
+        assert!(
+            second
+                .try_send_control(OutboundPacket::Packet(encoded_packet(2)))
+                .is_ok()
+        );
+
+        let queued = first_receiver
+            .recv()
+            .await
+            .expect("the first connection should own the global capacity");
+        drop(queued);
+        assert!(
+            second
+                .try_send(OutboundPacket::Packet(encoded_packet(8)))
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn process_entry_budget_is_shared_and_reserves_control_capacity() {
+        let global_budget = Arc::new(GlobalOutboundBudget {
+            entry_budget: Arc::new(Semaphore::new(4)),
+            non_control_entry_budget: Arc::new(Semaphore::new(3)),
+            byte_budget: Arc::new(Semaphore::new(100)),
+            non_control_byte_budget: Arc::new(Semaphore::new(90)),
+            chunk_byte_budget: Arc::new(Semaphore::new(80)),
+        });
+        let (first, mut first_receiver) =
+            outbound_packet_channel_with_budgets(100, Arc::clone(&global_budget));
+        let (second, _second_receiver) = outbound_packet_channel_with_budgets(100, global_budget);
+
+        for _ in 0..3 {
+            assert!(
+                first
+                    .try_send(OutboundPacket::Packet(encoded_packet(1)))
+                    .is_ok()
+            );
+        }
+        assert!(matches!(
+            second.try_send(OutboundPacket::Packet(encoded_packet(1))),
+            Err(mpsc::error::TrySendError::Full(_))
+        ));
+        assert!(
+            second
+                .try_send_control(OutboundPacket::Packet(encoded_packet(1)))
+                .is_ok()
+        );
+
+        let queued = first_receiver
+            .recv()
+            .await
+            .expect("one global entry should drain");
+        drop(queued);
+        assert!(
+            second
+                .try_send(OutboundPacket::Packet(encoded_packet(1)))
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn generic_packet_saturation_closes_instead_of_losing_state() {
+        let (sender, _receiver) = outbound_packet_channel_with_budget(8192);
+        for _ in 0..OUTBOUND_PACKET_QUEUE_ENTRY_CAPACITY {
+            assert!(
+                sender
+                    .try_send(OutboundPacket::Packet(encoded_packet(1)))
+                    .is_ok()
+            );
+        }
+        let (connection, _client) = test_java_connection(sender).await;
+
+        connection.send_encoded_packet(encoded_packet(1));
+
+        assert!(connection.closed());
+    }
+
+    #[tokio::test]
+    async fn saturated_bundle_closes_without_enqueuing_either_delimiter() {
+        let (sender, mut receiver) = outbound_packet_channel_with_budget(8192);
+        for _ in 0..OUTBOUND_PACKET_QUEUE_ENTRY_CAPACITY - 1 {
+            assert!(
+                sender
+                    .try_send(OutboundPacket::Packet(encoded_packet(1)))
+                    .is_ok()
+            );
+        }
+        let (connection, _client) = test_java_connection(sender).await;
+
+        connection.send_encoded_packet_bundle(vec![encoded_packet(1)]);
+
+        assert!(connection.closed());
+        let mut queued = 0;
+        while let Ok(packet) = receiver.try_recv() {
+            queued += 1;
+            drop(packet);
+        }
+        assert_eq!(queued, OUTBOUND_PACKET_QUEUE_ENTRY_CAPACITY - 1);
+    }
 
     fn decode(packet: RawPacket) -> DecodedPlayPacket {
         let Ok(decoded) = JavaConnection::decode_play_packet(packet) else {
@@ -1586,6 +2949,20 @@ mod tests {
             })),
             ScheduledPacketExecution::PlayerLocal
         );
+    }
+
+    #[test]
+    fn command_character_validation_runs_before_command_dispatch() {
+        let command = |command: &str| {
+            ScheduledPlayPacket(ScheduledPlayPacketKind::ChatCommand(SChatCommand {
+                command: command.to_owned(),
+            }))
+        };
+
+        assert!(!command("say bonjour 😀").has_illegal_command_characters());
+        for illegal in ["say line\nforge", "say §cformat", "say \u{7f}"] {
+            assert!(command(illegal).has_illegal_command_characters());
+        }
     }
 
     #[test]

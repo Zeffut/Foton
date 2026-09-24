@@ -134,13 +134,21 @@ static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 fn main() {
     #[cfg(all(windows, debug_assertions))]
     {
-        thread::Builder::new()
+        let bootstrap_thread = match thread::Builder::new()
             .name("foton-main".to_owned())
             .stack_size(8 * 1024 * 1024)
             .spawn(foton_main)
-            .expect("failed to spawn foton-main bootstrap thread")
-            .join()
-            .expect("foton-main thread panicked");
+        {
+            Ok(handle) => handle,
+            Err(error) => {
+                eprintln!("failed to spawn foton-main bootstrap thread: {error}");
+                process::exit(1);
+            }
+        };
+
+        if let Err(payload) = bootstrap_thread.join() {
+            panic::resume_unwind(payload);
+        }
     }
 
     #[cfg(not(all(windows, debug_assertions)))]
@@ -398,10 +406,21 @@ async fn run_server(
 
     let server = foton.server.clone();
 
-    if !server.prepare_spawn_area().await {
-        foton.disable_plugins();
-        shutdown_worlds(&server).await;
-        return Ok(());
+    match AssertUnwindSafe(server.prepare_spawn_area())
+        .catch_unwind()
+        .await
+    {
+        Ok(true) => {}
+        Ok(false) => {
+            foton.shutdown_plugins().await;
+            shutdown_worlds(&server).await;
+            return Ok(());
+        }
+        Err(payload) => {
+            foton.shutdown_plugins().await;
+            shutdown_worlds(&server).await;
+            panic::resume_unwind(payload);
+        }
     }
 
     SERVER.set(foton.server.clone()).ok();

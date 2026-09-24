@@ -1,22 +1,53 @@
 //! Login state packet handlers.
 
+use std::sync::Arc;
+
 use foton_core::player::GameProfile;
 use foton_protocol::{
     packets::login::{CHello, CLoginCompression, CLoginFinished, SHello, SKey},
     utils::ConnectionProtocol,
 };
 use foton_utils::translations;
-use rsa::Pkcs1v15Encrypt;
+use rsa::{Pkcs1v15Encrypt, RsaPrivateKey};
 use sha1::Sha1;
 use sha2::Digest;
 use text_components::TextComponent;
+use tokio::task::spawn_blocking;
 
 use crate::{
     AuthError,
+    authentication::{acquire_authentication_slot, mojang_authenticate_with_cancel},
     floodgate::resolve_floodgate_login,
-    is_valid_player_name, mojang_authenticate, offline_uuid, signed_bytes_be_to_hex,
+    is_valid_player_name, offline_uuid, signed_bytes_be_to_hex,
     tcp_client::{ConnectionAction, ConnectionUpdate, JavaTcpClient},
 };
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LoginKeyDecryptionError {
+    InvalidKey,
+    InvalidChallenge,
+}
+
+fn decrypt_login_key(
+    private_key: RsaPrivateKey,
+    packet: SKey,
+    expected_challenge: [u8; 4],
+) -> Result<[u8; 16], LoginKeyDecryptionError> {
+    let mut rng = rand::rng();
+    let challenge_response = private_key
+        .decrypt_blinded(&mut rng, Pkcs1v15Encrypt, &packet.challenge)
+        .map_err(|_| LoginKeyDecryptionError::InvalidKey)?;
+    if challenge_response != expected_challenge {
+        return Err(LoginKeyDecryptionError::InvalidChallenge);
+    }
+
+    let secret_key = private_key
+        .decrypt_blinded(&mut rng, Pkcs1v15Encrypt, &packet.key)
+        .map_err(|_| LoginKeyDecryptionError::InvalidKey)?;
+    secret_key
+        .try_into()
+        .map_err(|_| LoginKeyDecryptionError::InvalidKey)
+}
 
 impl JavaTcpClient {
     /// Handles the hello packet during the login state.
@@ -94,6 +125,10 @@ impl JavaTcpClient {
     }
 
     /// Handles the key packet during the login state, used for encryption.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the authentication permit must visibly cover the complete ordered RSA, cipher activation, session-server and login-state transition"
+    )]
     pub(crate) async fn handle_key(&self, packet: SKey) -> ConnectionAction {
         let sequence_result = self.pre_play_state.lock().begin_authentication();
         let requested_username = match sequence_result {
@@ -102,42 +137,44 @@ impl JavaTcpClient {
         };
         let challenge = self.challenge.load();
 
-        // `decrypt_blinded`, not `decrypt`. The plain call hands the padding
-        // scheme `DummyRng::None`, so the private-key operation runs unblinded
-        // and its duration correlates with the key -- which is exactly what
-        // RUSTSEC-2023-0071 (the Marvin attack) recovers, from the network, by
-        // timing many chosen ciphertexts against the same key. Both fields of
-        // this packet are attacker-controlled and a client may retry as often
-        // as it likes, so this is the exposed operation. The advisory has no
-        // fixed release, so blinding is the mitigation the crate itself offers.
-        let Ok(challenge_response) = self.server.key_store.private_key.decrypt_blinded(
-            &mut rand::rng(),
-            Pkcs1v15Encrypt,
-            &packet.challenge,
-        ) else {
-            self.kick("Invalid key".into()).await;
+        let authentication_slot = tokio::select! {
+            slot = acquire_authentication_slot() => slot,
+            () = self.cancel_token.cancelled() => return ConnectionAction::none(),
+        };
+        let Some(authentication_slot) = authentication_slot else {
+            self.kick("Authentication is temporarily busy".into()).await;
             return ConnectionAction::none();
         };
+        let authentication_slot = Arc::new(authentication_slot);
 
-        if challenge_response != challenge {
-            self.kick("Invalid challenge response".into()).await;
-            return ConnectionAction::none();
-        }
-
-        let Ok(secret_key) = self.server.key_store.private_key.decrypt_blinded(
-            &mut rand::rng(),
-            Pkcs1v15Encrypt,
-            &packet.key,
-        ) else {
-            self.kick("Invalid key".into()).await;
-            return ConnectionAction::none();
+        // Both attacker-controlled private-key operations run on Tokio's
+        // blocking pool. The authentication permit remains in this async
+        // frame while the job runs, so moving CPU work off a runtime worker
+        // does not weaken the concurrency bound.
+        let private_key = self.server.key_store.private_key.clone();
+        let worker_authentication_slot = Arc::clone(&authentication_slot);
+        let decryption = tokio::select! {
+            result = spawn_blocking(move || {
+                let _authentication_slot = worker_authentication_slot;
+                decrypt_login_key(private_key, packet, challenge)
+            }) => result,
+            () = self.cancel_token.cancelled() => return ConnectionAction::none(),
         };
-
-        let secret_key: [u8; 16] = if let Ok(secret_key) = secret_key.try_into() {
-            secret_key
-        } else {
-            self.kick("Invalid key".into()).await;
-            return ConnectionAction::none();
+        let secret_key = match decryption {
+            Ok(Ok(secret_key)) => secret_key,
+            Ok(Err(LoginKeyDecryptionError::InvalidChallenge)) => {
+                self.kick("Invalid challenge response".into()).await;
+                return ConnectionAction::none();
+            }
+            Ok(Err(LoginKeyDecryptionError::InvalidKey)) => {
+                self.kick("Invalid key".into()).await;
+                return ConnectionAction::none();
+            }
+            Err(error) => {
+                log::error!("Login RSA worker failed for client {}: {error}", self.id);
+                self.kick("Authentication failed".into()).await;
+                return ConnectionAction::none();
+            }
         };
 
         let Ok(_) = self
@@ -161,14 +198,16 @@ impl JavaTcpClient {
 
             let server_hash = signed_bytes_be_to_hex(server_hash);
 
-            match mojang_authenticate(
+            let authentication = mojang_authenticate_with_cancel(
                 &requested_username,
                 &server_hash,
                 self.server.config.auth_server.as_deref(),
+                &self.cancel_token,
             )
-            .await
-            {
+            .await;
+            match authentication {
                 Ok(profile) => profile,
+                Err(AuthError::Cancelled) => return ConnectionAction::none(),
                 Err(error) => {
                     self.kick(match error {
                         AuthError::FailedResponse => TextComponent::translated(
@@ -199,6 +238,7 @@ impl JavaTcpClient {
                 profile_actions: None,
             }
         };
+        drop(authentication_slot);
 
         // A duplicate UUID is settled at admission, not here: `queue_player_join`
         // kicks the session already holding it with
@@ -254,5 +294,44 @@ impl JavaTcpClient {
 
         self.start_configuration().await;
         ConnectionAction::none()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rsa::RsaPublicKey;
+
+    use super::*;
+
+    #[test]
+    fn login_key_decryption_validates_both_ciphertexts_and_the_challenge() {
+        let private_key = RsaPrivateKey::new(&mut rand::rng(), 1024)
+            .expect("test RSA private key should generate");
+        let public_key = RsaPublicKey::from(&private_key);
+        let challenge = [1, 2, 3, 4];
+        let secret = [7; 16];
+        let packet = SKey::new(
+            public_key
+                .encrypt(&mut rand::rng(), Pkcs1v15Encrypt, &secret)
+                .expect("test secret should encrypt"),
+            public_key
+                .encrypt(&mut rand::rng(), Pkcs1v15Encrypt, &challenge)
+                .expect("test challenge should encrypt"),
+        );
+
+        assert_eq!(
+            decrypt_login_key(private_key.clone(), packet.clone(), challenge),
+            Ok(secret)
+        );
+        assert_eq!(
+            decrypt_login_key(private_key.clone(), packet.clone(), [9; 4]),
+            Err(LoginKeyDecryptionError::InvalidChallenge)
+        );
+
+        let malformed_key = SKey::new(vec![0], packet.challenge);
+        assert_eq!(
+            decrypt_login_key(private_key, malformed_key, challenge),
+            Err(LoginKeyDecryptionError::InvalidKey)
+        );
     }
 }

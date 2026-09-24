@@ -62,6 +62,7 @@ Remote administration over the Source Rcon protocol
 |---|---|---|---|---|
 | `enable` | boolean | `false` |  | Whether the rcon port is opened at all |
 | `port` | integer | `25575` | 1–65535 | Port rcon listens on |
+| `bind_address` | string | `"127.0.0.1"` |  | IP address rcon listens on; loopback is the secure default because Source Rcon is plaintext |
 | `password` | string | `""` |  | Password every rcon client must send before it may run a command |
 
 #### `[server.bedrock]`

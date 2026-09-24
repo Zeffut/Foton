@@ -3,13 +3,15 @@
 //! Vanilla parity: `net.minecraft.server.rcon.thread.RconClient`, one thread
 //! per connection that reads a frame, answers it, and reads the next.
 
-use std::{io, net::SocketAddr, sync::Arc};
+use std::{io, net::SocketAddr, sync::Arc, time::Duration};
 
 use foton_core::server::Server;
+use subtle::ConstantTimeEq as _;
 use tokio::{
     io::{AsyncReadExt as _, AsyncWriteExt as _},
     net::TcpStream,
     select,
+    time::{Instant, timeout, timeout_at},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -18,6 +20,9 @@ use super::packet::{
     SERVERDATA_AUTH_RESPONSE, SERVERDATA_EXECCOMMAND, SERVERDATA_RESPONSE_VALUE, decode_request,
     encode_response, split_response,
 };
+
+const RCON_AUTH_TIMEOUT: Duration = Duration::from_secs(30);
+const RCON_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Serves one connection until it closes, misbehaves, or the server stops.
 pub(super) async fn serve(
@@ -28,9 +33,19 @@ pub(super) async fn serve(
     server: Arc<Server>,
     cancel: CancellationToken,
 ) {
-    let mut authenticated = false;
-    // Set when authentication fails, so the connection closes after answering.
-    let mut reject_and_close = false;
+    if !authenticate(
+        &mut connection,
+        address,
+        &password,
+        &cancel,
+        RCON_AUTH_TIMEOUT,
+    )
+    .await
+    {
+        log::debug!("Rcon client {address} disconnected");
+        return;
+    }
+
     loop {
         let request = select! {
             () = cancel.cancelled() => break,
@@ -38,6 +53,7 @@ pub(super) async fn serve(
         };
         let Some(request) = request else { break };
 
+        let mut reject_and_close = false;
         let sent = match request.kind {
             SERVERDATA_AUTH => {
                 // Vanilla parity: an empty password never authenticates, even
@@ -49,7 +65,7 @@ pub(super) async fn serve(
                 // length of the correct prefix; RCON is admin tooling rather
                 // than gameplay, so this is one of the places Foton is allowed
                 // to be stricter than vanilla.
-                authenticated =
+                let authenticated =
                     !request.body.is_empty() && constant_time_eq(&request.body, &password);
                 if authenticated {
                     log::info!("Rcon client {address} authenticated");
@@ -62,21 +78,19 @@ pub(super) async fn serve(
                     .await
                 } else {
                     log::warn!("Rcon client {address} failed to authenticate");
-                    // Vanilla parity: `RconClient` breaks out of its read loop
-                    // on a failed auth and the `finally` closes the socket, so
-                    // a client gets one guess per connection. Staying in the
-                    // loop turned a single TCP connection into an unlimited
-                    // password oracle.
+                    // Security hardening divergence: Vanilla keeps the socket
+                    // open after replying with request id -1. Foton closes it
+                    // so one connection cannot become an unlimited password
+                    // oracle; RCON is administrative rather than gameplay.
                     reject_and_close = true;
                     send_auth_failure(&mut connection).await
                 }
             }
-            SERVERDATA_EXECCOMMAND if authenticated => {
+            SERVERDATA_EXECCOMMAND => {
                 let response = run_command(&server, connection_id, &request.body, &cancel).await;
                 let Some(response) = response else { break };
                 send_command_response(&mut connection, request.request_id, &response).await
             }
-            SERVERDATA_EXECCOMMAND => send_auth_failure(&mut connection).await,
             unknown => {
                 // Vanilla parity: `String.format("Unknown request %s",
                 // Integer.toHexString(cmd))`, which prints the kind unsigned.
@@ -89,6 +103,64 @@ pub(super) async fn serve(
         }
     }
     log::debug!("Rcon client {address} disconnected");
+}
+
+/// Reads and answers the first request under one absolute deadline.
+///
+/// A client receives the response appropriate to the request it actually
+/// sent, but only a successful authentication keeps the socket open. This
+/// prevents unauthenticated clients from occupying a connection slot by
+/// periodically sending commands or unknown request kinds.
+async fn authenticate(
+    connection: &mut TcpStream,
+    address: SocketAddr,
+    password: &str,
+    cancel: &CancellationToken,
+    timeout: Duration,
+) -> bool {
+    let deadline = Instant::now() + timeout;
+    select! {
+        () = cancel.cancelled() => false,
+        result = timeout_at(deadline, authenticate_before_deadline(connection, address, password)) => {
+            result.unwrap_or(false)
+        }
+    }
+}
+
+async fn authenticate_before_deadline(
+    connection: &mut TcpStream,
+    address: SocketAddr,
+    password: &str,
+) -> bool {
+    let Some(request) = read_request(connection).await else {
+        return false;
+    };
+
+    match request.kind {
+        SERVERDATA_AUTH => {
+            let authenticated =
+                !request.body.is_empty() && constant_time_eq(&request.body, password);
+            if authenticated {
+                log::info!("Rcon client {address} authenticated");
+                send(connection, request.request_id, SERVERDATA_AUTH_RESPONSE, "")
+                    .await
+                    .is_ok()
+            } else {
+                log::warn!("Rcon client {address} failed to authenticate");
+                let _ = send_auth_failure(connection).await;
+                false
+            }
+        }
+        SERVERDATA_EXECCOMMAND => {
+            let _ = send_auth_failure(connection).await;
+            false
+        }
+        unknown => {
+            let message = format!("Unknown request {:x}", unknown as u32);
+            let _ = send_command_response(connection, request.request_id, &message).await;
+            false
+        }
+    }
 }
 
 /// Reads one frame, or `None` once the connection ends or breaks its own rules.
@@ -165,32 +237,183 @@ async fn send(
     kind: i32,
     payload: &str,
 ) -> Result<(), io::Error> {
-    connection
-        .write_all(&encode_response(request_id, kind, payload))
-        .await
+    timeout(
+        RCON_WRITE_TIMEOUT,
+        connection.write_all(&encode_response(request_id, kind, payload)),
+    )
+    .await
+    .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "Rcon write timed out"))?
 }
 
 /// Compares two secrets without leaking where they first differ.
 ///
-/// Folds every byte into one accumulator so the work does not depend on the
-/// contents. Lengths are compared first and separately, which leaks only the
-/// length -- as any timing-safe primitive of this shape does.
+/// Lengths are compared first and separately, which leaks only the length --
+/// as any timing-safe primitive of this shape does. Equal-length contents use
+/// `subtle`'s optimization-resistant primitive rather than a handwritten fold.
 fn constant_time_eq(candidate: &str, expected: &str) -> bool {
     let candidate = candidate.as_bytes();
     let expected = expected.as_bytes();
     if candidate.len() != expected.len() {
         return false;
     }
-    let mut difference = 0u8;
-    for (left, right) in candidate.iter().zip(expected) {
-        difference |= left ^ right;
-    }
-    difference == 0
+    bool::from(candidate.ct_eq(expected))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::constant_time_eq;
+    use std::{net::Ipv4Addr, time::Duration};
+
+    use tokio::{
+        io::{AsyncReadExt as _, AsyncWriteExt as _},
+        net::{TcpListener, TcpStream},
+        time::{sleep, timeout},
+    };
+    use tokio_util::sync::CancellationToken;
+
+    use crate::rcon::packet::{
+        AUTH_FAILURE_REQUEST_ID, SERVERDATA_AUTH, SERVERDATA_AUTH_RESPONSE, SERVERDATA_EXECCOMMAND,
+        SERVERDATA_RESPONSE_VALUE, encode_response,
+    };
+
+    use super::{authenticate, constant_time_eq};
+
+    async fn connected_pair() -> (TcpStream, TcpStream) {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .expect("test listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("test listener should have an address");
+        let client = TcpStream::connect(address);
+        let (accepted, client) = tokio::join!(listener.accept(), client);
+        (
+            accepted.expect("test connection should be accepted").0,
+            client.expect("test client should connect"),
+        )
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_trickle_cannot_extend_the_absolute_deadline() {
+        let (mut server_side, mut client_side) = connected_pair().await;
+        let address = server_side
+            .peer_addr()
+            .expect("test connection should have a peer address");
+        let authentication = tokio::spawn(async move {
+            authenticate(
+                &mut server_side,
+                address,
+                "secret",
+                &CancellationToken::new(),
+                Duration::from_millis(80),
+            )
+            .await
+        });
+
+        let frame = encode_response(7, SERVERDATA_AUTH, "secret");
+        let trickle = tokio::spawn(async move {
+            for byte in frame {
+                if client_side.write_all(&[byte]).await.is_err() {
+                    break;
+                }
+                sleep(Duration::from_millis(20)).await;
+            }
+        });
+
+        let authenticated = timeout(Duration::from_millis(200), authentication)
+            .await
+            .expect("absolute authentication deadline should expire")
+            .expect("authentication task should not panic");
+        assert!(!authenticated);
+        trickle.abort();
+    }
+
+    #[tokio::test]
+    async fn first_unauthenticated_request_is_answered_then_closed() {
+        for (kind, body, expected) in [
+            (
+                SERVERDATA_AUTH,
+                "wrong",
+                encode_response(AUTH_FAILURE_REQUEST_ID, SERVERDATA_AUTH_RESPONSE, ""),
+            ),
+            (
+                SERVERDATA_EXECCOMMAND,
+                "payload",
+                encode_response(AUTH_FAILURE_REQUEST_ID, SERVERDATA_AUTH_RESPONSE, ""),
+            ),
+            (
+                0x123,
+                "payload",
+                encode_response(7, SERVERDATA_RESPONSE_VALUE, "Unknown request 123"),
+            ),
+        ] {
+            let (mut server_side, mut client_side) = connected_pair().await;
+            let address = server_side
+                .peer_addr()
+                .expect("test connection should have a peer address");
+            let authentication = tokio::spawn(async move {
+                authenticate(
+                    &mut server_side,
+                    address,
+                    "secret",
+                    &CancellationToken::new(),
+                    Duration::from_secs(1),
+                )
+                .await
+            });
+
+            client_side
+                .write_all(&encode_response(7, kind, body))
+                .await
+                .expect("test request should be written");
+            let mut response = Vec::new();
+            client_side
+                .read_to_end(&mut response)
+                .await
+                .expect("server should close after its response");
+
+            assert_eq!(response, expected);
+            assert!(
+                !authentication
+                    .await
+                    .expect("authentication task should not panic")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn valid_first_authentication_keeps_the_session_eligible() {
+        let (mut server_side, mut client_side) = connected_pair().await;
+        let address = server_side
+            .peer_addr()
+            .expect("test connection should have a peer address");
+        let authentication = tokio::spawn(async move {
+            authenticate(
+                &mut server_side,
+                address,
+                "secret",
+                &CancellationToken::new(),
+                Duration::from_secs(1),
+            )
+            .await
+        });
+
+        client_side
+            .write_all(&encode_response(7, SERVERDATA_AUTH, "secret"))
+            .await
+            .expect("test authentication should be written");
+        let mut response = Vec::new();
+        client_side
+            .read_to_end(&mut response)
+            .await
+            .expect("test authentication response should be readable");
+
+        assert_eq!(response, encode_response(7, SERVERDATA_AUTH_RESPONSE, ""));
+        assert!(
+            authentication
+                .await
+                .expect("authentication task should not panic")
+        );
+    }
 
     /// The comparison still answers correctly; being timing-safe is not an
     /// excuse for being wrong.
@@ -214,24 +437,5 @@ mod tests {
                 "constant_time_eq({candidate:?}, {expected:?}) disagreed with =="
             );
         }
-    }
-
-    /// It compares every byte rather than stopping at the first difference.
-    ///
-    /// A password oracle is built out of the timing difference between "wrong
-    /// at byte 0" and "wrong at byte 30". This cannot measure time reliably in
-    /// a unit test, so it pins the observable proxy: the two cases do the same
-    /// amount of work because neither returns early.
-    #[test]
-    fn constant_time_eq_does_not_stop_at_the_first_difference() {
-        let expected = "a".repeat(32);
-        let differs_early = format!("Z{}", "a".repeat(31));
-        let differs_late = format!("{}Z", "a".repeat(31));
-
-        assert!(!constant_time_eq(&differs_early, &expected));
-        assert!(!constant_time_eq(&differs_late, &expected));
-        // Both are the same length as the secret, so both walk all 32 bytes.
-        assert_eq!(differs_early.len(), expected.len());
-        assert_eq!(differs_late.len(), expected.len());
     }
 }

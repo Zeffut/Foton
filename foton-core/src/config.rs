@@ -4,6 +4,7 @@
 //! defines `RuntimeConfig` (the subset kept after startup) and the world/domain
 //! configuration types that both crates share.
 
+use base64::{Engine as _, prelude::BASE64_STANDARD};
 pub use foton_protocol::packet_traits::CompressionInfo;
 use foton_protocol::packets::config::{CServerLinks, Link, ServerLinksType};
 use foton_registry::vanilla_dimension_types;
@@ -13,9 +14,11 @@ use foton_utils::types::{Difficulty, GameType};
 use reqwest::Url;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Deserializer, de::Error as DeError};
-use std::fmt;
 use std::{
     collections::BTreeMap,
+    fmt,
+    fs::File,
+    io::Read as _,
     path::{Component, Path, PathBuf},
 };
 use text_components::TextComponent;
@@ -27,6 +30,9 @@ use crate::worldgen::registry::{ValidatedWorldGeneratorConfig, WorldGeneratorReg
 /// Error returned when online mode is configured without its authentication handshake.
 pub const ONLINE_MODE_REQUIRES_ENCRYPTION: &str =
     "encryption must be true when online_mode is enabled";
+
+const FAVICON_MAX_BYTES: u64 = 1024 * 1024;
+const FAVICON_DATA_URI_PREFIX: &str = "data:image/png;base64,";
 
 /// Validates the login settings that establish a player's authenticated identity.
 ///
@@ -104,7 +110,7 @@ pub struct RuntimeConfig {
     pub motd: String,
     /// Whether to use a favicon.
     pub use_favicon: bool,
-    /// The path to the favicon.
+    /// Pre-encoded favicon data URI, loaded and validated during startup.
     pub favicon: String,
     /// Whether to enforce secure chat.
     pub enforce_secure_chat: bool,
@@ -127,6 +133,76 @@ pub struct RuntimeConfig {
 }
 
 impl RuntimeConfig {
+    /// Loads and validates a configured 64×64 PNG favicon for runtime reuse.
+    ///
+    /// # Errors
+    ///
+    /// Returns a descriptive startup error for an inaccessible, non-regular,
+    /// oversized, non-PNG, or incorrectly sized file.
+    pub fn load_favicon(path: &Path) -> Result<String, String> {
+        let path_metadata = path
+            .metadata()
+            .map_err(|error| format!("failed to inspect favicon {}: {error}", path.display()))?;
+        if !path_metadata.is_file() {
+            return Err(format!(
+                "favicon must be a regular file: {}",
+                path.display()
+            ));
+        }
+        let file = File::open(path)
+            .map_err(|error| format!("failed to open favicon {}: {error}", path.display()))?;
+        let metadata = file
+            .metadata()
+            .map_err(|error| format!("failed to inspect favicon {}: {error}", path.display()))?;
+        if !metadata.is_file() {
+            return Err(format!(
+                "favicon must be a regular file: {}",
+                path.display()
+            ));
+        }
+        if metadata.len() > FAVICON_MAX_BYTES {
+            return Err(format!(
+                "favicon {} exceeds the {FAVICON_MAX_BYTES} byte limit",
+                path.display()
+            ));
+        }
+
+        let mut bytes = Vec::new();
+        file.take(FAVICON_MAX_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|error| format!("failed to read favicon {}: {error}", path.display()))?;
+        if bytes.len() > FAVICON_MAX_BYTES as usize {
+            return Err(format!(
+                "favicon {} exceeds the {FAVICON_MAX_BYTES} byte limit",
+                path.display()
+            ));
+        }
+        if bytes.len() < 33
+            || bytes[..8] != *b"\x89PNG\r\n\x1a\n"
+            || bytes[8..12] != [0, 0, 0, 13]
+            || bytes[12..16] != *b"IHDR"
+        {
+            return Err(format!(
+                "favicon must be a PNG with an IHDR header: {}",
+                path.display()
+            ));
+        }
+        let width = u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
+        let height = u32::from_be_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]);
+        if width != 64 || height != 64 {
+            return Err(format!(
+                "favicon must be exactly 64x64 pixels, got {width}x{height}: {}",
+                path.display()
+            ));
+        }
+
+        let capacity = FAVICON_DATA_URI_PREFIX.len() + bytes.len().div_ceil(3) * 4;
+        let mut data_uri = String::with_capacity(capacity);
+        data_uri.push_str(FAVICON_DATA_URI_PREFIX);
+        BASE64_STANDARD.encode_string(bytes, &mut data_uri);
+        Ok(data_uri)
+    }
+
     /// Builds the `CServerLinks` packet from config, if server links are enabled.
     #[must_use]
     pub fn server_links_packet(&self) -> Option<CServerLinks> {
@@ -836,8 +912,27 @@ fn parse_difficulty(value: &str) -> Result<Difficulty, String> {
 
 #[cfg(test)]
 mod tests {
+    use std::env::temp_dir;
+    use std::fs::{remove_file, write};
+
     use super::*;
     use foton_registry::init_vanilla_registry;
+
+    struct TempFavicon(PathBuf);
+
+    impl TempFavicon {
+        fn new(bytes: &[u8]) -> Self {
+            let path = temp_dir().join(format!("foton-favicon-check-{}.png", uuid::Uuid::new_v4()));
+            write(&path, bytes).expect("write favicon test file");
+            Self(path)
+        }
+    }
+
+    impl Drop for TempFavicon {
+        fn drop(&mut self) {
+            let _ignored = remove_file(&self.0);
+        }
+    }
 
     #[test]
     fn online_mode_requires_the_authenticated_encryption_flow() {
@@ -848,6 +943,42 @@ mod tests {
         );
         assert_eq!(validate_login_security(false, true), Ok(()));
         assert_eq!(validate_login_security(false, false), Ok(()));
+    }
+
+    #[test]
+    fn favicon_loader_accepts_only_a_regular_file() {
+        let directory = temp_dir();
+        let error = RuntimeConfig::load_favicon(&directory)
+            .expect_err("a directory must not be accepted as a favicon");
+        assert!(error.contains("regular file"));
+    }
+
+    #[test]
+    fn favicon_loader_rejects_an_oversize_file() {
+        let favicon = TempFavicon::new(&vec![0; FAVICON_MAX_BYTES as usize + 1]);
+        let error = RuntimeConfig::load_favicon(&favicon.0)
+            .expect_err("an oversize favicon must fail startup validation");
+        assert!(error.contains("exceeds"));
+    }
+
+    #[test]
+    fn favicon_loader_rejects_an_invalid_png_signature() {
+        let mut bytes = include_bytes!("../../package-content/favicon.png").to_vec();
+        bytes[0] = 0;
+        let favicon = TempFavicon::new(&bytes);
+        let error = RuntimeConfig::load_favicon(&favicon.0)
+            .expect_err("a non-PNG favicon must fail startup validation");
+        assert!(error.contains("IHDR"));
+    }
+
+    #[test]
+    fn favicon_loader_rejects_non_64_square_dimensions() {
+        let mut bytes = include_bytes!("../../package-content/favicon.png").to_vec();
+        bytes[19] = 63;
+        let favicon = TempFavicon::new(&bytes);
+        let error = RuntimeConfig::load_favicon(&favicon.0)
+            .expect_err("wrong favicon dimensions must fail startup validation");
+        assert!(error.contains("63x64"));
     }
 
     fn registries() -> (WorldGeneratorRegistry, WorldStorageRegistry) {

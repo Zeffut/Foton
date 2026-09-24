@@ -194,37 +194,43 @@ impl<R: AsyncRead + Unpin> TCPNetworkDecoder<R> {
 
         let (packet_buffer, packet_data_start) = if let Some(threshold) = self.compression {
             let decompressed_len = VarInt::read(&mut cursor)?.0 as usize;
-            let raw_packet_len = packet_len - VarInt::written_size(decompressed_len as i32);
 
             if decompressed_len > MAX_PACKET_DATA_SIZE {
                 Err(PacketError::TooLong(decompressed_len))?;
             }
 
             if decompressed_len > 0 {
-                let mut decompressed = vec![0; decompressed_len];
-                let mut decoder = ZlibDecoder::new(&mut cursor);
-                decoder
-                    .read_exact(&mut decompressed)
+                if decompressed_len < threshold.get() as usize {
+                    Err(PacketError::CompressedBelowThreshold {
+                        declared: decompressed_len,
+                        threshold: threshold.get() as usize,
+                    })?;
+                }
+                // Grow with bytes the zlib stream actually produces. Reserving
+                // the attacker-declared length up front made a three-byte
+                // invalid stream allocate the full 8 MiB protocol maximum.
+                let decoder = ZlibDecoder::new(&mut cursor);
+                let mut limited = decoder.take(decompressed_len as u64 + 1);
+                let mut decompressed = Vec::with_capacity(decompressed_len.min(READ_CHUNK));
+                limited
+                    .read_to_end(&mut decompressed)
                     .map_err(|e| PacketError::DecompressionFailed(e.to_string()))?;
-
-                let mut overflow = [0];
-                if decoder
-                    .read(&mut overflow)
-                    .map_err(|e| PacketError::DecompressionFailed(e.to_string()))?
-                    != 0
-                {
+                if decompressed.len() > decompressed_len {
                     Err(PacketError::DecompressionFailed(format!(
                         "decompressed packet exceeds declared length of {decompressed_len}"
                     )))?;
                 }
+                if decompressed.len() < decompressed_len {
+                    Err(PacketError::DecompressionFailed(format!(
+                        "decompressed packet is shorter than declared length of {decompressed_len}"
+                    )))?;
+                }
                 (decompressed, 0)
             } else {
-                // Validate that we are not less than the compression threshold
-                if raw_packet_len > threshold.get() as _ {
-                    Err(PacketError::NotCompressed)?;
-                }
-
                 // The rest of the packet data is uncompressed.
+                // Vanilla's `CompressionDecoder` accepts this representation
+                // regardless of its size. Its threshold validation applies
+                // only when `uncompressedLength` is positive.
                 let packet_data_start = cursor.position() as usize;
                 (packet_data, packet_data_start)
             }
@@ -629,6 +635,53 @@ mod compression_security_tests {
         packet
     }
 
+    fn uncompressed_packet(packet_data: &[u8]) -> Vec<u8> {
+        let mut framed = Vec::new();
+        VarInt::from(packet_data.len() + 1)
+            .write(&mut framed)
+            .expect("test packet length should encode");
+        VarInt(0)
+            .write(&mut framed)
+            .expect("zero decompressed length should encode");
+        framed.extend_from_slice(packet_data);
+        framed
+    }
+
+    #[tokio::test]
+    async fn accepts_uncompressed_packets_at_and_above_the_threshold_like_vanilla() {
+        let threshold = NonZeroU32::new(256).expect("test threshold is non-zero");
+        for packet_size in [threshold.get() as usize, threshold.get() as usize + 1] {
+            let mut packet_data = vec![0; packet_size];
+            packet_data[0] = 2;
+            let packet = uncompressed_packet(&packet_data);
+            let mut decoder = TCPNetworkDecoder::new(packet.as_slice());
+            decoder.set_compression(threshold);
+
+            let raw_packet = decoder
+                .get_raw_packet()
+                .await
+                .expect("Vanilla accepts zero-length compression headers at any packet size");
+            assert_eq!(raw_packet.id, 2);
+            assert_eq!(raw_packet.payload().len(), packet_size - 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn rejects_compressed_packets_declared_below_the_threshold_like_vanilla() {
+        let threshold = NonZeroU32::new(256).expect("test threshold is non-zero");
+        let packet = compressed_packet(2, &[2, 0]);
+        let mut decoder = TCPNetworkDecoder::new(packet.as_slice());
+        decoder.set_compression(threshold);
+
+        assert!(matches!(
+            decoder.get_raw_packet().await,
+            Err(PacketError::CompressedBelowThreshold {
+                declared: 2,
+                threshold: 256,
+            })
+        ));
+    }
+
     #[tokio::test]
     async fn rejects_zlib_stream_expanding_past_declared_length() {
         // This models a tiny wire payload claiming one byte while expanding to twice the protocol
@@ -652,6 +705,27 @@ mod compression_security_tests {
         let mut decoder = TCPNetworkDecoder::new(packet.as_slice());
         decoder.set_compression(NonZeroU32::MIN);
 
+        assert!(matches!(
+            decoder.get_raw_packet().await,
+            Err(PacketError::DecompressionFailed(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn tiny_invalid_stream_cannot_force_the_maximum_output_allocation() {
+        let mut packet_data = Vec::new();
+        VarInt::from(MAX_PACKET_DATA_SIZE)
+            .write(&mut packet_data)
+            .expect("test claimed length should encode");
+        packet_data.extend_from_slice(&[0xff, 0xff, 0xff]);
+        let mut packet = Vec::new();
+        VarInt::from(packet_data.len())
+            .write(&mut packet)
+            .expect("test packet length should encode");
+        packet.extend_from_slice(&packet_data);
+
+        let mut decoder = TCPNetworkDecoder::new(packet.as_slice());
+        decoder.set_compression(NonZeroU32::MIN);
         assert!(matches!(
             decoder.get_raw_packet().await,
             Err(PacketError::DecompressionFailed(_))

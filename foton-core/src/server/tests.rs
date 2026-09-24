@@ -1,12 +1,13 @@
 use super::{WorldCreationRequest, WorldCreationState};
 use std::{
+    convert::Infallible,
     env::temp_dir,
     io::Cursor,
     path::{Path, PathBuf},
     slice,
     sync::{
         Arc, Weak,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -25,7 +26,12 @@ use foton_utils::{BlockPos, ChunkPos, types::UpdateFlags};
 use foton_utils::{codec::VarInt, serial::ReadFrom, text::DisplayResolutor};
 use glam::DVec3;
 use text_components::TextComponent;
-use tokio::{fs, runtime::Builder, task::JoinSet, time::sleep};
+use tokio::{
+    fs,
+    runtime::Builder,
+    task::{JoinSet, yield_now},
+    time::sleep,
+};
 use uuid::Uuid;
 
 use crate::behavior::init_behaviors;
@@ -46,6 +52,7 @@ use crate::permission::{
 };
 use crate::player::connection::NetworkConnection;
 use crate::player::player_data::PersistentSlot;
+use crate::player::player_data_storage::{GlobalPlayerData, PersistenceUpdateOutcome};
 use crate::player::{Player, PlayerConnection, ResetReason};
 use crate::portal::WorldChangeRequest;
 use crate::test_support::{
@@ -58,22 +65,24 @@ use crate::worldgen::WorldGeneratorRegistry;
 use super::known_players::{
     KnownPlayerSaveStep, UncachedPlayerTarget, classify_uncached_player_target, direct_uuid_profile,
 };
-use super::player_admission::{PendingPlayerJoin, PlayerAdmissionState};
+use super::player_admission::{PendingPlayerJoin, PlayerAdmissionState, PlayerLoginAttemptGuard};
 use super::{
     AsyncMutex, CancellationToken, ChunkSender, CommandRegistry, CommandRequest,
     CommandRequestQueue, DomainCommandStorage, DomainMapData, DomainPlayerData, DomainPlayerState,
     DomainScoreboards, EnderPearlRestoreJob, FxHashMap, KeyStore, KnownPlayerCacheState,
     KnownPlayers, Notify, PacketProcessor, PersistentEnderPearl, PersistentEntity,
     PersistentPlayerData, PersistentRootVehicle, PlayerDataStorage, PlayerDisconnectQueue,
-    PlayerJoinQueue, PlayerMap, PreparedSpawn, RegistryCache, RootVehicleRestoreJob, Server,
-    ServerJobQueue, ServiceKeyStore, SyncMutex, SyncRwLock, TabListTickStats, TickRateManager,
-    UnpreparedDomainPlayerData, UnpreparedDomainPlayerState, WorldMap,
-    can_entity_return_from_end_to_overworld, cap_positive_thread_count,
+    PlayerJoinQueue, PlayerMap, PlayerPermissionUpdateError, PreparedSpawn, RegistryCache,
+    RootVehicleRestoreJob, Server, ServerJobQueue, ServiceKeyStore, SyncMutex, SyncRwLock,
+    TabListTickStats, TickRateManager, UnpreparedDomainPlayerData, UnpreparedDomainPlayerState,
+    WorldMap, can_entity_return_from_end_to_overworld, cap_positive_thread_count,
     create_registered_dispatcher, is_allowed_to_enter_portal_target, is_end_return_transition,
     offline_uuid, portal_entity_still_valid, validate_player_permission_group_update,
 };
 use crate::boss_event::custom::DomainCustomBossEvents;
-use crate::event::{BlockBreakEvent, EventBus, PlayerChatEvent, PlayerJoinEvent};
+use crate::event::{
+    BlockBreakEvent, EventBus, PlayerChatEvent, PlayerJoinEvent, PlayerLoginAbortEvent,
+};
 use crate::player::game_mode::block_breaking::BlockBreakAction;
 use crate::test_support::init_test_logger;
 use foton_protocol::packets::game::SChat;
@@ -86,6 +95,38 @@ use tokio::sync::oneshot::channel;
 struct TestConnection {
     sent_packets: Arc<SyncMutex<Vec<EncodedPacket>>>,
     closed: AtomicBool,
+}
+
+struct DisconnectRecordingConnection {
+    disconnected: Arc<AtomicBool>,
+}
+
+impl NetworkConnection for DisconnectRecordingConnection {
+    fn compression(&self) -> Option<CompressionInfo> {
+        None
+    }
+
+    fn send_encoded(&self, _packet: EncodedPacket) {}
+
+    fn send_encoded_bundle(&self, _packets: Vec<EncodedPacket>) {}
+
+    fn disconnect_with_reason(&self, _reason: TextComponent) {
+        self.disconnected.store(true, Ordering::Release);
+    }
+
+    fn tick(&self) {}
+
+    fn latency(&self) -> i32 {
+        0
+    }
+
+    fn close(&self) {
+        self.disconnected.store(true, Ordering::Release);
+    }
+
+    fn closed(&self) -> bool {
+        self.disconnected.load(Ordering::Acquire)
+    }
 }
 
 impl NetworkConnection for TestConnection {
@@ -303,6 +344,9 @@ async fn test_server_with_worlds(
         player_data_storage,
         player_permission_states: SyncRwLock::new(player_permission_states),
         player_permission_updates: AsyncMutex::new(()),
+        plugin_persistence_tasks: super::permissions::PluginPersistenceTasks::new(),
+        queued_whitelist_update_revisions: SyncMutex::new(FxHashMap::default()),
+        queued_operator_update_revisions: SyncMutex::new(FxHashMap::default()),
         known_players: SyncMutex::new(KnownPlayerCacheState::new(KnownPlayers::new())),
         known_player_save_idle: Notify::new(),
         profile_lookup_client: reqwest::Client::new(),
@@ -2152,6 +2196,27 @@ fn test_player_with_uuid_and_packets(
     (player, sent_packets)
 }
 
+fn test_player_with_disconnect_flag(
+    server: &Arc<Server>,
+    world: Arc<World>,
+    uuid: Uuid,
+    name: &str,
+    entity_id: i32,
+) -> (Arc<Player>, Arc<AtomicBool>) {
+    let disconnected = Arc::new(AtomicBool::new(false));
+    let connection = Arc::new(PlayerConnection::Other(Box::new(
+        DisconnectRecordingConnection {
+            disconnected: Arc::clone(&disconnected),
+        },
+    )));
+    let player = TestPlayerBuilder::new(world, name, entity_id)
+        .uuid(uuid)
+        .connection(connection)
+        .server(server)
+        .build();
+    (player, disconnected)
+}
+
 fn decode_system_chat(packet: &EncodedPacket) -> TextComponent {
     let mut cursor = Cursor::new(packet.encoded_data.as_slice());
     let packet_length = VarInt::read(&mut cursor);
@@ -2178,6 +2243,55 @@ fn packet_id(packet: &EncodedPacket) -> i32 {
         Ok(packet_id) => packet_id.0,
         Err(error) => panic!("packet id should decode: {error}"),
     }
+}
+
+#[test]
+fn login_attempt_guard_aborts_only_until_the_join_commits() {
+    let world = fresh_test_world("login_attempt_guard");
+    let runtime = Builder::new_current_thread().enable_all().build();
+    let Ok(runtime) = runtime else {
+        panic!("test runtime should initialize");
+    };
+
+    runtime.block_on(async {
+        let storage_root = test_storage_root("login-attempt-guard");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await;
+        let Ok(server) = server else {
+            panic!("test server should initialize");
+        };
+        let player = test_player(&server, Arc::clone(&world));
+        let aborted = Arc::new(AtomicUsize::new(0));
+        let listener_aborted = Arc::clone(&aborted);
+        server.events.on::<PlayerLoginAbortEvent, _>(
+            Identifier::new_static("test", "login_attempt_abort"),
+            move |_| {
+                listener_aborted.fetch_add(1, Ordering::SeqCst);
+            },
+        );
+
+        drop(PlayerLoginAttemptGuard::new(&server, Arc::clone(&player)));
+        assert_eq!(aborted.load(Ordering::SeqCst), 1);
+
+        let mut committed = PlayerLoginAttemptGuard::new(&server, Arc::clone(&player));
+        committed.commit();
+        drop(committed);
+        assert_eq!(
+            aborted.load(Ordering::SeqCst),
+            1,
+            "a joined attempt must not emit a later abort"
+        );
+
+        drop(player);
+        drop(server);
+        if let Err(error) = fs::remove_dir_all(&storage_root).await {
+            panic!("test storage should be removed: {error}");
+        }
+    });
 }
 
 #[test]
@@ -2228,6 +2342,7 @@ fn initial_player_info_precedes_entity_spawn_for_existing_players() {
         server.finish_prepared_player_join(PendingPlayerJoin {
             player: Arc::clone(&joining),
             state: Ok(state),
+            login_attempt: PlayerLoginAttemptGuard::new(&server, Arc::clone(&joining)),
         });
 
         assert!(
@@ -2313,6 +2428,7 @@ fn initial_admission_installs_restores_before_scheduling_jobs() {
         server.finish_prepared_player_join(PendingPlayerJoin {
             player: Arc::clone(&joining),
             state: Ok(state),
+            login_attempt: PlayerLoginAttemptGuard::new(&server, Arc::clone(&joining)),
         });
 
         assert!(world.contains_player(&joining));
@@ -2794,6 +2910,295 @@ fn command_source_and_operator_checks_use_published_subject_state() {
         if let Err(error) = fs::remove_dir_all(&storage_root).await {
             panic!("test storage should be removed: {error}");
         }
+    });
+}
+
+#[test]
+fn committed_permission_update_is_published_despite_backup_rotation_failure() {
+    let world = Arc::clone(test_world());
+    let runtime = Builder::new_current_thread().enable_all().build();
+    let Ok(runtime) = runtime else {
+        panic!("test runtime should initialize");
+    };
+    runtime.block_on(async {
+        let uuid = Uuid::from_u128(0x5045_524d);
+        let storage_root = test_storage_root("permission-committed-warning");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("test server should initialize: {error}"));
+
+        server
+            .try_update_player_permissions(uuid, |state| {
+                let (mut groups, overrides, metadata) = state.into_parts();
+                groups.push(OP_GROUP.to_owned());
+                Ok::<_, Infallible>((
+                    PermissionSubjectState::new_with_metadata(groups, overrides, metadata),
+                    (),
+                ))
+            })
+            .await
+            .unwrap_or_else(|error| panic!("initial permission write should succeed: {error}"));
+        assert!(server.is_operator(uuid));
+
+        fs::create_dir(storage_root.join("global/player_permissions.toml_old"))
+            .await
+            .unwrap_or_else(|error| panic!("backup obstruction should be created: {error}"));
+        let (_, (), outcome) = server
+            .try_update_player_permissions(uuid, |state| {
+                let (mut groups, overrides, metadata) = state.into_parts();
+                groups.retain(|group| group != OP_GROUP);
+                Ok::<_, Infallible>((
+                    PermissionSubjectState::new_with_metadata(groups, overrides, metadata),
+                    (),
+                ))
+            })
+            .await
+            .unwrap_or_else(|error| {
+                panic!("visible permission commit must not become a storage failure: {error}")
+            });
+
+        assert!(matches!(
+            outcome,
+            PersistenceUpdateOutcome::CommittedWithError(_)
+        ));
+        assert!(!server.is_operator(uuid));
+        let persisted = server
+            .player_data_storage
+            .load_permission_subjects()
+            .await
+            .unwrap_or_else(|error| panic!("committed permissions should load: {error}"));
+        assert!(persisted.get(uuid).is_none());
+
+        drop(server);
+        fs::remove_dir_all(&storage_root)
+            .await
+            .unwrap_or_else(|error| panic!("test storage should be removed: {error}"));
+    });
+}
+
+#[test]
+fn permission_update_failure_before_commit_does_not_publish_cache() {
+    let world = Arc::clone(test_world());
+    let runtime = Builder::new_current_thread().enable_all().build();
+    let Ok(runtime) = runtime else {
+        panic!("test runtime should initialize");
+    };
+    runtime.block_on(async {
+        let uuid = Uuid::from_u128(0x0050_5245_434f_4d4d_4954);
+        let storage_root = test_storage_root("permission-precommit-failure");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("test server should initialize: {error}"));
+
+        fs::create_dir(storage_root.join("global/player_permissions.toml.tmp"))
+            .await
+            .unwrap_or_else(|error| {
+                panic!("temporary-file obstruction should be created: {error}")
+            });
+        let update = server
+            .try_update_player_permissions(uuid, |state| {
+                let (mut groups, overrides, metadata) = state.into_parts();
+                groups.push(OP_GROUP.to_owned());
+                Ok::<_, Infallible>((
+                    PermissionSubjectState::new_with_metadata(groups, overrides, metadata),
+                    (),
+                ))
+            })
+            .await;
+
+        assert!(matches!(
+            update,
+            Err(PlayerPermissionUpdateError::Storage(_))
+        ));
+        assert!(
+            !server.is_operator(uuid),
+            "a failure before the primary rename must leave the published cache unchanged"
+        );
+        assert!(
+            server.player_permission_state(uuid).is_none(),
+            "the failed edit must not create a cached subject"
+        );
+
+        drop(server);
+        fs::remove_dir_all(&storage_root)
+            .await
+            .unwrap_or_else(|error| panic!("test storage should be removed: {error}"));
+    });
+}
+
+#[test]
+fn pre_run_shutdown_drains_plugin_player_list_updates_and_closes_admission() {
+    let world = fresh_test_world("plugin_persistence_early_shutdown");
+    let runtime = Builder::new_current_thread().enable_all().build();
+    let Ok(runtime) = runtime else {
+        panic!("test runtime should initialize");
+    };
+    runtime.block_on(async {
+        let uuid = Uuid::from_u128(0x504c_5547_494e_5348_5554_444f_574e);
+        let storage_root = test_storage_root("plugin-persistence-early-shutdown");
+        let server = test_server(world, PermissionSubjectIndex::new(), &storage_root)
+            .await
+            .unwrap_or_else(|error| panic!("test server should initialize: {error}"));
+
+        server.queue_player_operator_update(uuid, true);
+        server.queue_player_whitelist_update(uuid, true);
+        server.close_and_drain_plugin_persistence_updates().await;
+
+        let persisted_permissions = server
+            .player_data_storage
+            .load_permission_subjects()
+            .await
+            .unwrap_or_else(|error| panic!("drained permissions should load: {error}"));
+        assert!(
+            persisted_permissions
+                .get(uuid)
+                .is_some_and(|state| state.groups().iter().any(|group| group == OP_GROUP)),
+            "the early shutdown barrier returned before the operator update persisted"
+        );
+        let persisted_global = server
+            .player_data_storage
+            .load_global(uuid)
+            .await
+            .unwrap_or_else(|error| panic!("drained whitelist data should load: {error}"));
+        assert!(
+            persisted_global.is_some_and(|data| data.whitelisted),
+            "the early shutdown barrier returned before the whitelist update persisted"
+        );
+
+        server.queue_player_operator_update(uuid, false);
+        server.queue_player_whitelist_update(uuid, false);
+        server.close_and_drain_plugin_persistence_updates().await;
+        assert!(server.is_operator(uuid));
+        assert!(
+            server
+                .player_data_storage
+                .load_global(uuid)
+                .await
+                .unwrap_or_else(|error| panic!("whitelist data should reload: {error}"))
+                .is_some_and(|data| data.whitelisted),
+            "an update entered after the shutdown admission boundary"
+        );
+
+        drop(server);
+        fs::remove_dir_all(&storage_root)
+            .await
+            .unwrap_or_else(|error| panic!("test storage should be removed: {error}"));
+    });
+}
+
+#[test]
+fn newer_queued_revisions_supersede_detached_grants() {
+    let world = Arc::clone(test_world());
+    let runtime = Builder::new_current_thread().enable_all().build();
+    let Ok(runtime) = runtime else {
+        panic!("test runtime should initialize");
+    };
+    runtime.block_on(async {
+        let uuid = Uuid::from_u128(0x004f_5244_4552);
+        let storage_root = test_storage_root("queued-permission-order");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("test server should initialize: {error}"));
+
+        let operator_grant = server.begin_queued_operator_update(uuid);
+        let operator_revoke = server.begin_queued_operator_update(uuid);
+        let grant_server = Arc::clone(&server);
+        let grant_revision = Arc::clone(&operator_grant);
+        let stale_grant = server
+            .try_update_player_permissions_if_current(
+                uuid,
+                move || grant_server.queued_operator_update_is_current(uuid, &grant_revision),
+                |state| {
+                    let (mut groups, overrides, metadata) = state.into_parts();
+                    groups.push(OP_GROUP.to_owned());
+                    Ok::<_, Infallible>((
+                        PermissionSubjectState::new_with_metadata(groups, overrides, metadata),
+                        (),
+                    ))
+                },
+            )
+            .await;
+        assert!(matches!(
+            stale_grant,
+            Err(PlayerPermissionUpdateError::Superseded)
+        ));
+
+        let revoke_server = Arc::clone(&server);
+        let revoke_revision = Arc::clone(&operator_revoke);
+        server
+            .try_update_player_permissions_if_current(
+                uuid,
+                move || revoke_server.queued_operator_update_is_current(uuid, &revoke_revision),
+                |state| Ok::<_, Infallible>((state, ())),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("latest operator revision should persist: {error}"));
+        assert!(!server.is_operator(uuid));
+
+        let whitelist_grant = server.begin_queued_whitelist_update(uuid);
+        let whitelist_revoke = server.begin_queued_whitelist_update(uuid);
+        let fallback = GlobalPlayerData {
+            last_active_domain: server.worlds.default_domain().to_owned(),
+            first_played: 0,
+            last_played: 0,
+            statistics: Vec::new(),
+            whitelisted: false,
+        };
+        let stale_server = Arc::clone(&server);
+        let stale_revision = Arc::clone(&whitelist_grant);
+        let stale_whitelist = server
+            .player_data_storage
+            .set_player_whitelisted(
+                uuid,
+                true,
+                &fallback,
+                move || stale_server.queued_whitelist_update_is_current(uuid, &stale_revision),
+                |_| {},
+            )
+            .await
+            .unwrap_or_else(|error| panic!("stale whitelist check should not fail: {error}"));
+        assert!(stale_whitelist.is_none());
+
+        let current_server = Arc::clone(&server);
+        let current_revision = Arc::clone(&whitelist_revoke);
+        let publication_server = Arc::clone(&server);
+        let current_whitelist = server
+            .player_data_storage
+            .set_player_whitelisted(
+                uuid,
+                false,
+                &fallback,
+                move || current_server.queued_whitelist_update_is_current(uuid, &current_revision),
+                move |data| publication_server.publish_player_whitelist(uuid, data),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("latest whitelist revision should persist: {error}"));
+        assert!(matches!(
+            current_whitelist,
+            Some(PersistenceUpdateOutcome::Durable)
+        ));
+        assert!(
+            !server
+                .global_player_data(uuid)
+                .is_some_and(|data| data.whitelisted)
+        );
+
+        drop(server);
+        fs::remove_dir_all(&storage_root)
+            .await
+            .unwrap_or_else(|error| panic!("test storage should be removed: {error}"));
     });
 }
 
@@ -3401,5 +3806,148 @@ fn a_duplicate_login_displaces_the_session_holding_the_uuid_instead_of_being_ref
             Some(PlayerAdmissionState::Joining),
             "the newcomer must hold the admission"
         );
+    });
+}
+
+#[test]
+fn duplicate_waiter_disconnects_an_incumbent_that_finishes_joining_later() {
+    let world = fresh_test_world("duplicate_waiter_joining_to_online");
+    let runtime = Builder::new_current_thread().enable_all().build();
+    let Ok(runtime) = runtime else {
+        panic!("test runtime should initialize");
+    };
+
+    runtime.block_on(async {
+        let storage_root = test_storage_root("duplicate-waiter-joining-to-online");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await;
+        let Ok(server) = server else {
+            panic!("test server should initialize");
+        };
+
+        let uuid = Uuid::from_u128(0x5252);
+        let (incumbent, incumbent_disconnected) =
+            test_player_with_disconnect_flag(&server, Arc::clone(&world), uuid, "Incumbent", 1);
+        assert!(server.reserve_player_join(&incumbent));
+
+        let newcomer =
+            test_player_with_uuid_and_packets(&server, Arc::clone(&world), uuid, "Newcomer", 2).0;
+        let reserving = {
+            let server = Arc::clone(&server);
+            let newcomer = Arc::clone(&newcomer);
+            tokio::spawn(async move { server.reserve_player_join_over_duplicate(&newcomer).await })
+        };
+
+        // The current-thread runtime guarantees the waiter reaches its first
+        // sleep before this task resumes, so its initial duplicate lookup saw
+        // only the `Joining` admission and no online incumbent.
+        yield_now().await;
+        assert!(!incumbent_disconnected.load(Ordering::Acquire));
+        assert!(server.admit_reserved_player(Arc::clone(&incumbent)));
+
+        sleep(Duration::from_millis(75)).await;
+        assert!(
+            incumbent_disconnected.load(Ordering::Acquire),
+            "the next duplicate poll must find and disconnect the newly-online incumbent"
+        );
+        assert!(
+            server
+                .online_players
+                .remove_player_sync(&incumbent)
+                .is_some()
+        );
+        assert!(
+            reserving
+                .await
+                .expect("duplicate reservation task should not panic")
+        );
+
+        server.release_player_admission(uuid, PlayerAdmissionState::Joining);
+        drop((newcomer, incumbent));
+        drop(server);
+        if let Err(error) = fs::remove_dir_all(&storage_root).await {
+            panic!("test storage should be removed: {error}");
+        }
+    });
+}
+
+#[test]
+fn joining_reservations_consume_capacity_before_player_data_is_loaded() {
+    let world = fresh_test_world("joining_reservations_consume_capacity");
+    let runtime = Builder::new_current_thread().enable_all().build();
+    let Ok(runtime) = runtime else {
+        panic!("test runtime should initialize");
+    };
+
+    runtime.block_on(async {
+        let storage_root = test_storage_root("joining-reservations-consume-capacity");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await;
+        let Ok(server) = server else {
+            panic!("test server should initialize");
+        };
+
+        let mut online = Vec::new();
+        for index in 0..(server.config.max_players - 1) {
+            let player = test_player_with_uuid_and_packets(
+                &server,
+                Arc::clone(&world),
+                Uuid::from_u128(u128::from(index) + 1),
+                &format!("Online{index}"),
+                i32::try_from(index).expect("test player index fits i32") + 1,
+            )
+            .0;
+            assert!(server.online_players.insert(Arc::clone(&player)));
+            online.push(player);
+        }
+
+        let joining = test_player_with_uuid_and_packets(
+            &server,
+            Arc::clone(&world),
+            Uuid::from_u128(10_000),
+            "Joining",
+            10_000,
+        )
+        .0;
+        assert!(server.reserve_player_join(&joining));
+
+        let overflow = test_player_with_uuid_and_packets(
+            &server,
+            Arc::clone(&world),
+            Uuid::from_u128(10_001),
+            "Overflow",
+            10_001,
+        )
+        .0;
+        assert!(
+            !server.reserve_player_join(&overflow),
+            "a joining reservation must consume the last slot before its async load starts"
+        );
+        assert_eq!(
+            server
+                .player_admissions
+                .lock()
+                .values()
+                .filter(|state| **state == PlayerAdmissionState::Joining)
+                .count(),
+            1
+        );
+
+        server.release_player_admission(joining.gameprofile.id, PlayerAdmissionState::Joining);
+        assert!(server.reserve_player_join(&overflow));
+
+        drop((overflow, joining, online));
+        drop(server);
+        if let Err(error) = fs::remove_dir_all(&storage_root).await {
+            panic!("test storage should be removed: {error}");
+        }
     });
 }

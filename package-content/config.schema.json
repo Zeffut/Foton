@@ -245,6 +245,11 @@
               "maximum": 65535,
               "default": 25575
             },
+            "bind_address": {
+              "type": "string",
+              "description": "IP address rcon listens on; loopback is the secure default because Source Rcon is plaintext",
+              "default": "127.0.0.1"
+            },
             "password": {
               "type": "string",
               "description": "Password every rcon client must send before it may run a command",

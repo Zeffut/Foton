@@ -1,5 +1,9 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{
+    sync::Weak,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
+use crate::event::PlayerLoginAbortEvent;
 use foton_utils::translations;
 
 /// How long a duplicate login waits for the session it displaced to finish leaving.
@@ -21,6 +25,36 @@ use super::{
 pub(super) struct PendingPlayerJoin {
     pub(super) player: Arc<Player>,
     pub(super) state: Result<DomainPlayerState, String>,
+    pub(super) login_attempt: PlayerLoginAttemptGuard,
+}
+
+pub(super) struct PlayerLoginAttemptGuard {
+    server: Weak<Server>,
+    player: Option<Arc<Player>>,
+}
+
+impl PlayerLoginAttemptGuard {
+    pub(super) fn new(server: &Arc<Server>, player: Arc<Player>) -> Self {
+        Self {
+            server: Arc::downgrade(server),
+            player: Some(player),
+        }
+    }
+
+    pub(super) fn commit(&mut self) {
+        self.player = None;
+    }
+}
+
+impl Drop for PlayerLoginAttemptGuard {
+    fn drop(&mut self) {
+        let Some(player) = self.player.take() else {
+            return;
+        };
+        if let Some(server) = self.server.upgrade() {
+            server.abort_player_login(&player);
+        }
+    }
 }
 
 pub(super) struct PendingPlayerDisconnect {
@@ -34,6 +68,13 @@ pub(super) enum PlayerAdmissionState {
     Joining,
     Relocating,
     Disconnecting,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PlayerJoinReservation {
+    Reserved,
+    Duplicate,
+    Full,
 }
 
 pub(super) struct PlayerJoinQueue {
@@ -110,19 +151,29 @@ impl Server {
     /// game tick safe point so the socket reader can enter play immediately.
     pub fn queue_player_join(self: &Arc<Self>, player: Arc<Player>) {
         if player.connection.closed() {
+            self.abort_player_login(&player);
             return;
         }
 
         let server = Arc::clone(self);
+        let login_attempt = PlayerLoginAttemptGuard::new(self, Arc::clone(&player));
         tokio::spawn(async move {
             if !server.reserve_player_join_over_duplicate(&player).await {
                 return;
             }
             let state = server.prepare_player_join(&player).await;
-            server
-                .pending_player_joins
-                .send(PendingPlayerJoin { player, state });
+            server.pending_player_joins.send(PendingPlayerJoin {
+                player,
+                state,
+                login_attempt,
+            });
         });
+    }
+
+    /// Announces that a protocol login attempt ended before its join event.
+    pub fn abort_player_login(&self, player: &Arc<Player>) {
+        let mut event = PlayerLoginAbortEvent::new(Arc::clone(player));
+        self.events.fire(&mut event);
     }
 
     /// Reserves the join slot, displacing whoever already holds the UUID.
@@ -147,15 +198,17 @@ impl Server {
         self: &Arc<Self>,
         player: &Arc<Player>,
     ) -> bool {
-        if self.reserve_player_join(player) {
-            return true;
+        match self.try_reserve_player_join(player) {
+            PlayerJoinReservation::Reserved => return true,
+            PlayerJoinReservation::Full => {
+                player.disconnect("The server is full");
+                return false;
+            }
+            PlayerJoinReservation::Duplicate => {}
         }
 
         let uuid = player.gameprofile.id;
-        if let Some(incumbent) = self.online_players.get_by_uuid(&uuid) {
-            log::info!("Disconnecting the existing session for {uuid}: duplicate login");
-            incumbent.disconnect(translations::MULTIPLAYER_DISCONNECT_DUPLICATE_LOGIN.msg());
-        }
+        self.disconnect_duplicate_incumbent(uuid);
 
         let deadline = Instant::now() + DUPLICATE_LOGIN_TEARDOWN_TIMEOUT;
         while Instant::now() < deadline {
@@ -163,14 +216,30 @@ impl Server {
             if player.connection.closed() {
                 return false;
             }
-            if self.reserve_player_join(player) {
-                return true;
+            match self.try_reserve_player_join(player) {
+                PlayerJoinReservation::Reserved => return true,
+                PlayerJoinReservation::Full => {
+                    player.disconnect("The server is full");
+                    return false;
+                }
+                PlayerJoinReservation::Duplicate => self.disconnect_duplicate_incumbent(uuid),
             }
         }
 
         log::warn!("Login for {uuid} gave up waiting for the previous session to leave");
         player.disconnect("You are already connected to this server");
         false
+    }
+
+    fn disconnect_duplicate_incumbent(&self, uuid: Uuid) {
+        let Some(incumbent) = self.online_players.get_by_uuid(&uuid) else {
+            return;
+        };
+        if incumbent.connection.closed() {
+            return;
+        }
+        log::info!("Disconnecting the existing session for {uuid}: duplicate login");
+        incumbent.disconnect(translations::MULTIPLAYER_DISCONNECT_DUPLICATE_LOGIN.msg());
     }
 
     async fn prepare_player_join(&self, player: &Player) -> Result<DomainPlayerState, String> {
@@ -186,7 +255,11 @@ impl Server {
     }
 
     pub(super) fn finish_prepared_player_join(self: &Arc<Self>, join: PendingPlayerJoin) {
-        let PendingPlayerJoin { player, state } = join;
+        let PendingPlayerJoin {
+            player,
+            state,
+            mut login_attempt,
+        } = join;
         let uuid = player.gameprofile.id;
         if player.connection.closed() {
             self.release_player_admission(uuid, PlayerAdmissionState::Joining);
@@ -264,6 +337,7 @@ impl Server {
         }
         let previous_name = self.record_known_player(&player.gameprofile);
         self.broadcast_player_join_message(&player, previous_name.as_deref());
+        login_attempt.commit();
         // Vanilla parity: the `customBossEvents.onPlayerConnect` of
         // `PlayerList.placeNewPlayer`. A named bar remembers who it was
         // assigned to across a logout, and this is where it is handed back.
@@ -280,21 +354,38 @@ impl Server {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn reserve_player_join(&self, player: &Player) -> bool {
+        self.try_reserve_player_join(player) == PlayerJoinReservation::Reserved
+    }
+
+    fn try_reserve_player_join(&self, player: &Player) -> PlayerJoinReservation {
         let uuid = player.gameprofile.id;
         let mut admissions = self.player_admissions.lock();
         if admissions.contains_key(&uuid) {
-            return false;
+            return PlayerJoinReservation::Duplicate;
         }
         if self.online_players.get_by_uuid(&uuid).is_some() {
-            return false;
+            return PlayerJoinReservation::Duplicate;
         }
-        admissions
-            .insert(uuid, PlayerAdmissionState::Joining)
-            .is_none()
+
+        // Hold the admission lock across the capacity check and insertion so
+        // concurrent login tasks count one another before any player-data I/O
+        // begins. Relocations and disconnect saves already belong to players
+        // counted in `online_players`; only `Joining` reservations are extra.
+        let joining = admissions
+            .values()
+            .filter(|state| **state == PlayerAdmissionState::Joining)
+            .count();
+        if self.player_count().saturating_add(joining) >= self.config.max_players as usize {
+            return PlayerJoinReservation::Full;
+        }
+        let previous = admissions.insert(uuid, PlayerAdmissionState::Joining);
+        debug_assert!(previous.is_none());
+        PlayerJoinReservation::Reserved
     }
 
-    fn admit_reserved_player(&self, player: Arc<Player>) -> bool {
+    pub(super) fn admit_reserved_player(&self, player: Arc<Player>) -> bool {
         let uuid = player.gameprofile.id;
         let mut admissions = self.player_admissions.lock();
         if admissions.get(&uuid) != Some(&PlayerAdmissionState::Joining) {

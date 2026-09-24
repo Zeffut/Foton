@@ -25,25 +25,44 @@
 #![cfg_attr(not(test), warn(clippy::panic, clippy::unreachable, clippy::todo))]
 
 use std::ffi::{CString, NulError, c_void};
-use std::fs::read_dir;
+use std::fs::{read_dir, symlink_metadata};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::ptr;
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, LazyLock, Weak};
+use std::time::Duration;
 
 use foton_core::server::Server;
+use foton_protocol::packet_traits::PacketTranslation;
+use foton_utils::locks::SyncMutex;
 use jni::objects::JString;
 use jni::sys::{JNI_OK, JNI_VERSION_1_8, JavaVM as RawJavaVm, JavaVMInitArgs, JavaVMOption};
 use jni::{JavaVM, errors::Error as JniError};
 use thiserror::Error;
+use tokio::{
+    sync::Semaphore,
+    task::spawn_blocking,
+    time::{Instant, timeout_at},
+};
 
 mod forward;
 mod natives;
+mod via;
 
 /// The class the Java side exposes to this one.
 const HOST_CLASS: &str = "foton/PluginHost";
 
 /// The class whose methods Foton answers.
 const NATIVE_CLASS: &str = "foton/Native";
+
+/// The JVM lives until process exit, so the library containing its executing
+/// code must remain mapped for that entire lifetime too.
+static JVM_RUNTIMES: LazyLock<SyncMutex<Vec<libloading::Library>>> =
+    LazyLock::new(|| SyncMutex::new(Vec::new()));
+
+/// Limits connection setup calls that may be blocked inside a plugin's Netty initializer.
+static VIA_OPEN_WORKERS: LazyLock<Arc<Semaphore>> = LazyLock::new(|| Arc::new(Semaphore::new(32)));
+const VIA_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Why a plugin host could not start, or could not do its job.
 #[derive(Debug, Error)]
@@ -63,9 +82,15 @@ pub enum PluginHostError {
     /// The API jar the plugins are loaded against is not where it should be.
     #[error("the plugin API jar is missing at {0}; run dev/build-plugin-api.sh")]
     NoApiJar(PathBuf),
+    /// A configured classpath directory could not be read completely.
+    #[error("could not read plugin library directory {0}: {1}")]
+    LibraryDirectory(PathBuf, io::Error),
     /// Something went wrong on the Java side of the boundary.
     #[error("the plugin host failed: {0}")]
     Java(#[from] JniError),
+    /// A bounded JVM worker could not complete a connection operation.
+    #[error("the plugin network bridge failed: {0}")]
+    JavaTask(String),
 }
 
 /// Where the pieces a plugin host needs are.
@@ -104,12 +129,12 @@ impl PluginHostConfig {
     /// not expand that the way the `java` launcher does, and what a plugin can
     /// reach is worth deciding on purpose in any case.
     fn class_path(&self) -> Result<String, PluginHostError> {
-        if !self.api_jar.is_file() {
+        if !is_regular_file(&self.api_jar) {
             return Err(PluginHostError::NoApiJar(self.api_jar.clone()));
         }
-        let mut entries = vec![self.api_jar.to_string_lossy().into_owned()];
+        let mut entries = vec![jvm_path(&self.api_jar)];
         if let Some(directory) = &self.library_directory {
-            entries.extend(jars_in(directory));
+            entries.extend(jars_in(directory)?);
         }
         Ok(entries.join(if cfg!(target_os = "windows") {
             ";"
@@ -120,18 +145,34 @@ impl PluginHostConfig {
 }
 
 /// Every jar directly inside a directory, sorted so a classpath is reproducible.
-fn jars_in(directory: &Path) -> Vec<String> {
-    let Ok(entries) = read_dir(directory) else {
-        return Vec::new();
-    };
-    let mut jars: Vec<String> = entries
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().is_some_and(|ext| ext == "jar"))
-        .map(|path| path.to_string_lossy().into_owned())
-        .collect();
+fn jars_in(directory: &Path) -> Result<Vec<String>, PluginHostError> {
+    let entries = read_dir(directory)
+        .map_err(|error| PluginHostError::LibraryDirectory(directory.to_owned(), error))?;
+    let mut jars = Vec::new();
+    for entry in entries {
+        let entry = entry
+            .map_err(|error| PluginHostError::LibraryDirectory(directory.to_owned(), error))?;
+        let kind = entry
+            .file_type()
+            .map_err(|error| PluginHostError::LibraryDirectory(directory.to_owned(), error))?;
+        let path = entry.path();
+        if kind.is_file() && path.extension().is_some_and(|extension| extension == "jar") {
+            jars.push(jvm_path(&path));
+        }
+    }
     jars.sort();
-    jars
+    Ok(jars)
+}
+
+fn jvm_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+/// True only for a direct regular file. Runtime classpaths never follow links:
+/// otherwise a bundle validated inside one directory can be swapped to point
+/// outside it before the JVM opens the jar.
+fn is_regular_file(path: &Path) -> bool {
+    symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_file())
 }
 
 /// A running Java runtime with Foton's plugin host inside it.
@@ -141,10 +182,6 @@ fn jars_in(directory: &Path) -> Vec<String> {
 /// [`Self::disable_all`] to stop the plugins.
 pub struct PluginHost {
     vm: Arc<JavaVM>,
-    /// The loaded runtime, kept alive because the VM's code lives in it.
-    ///
-    /// Dropping this would unmap the library the JVM is executing from.
-    _runtime: libloading::Library,
 }
 
 /// The entry point every Java runtime exports.
@@ -171,7 +208,7 @@ impl PluginHost {
         // fails to load or fails to export the symbol rather than doing
         // something surprising. `JNI_CreateJavaVM` is called with arguments
         // built immediately below and valid for the whole call.
-        let (vm, runtime) = unsafe {
+        let vm = unsafe {
             let runtime = libloading::Library::new(&library)
                 .map_err(|error| PluginHostError::NoRuntime(library.clone(), error.to_string()))?;
             let create: libloading::Symbol<'_, CreateJavaVm> =
@@ -207,17 +244,17 @@ impl PluginHost {
             if status != JNI_OK {
                 return Err(PluginHostError::RuntimeRefused(status));
             }
+            // Pin the runtime before another fallible JNI operation can return:
+            // a successful create call has already started process-lifetime
+            // JVM threads that may execute code from this library.
+            JVM_RUNTIMES.lock().push(runtime);
             // SAFETY: the pointer came from a `JNI_CreateJavaVM` that reported
             // success, which is exactly what `from_raw` requires.
-            let vm = JavaVM::from_raw(raw_vm)?;
-            (vm, runtime)
+            JavaVM::from_raw(raw_vm)?
         };
 
         natives::bind(server.clone());
-        let host = Self {
-            vm: Arc::new(vm),
-            _runtime: runtime,
-        };
+        let host = Self { vm: Arc::new(vm) };
         if let Err(error) = host.register_natives() {
             eprintln!("native registration failed: {error:?}");
             return Err(error);
@@ -240,6 +277,27 @@ impl PluginHost {
         if let Some(server) = server.upgrade() {
             forward::subscribe(&server, Arc::clone(&self.vm));
         }
+    }
+
+    /// Opens a per-connection Via pipeline when a plugin registered Paper's hook.
+    pub async fn open_packet_translation(
+        &self,
+    ) -> Result<Option<PacketTranslation>, PluginHostError> {
+        let deadline = Instant::now() + VIA_OPEN_TIMEOUT;
+        let worker = timeout_at(deadline, Arc::clone(&VIA_OPEN_WORKERS).acquire_owned())
+            .await
+            .map_err(|_| PluginHostError::JavaTask("opening a Via channel timed out".to_owned()))?
+            .map_err(|_| PluginHostError::JavaTask("Via worker pool is closed".to_owned()))?;
+        let vm = Arc::clone(&self.vm);
+        let task = spawn_blocking(move || {
+            let _worker = worker;
+            via::ViaTranslator::open(vm)
+        });
+        timeout_at(deadline, task)
+            .await
+            .map_err(|_| PluginHostError::JavaTask("opening a Via channel timed out".to_owned()))?
+            .map_err(|error| PluginHostError::JavaTask(error.to_string()))?
+            .map_err(|error| PluginHostError::JavaTask(error.to_string()))
     }
 
     /// Tells the runtime which Rust function answers each declared native.
@@ -340,6 +398,13 @@ impl PluginHost {
         forward::unsubscribe(server);
     }
 
+    /// Marks an actual server shutdown before connections and plugins are drained.
+    pub fn mark_stopping(&self) -> Result<(), PluginHostError> {
+        let mut env = self.vm.attach_current_thread()?;
+        env.call_static_method(HOST_CLASS, "markStopping", "()V", &[])?;
+        Ok(())
+    }
+
     /// Disables every loaded plugin, newest first.
     ///
     /// # Errors
@@ -354,3 +419,51 @@ impl PluginHost {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod class_path_file_tests {
+    #[cfg(unix)]
+    use super::is_regular_file;
+    use super::jars_in;
+    use std::fs::{create_dir, write};
+
+    #[test]
+    fn classpath_uses_only_direct_regular_jars() {
+        let temporary = tempfile::tempdir().expect("temporary classpath directory");
+        let regular = temporary.path().join("regular.jar");
+        write(&regular, b"jar").expect("regular test jar");
+        create_dir(temporary.path().join("directory.jar")).expect("jar-shaped directory");
+
+        assert_eq!(
+            jars_in(temporary.path()).expect("readable classpath directory"),
+            vec![regular.to_string_lossy().replace('\\', "/")]
+        );
+    }
+
+    #[test]
+    fn missing_classpath_directory_is_an_error() {
+        let temporary = tempfile::tempdir().expect("temporary classpath parent");
+        let missing = temporary.path().join("missing");
+
+        assert!(jars_in(&missing).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn classpath_rejects_jar_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let temporary = tempfile::tempdir().expect("temporary classpath directory");
+        let target = temporary.path().join("target.bin");
+        let link = temporary.path().join("linked.jar");
+        write(&target, b"jar").expect("symlink target");
+        symlink(&target, &link).expect("jar symlink");
+
+        assert!(!is_regular_file(&link));
+        assert!(
+            jars_in(temporary.path())
+                .expect("readable classpath directory")
+                .is_empty()
+        );
+    }
+}

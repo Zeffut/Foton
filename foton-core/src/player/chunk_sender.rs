@@ -6,7 +6,10 @@
 //! `mark_chunk_pending_to_send` and `drop_chunk` are never blocked for long.
 use rayon::{ThreadPool, prelude::*};
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::sync::{Arc, Weak};
+use std::{
+    fmt, mem,
+    sync::{Arc, Weak},
+};
 
 use foton_protocol::packet_traits::{ClientPacket, CompressionInfo, EncodedPacket};
 use foton_protocol::packets::game::{
@@ -15,6 +18,7 @@ use foton_protocol::packets::game::{
 use foton_protocol::utils::ConnectionProtocol;
 use foton_utils::locks::SyncMutex;
 use foton_utils::{ChunkPos, PackedChunkPos};
+use tokio::sync::mpsc;
 
 use crate::{
     chunk::{
@@ -27,9 +31,9 @@ use crate::{
 };
 
 /// Minimum chunks per tick (vanilla: 0.01)
-const MIN_CHUNKS_PER_TICK: f32 = 0.1f32;
-/// Maximum chunks per tick (vanilla: 64.0, we use 500.0 for faster loading)
-const MAX_CHUNKS_PER_TICK: f32 = 500.0;
+const MIN_CHUNKS_PER_TICK: f32 = 0.01;
+/// Maximum chunks per tick (vanilla: 64.0)
+const MAX_CHUNKS_PER_TICK: f32 = 64.0;
 /// Starting chunks per tick (vanilla: 9.0)
 const START_CHUNKS_PER_TICK: f32 = 9.0;
 /// Maximum unacknowledged batches after first ack (vanilla: 10)
@@ -53,6 +57,7 @@ pub struct PreparedBatch {
     pub has_skylight: bool,
     /// Snapshot of the player's generation counter at prepare time.
     pub epoch_snapshot: u32,
+    reusable_encoded_chunks: SyncMutex<Vec<EncodedChunk>>,
 }
 
 /// Encoded chunk packet plus the holder and readiness generation it was built from.
@@ -60,6 +65,13 @@ pub struct PreparedBatch {
 pub struct EncodedChunk {
     pos: ChunkPos,
     packet: EncodedPacket,
+    content_revision: u64,
+    holder: Weak<ChunkHolder>,
+    readiness: TickingReadinessSnapshot,
+}
+
+struct EncodedChunkMetadata {
+    pos: ChunkPos,
     content_revision: u64,
     holder: Weak<ChunkHolder>,
     readiness: TickingReadinessSnapshot,
@@ -78,10 +90,33 @@ impl EncodedChunk {
             && prepared.holder.ticking_readiness_snapshot() == prepared.readiness
             && prepared.holder.packet_content_revision() == self.content_revision
     }
+
+    fn into_parts(self) -> (EncodedChunkMetadata, EncodedPacket) {
+        (
+            EncodedChunkMetadata {
+                pos: self.pos,
+                content_revision: self.content_revision,
+                holder: self.holder,
+                readiness: self.readiness,
+            },
+            self.packet,
+        )
+    }
+}
+
+impl EncodedChunkMetadata {
+    fn with_packet(self, packet: EncodedPacket) -> EncodedChunk {
+        EncodedChunk {
+            pos: self.pos,
+            packet,
+            content_revision: self.content_revision,
+            holder: self.holder,
+            readiness: self.readiness,
+        }
+    }
 }
 
 /// This struct is responsible for sending chunks to the client.
-#[derive(Debug)]
 pub struct ChunkSender {
     /// A list of chunks that are waiting to be sent to the client.
     pub pending_chunks: FxHashSet<ChunkPos>,
@@ -97,6 +132,28 @@ pub struct ChunkSender {
     /// The maximum number of unacknowledged batches allowed.
     /// Starts at 1 and increases to `MAX_UNACKNOWLEDGED_BATCHES` after first ack.
     pub max_unacknowledged_batches: u16,
+    deferred_encoded_chunks: Vec<EncodedChunk>,
+}
+
+impl fmt::Debug for ChunkSender {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ChunkSender")
+            .field("pending_chunks", &self.pending_chunks)
+            .field("sent_chunks", &self.sent_chunks)
+            .field("unacknowledged_batches", &self.unacknowledged_batches)
+            .field("desired_chunks_per_tick", &self.desired_chunks_per_tick)
+            .field("batch_quota", &self.batch_quota)
+            .field(
+                "max_unacknowledged_batches",
+                &self.max_unacknowledged_batches,
+            )
+            .field(
+                "deferred_encoded_chunk_count",
+                &self.deferred_encoded_chunks.len(),
+            )
+            .finish()
+    }
 }
 
 impl ChunkSender {
@@ -109,6 +166,8 @@ impl ChunkSender {
     /// Drops a chunk from the client's view.
     pub fn drop_chunk(&mut self, connection: &PlayerConnection, pos: ChunkPos) {
         self.pending_chunks.remove(&pos);
+        self.deferred_encoded_chunks
+            .retain(|encoded| encoded.pos != pos);
         if self.sent_chunks.remove(&pos) && !connection.closed() {
             Self::send_packet(
                 connection,
@@ -132,6 +191,49 @@ impl ChunkSender {
             return;
         };
         connection.send_encoded(encoded);
+    }
+
+    fn encode_packet<P: ClientPacket>(
+        connection: &PlayerConnection,
+        packet: P,
+    ) -> Option<EncodedPacket> {
+        match EncodedPacket::from_bare(packet, connection.compression(), ConnectionProtocol::Play) {
+            Ok(encoded) => Some(encoded),
+            Err(error) => {
+                log::warn!("Failed to encode a chunk-batch boundary packet: {error}");
+                None
+            }
+        }
+    }
+
+    fn try_send_batch(
+        connection: &PlayerConnection,
+        packets: Vec<EncodedPacket>,
+    ) -> Result<(), mpsc::error::TrySendError<Vec<EncodedPacket>>> {
+        if connection.closed() {
+            return Err(mpsc::error::TrySendError::Closed(packets));
+        }
+
+        match connection {
+            PlayerConnection::Java(java) => java.try_send_chunk_batch(packets),
+            PlayerConnection::Other(other) => {
+                for packet in packets {
+                    other.send_encoded(packet);
+                }
+                if other.closed() {
+                    Err(mpsc::error::TrySendError::Closed(Vec::new()))
+                } else {
+                    Ok(())
+                }
+            }
+        }
+    }
+
+    fn batch_byte_capacity(connection: &PlayerConnection) -> usize {
+        match connection {
+            PlayerConnection::Java(java) => java.chunk_batch_byte_capacity(),
+            PlayerConnection::Other(_) => usize::MAX,
+        }
     }
 
     /// Phase 1: Lock briefly to drain pending chunks and snapshot state.
@@ -165,6 +267,7 @@ impl ChunkSender {
             chunks: holders,
             has_skylight: world.dimension_type.has_skylight,
             epoch_snapshot,
+            reusable_encoded_chunks: SyncMutex::new(mem::take(&mut self.deferred_encoded_chunks)),
         })
     }
 
@@ -182,11 +285,25 @@ impl ChunkSender {
         compression: Option<CompressionInfo>,
         encoding_pool: &ThreadPool,
     ) -> Vec<EncodedChunk> {
+        let reusable = mem::take(&mut *batch.reusable_encoded_chunks.lock());
+        let mut reusable = reusable.into_iter();
+        let mut encoded_prefix = Vec::new();
+        for prepared in &batch.chunks {
+            let Some(encoded) = reusable.next() else {
+                break;
+            };
+            if !encoded.is_current_for(prepared) {
+                break;
+            }
+            encoded_prefix.push(encoded);
+        }
+
         let cached_chunks = &*cache;
         let encoded_chunks = encoding_pool.install(|| {
             batch
                 .chunks
                 .par_iter()
+                .skip(encoded_prefix.len())
                 .map(|prepared| {
                     let holder = &prepared.holder;
                     let pos = prepared.pos;
@@ -243,13 +360,13 @@ impl ChunkSender {
                 })
                 .collect::<Vec<_>>()
         });
-        let encoded_chunks = encoded_chunks.into_iter().flatten().collect::<Vec<_>>();
+        encoded_prefix.extend(encoded_chunks.into_iter().flatten());
 
-        for encoded in &encoded_chunks {
+        for encoded in &encoded_prefix {
             cache.insert(encoded.pos, encoded.clone());
         }
 
-        encoded_chunks
+        encoded_prefix
     }
 
     /// Phase 3: Lock briefly to verify generation counter and send the batch.
@@ -287,28 +404,79 @@ impl ChunkSender {
             return Vec::new();
         }
 
-        self.unacknowledged_batches += 1;
-        self.batch_quota -= valid_chunks.len() as f32;
+        let Some(start) = Self::encode_packet(connection, CChunkBatchStart {}) else {
+            connection.close();
+            return Vec::new();
+        };
+        let batch_capacity = Self::batch_byte_capacity(connection);
+        let mut encoded_bytes = start.encoded_data.len().max(1);
+        let mut packets = Vec::with_capacity(valid_chunks.len() + 2);
+        let mut sent_chunks = Vec::with_capacity(valid_chunks.len());
+        let mut selected_metadata = Vec::with_capacity(valid_chunks.len());
+        let mut finished = None;
+        packets.push(start);
+        for encoded in valid_chunks {
+            let next_batch_size = sent_chunks.len() + 1;
+            let Ok(next_batch_size) = i32::try_from(next_batch_size) else {
+                break;
+            };
+            let Some(next_finished) = Self::encode_packet(
+                connection,
+                CChunkBatchFinished {
+                    batch_size: next_batch_size,
+                },
+            ) else {
+                connection.close();
+                return Vec::new();
+            };
+            let Some(next_encoded_bytes) = encoded_bytes
+                .checked_add(encoded.packet.encoded_data.len().max(1))
+                .and_then(|bytes| bytes.checked_add(next_finished.encoded_data.len().max(1)))
+            else {
+                break;
+            };
+            if next_encoded_bytes > batch_capacity {
+                break;
+            }
 
-        Self::send_packet(connection, CChunkBatchStart {});
+            encoded_bytes = next_encoded_bytes - next_finished.encoded_data.len().max(1);
+            let (metadata, packet) = encoded.into_parts();
+            sent_chunks.push(metadata.pos);
+            selected_metadata.push(metadata);
+            packets.push(packet);
+            finished = Some(next_finished);
+        }
+        let Some(finished) = finished else {
+            log::warn!("A chunk packet exceeded the outbound batch byte budget; deferring it");
+            return Vec::new();
+        };
+        packets.push(finished);
 
-        let batch_size = valid_chunks.len();
-        for encoded in &valid_chunks {
-            connection.send_encoded(encoded.packet.clone());
+        match Self::try_send_batch(connection, packets) {
+            Ok(()) => {}
+            Err(mpsc::error::TrySendError::Full(returned_packets)) => {
+                let mut returned_packets = returned_packets.into_iter();
+                let _boundary = returned_packets.next();
+                self.deferred_encoded_chunks.extend(
+                    selected_metadata
+                        .into_iter()
+                        .zip(returned_packets)
+                        .map(|(metadata, packet)| metadata.with_packet(packet)),
+                );
+                return Vec::new();
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                connection.close();
+                return Vec::new();
+            }
         }
 
-        Self::send_packet(
-            connection,
-            CChunkBatchFinished {
-                batch_size: batch_size as i32,
-            },
-        );
+        self.unacknowledged_batches += 1;
+        self.batch_quota -= sent_chunks.len() as f32;
 
-        let mut sent_chunks = Vec::with_capacity(valid_chunks.len());
-        for encoded in valid_chunks {
-            self.pending_chunks.remove(&encoded.pos);
-            self.sent_chunks.insert(encoded.pos);
-            sent_chunks.push(encoded.pos);
+        for pos in &sent_chunks {
+            self.pending_chunks.remove(pos);
+            self.sent_chunks.insert(*pos);
         }
         sent_chunks
     }
@@ -370,7 +538,7 @@ impl ChunkSender {
 
         self.unacknowledged_batches = self.unacknowledged_batches.saturating_sub(1);
 
-        // Handle NaN and clamp to valid range (vanilla uses 0.01-64, we use 0.01-500)
+        // Handle NaN and clamp to Vanilla's valid range.
         self.desired_chunks_per_tick = if desired_chunks_per_tick.is_nan() {
             MIN_CHUNKS_PER_TICK
         } else {
@@ -416,6 +584,7 @@ impl Default for ChunkSender {
             desired_chunks_per_tick: START_CHUNKS_PER_TICK,
             batch_quota: 0.0,
             max_unacknowledged_batches: 1,
+            deferred_encoded_chunks: Vec::new(),
         }
     }
 }
@@ -433,9 +602,27 @@ mod tests {
         section::{ChunkSection, Sections},
     };
     use crate::world::tick_scheduler::{BlockTickList, FluidTickList};
+    use crate::{
+        player::connection::{JavaConnection, outbound_packet_channel},
+        test_support::{fresh_test_world, insert_ready_full_chunk},
+    };
+    use foton_protocol::packet_writer::TCPNetworkEncoder;
     use foton_registry::init_vanilla_registry;
+    use foton_utils::{FrontVec, locks::AsyncMutex};
     use foton_worldgen::structure::{StructureReferenceMap, StructureStartMap};
     use std::sync::Weak;
+    use tokio::io::BufWriter;
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio::runtime::Builder;
+    use tokio_util::sync::CancellationToken;
+
+    fn encoded_packet(byte_len: usize) -> EncodedPacket {
+        let mut encoded_data = FrontVec::new(0);
+        encoded_data.extend_from_slice(&vec![0; byte_len]);
+        EncodedPacket {
+            encoded_data: Arc::new(encoded_data),
+        }
+    }
 
     fn prepared_full_chunk(pos: ChunkPos) -> PreparedChunk {
         let chunk = Chunk::from_full_disk(
@@ -483,6 +670,7 @@ mod tests {
             chunks: positions.into_iter().map(prepared_full_chunk).collect(),
             has_skylight: true,
             epoch_snapshot: 0,
+            reusable_encoded_chunks: SyncMutex::new(Vec::new()),
         };
         let encoding_pool = rayon::ThreadPoolBuilder::new()
             .num_threads(2)
@@ -529,6 +717,7 @@ mod tests {
             chunks: vec![prepared],
             has_skylight: true,
             epoch_snapshot: 0,
+            reusable_encoded_chunks: SyncMutex::new(Vec::new()),
         };
         let encoding_pool = rayon::ThreadPoolBuilder::new()
             .num_threads(1)
@@ -549,6 +738,7 @@ mod tests {
             chunks: vec![prepared_full_chunk(pos)],
             has_skylight: true,
             epoch_snapshot: 0,
+            reusable_encoded_chunks: SyncMutex::new(Vec::new()),
         };
         let encoding_pool = rayon::ThreadPoolBuilder::new()
             .num_threads(1)
@@ -563,6 +753,7 @@ mod tests {
             chunks: vec![prepared_full_chunk(pos)],
             has_skylight: true,
             epoch_snapshot: 0,
+            reusable_encoded_chunks: SyncMutex::new(Vec::new()),
         };
         let replacement =
             ChunkSender::encode_batch(&replacement_batch, &mut cache, None, &encoding_pool);
@@ -583,6 +774,7 @@ mod tests {
             }],
             has_skylight: true,
             epoch_snapshot: 0,
+            reusable_encoded_chunks: SyncMutex::new(Vec::new()),
         };
         let rebound = ChunkSender::encode_batch(&rebound_batch, &mut cache, None, &encoding_pool);
         assert_eq!(rebound.len(), 1);
@@ -627,6 +819,28 @@ mod tests {
     }
 
     #[test]
+    fn chunk_batch_ack_clamps_non_finite_and_extreme_feedback_to_vanilla_bounds() {
+        for (feedback, expected) in [
+            (f32::NEG_INFINITY, MIN_CHUNKS_PER_TICK),
+            (-1.0, MIN_CHUNKS_PER_TICK),
+            (500.0, MAX_CHUNKS_PER_TICK),
+            (f32::INFINITY, MAX_CHUNKS_PER_TICK),
+        ] {
+            let mut sender = ChunkSender {
+                unacknowledged_batches: 1,
+                ..ChunkSender::default()
+            };
+
+            assert!(sender.on_chunk_batch_received_by_client(feedback));
+            assert_eq!(
+                sender.desired_chunks_per_tick.to_bits(),
+                expected.to_bits(),
+                "unexpected pacing result for {feedback}"
+            );
+        }
+    }
+
+    #[test]
     fn marking_chunk_pending_clears_sent_state() {
         let mut sender = ChunkSender::default();
         let pos = ChunkPos::new(2, -3);
@@ -636,6 +850,114 @@ mod tests {
 
         assert!(sender.pending_chunks.contains(&pos));
         assert!(!sender.is_chunk_sent(pos));
+    }
+
+    #[test]
+    fn saturated_commit_defers_state_and_reuses_encoding_after_drain() {
+        init_vanilla_registry();
+        init_behaviors();
+        let world = fresh_test_world("chunk-sender-saturation");
+        let pos = ChunkPos::new(0, 0);
+        insert_ready_full_chunk(&world, pos);
+        let epoch = SyncMutex::new(0);
+        let mut chunk_sender = ChunkSender::default();
+        chunk_sender.mark_chunk_pending_to_send(pos);
+        let batch = chunk_sender
+            .prepare_batch(&world, pos, &epoch)
+            .expect("the ready chunk should form a batch");
+        let quota_before_commit = chunk_sender.batch_quota;
+        let encoding_pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .build()
+            .expect("test chunk encoding pool should initialize");
+        let mut cache = FxHashMap::default();
+        let encoded = ChunkSender::encode_batch(&batch, &mut cache, None, &encoding_pool);
+        let Some(first_encoded) = encoded.first() else {
+            panic!("the ready chunk should encode");
+        };
+        let original_packet = Arc::downgrade(&first_encoded.packet.encoded_data);
+
+        let (outgoing, mut receiver) = outbound_packet_channel();
+        for _ in 0..256 {
+            assert!(
+                outgoing
+                    .try_send_chunk_batch(vec![encoded_packet(1)])
+                    .is_ok()
+            );
+        }
+        let runtime = Builder::new_current_thread()
+            .enable_io()
+            .build()
+            .expect("test network runtime should initialize");
+        let (_client, server_stream, remote_address) = runtime.block_on(async {
+            let listener = TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("test listener should bind");
+            let address = listener
+                .local_addr()
+                .expect("test listener should have an address");
+            let (client, accepted) = tokio::join!(TcpStream::connect(address), listener.accept());
+            let client = client.expect("test client should connect");
+            let (server_stream, remote_address) = accepted.expect("test listener should accept");
+            (client, server_stream, remote_address)
+        });
+        let (_read_half, write_half) = server_stream.into_split();
+        let connection = PlayerConnection::Java(JavaConnection::new(
+            outgoing,
+            CancellationToken::new(),
+            None,
+            Arc::new(AsyncMutex::new(Some(TCPNetworkEncoder::new(
+                BufWriter::new(write_half),
+            )))),
+            1,
+            remote_address,
+            Weak::new(),
+            None,
+            None,
+        ));
+
+        let committed = chunk_sender.commit_batch(&batch, encoded, &connection, &epoch);
+        assert!(committed.is_empty());
+        assert!(chunk_sender.pending_chunks.contains(&pos));
+        assert!(!chunk_sender.is_chunk_sent(pos));
+        assert_eq!(chunk_sender.unacknowledged_batches, 0);
+        assert_eq!(
+            chunk_sender.batch_quota.to_bits(),
+            quota_before_commit.to_bits()
+        );
+        cache.clear();
+
+        for _ in 0..3 {
+            let queued = receiver
+                .try_recv()
+                .expect("the saturated queue should contain filler packets");
+            drop(queued);
+        }
+        let retry_batch = chunk_sender
+            .prepare_batch(&world, pos, &epoch)
+            .expect("the deferred chunk should retry after drain");
+        let retry_encoded =
+            ChunkSender::encode_batch(&retry_batch, &mut cache, None, &encoding_pool);
+        let Some(retry_packet) = retry_encoded.first() else {
+            panic!("the deferred chunk should retain its encoding");
+        };
+        let Some(original_packet) = original_packet.upgrade() else {
+            panic!("the deferred batch should retain the encoded packet");
+        };
+        assert!(Arc::ptr_eq(
+            &original_packet,
+            &retry_packet.packet.encoded_data
+        ));
+
+        let committed = chunk_sender.commit_batch(&retry_batch, retry_encoded, &connection, &epoch);
+        assert_eq!(committed, vec![pos]);
+        assert!(!chunk_sender.pending_chunks.contains(&pos));
+        assert!(chunk_sender.is_chunk_sent(pos));
+        assert_eq!(chunk_sender.unacknowledged_batches, 1);
+        assert_eq!(
+            chunk_sender.batch_quota.to_bits(),
+            (quota_before_commit - 1.0).to_bits()
+        );
     }
 
     #[test]

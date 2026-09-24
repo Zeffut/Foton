@@ -1,7 +1,10 @@
 // The Bedrock settings live in `foton-bedrock` rather than here: the login
 // path reads them too, and `foton-login` cannot depend on this binary crate.
 pub use foton_bedrock::config::BedrockConfig;
-use std::net::IpAddr;
+use std::{
+    net::{IpAddr, Ipv4Addr},
+    path::Path,
+};
 
 use foton_core::{
     chunk::chunk_ticket_manager::MAX_SUPPORTED_VIEW_DISTANCE,
@@ -134,6 +137,19 @@ impl ServerConfig {
     ///
     /// Returns a message describing any setting that cannot be resolved.
     pub fn into_runtime_config(self) -> Result<RuntimeConfig, String> {
+        // Vanilla parity: `MinecraftServer.loadStatusIcon` logs an unusable
+        // icon and serves none; it never stops the server from starting.
+        let favicon = if self.use_favicon {
+            RuntimeConfig::load_favicon(Path::new(&self.favicon)).map_or_else(
+                |error| {
+                    log::error!("Couldn't load server icon: {error}");
+                    None
+                },
+                Some,
+            )
+        } else {
+            None
+        };
         let bug_report_webhook = self.bug_reports.into_webhook()?;
         Ok(RuntimeConfig {
             max_players: self.max_players,
@@ -148,8 +164,8 @@ impl ServerConfig {
             encryption: self.encryption,
             allow_flight: self.allow_flight,
             motd: self.motd,
-            use_favicon: self.use_favicon,
-            favicon: self.favicon,
+            use_favicon: favicon.is_some(),
+            favicon: favicon.unwrap_or_default(),
             enforce_secure_chat: self.enforce_secure_chat,
             chat_spam_threshold_seconds: self.chat_spam_threshold_seconds,
             command_spam_threshold_seconds: self.command_spam_threshold_seconds,
@@ -176,6 +192,9 @@ pub struct RconConfig {
     pub enable: bool,
     /// The port Rcon listens on.
     pub port: u16,
+    /// Address Rcon listens on. Loopback is the secure default because Source
+    /// Rcon sends its password and command traffic in plaintext.
+    pub bind_address: IpAddr,
     /// The password every client must send before it may run a command.
     pub password: String,
 }
@@ -186,6 +205,7 @@ impl Default for RconConfig {
             enable: false,
             // Vanilla's default `rcon.port`.
             port: 25575,
+            bind_address: IpAddr::V4(Ipv4Addr::LOCALHOST),
             password: String::new(),
         }
     }
@@ -222,6 +242,9 @@ pub(super) fn validate(config: &ServerConfig) -> Result<(), &'static str> {
     // too. Nonsense independently of Bedrock either way.
     if config.server_port == 0 {
         return Err("server_port must not be 0");
+    }
+    if !(1..=i32::MAX as u32).contains(&config.max_players) {
+        return Err("max_players must be in range 1..=2147483647");
     }
     if !config.allow_extended_view_distance && !(1..=32).contains(&config.view_distance) {
         return Err("View distance must in range 1..32");
