@@ -132,8 +132,7 @@ public final class FotonWorld implements World {
         return Native.worldChunkGenerated(name, x, z);
     }
     @Override public String getGameRuleValue(String rule) { return Native.worldGameRule(name, rule); }
-    @Override public <T> T getGameRuleDefault(org.bukkit.GameRule<T> rule) { return rule == null ? null : rule.parse(Native.worldGameRuleDefault(name, rule.getName())); }
-    @Override public <T> boolean setGameRule(org.bukkit.GameRule<T> rule, T value) { return rule != null && value != null && Native.setWorldGameRule(name, rule.getName(), String.valueOf(value)); }
+
     @Override public boolean hasStorm() { return Native.worldStorm(name); }
     @Override public boolean isClearWeather() { return !hasStorm() && !isThundering(); }
     @Override public void setStorm(boolean storm) { Native.setWorldStorm(name, storm); }
