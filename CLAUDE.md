@@ -30,20 +30,15 @@ Deux checkouts existent, et **les deux compilent** :
 - **Windows** : `C:\Users\Zeffu\Desktop\Projets\Foton`.
 - **WSL2 (Ubuntu)** : `/root/Foton` — renommé depuis `/root/SteelMC` le 2026-09-03.
 
-Sur le checkout Windows, `cargo check`, `cargo clippy` et `cargo test` tournent
-**nativement** et plus vite qu'en passant par WSL. La version précédente de ce
-document interdisait de compiler côté Windows ; c'était faux, et l'interdiction
-a coûté du temps.
+Smart App Control (`os error 4551`) bloque la toolchain Windows de façon
+variable. Depuis le 2026-09-24 il refuse **`cargo` et `rustc` eux-mêmes**, jusqu'à
+`cargo --version` ; auparavant il ne bloquait que `cargo fmt` et, par
+intermittence, les binaires de test fraîchement liés. Ne pas compter sur la
+compilation native : essayer `cargo --version` d'abord, et sinon tout passer par
+WSL.
 
-Ce que Smart App Control bloque vraiment, avec `os error 4551` :
-
-- **`cargo fmt`**, toujours.
-- **les binaires de test fraîchement liés**, par intermittence — `cargo test`
-  peut passer puis se voir refuser après un rebuild, ce qui emporte aussi
-  `dev/count-tests.py`.
-
-Pour ces cas-là, et pour `typos` et `prek`, piloter WSL sur le **même** checkout
-Windows, sans dupliquer l'arbre :
+Pour cargo, `typos` et `prek`, piloter WSL sur le **même** checkout Windows,
+sans dupliquer l'arbre (`dev/ci.sh` s'y lance tel quel) :
 
 ```
 wsl -d Ubuntu -u root -- bash -c 'cd /mnt/c/Users/Zeffu/Desktop/Projets/Foton \
@@ -165,13 +160,15 @@ déjà cette position.
 ## FotonExtractor — obtenir des données vanilla manquantes
 
 Checkout : `/root/FotonExtractor` (mod Fabric Kotlin, cible MC 26.2, build validé).
-Le checkout et son dépôt portent peut-être encore l'ancien nom : les renommer une
-bonne fois, ce document et `dev/doctor.sh` attendent `FotonExtractor`.
+Le dossier a été renommé depuis `/root/SteelExtractor` le 2026-09-24. L'intérieur
+garde l'ancien nom — package `com.steelextractor`, mod id `steel-extractor`,
+remote `Steel-Foundation/SteelExtractor` — donc la sortie s'appelle toujours
+`steel_extractor_output`.
 
 ```bash
 cd ~/FotonExtractor
 export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
-./gradlew runServer     # produit run/foton_extractor_output/
+./gradlew runServer     # produit run/steel_extractor_output/
 ./gradlew runDatagen
 ```
 
