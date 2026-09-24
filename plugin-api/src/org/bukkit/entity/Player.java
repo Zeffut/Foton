@@ -208,8 +208,36 @@ public interface Player extends HumanEntity, org.bukkit.OfflinePlayer {
 
     void sendActionBar(String message);
 
+    @Override
     default void sendActionBar(net.kyori.adventure.text.Component message) {
-        sendActionBar(message == null ? "" : net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(message));
+        if (message != null) foton.Native.sendActionBarComponent(getUniqueId().toString(), foton.FotonComponents.toJson(message));
+    }
+
+    /** Clears the title and subtitle, keeping the fade times. */
+    default void clearTitle() { foton.Native.clearPlayerTitle(getUniqueId().toString()); }
+
+    /** The movement keys the client last reported. */
+    default org.bukkit.Input getCurrentInput() { return new foton.FotonInput(foton.Native.playerInput(getUniqueId().toString())); }
+
+    /** Experience as an orb gives it: with {@code applyMending}, damaged
+     * mending gear soaks it up first. */
+    default void giveExp(int amount, boolean applyMending) {
+        foton.Native.givePlayerExperience(getUniqueId().toString(), amount, applyMending);
+    }
+
+    /** The name shown in the tab list; null restores the player's own. */
+    default void playerListName(net.kyori.adventure.text.Component name) {
+        foton.Native.setPlayerListNameComponent(getUniqueId().toString(), name == null ? null : foton.FotonComponents.toJson(name));
+    }
+
+    /** Sets both halves of the tab list decoration. */
+    default void sendPlayerListHeaderAndFooter(net.kyori.adventure.text.Component header, net.kyori.adventure.text.Component footer) {
+        foton.Native.setPlayerListHeaderFooterComponents(getUniqueId().toString(),
+            header == null ? null : foton.FotonComponents.toJson(header),
+            footer == null ? null : foton.FotonComponents.toJson(footer));
+    }
+    default void sendPlayerListHeader(net.kyori.adventure.text.Component header) {
+        sendPlayerListHeaderAndFooter(header, null);
     }
 
     default void showTitle(net.kyori.adventure.title.Title title) { }

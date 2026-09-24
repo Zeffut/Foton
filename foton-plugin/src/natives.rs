@@ -174,7 +174,9 @@ mod attributes;
 mod displays;
 mod entities;
 mod lifecycle;
+mod merchants;
 mod particles;
+mod players;
 mod support;
 
 /// The server the natives answer about.
@@ -208,7 +210,8 @@ const ABANDONED_CHUNK_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 static BOSS_BARS: OnceLock<SyncRwLock<FxHashMap<Uuid, Arc<ServerBossEvent>>>> = OnceLock::new();
 
 /// Bukkit updates header and footer independently, while the protocol packet carries both.
-static PLAYER_TAB_LISTS: OnceLock<SyncRwLock<FxHashMap<Uuid, (String, String)>>> = OnceLock::new();
+static PLAYER_TAB_LISTS: OnceLock<SyncRwLock<FxHashMap<Uuid, (TextComponent, TextComponent)>>> =
+    OnceLock::new();
 
 /// Plugin world-creation requests. Requests are polled from JVM threads;
 /// actual construction and attachment remain owned by the server safe-point.
@@ -291,7 +294,7 @@ fn boss_bars() -> &'static SyncRwLock<FxHashMap<Uuid, Arc<ServerBossEvent>>> {
     BOSS_BARS.get_or_init(|| SyncRwLock::new(FxHashMap::default()))
 }
 
-fn player_tab_lists() -> &'static SyncRwLock<FxHashMap<Uuid, (String, String)>> {
+fn player_tab_lists() -> &'static SyncRwLock<FxHashMap<Uuid, (TextComponent, TextComponent)>> {
     PLAYER_TAB_LISTS.get_or_init(|| SyncRwLock::new(FxHashMap::default()))
 }
 
@@ -6993,22 +6996,20 @@ fn set_player_tab_list(
     let mut lists = player_tab_lists().write();
     let entry = lists
         .entry(id)
-        .or_insert_with(|| (String::new(), String::new()));
+        .or_insert_with(|| (TextComponent::plain(""), TextComponent::plain("")));
     if let Some(header) = header {
         let Ok(value) = env.get_string(&header) else {
             return;
         };
-        entry.0 = String::from(value);
+        entry.0 = String::from(value).into();
     }
     if let Some(footer) = footer {
         let Ok(value) = env.get_string(&footer) else {
             return;
         };
-        entry.1 = String::from(value);
+        entry.1 = String::from(value).into();
     }
-    let header: TextComponent = entry.0.clone().into();
-    let footer: TextComponent = entry.1.clone().into();
-    player.send_packet(CTabList::new(&header, &footer, player.as_ref()));
+    player.send_packet(CTabList::new(&entry.0, &entry.1, player.as_ref()));
 }
 
 /// `foton.Native.setPlayerListHeader`
@@ -13346,6 +13347,8 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
     bindings.extend(entities::bindings());
     bindings.extend(displays::bindings());
     bindings.extend(lifecycle::bindings());
+    bindings.extend(merchants::bindings());
+    bindings.extend(players::bindings());
     bindings
 }
 

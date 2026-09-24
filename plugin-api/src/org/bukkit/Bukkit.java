@@ -387,4 +387,8 @@ public final class Bukkit {
     public static io.papermc.paper.threadedregions.scheduler.AsyncScheduler getAsyncScheduler() {
         return server.getAsyncScheduler();
     }
+
+    public static org.bukkit.inventory.Merchant createMerchant(net.kyori.adventure.text.Component title) { return server.createMerchant(title); }
+    public static org.bukkit.inventory.Merchant createMerchant(String title) { return server.createMerchant(title); }
+    public static org.bukkit.inventory.Merchant createMerchant() { return server.createMerchant(); }
 }

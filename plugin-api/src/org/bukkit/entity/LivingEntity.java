@@ -60,4 +60,18 @@ public interface LivingEntity extends Damageable, org.bukkit.attribute.Attributa
     default void setRemoveWhenFarAway(boolean remove) { }
     default boolean getCanPickupItems() { return true; }
     default void setCanPickupItems(boolean pickup) { }
+
+    /** The item being used -- a drawn bow, a raised shield, food being eaten -- or air. */
+    default org.bukkit.inventory.ItemStack getActiveItem() {
+        org.bukkit.inventory.ItemStack item = foton.FotonInventory.decode(foton.Native.activeItem(getUniqueId().toString()));
+        return item == null ? new org.bukkit.inventory.ItemStack(org.bukkit.Material.AIR) : item;
+    }
+    /** Whether the entity is on a ladder, vine or other climbable block. */
+    default boolean isClimbing() { return (foton.Native.entitySurroundings(getUniqueId().toString()) & 1) != 0; }
+    /** Whether the entity is in a riptide spin attack. */
+    default boolean isRiptiding() { return (foton.Native.entitySurroundings(getUniqueId().toString()) & 8) != 0; }
+    /** Vanilla's fall-flying flag; the server clears it again when the entity cannot glide. */
+    default void setGliding(boolean gliding) { foton.Native.setEntityGliding(getUniqueId().toString(), gliding); }
+    /** Vanilla's swimming flag; a player's is recomputed every tick from where they are. */
+    default void setSwimming(boolean swimming) { foton.Native.setEntitySwimming(getUniqueId().toString(), swimming); }
 }

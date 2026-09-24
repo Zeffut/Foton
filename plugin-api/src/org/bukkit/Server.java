@@ -304,4 +304,13 @@ public interface Server {
     io.papermc.paper.threadedregions.scheduler.RegionScheduler getRegionScheduler();
 
     io.papermc.paper.threadedregions.scheduler.AsyncScheduler getAsyncScheduler();
+
+    /** A merchant with no villager behind it, titled {@code title} (null for the vanilla title). */
+    default org.bukkit.inventory.Merchant createMerchant(net.kyori.adventure.text.Component title) {
+        return new foton.FotonMerchant(title);
+    }
+    default org.bukkit.inventory.Merchant createMerchant(String title) {
+        return createMerchant(title == null ? null : net.kyori.adventure.text.Component.text(title));
+    }
+    default org.bukkit.inventory.Merchant createMerchant() { return createMerchant((net.kyori.adventure.text.Component) null); }
 }

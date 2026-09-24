@@ -555,6 +555,18 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
         Player.super.sendActionBar(message);
     }
 
+    @Override public void clearTitle() { Player.super.clearTitle(); }
+
+    @Override
+    public void sendPlayerListHeaderAndFooter(net.kyori.adventure.text.Component header, net.kyori.adventure.text.Component footer) {
+        Player.super.sendPlayerListHeaderAndFooter(header, footer);
+    }
+
+    @Override
+    public void sendPlayerListHeader(net.kyori.adventure.text.Component header) {
+        Player.super.sendPlayerListHeader(header);
+    }
+
     @Override
     public void showTitle(net.kyori.adventure.title.Title title) {
         if (title == null) return;

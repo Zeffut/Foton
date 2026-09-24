@@ -192,4 +192,12 @@ public interface Entity extends CommandSender, org.bukkit.Nameable, org.bukkit.p
     /** The scheduler for work that follows this entity. */
     io.papermc.paper.threadedregions.scheduler.EntityScheduler getScheduler();
 
+    /** Whether the entity is touching lava. */
+    default boolean isInLava() { return (foton.Native.entitySurroundings(getUniqueId().toString()) & 2) != 0; }
+    /** Whether the entity is touching water; a bubble column is water. */
+    default boolean isInWaterOrBubbleColumn() { return (foton.Native.entitySurroundings(getUniqueId().toString()) & 4) != 0; }
+    /** Whether rain is falling on the entity's position. */
+    default boolean isInRain() { return (foton.Native.entitySurroundings(getUniqueId().toString()) & 16) != 0; }
+    default boolean isInWaterOrRain() { return (foton.Native.entitySurroundings(getUniqueId().toString()) & (4 | 16)) != 0; }
+    default boolean isInWaterOrRainOrBubbleColumn() { return isInWaterOrRain(); }
 }

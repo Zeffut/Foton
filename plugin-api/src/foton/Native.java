@@ -684,6 +684,34 @@ public final class Native {
     /** {@code {next index, reaches (0/1), x, y, z...}} or null. */
     public static native double[] mobCurrentPath(String uuid);
 
+    /** The stack the living entity is using, inventory-encoded; "" for none. */
+    public static native String activeItem(String uuid);
+    /** Bits: 1 climbing, 2 in lava, 4 in water, 8 riptiding, 16 in rain. */
+    public static native int entitySurroundings(String uuid);
+    public static native void clearPlayerTitle(String uuid);
+    public static native int playerCooldown(String uuid, String group);
+    public static native void setPlayerCooldown(String uuid, String group, int ticks);
+    public static native void setPlayerItemCooldown(String uuid, String item, int ticks);
+    /** Vanilla's Input flags from the player's last input packet. */
+    public static native int playerInput(String uuid);
+    public static native String playerCursor(String uuid);
+    public static native void setPlayerCursor(String uuid, String item);
+    public static native void givePlayerExperience(String uuid, int amount, boolean mending);
+    public static native void sendActionBarComponent(String uuid, String json);
+    public static native void setPlayerListNameComponent(String uuid, String json);
+    public static native void setPlayerListHeaderFooterComponents(String uuid, String header, String footer);
+    public static native void setEntityGliding(String uuid, boolean gliding);
+    public static native void setEntitySwimming(String uuid, boolean swimming);
+    /** A new plugin merchant titled with a component's JSON; its handle. */
+    public static native String createMerchant(String titleJson);
+    public static native void releaseMerchant(String handle);
+    public static native String[] merchantOffers(String handle);
+    public static native boolean setMerchantOffers(String handle, String[] offers);
+    public static native boolean setMerchantOffer(String handle, int index, String offer);
+    /** The trader of a plugin merchant (by handle) or of a villager or wandering trader (by UUID). */
+    public static native String merchantTrader(String handle);
+    public static native boolean openMerchant(String uuid, String handle, boolean force);
+
     public static UUID parse(String uuid) {
         if (uuid == null) return null;
         try {

@@ -1348,7 +1348,7 @@ impl Player {
     /// whichever menu is open and falls back to the player's own inventory
     /// menu when none is, which is the same pair
     /// [`Self::clear_or_count_matching_items`] walks.
-    pub(crate) fn carried_item(&self) -> ItemStack {
+    pub fn carried_item(&self) -> ItemStack {
         let open_menu = self.open_menu.lock();
         if let Some(menu) = open_menu.menu.as_ref() {
             return menu.behavior().carried().clone();
@@ -1362,6 +1362,24 @@ impl Player {
         }
         drop(open_menu);
         self.inventory_menu.lock().behavior().carried().clone()
+    }
+
+    /// Puts `stack` on the cursor; the menu sends it with its next sync.
+    ///
+    /// Vanilla parity: `Player.containerMenu.setCarried`. Returns `false` when
+    /// the open menu has been handed to a callback and has no cursor to set.
+    pub fn set_carried_item(&self, stack: ItemStack) -> bool {
+        let mut open_menu = self.open_menu.lock();
+        if let Some(menu) = open_menu.menu.as_mut() {
+            *menu.behavior_mut().carried_mut() = stack;
+            return true;
+        }
+        if open_menu.dispatch.is_some() {
+            return false;
+        }
+        drop(open_menu);
+        *self.inventory_menu.lock().behavior_mut().carried_mut() = stack;
+        true
     }
 
     /// Removes or counts matching stacks across every location used by vanilla `/clear`.

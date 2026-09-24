@@ -14,6 +14,8 @@ public class MerchantRecipe {
     private boolean experienceReward;
     private int villagerExperience;
     private float priceMultiplier;
+    private int specialPrice;
+    private java.util.function.Consumer<MerchantRecipe> writeBack;
     private String owner;
     private int offerIndex = -1;
     private List<ItemStack> ingredients = new ArrayList<>();
@@ -83,14 +85,55 @@ public class MerchantRecipe {
     public ItemStack getResult() { return result == null ? null : result.clone(); }
     public void setResult(ItemStack value) { result = value == null ? null : value.clone(); }
     public int getUses() { return uses; }
-    public void setUses(int value) { uses = Math.max(0, value); if (owner != null) foton.Native.entitySetMerchantOfferUses(owner, offerIndex, uses); }
+    public void setUses(int value) { uses = Math.max(0, value); if (owner != null) foton.Native.entitySetMerchantOfferUses(owner, offerIndex, uses); changed(); }
     public int getMaxUses() { return maxUses; }
-    public void setMaxUses(int value) { maxUses = Math.max(1, value); if (owner != null) foton.Native.entitySetMerchantOfferMaxUses(owner, offerIndex, maxUses); }
+    public void setMaxUses(int value) { maxUses = Math.max(1, value); if (owner != null) foton.Native.entitySetMerchantOfferMaxUses(owner, offerIndex, maxUses); changed(); }
     public int getDemand() { return demand; }
-    public void setDemand(int value) { demand = value; if (owner != null) foton.Native.entitySetMerchantOfferDemand(owner, offerIndex, demand); }
+    public void setDemand(int value) { demand = value; if (owner != null) foton.Native.entitySetMerchantOfferDemand(owner, offerIndex, demand); changed(); }
     public boolean hasExperienceReward() { return experienceReward; }
+    public void setExperienceReward(boolean flag) { experienceReward = flag; changed(); }
     public int getVillagerExperience() { return villagerExperience; }
+    public void setVillagerExperience(int villagerExperience) { this.villagerExperience = villagerExperience; changed(); }
     public float getPriceMultiplier() { return priceMultiplier; }
+    public void setPriceMultiplier(float priceMultiplier) { this.priceMultiplier = priceMultiplier; changed(); }
+    public int getSpecialPrice() { return specialPrice; }
+    public void setSpecialPrice(int specialPrice) { this.specialPrice = specialPrice; changed(); }
+
+    /** Makes this recipe live: each field set afterwards is handed to {@code sink},
+     * the way Paper's recipes read from a merchant write through to its offer. */
+    public void writeBackTo(java.util.function.Consumer<MerchantRecipe> sink) { writeBack = sink; }
+    private void changed() { if (writeBack != null) writeBack.accept(this); }
+
+    private static final String FIELD = "\u001e";
+
+    /** Every field of the offer, items with their components, for a plugin merchant. */
+    public String encodeOffer() {
+        ItemStack first = ingredients.size() > 0 ? ingredients.get(0) : null;
+        ItemStack second = ingredients.size() > 1 ? ingredients.get(1) : null;
+        return String.join(FIELD, foton.FotonInventory.encode(result), Integer.toString(uses),
+            Integer.toString(maxUses), experienceReward ? "1" : "0", Integer.toString(villagerExperience),
+            Float.toString(priceMultiplier), Integer.toString(demand), Integer.toString(specialPrice),
+            foton.FotonInventory.encode(first), foton.FotonInventory.encode(second));
+    }
+
+    /** Reads what {@link #encodeOffer} writes; null if it is malformed. */
+    public static MerchantRecipe decodeOffer(String encoded) {
+        if (encoded == null) return null;
+        String[] fields = encoded.split(FIELD, -1);
+        if (fields.length != 10) return null;
+        ItemStack result = foton.FotonInventory.decode(fields[0]);
+        if (result == null) return null;
+        try {
+            MerchantRecipe recipe = new MerchantRecipe(result, Integer.parseInt(fields[1]), Integer.parseInt(fields[2]),
+                "1".equals(fields[3]), Integer.parseInt(fields[4]), Float.parseFloat(fields[5]), Integer.parseInt(fields[6]));
+            recipe.specialPrice = Integer.parseInt(fields[7]);
+            recipe.addIngredient(foton.FotonInventory.decode(fields[8]));
+            recipe.addIngredient(foton.FotonInventory.decode(fields[9]));
+            return recipe;
+        } catch (NumberFormatException error) {
+            return null;
+        }
+    }
     /** Encodes the Vanilla fields understood by Foton's merchant bridge. */
     public String encode() {
         ItemStack first = ingredients.size() > 0 ? ingredients.get(0) : null;
