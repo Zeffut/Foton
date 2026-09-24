@@ -139,6 +139,10 @@ impl JavaTcpClient {
             )
         });
 
+        if let Some(tap) = self.server.packet_taps.current() {
+            tap.playing(self.id, player.gameprofile.id, entity_id);
+        }
+
         let connection = Arc::clone(&player.connection);
         if self
             .connection_updates

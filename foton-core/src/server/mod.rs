@@ -42,6 +42,7 @@ use crate::config::{
 use crate::entity::{
     Entity, EntityBase, PendingWorldChangeToken, RemovalReason, SharedEntity, change_entity_world,
 };
+use crate::packet_tap::PacketTaps;
 
 use crate::chunk_saver::{ChunkStorage, PersistentEntity, registry::WorldStorageRegistry};
 use crate::event::EventBus;
@@ -523,6 +524,8 @@ pub struct Server {
     /// it holds subscriptions rather than game data, and something being
     /// enabled or disabled while the server runs is ordinary.
     pub events: EventBus,
+    /// Outside code shown raw packets before Foton handles or sends them.
+    pub packet_taps: PacketTaps,
     /// Queued domain switches to process after world ticks.
     pending_domain_switches: SyncMutex<Vec<DomainSwitchRequest>>,
 }
@@ -1202,6 +1205,7 @@ impl Server {
             pending_world_additions: SyncMutex::new(vec![]),
             world_creation_closed: AtomicBool::new(false),
             events: EventBus::new(),
+            packet_taps: PacketTaps::new(),
             pending_domain_switches: SyncMutex::new(vec![]),
         })
     }

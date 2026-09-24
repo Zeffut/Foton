@@ -46,6 +46,7 @@ use tokio_util::sync::CancellationToken;
 use crate::command::{handle_client_request, sender::CommandSender};
 use crate::event::PlayerClientLoadedWorldEvent;
 use crate::event::PlayerCommandPreprocessEvent;
+use crate::packet_tap::{PacketTap, TapPhase, TapVerdict};
 use crate::player::Player;
 use crate::player::connection::NetworkConnection;
 use crate::server::Server;
@@ -57,6 +58,12 @@ pub type JavaNetworkWriter = Arc<AsyncMutex<Option<TCPNetworkEncoder<BufWriter<O
 pub enum OutboundPacket {
     /// Normal packet write that may be interrupted by connection shutdown.
     Packet(EncodedPacket),
+    /// A normal packet the packet tap is not shown.
+    ///
+    /// What a packet library sends "silently": its own listeners must not see
+    /// a packet it built itself, or a listener answering a packet with a
+    /// packet would answer its own answer forever.
+    Silent(EncodedPacket),
     /// Final disconnect packet that must be flushed before closing the socket.
     Disconnect(EncodedPacket),
 }
@@ -100,6 +107,19 @@ pub struct OutboundReceiver {
 impl OutboundSender {
     /// Tries to enqueue a normal packet without waiting or allocating beyond the queue limits.
     pub fn try_send_packet(&self, packet: EncodedPacket) -> Result<(), OutboundSendError> {
+        self.try_send_budgeted(packet, OutboundPacket::Packet)
+    }
+
+    /// Like [`Self::try_send_packet`], for a packet the tap must not see.
+    pub fn try_send_silent_packet(&self, packet: EncodedPacket) -> Result<(), OutboundSendError> {
+        self.try_send_budgeted(packet, OutboundPacket::Silent)
+    }
+
+    fn try_send_budgeted(
+        &self,
+        packet: EncodedPacket,
+        wrap: fn(EncodedPacket) -> OutboundPacket,
+    ) -> Result<(), OutboundSendError> {
         let packet_bytes = packet.encoded_data.len();
         let mut budget = self.budget.lock();
         if budget.queued_packets >= self.packet_limit
@@ -109,7 +129,7 @@ impl OutboundSender {
             return Err(OutboundSendError::Full);
         }
 
-        match self.sender.try_send(OutboundPacket::Packet(packet)) {
+        match self.sender.try_send(wrap(packet)) {
             Ok(()) => {
                 budget.queued_packets += 1;
                 budget.queued_bytes += packet_bytes;
@@ -142,7 +162,7 @@ impl OutboundReceiver {
     fn release_budget(&self, outbound: &OutboundPacket) {
         let mut budget = self.budget.lock();
         match outbound {
-            OutboundPacket::Packet(packet) => {
+            OutboundPacket::Packet(packet) | OutboundPacket::Silent(packet) => {
                 budget.queued_packets = budget.queued_packets.saturating_sub(1);
                 budget.queued_bytes = budget
                     .queued_bytes
@@ -899,6 +919,100 @@ impl JavaConnection {
         self.cancel_token.cancel();
     }
 
+    /// The id this connection was given at accept time.
+    #[must_use]
+    pub const fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// Queues a packet given as protocol bytes rather than as a `ClientPacket`.
+    ///
+    /// A `silent` packet is not shown to the packet tap. Returns `false` when
+    /// the packet could not be framed or the connection is closing.
+    pub fn send_raw(&self, id: i32, payload: &[u8], silent: bool) -> bool {
+        let Ok(packet) = EncodedPacket::from_id_and_payload(id, payload, self.compression) else {
+            return false;
+        };
+        let queued = if silent {
+            self.outgoing_packets.try_send_silent_packet(packet)
+        } else {
+            self.outgoing_packets.try_send_packet(packet)
+        };
+        queued.is_ok()
+    }
+
+    /// Handles protocol bytes as though the client had sent them.
+    ///
+    /// A `silent` packet is not shown to the packet tap first. A packet that
+    /// does not decode is dropped and reported as `false`; unlike one read
+    /// from the socket, it did not come from the client and is no reason to
+    /// disconnect it.
+    pub fn receive_raw(&self, server: &Server, id: i32, payload: Vec<u8>, silent: bool) -> bool {
+        let packet = RawPacket::new(id, payload);
+        let packet = if silent {
+            packet
+        } else {
+            let Some(packet) = self.offer_inbound(server, packet) else {
+                return true;
+            };
+            packet
+        };
+        let Some(player) = self.player.upgrade() else {
+            return false;
+        };
+        self.process_packet(packet, player, server).is_ok()
+    }
+
+    /// Shows a received packet to the tap, if one is installed.
+    ///
+    /// `None` means the tap cancelled it and Foton must act as though it
+    /// never arrived.
+    fn offer_inbound(&self, server: &Server, packet: RawPacket) -> Option<RawPacket> {
+        let Some(tap) = server.packet_taps.current() else {
+            return Some(packet);
+        };
+        match tap.inbound(self.id, TapPhase::Play, packet.id, packet.payload()) {
+            TapVerdict::Pass => Some(packet),
+            TapVerdict::Cancel => None,
+            TapVerdict::Rewrite(payload) => Some(RawPacket::new(packet.id, payload)),
+        }
+    }
+
+    /// Shows a packet about to be written to the tap, if one is installed.
+    ///
+    /// Returns what to write and, when the tap asked to hear about it, the tap
+    /// to tell once it is written; `None` when the tap cancelled the packet.
+    fn offer_outbound(
+        &self,
+        packet: EncodedPacket,
+    ) -> Option<(EncodedPacket, Option<Arc<dyn PacketTap>>)> {
+        let Some(player) = self.player.upgrade() else {
+            return Some((packet, None));
+        };
+        let server = player.server();
+        let Some(tap) = server.packet_taps.current() else {
+            return Some((packet, None));
+        };
+        let id = packet.id();
+        if server.packet_taps.skips_outbound(id) {
+            return Some((packet, None));
+        }
+        let Ok(payload) = packet.payload(self.compression) else {
+            // Foton framed this packet itself; failing to read it back is a
+            // bug here, not the client's doing, and the tap is simply skipped.
+            return Some((packet, None));
+        };
+        let outcome = tap.outbound(self.id, TapPhase::Play, id, &payload);
+        let packet = match outcome.verdict {
+            TapVerdict::Pass => packet,
+            TapVerdict::Cancel => return None,
+            TapVerdict::Rewrite(payload) => {
+                EncodedPacket::from_id_and_payload(id, &payload, self.compression).ok()?
+            }
+        };
+        Some((packet, outcome.after_send.then_some(tap)))
+    }
+
     /// Returns whether the connection is closed.
     #[must_use]
     pub fn closed(&self) -> bool {
@@ -1218,6 +1332,9 @@ impl JavaConnection {
                 packet = reader.get_raw_packet() => {
                     match packet {
                         Ok(packet) => {
+                            let Some(packet) = self.offer_inbound(&server, packet) else {
+                                continue;
+                            };
                             if let Some(player) = self.player.upgrade()
                                 && let Err(err) = self.process_packet(packet, player, &server) {
                                 // Vanilla parity: `Connection.exceptionCaught`
@@ -1259,9 +1376,10 @@ impl JavaConnection {
                 }
                 outbound = sender_recv.recv() => {
                     if let Some(outbound) = outbound {
-                        let (packet, close_after_write) = match outbound {
-                            OutboundPacket::Packet(packet) => (packet, false),
-                            OutboundPacket::Disconnect(packet) => (packet, true),
+                        let (packet, close_after_write, tapped) = match outbound {
+                            OutboundPacket::Packet(packet) => (packet, false, true),
+                            OutboundPacket::Silent(packet) => (packet, false, false),
+                            OutboundPacket::Disconnect(packet) => (packet, true, false),
                         };
 
                         if close_after_write {
@@ -1273,6 +1391,15 @@ impl JavaConnection {
                             self.close();
                             break;
                         }
+
+                        let (packet, tap) = if tapped {
+                            match self.offer_outbound(packet) {
+                                Some(offered) => offered,
+                                None => continue,
+                            }
+                        } else {
+                            (packet, None)
+                        };
 
                         let write_result = self.write_packet_now(&packet);
                         select! {
@@ -1286,6 +1413,9 @@ impl JavaConnection {
                                     log::warn!("Failed to send packet to client {}: {err}", self.id);
                                     self.close();
                                     break;
+                                }
+                                if let Some(tap) = tap {
+                                    tap.sent(self.id);
                                 }
                             }
                         }
@@ -1315,7 +1445,7 @@ impl JavaConnection {
         let mut disconnect_packet = None;
         loop {
             match sender_recv.try_recv() {
-                Ok(OutboundPacket::Packet(_)) => {}
+                Ok(OutboundPacket::Packet(_) | OutboundPacket::Silent(_)) => {}
                 Ok(OutboundPacket::Disconnect(packet)) => disconnect_packet = Some(packet),
                 Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
             }

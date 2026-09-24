@@ -276,6 +276,18 @@ impl PrePlayState {
         Ok(())
     }
 
+    /// The profile of a client in configuration, which is the only phase that
+    /// both has one and has not yet handed it to a player.
+    pub(crate) const fn configuring_profile(&self) -> Option<&GameProfile> {
+        match &self.state {
+            State::Configuration {
+                authenticated_profile,
+                ..
+            } => Some(authenticated_profile),
+            _ => None,
+        }
+    }
+
     pub(crate) fn finish_configuration(&mut self) -> Result<GameProfile, PacketSequenceError> {
         self.expect(PrePlayPacket::FinishConfiguration)?;
         let previous = mem::replace(&mut self.state, State::Play);

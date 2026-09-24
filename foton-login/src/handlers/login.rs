@@ -1,5 +1,7 @@
 //! Login state packet handlers.
 
+use std::sync::atomic::Ordering;
+
 use foton_core::player::GameProfile;
 use foton_protocol::{
     packets::login::{CHello, CLoginCompression, CLoginFinished, SHello, SKey},
@@ -19,6 +21,26 @@ use crate::{
 };
 
 impl JavaTcpClient {
+    /// Tells the packet tap, if there is one, that this client is now known.
+    ///
+    /// Configuration is the first phase with an authenticated profile, so it
+    /// is where a packet library first gets a user to attach packets to.
+    fn open_packet_tap(&self) {
+        let Some(tap) = self.server.packet_taps.current() else {
+            return;
+        };
+        let Some((id, name)) = self
+            .pre_play_state
+            .lock()
+            .configuring_profile()
+            .map(|profile| (profile.id, profile.name.clone()))
+        else {
+            return;
+        };
+        tap.opened(self.id, id, &name, self.address);
+        self.tap_opened.store(true, Ordering::Release);
+    }
+
     /// Handles the hello packet during the login state.
     pub(crate) async fn handle_hello(&self, packet: SHello) -> ConnectionAction {
         // A Floodgate handshake derives its identity entirely from the
@@ -252,6 +274,7 @@ impl JavaTcpClient {
             return self.reject_unexpected_packet(error).await;
         }
         self.protocol.store(ConnectionProtocol::Config);
+        self.open_packet_tap();
 
         self.start_configuration().await;
         ConnectionAction::none()
