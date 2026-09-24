@@ -11,7 +11,7 @@
 use std::sync::Arc;
 
 use foton_core::event::{
-    EntitiesLoadEvent, EntitiesUnloadEvent, EntityDismountEvent, EntityPlaceEvent,
+    EntitiesLoadEvent, EntityDamageEvent, EntitiesUnloadEvent, EntityDismountEvent, EntityPlaceEvent,
     PlayerArmorChangeEvent, PlayerFailMoveEvent, PlayerItemConsumeEvent,
     PlayerToggleFlightEvent, PlayerVelocityEvent,
 };
@@ -270,6 +270,33 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: &Arc<JavaVM>) {
                 &uuid_list(event.entities()),
             ],
         );
+    });
+
+    let jvm = Arc::clone(vm);
+    events.on::<EntityDamageEvent, _>(owner(), move |event| {
+        let Some(answer) = text_call(
+            &jvm,
+            "fireEnvironmentDamage",
+            &[
+                &event.entity().to_string(),
+                event.cause(),
+                &event.damage().to_string(),
+            ],
+        ) else {
+            return;
+        };
+        let answer = fields(&answer);
+        if flag(answer.first()) == Some(true) {
+            event.set_cancelled(true);
+            return;
+        }
+        if let Some(damage) = answer
+            .get(1)
+            .and_then(|text| text.parse::<f64>().ok())
+            .filter(|damage| damage.is_finite())
+        {
+            event.set_damage(damage);
+        }
     });
 }
 

@@ -16,6 +16,7 @@ use crate::natives::describe_slot;
 use crate::natives::parse_slot;
 use foton_core::entity::conversion::ConversionReason;
 use foton_core::event::AsyncTabCompleteEvent;
+use foton_core::event::Event;
 use foton_core::event::EntityTargetEvent;
 use foton_core::event::ExplosionPrimeEvent;
 use foton_core::event::{
@@ -47,6 +48,7 @@ use foton_core::player::Player;
 use foton_core::server::Server;
 use foton_registry::item_stack::ItemStack;
 use foton_utils::text::DisplayResolutor;
+use foton_utils::types::InteractionHand;
 use foton_utils::{BlockPos, Identifier};
 use jni::objects::{JObject, JString, JValue, JValueGen};
 use jni::{AttachGuard, JNIEnv, JavaVM};
@@ -305,8 +307,14 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     });
     let jvm = Arc::clone(&vm);
     events.on::<EntityResurrectEvent, _>(owner(), move |event| {
-        if !entity_resurrect_call(&jvm, event.entity_id()) {
-            event.set_cancelled(true);
+        let hand = event.hand().map_or("", |hand| match hand {
+            InteractionHand::MainHand => "HAND",
+            InteractionHand::OffHand => "OFF_HAND",
+        });
+        if let Some(cancelled) =
+            entity_resurrect_call(&jvm, event.entity_id(), hand, Event::is_cancelled(event))
+        {
+            event.set_cancelled(cancelled);
         }
     });
 
@@ -676,6 +684,7 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
             &event.damager().to_string(),
             &event.entity().to_string(),
             event.cause(),
+            event.critical(),
         ) {
             event.set_cancelled(true);
         }
@@ -1521,21 +1530,25 @@ fn entity_death_call(vm: &JavaVM, entity: Uuid) {
     );
 }
 
-fn entity_resurrect_call(vm: &JavaVM, entity: Uuid) -> bool {
-    let Some(mut env) = BridgeEnv::attach(vm) else {
-        return true;
-    };
-    let Ok(uuid) = env.new_string(entity.to_string()) else {
-        return true;
-    };
+/// Returns whether the resurrection ends up cancelled, or `None` when the
+/// crossing failed and the event should stay as it was.
+fn entity_resurrect_call(vm: &JavaVM, entity: Uuid, hand: &str, cancelled: bool) -> Option<bool> {
+    let mut env = BridgeEnv::attach(vm)?;
+    let uuid = env.new_string(entity.to_string()).ok()?;
+    let hand = env.new_string(hand).ok()?;
     env.call_static_method(
         BRIDGE,
         "fireEntityResurrect",
-        "(Ljava/lang/String;)Z",
-        &[JValue::Object(&uuid)],
+        "(Ljava/lang/String;Ljava/lang/String;Z)Z",
+        &[
+            JValue::Object(&uuid),
+            JValue::Object(&hand),
+            JValue::Bool(u8::from(cancelled)),
+        ],
     )
     .and_then(JValueGen::z)
-    .unwrap_or(true)
+    .ok()
+    .map(|allowed| !allowed)
 }
 
 fn player_take_lectern_book_call(
@@ -1799,7 +1812,7 @@ fn regain_health_call(vm: &JavaVM, entity: &str, amount: f32) -> bool {
     .unwrap_or(true)
 }
 
-fn damage_call(vm: &JavaVM, damager: &str, entity: &str, cause: &str) -> bool {
+fn damage_call(vm: &JavaVM, damager: &str, entity: &str, cause: &str, critical: bool) -> bool {
     let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
@@ -1815,11 +1828,12 @@ fn damage_call(vm: &JavaVM, damager: &str, entity: &str, cause: &str) -> bool {
     env.call_static_method(
         BRIDGE,
         "fireEntityDamage",
-        "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+        "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z)Z",
         &[
             JValue::Object(&damager),
             JValue::Object(&entity),
             JValue::Object(&cause),
+            JValue::Bool(u8::from(critical)),
         ],
     )
     .and_then(JValueGen::z)

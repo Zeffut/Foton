@@ -31,6 +31,8 @@ pub mod block;
 pub mod command;
 /// A command a player typed, before the server has read it.
 pub mod command_preprocess;
+/// Damage no entity is behind.
+pub mod damage;
 /// Events about entities that are not players.
 pub mod entity;
 /// Entities arriving in the world and leaving their vehicles.
@@ -54,6 +56,7 @@ pub use block::{
 };
 pub use command::{AsyncTabCompleteEvent, CommandEvent};
 pub use command_preprocess::PlayerCommandPreprocessEvent;
+pub use damage::EntityDamageEvent;
 pub use entity::{
     BlockExplodeEvent, CreatureSpawnEvent, EntityChangeBlockEvent, EntityDamageByEntityEvent,
     EntityDeathEvent, EntityExplodeEvent, EntityMountEvent, EntityPickupItemEvent,

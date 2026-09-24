@@ -445,12 +445,12 @@ public final class EventBridge {
         return record.event();
     }
 
-    public static boolean fireEntityDamage(String damager, String entity, String cause) {
+    public static boolean fireEntityDamage(String damager, String entity, String cause, boolean critical) {
         org.bukkit.entity.Entity target = FotonEntity.handle(Native.parse(entity));
         org.bukkit.event.entity.EntityDamageByEntityEvent event =
             new org.bukkit.event.entity.EntityDamageByEntityEvent(
                 FotonEntity.handle(Native.parse(damager)), target,
-                damageCause(cause));
+                damageCause(cause), critical);
         dispatch(event);
         if (target instanceof org.bukkit.entity.LivingEntity) {
             LAST_DAMAGE.put(target.getUniqueId(), new DamageRecord(event, Bukkit.getCurrentTick()));
@@ -703,9 +703,15 @@ public final class EventBridge {
         dispatch(event);
         return !event.isCancelled();
     }
-    public static boolean fireEntityResurrect(String uuid) {
+    /** Returns whether the entity is saved. Without a totem the event starts
+     * cancelled, and a plugin that un-cancels it grants the life anyway. */
+    public static boolean fireEntityResurrect(String uuid, String hand, boolean cancelled) {
+        org.bukkit.entity.Entity entity = FotonEntity.handle(Native.parse(uuid));
+        org.bukkit.entity.LivingEntity living = entity instanceof org.bukkit.entity.LivingEntity alive
+            ? alive : new FotonLivingEntity(java.util.UUID.fromString(uuid));
         org.bukkit.event.entity.EntityResurrectEvent event = new org.bukkit.event.entity.EntityResurrectEvent(
-            new FotonLivingEntity(java.util.UUID.fromString(uuid)));
+            living, hand.isEmpty() ? null : org.bukkit.inventory.EquipmentSlot.valueOf(hand));
+        event.setCancelled(cancelled);
         dispatch(event);
         return !event.isCancelled();
     }

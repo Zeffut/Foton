@@ -168,4 +168,15 @@ public final class EventRelay {
             entities(uuids)));
         return "";
     }
+
+    /** Answers `cancelled, damage`. */
+    public static String fireEnvironmentDamage(String entity, String cause, String damage) {
+        org.bukkit.event.entity.EntityDamageEvent event = new org.bukkit.event.entity.EntityDamageEvent(
+            FotonEntity.handle(Native.parse(entity)),
+            org.bukkit.event.entity.EntityDamageEvent.DamageCause.valueOf(cause),
+            Double.parseDouble(damage));
+        EventBridge.dispatch(event);
+        if (event.getEntity() != null) EventBridge.setLastDamageCause(event.getEntity().getUniqueId(), event);
+        return answer(event.isCancelled(), event.getDamage());
+    }
 }

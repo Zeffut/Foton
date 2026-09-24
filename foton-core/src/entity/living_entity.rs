@@ -16,7 +16,7 @@ use crate::behavior::ITEM_BEHAVIORS;
 use crate::behavior::item::apply_one_consume_effect;
 use crate::entity::kill_score;
 use crate::event::EntityDeathEvent;
-use crate::event::{EntityResurrectEvent, Event, PlayerArmorChangeEvent};
+use crate::event::{EntityDamageEvent, EntityResurrectEvent, Event, PlayerArmorChangeEvent};
 use crate::inventory::lock::{ContainerId, ContainerLockGuard, ContainerRef};
 use crate::physics::collision;
 use crate::player::player_inventory::PlayerInventory;
@@ -951,12 +951,36 @@ pub trait LivingEntity: Entity {
             damage = f32::MAX;
         }
 
-        let Some((took_full_damage, effective_amount)) = self
+        // Paper parity: `EntityDamageEvent` for damage no entity is behind,
+        // fired on the amount that would land, before the invulnerability
+        // frames are spent. Entity damage has its own by-entity event.
+        let mut plugin_damage = None;
+        if let Some(cause) = EntityDamageEvent::environmental_cause(source) {
+            let Some(landing) = self
+                .living_base()
+                .preview_damage_cooldown(damage, source.bypasses_cooldown())
+            else {
+                return false;
+            };
+            let mut event = EntityDamageEvent::new(self.uuid(), cause, f64::from(landing));
+            world.fire_event(&mut event);
+            if Event::is_cancelled(&event) {
+                return false;
+            }
+            if event.damage() != f64::from(landing) {
+                plugin_damage = Some(event.damage() as f32);
+            }
+        }
+
+        let Some((took_full_damage, mut effective_amount)) = self
             .living_base()
             .apply_damage_cooldown(damage, source.bypasses_cooldown())
         else {
             return false;
         };
+        if let Some(changed) = plugin_damage {
+            effective_amount = changed.max(0.0);
+        }
 
         self.before_actually_hurt(source, effective_amount);
         self.actually_hurt(world, source, effective_amount);
@@ -1192,14 +1216,18 @@ pub trait LivingEntity: Entity {
         let hand = [InteractionHand::MainHand, InteractionHand::OffHand]
             .into_iter()
             .find(|hand| self.get_item_in_hand(*hand).get(DEATH_PROTECTION).is_some());
-        let Some(hand) = hand else {
-            return false;
-        };
-        let mut event = EntityResurrectEvent::new(self.uuid());
+        // Paper parity: asked even with no totem, starting cancelled.
+        let mut event = EntityResurrectEvent::new(self.uuid(), hand);
         world.fire_event(&mut event);
         if Event::is_cancelled(&event) {
             return false;
         }
+        let Some(hand) = hand else {
+            // A plugin granted the life: no totem to spend, no totem effects.
+            self.set_health(1.0);
+            self.broadcast_entity_event(EntityStatus::ProtectedFromDeath);
+            return true;
+        };
         let stack = self.get_item_in_hand(hand);
         // Vanilla parity: the bare `itemStack.shrink(1)`, which has no creative
         // branch. `copy_with_count(0)` is not empty enough: the stack still
