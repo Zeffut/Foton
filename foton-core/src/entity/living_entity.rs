@@ -3515,7 +3515,7 @@ pub trait LivingEntity: Entity {
             self.set_jumping(false);
             let input = self.travel_input();
             self.set_travel_input(LivingTravelInput::new(0.0, input.vertical(), 0.0));
-        } else if self.is_effective_ai() {
+        } else if self.is_effective_ai() && self.as_mob().is_none_or(|mob| mob.is_aware()) {
             self.server_ai_step();
         }
 
@@ -3575,6 +3575,10 @@ pub trait LivingEntity: Entity {
 
     /// Mirrors vanilla `LivingEntity.pushEntities()`.
     fn push_entities(&self) {
+        // A non-collidable entity (Bukkit's `setCollidable(false)`) pushes nothing.
+        if !self.living_base().collides() {
+            return;
+        }
         let Some(world) = self.level() else {
             return;
         };

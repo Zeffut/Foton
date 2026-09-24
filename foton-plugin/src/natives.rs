@@ -41,7 +41,6 @@ use foton_core::entity::TamableAnimal;
 use foton_core::entity::conversion::{
     ConversionParams, ConversionReason, convert_to, replace_entity,
 };
-use foton_core::entity::damage::DamageSource;
 use foton_core::entity::entities::TropicalFishPattern;
 use foton_core::entity::entities::decoration::ArmorStandEntity;
 use foton_core::entity::entities::mobs::hostile::PhantomEntity;
@@ -137,7 +136,6 @@ use foton_registry::recipe::{
 use foton_registry::trading::ItemCost;
 use foton_registry::trading::MerchantOffer;
 use foton_registry::vanilla_block_entity_types::SIGN;
-use foton_registry::vanilla_damage_types::PLAYER_ATTACK;
 use foton_registry::vanilla_game_rules::TNT_EXPLOSION_DROP_DECAY;
 use foton_registry::{
     REGISTRY, RegistryEntry as _, RegistryExt as _, TaggedRegistryExt as _, vanilla_entities,
@@ -8775,30 +8773,6 @@ extern "system" fn open_loom(
     1
 }
 
-extern "system" fn damage_player(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    amount: jdouble,
-    source_uuid: JString<'_>,
-) {
-    let Some(player) = player(&mut env, &uuid) else {
-        return;
-    };
-    let source_id = env
-        .get_string(&source_uuid)
-        .ok()
-        .and_then(|value| value.to_str().ok().and_then(|text| text.parse().ok()));
-    let world = player.get_world();
-    let mut source = DamageSource::environment(&PLAYER_ATTACK);
-    if let Some(id) =
-        source_id.and_then(|id| world.get_entity_by_uuid(&id).map(|entity| entity.id()))
-    {
-        source = source.with_causing_entity(id).with_direct_entity(id);
-    }
-    let _ = player.hurt(&world, &source, amount as f32);
-}
-
 extern "system" fn open_cartography_table(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -12886,11 +12860,6 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "openLoom",
             "(Ljava/lang/String;Ljava/lang/String;III)Z",
             open_loom as *mut c_void,
-        ),
-        method(
-            "damagePlayer",
-            "(Ljava/lang/String;DLjava/lang/String;)V",
-            damage_player as *mut c_void,
         ),
         method(
             "openCartographyTable",

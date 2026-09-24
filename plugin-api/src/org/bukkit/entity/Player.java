@@ -152,7 +152,6 @@ public interface Player extends HumanEntity, org.bukkit.OfflinePlayer {
     default org.bukkit.inventory.InventoryView openStonecutter(org.bukkit.Location location, boolean force) { return null; }
     default org.bukkit.inventory.InventoryView openAnvil(org.bukkit.Location location, boolean force) { return null; }
     default org.bukkit.inventory.InventoryView openCartographyTable(org.bukkit.Location location, boolean force) { return null; }
-    default void damage(double amount, Entity source) { }
     boolean teleport(org.bukkit.Location location);
     void kickPlayer(String message);
     void kick(net.kyori.adventure.text.Component message);

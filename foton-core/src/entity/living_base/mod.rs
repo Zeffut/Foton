@@ -837,6 +837,10 @@ struct LivingEntityState {
     recent_kinetic_enemies: Option<FxHashMap<i32, i64>>,
     no_jump_delay: i32,
     no_action_time: i32,
+    /// Whether other entities push this one and it pushes them. Not a vanilla
+    /// field: Bukkit's `LivingEntity.setCollidable`, which plugins use to let
+    /// players walk through an NPC.
+    collides: bool,
 }
 
 impl LivingEntityState {
@@ -875,6 +879,7 @@ impl LivingEntityState {
             recent_kinetic_enemies: None,
             no_jump_delay: 0,
             no_action_time: 0,
+            collides: true,
         }
     }
 
@@ -1230,6 +1235,18 @@ impl LivingEntityBase {
     #[must_use]
     pub fn was_experience_consumed(&self) -> bool {
         self.state.lock().skip_drop_experience
+    }
+
+    /// Whether this entity takes part in entity pushing. See
+    /// [`LivingEntityState::collides`](Self::set_collides).
+    #[must_use]
+    pub fn collides(&self) -> bool {
+        self.state.lock().collides
+    }
+
+    /// Takes this entity out of entity pushing, or puts it back.
+    pub fn set_collides(&self, collides: bool) {
+        self.state.lock().collides = collides;
     }
 
     /// Returns vanilla `LivingEntity.noActionTime`.

@@ -17,6 +17,13 @@ public interface LivingEntity extends Damageable, org.bukkit.attribute.Attributa
         return null;
     }
 
+    /** Whether the entity thinks: always false for anything that is not a mob. */
+    default boolean hasAI() { return foton.Native.entityHasAi(getUniqueId().toString()); }
+    /** Vanilla's NoAI switch: a mob without AI does not move at all. */
+    default void setAI(boolean ai) { foton.Native.setEntityAi(getUniqueId().toString(), ai); }
+    default boolean isCollidable() { return foton.Native.entityCollidable(getUniqueId().toString()); }
+    /** Whether other entities push this one, and it them. */
+    default void setCollidable(boolean collidable) { foton.Native.setEntityCollidable(getUniqueId().toString(), collidable); }
     default org.bukkit.event.entity.EntityDamageEvent getLastDamageCause() { return null; }
     default void setLastDamageCause(org.bukkit.event.entity.EntityDamageEvent event) { }
     default boolean isHandRaised() { return false; }

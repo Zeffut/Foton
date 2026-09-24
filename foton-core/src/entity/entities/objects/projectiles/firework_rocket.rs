@@ -172,7 +172,8 @@ impl FireworkRocketEntity {
         self.entity_data.lock().attached_to_target.get().is_some()
     }
 
-    fn attached_entity(&self, world: &Arc<World>) -> Option<SharedEntity> {
+    /// The living entity this rocket is propelling, vanilla's `attachedToEntity`.
+    pub fn attached_entity(&self, world: &Arc<World>) -> Option<SharedEntity> {
         if let Some(attached) = self
             .state
             .lock()

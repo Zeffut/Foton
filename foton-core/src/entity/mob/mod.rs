@@ -229,6 +229,10 @@ pub struct MobBase {
     leash_data: SyncMutex<Option<LeashData>>,
     ambient_sound_time: SyncMutex<i32>,
     xp_reward: SyncMutex<i32>,
+    /// Whether the mob thinks: senses, runs its goals and brain, navigates.
+    /// Not a vanilla field: Bukkit's `Mob.setAware`, a mob that still falls and
+    /// can be pushed but decides nothing. Saved as `Bukkit.Aware`, as Paper does.
+    aware: SyncMutex<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -269,6 +273,7 @@ impl MobBase {
             leash_data: SyncMutex::new(None),
             ambient_sound_time: SyncMutex::new(0),
             xp_reward: SyncMutex::new(0),
+            aware: SyncMutex::new(true),
         }
     }
 
@@ -1269,6 +1274,9 @@ pub trait Mob: LivingEntity + MobSource {
         if self.is_no_ai() {
             nbt.insert("NoAI", i8::from(true));
         }
+        if !self.is_aware() {
+            nbt.insert("Bukkit.Aware", i8::from(false));
+        }
     }
 
     /// Reads the mob-owned half of this entity's save data.
@@ -1304,6 +1312,7 @@ pub trait Mob: LivingEntity + MobSource {
         *self.mob_base().death_loot_table_seed().lock() =
             nbt.long("DeathLootTableSeed").unwrap_or(0);
         self.set_no_ai(nbt.byte("NoAI").is_some_and(|value| value != 0));
+        self.set_aware(nbt.byte("Bukkit.Aware").is_none_or(|value| value != 0));
     }
 
     /// Overrides the loot table this mob drops from on death.
@@ -1899,6 +1908,17 @@ pub trait Mob: LivingEntity + MobSource {
     /// Switches this mob's AI off or on. See [`Self::is_no_ai`].
     fn set_no_ai(&self, no_ai: bool) {
         self.set_mob_flag(MOB_FLAG_NO_AI, no_ai);
+    }
+
+    /// Whether this mob runs its AI step. Unlike [`Self::is_no_ai`], an
+    /// unaware mob still moves under physics.
+    fn is_aware(&self) -> bool {
+        *self.mob_base().aware.lock()
+    }
+
+    /// Makes this mob aware or not. See [`Self::is_aware`].
+    fn set_aware(&self, aware: bool) {
+        *self.mob_base().aware.lock() = aware;
     }
 
     /// Whether this mob holds its weapon in the off hand, the `LeftHanded`

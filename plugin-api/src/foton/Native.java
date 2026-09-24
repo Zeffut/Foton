@@ -491,7 +491,6 @@ public final class Native {
     public static native boolean openStonecutter(String uuid, String world, int x, int y, int z);
     public static native boolean openAnvil(String uuid, String world, int x, int y, int z);
     public static native boolean openCartographyTable(String uuid, String world, int x, int y, int z);
-    public static native void damagePlayer(String uuid, double amount, String sourceUuid);
 
     /** One inventory slot as `minecraft:name count`, or the empty string.
      *
@@ -606,7 +605,37 @@ public final class Native {
     public static native String carriedInventorySlot(String uuid, int slot);
     public static native void setCarriedInventorySlot(String uuid, int slot, String item);
 
-    static UUID parse(String uuid) {
+    public static native String[] entityTags(String uuid);
+    public static native boolean addEntityTag(String uuid, String tag);
+    public static native boolean removeEntityTag(String uuid, String tag);
+    /** Sets a custom name from vanilla component JSON; null clears it. */
+    public static native void setEntityCustomNameComponent(String uuid, String json);
+    public static native boolean entityGravity(String uuid);
+    public static native void setEntityGravity(String uuid, boolean gravity);
+    public static native boolean entitySilent(String uuid);
+    public static native void setEntitySilent(String uuid, boolean silent);
+    public static native void setEntityRotation(String uuid, float yaw, float pitch);
+    public static native int entityPose(String uuid);
+    public static native void damageEntity(String uuid, double amount, String source);
+    public static native boolean entityHasAi(String uuid);
+    public static native void setEntityAi(String uuid, boolean ai);
+    public static native boolean mobAware(String uuid);
+    public static native void setMobAware(String uuid, boolean aware);
+    public static native boolean entityCollidable(String uuid);
+    public static native void setEntityCollidable(String uuid, boolean collidable);
+    public static native String itemThrower(String uuid);
+    public static native String itemOwner(String uuid);
+    public static native void setItemOwner(String uuid, String owner);
+    public static native int itemPickupDelay(String uuid);
+    public static native void setItemPickupDelay(String uuid, int delay);
+    public static native void setItemFrameItem(String uuid, String item, boolean playSound);
+    public static native String fireworkAttachedTo(String uuid);
+    /** An equipment slot by Bukkit {@code EquipmentSlot} ordinal. */
+    public static native String entityEquipmentItem(String uuid, int slot);
+    public static native void setEntityEquipmentItem(String uuid, int slot, String item);
+
+    public static UUID parse(String uuid) {
+        if (uuid == null) return null;
         try {
             return UUID.fromString(uuid);
         } catch (IllegalArgumentException error) {

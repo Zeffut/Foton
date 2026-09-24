@@ -6,7 +6,7 @@ import org.bukkit.World;
 import org.bukkit.command.CommandSender;
 
 /** Anything in a world that has a position. */
-public interface Entity extends CommandSender, org.bukkit.persistence.PersistentDataHolder, org.bukkit.metadata.Metadatable {
+public interface Entity extends CommandSender, org.bukkit.Nameable, org.bukkit.persistence.PersistentDataHolder, org.bukkit.metadata.Metadatable {
     /** Distance fallen since the entity was last on the ground.
      *
      * <p>Declared here rather than only on {@code LivingEntity} because
@@ -41,6 +41,66 @@ public interface Entity extends CommandSender, org.bukkit.persistence.Persistent
     UUID getUniqueId();
 
     Location getLocation();
+
+    /** Copies this entity's position and rotation into {@code location}, and
+     * returns it -- the allocation-free form hot loops use. */
+    default Location getLocation(Location location) {
+        Location current = getLocation();
+        if (location == null || current == null) return location;
+        location.setWorld(current.getWorld());
+        location.setX(current.getX());
+        location.setY(current.getY());
+        location.setZ(current.getZ());
+        location.setYaw(current.getYaw());
+        location.setPitch(current.getPitch());
+        return location;
+    }
+
+    /** The height of the entity's current bounding box: its pose and scale included. */
+    default double getHeight() {
+        double[] box = foton.Native.entityBoundingBox(getUniqueId().toString());
+        return box == null || box.length < 6 ? 0.0 : box[4] - box[1];
+    }
+
+    /** The width of the entity's current bounding box. */
+    default double getWidth() {
+        double[] box = foton.Native.entityBoundingBox(getUniqueId().toString());
+        return box == null || box.length < 6 ? 0.0 : box[3] - box[0];
+    }
+
+    default boolean hasGravity() { return foton.Native.entityGravity(getUniqueId().toString()); }
+    default void setGravity(boolean gravity) { foton.Native.setEntityGravity(getUniqueId().toString(), gravity); }
+    default boolean isSilent() { return foton.Native.entitySilent(getUniqueId().toString()); }
+    default void setSilent(boolean silent) { foton.Native.setEntitySilent(getUniqueId().toString(), silent); }
+
+    /** Turns the entity, head included; the angles are wrapped and clamped first. */
+    default void setRotation(float yaw, float pitch) {
+        if (!Float.isFinite(yaw) || !Float.isFinite(pitch)) throw new IllegalArgumentException("yaw and pitch must be finite");
+        foton.Native.setEntityRotation(getUniqueId().toString(), Location.normalizeYaw(yaw), Location.normalizePitch(pitch));
+    }
+
+    default Pose getPose() {
+        int pose = foton.Native.entityPose(getUniqueId().toString());
+        Pose[] poses = Pose.values();
+        return pose >= 0 && pose < poses.length ? poses[pose] : Pose.STANDING;
+    }
+
+    /** The entity's scoreboard tags: live, so adding to the set tags the entity. */
+    default java.util.Set<String> getScoreboardTags() { return new foton.FotonScoreboardTags(getUniqueId().toString()); }
+    default boolean addScoreboardTag(String tag) { return tag != null && foton.Native.addEntityTag(getUniqueId().toString(), tag); }
+    default boolean removeScoreboardTag(String tag) { return tag != null && foton.Native.removeEntityTag(getUniqueId().toString(), tag); }
+
+    /** The custom name as a component. Foton keeps the name's text here; its
+     * formatting reaches players but is not read back. */
+    @Override default net.kyori.adventure.text.Component customName() {
+        String name = getCustomName();
+        return name == null ? null : net.kyori.adventure.text.Component.text(name);
+    }
+
+    /** Sets the custom name, colour and formatting included. */
+    @Override default void customName(net.kyori.adventure.text.Component customName) {
+        foton.Native.setEntityCustomNameComponent(getUniqueId().toString(), foton.FotonComponents.toJson(customName));
+    }
     default Location getOrigin() { return getLocation(); }
     default EntitySnapshot createSnapshot() { return new foton.FotonEntitySnapshot(getType(), getLocation()); }
     default org.bukkit.util.Vector getVelocity() { return new org.bukkit.util.Vector(); }
@@ -90,6 +150,14 @@ public interface Entity extends CommandSender, org.bukkit.persistence.Persistent
 
     default boolean teleport(Location location) { return false; }
     default boolean teleport(Location location, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause) { return teleport(location); }
+    default boolean teleport(Location location, io.papermc.paper.entity.TeleportFlag... flags) {
+        return teleport(location, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.PLUGIN, flags);
+    }
+    /** Paper's flagged teleport. The base form ignores the flags; Foton's
+     * entities apply them (see {@code FotonEntity}). */
+    default boolean teleport(Location location, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause, io.papermc.paper.entity.TeleportFlag... flags) {
+        return teleport(location, cause);
+    }
     default java.util.concurrent.CompletableFuture<Boolean> teleportAsync(Location location) {
         return java.util.concurrent.CompletableFuture.completedFuture(teleport(location));
     }
@@ -103,9 +171,9 @@ public interface Entity extends CommandSender, org.bukkit.persistence.Persistent
     default void remove() { }
 
     boolean isDead();
-    String getCustomName();
+    @Override String getCustomName();
     default void setCustomNameVisible(boolean visible) { foton.Native.setEntityCustomNameVisible(getUniqueId().toString(), visible); }
-    void setCustomName(String name);
+    @Override void setCustomName(String name);
 
     /** The scheduler for work that follows this entity. */
     io.papermc.paper.threadedregions.scheduler.EntityScheduler getScheduler();

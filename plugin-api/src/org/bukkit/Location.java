@@ -226,6 +226,19 @@ public class Location implements Cloneable {
         return result;
     }
 
+    /** Wraps a yaw into [-180, 180), as Paper does before applying it. */
+    public static float normalizeYaw(float yaw) {
+        yaw %= 360.0f;
+        if (yaw >= 180.0f) yaw -= 360.0f;
+        else if (yaw < -180.0f) yaw += 360.0f;
+        return yaw;
+    }
+
+    /** Clamps a pitch into [-90, 90]. */
+    public static float normalizePitch(float pitch) {
+        return Math.max(-90.0f, Math.min(90.0f, pitch));
+    }
+
     @Override
     public Location clone() {
         try {

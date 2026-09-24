@@ -250,12 +250,6 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
     }
 
     @Override
-    public void damage(double amount, org.bukkit.entity.Entity source) {
-        if (amount > 0.0 && Double.isFinite(amount))
-            Native.damagePlayer(id.toString(), amount, source == null ? null : source.getUniqueId().toString());
-    }
-
-    @Override
     public org.bukkit.inventory.InventoryView openCartographyTable(org.bukkit.Location location, boolean force) {
         if (location == null || location.getWorld() == null) return null;
         if (!location.getWorld().getName().equals(getWorld().getName())) return null;
