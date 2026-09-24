@@ -49,6 +49,24 @@ impl SmithingHandler {
         ContainerId::from_arc(&self.result_container)
     }
 
+    /// The three inputs and the result, as a `PrepareSmithingEvent` shows
+    /// them.
+    #[must_use]
+    pub fn snapshot(&self, guard: &ContainerLockGuard) -> Option<([ItemStack; 3], ItemStack)> {
+        let (template, base, addition) = self.inputs(guard)?;
+        let result = guard.get(self.result_id())?.get_item(0).clone();
+        Some(([template, base, addition], result))
+    }
+
+    /// Replaces the result a plugin changed.
+    pub fn set_result(&self, guard: &mut ContainerLockGuard, result: ItemStack) {
+        let Some(container) = guard.get_typed_mut::<ResultContainer>(self.result_id()) else {
+            return;
+        };
+        container.set_item(0, result);
+        container.set_changed();
+    }
+
     /// Returns the three inputs.
     fn inputs(&self, guard: &ContainerLockGuard) -> Option<(ItemStack, ItemStack, ItemStack)> {
         let container = guard.get(self.input_id())?;

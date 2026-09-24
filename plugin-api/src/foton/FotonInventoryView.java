@@ -27,7 +27,9 @@ public final class FotonInventoryView extends InventoryView {
                         ? new FotonFurnaceMenuInventory(owner, org.bukkit.Material.BLAST_FURNACE)
                         : "minecraft:smoker".equals(menuType)
                             ? new FotonFurnaceMenuInventory(owner, org.bukkit.Material.SMOKER)
-                            : new FotonMenuInventory(owner);
+                            : "minecraft:smithing".equals(menuType)
+                                ? new FotonSmithingInventory(owner)
+                                : new FotonMenuInventory(owner);
         String title = Native.openMenuTitle(player.getUniqueId().toString());
         this.title = title == null ? "" : title;
     }

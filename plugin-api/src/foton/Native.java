@@ -105,6 +105,9 @@ public final class Native {
     public static native String[] signLines(String world, int x, int y, int z);
     public static native String hopperCustomName(String world, int x, int y, int z);
     public static native String hopperInventorySlot(String world, int x, int y, int z, int slot);
+    /** The key of the recipe a square crafting grid `width` wide makes of
+     * the encoded stacks, row by row, or null. */
+    public static native String craftingRecipe(String items, int width);
     /** Whether a furnace burns the encoded stack. */
     public static native boolean isFuel(String item);
     /** The recipe by which the furnace-like block `block` cooks the encoded

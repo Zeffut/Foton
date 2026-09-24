@@ -10,6 +10,7 @@ use foton_registry::{REGISTRY, vanilla_blocks, vanilla_menu_types};
 use foton_utils::BlockPos;
 use foton_utils::locks::{IntoShared, Shared};
 
+use crate::event::PrepareSmithingEvent;
 use crate::inventory::container::{ResultContainer, SimpleContainer};
 use crate::inventory::menu::builder::SectionKind;
 use crate::inventory::prelude::*;
@@ -82,9 +83,16 @@ impl MenuKind for SmithingKind {
         &mut self,
         _behavior: &mut MenuBehavior,
         guard: &mut ContainerLockGuard,
-        _player: &Player,
+        player: &Player,
     ) {
         self.handler.update_result(guard);
+        // Paper parity: `PrepareSmithingEvent`, after every recomputation.
+        let Some((inputs, result)) = self.handler.snapshot(guard) else {
+            return;
+        };
+        let mut event = PrepareSmithingEvent::new(player.gameprofile.id, inputs, result);
+        player.fire_event(&mut event);
+        self.handler.set_result(guard, event.result().clone());
     }
 
     fn can_take_item_for_pick_all(&self, _carried: &ItemStack, slot_index: usize) -> bool {

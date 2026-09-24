@@ -311,6 +311,122 @@ public final class EventRelay {
         return answer(event.isCancelled(), out);
     }
 
+    /** Answers `cancelled, offers`, each offer `key level cost` or empty. */
+    public static String firePrepareEnchant(String uuid, String world, String table, String item,
+            String offers, String bonus, String cancelled) {
+        Player player = player(uuid);
+        String[] rows = offers.split(ITEM, -1);
+        org.bukkit.enchantments.EnchantmentOffer[] parsed = new org.bukkit.enchantments.EnchantmentOffer[3];
+        for (int slot = 0; slot < parsed.length && slot < rows.length; slot++) {
+            String[] parts = rows[slot].split(" ");
+            if (parts.length != 3) continue;
+            org.bukkit.NamespacedKey key = org.bukkit.NamespacedKey.fromString(parts[0]);
+            org.bukkit.enchantments.Enchantment enchantment =
+                key == null ? null : org.bukkit.enchantments.Enchantment.getByKey(key);
+            if (enchantment == null) continue;
+            parsed[slot] = new org.bukkit.enchantments.EnchantmentOffer(enchantment,
+                Integer.parseInt(parts[1]), Integer.parseInt(parts[2]));
+        }
+        org.bukkit.event.enchantment.PrepareItemEnchantEvent event =
+            new org.bukkit.event.enchantment.PrepareItemEnchantEvent(player, player.getOpenInventory(),
+                block(world, table), FotonInventory.decode(item), parsed, Integer.parseInt(bonus));
+        event.setCancelled(flag(cancelled));
+        EventBridge.dispatch(event);
+        StringBuilder out = new StringBuilder();
+        org.bukkit.enchantments.EnchantmentOffer[] left = event.getOffers();
+        for (int slot = 0; slot < 3; slot++) {
+            if (slot > 0) out.append(ITEM);
+            org.bukkit.enchantments.EnchantmentOffer offer = slot < left.length ? left[slot] : null;
+            if (offer == null || offer.getEnchantment() == null) continue;
+            out.append(offer.getEnchantment().getKey()).append(' ').append(offer.getEnchantmentLevel())
+                .append(' ').append(offer.getCost());
+        }
+        return answer(event.isCancelled(), out);
+    }
+
+    /** Answers the result. */
+    public static String firePrepareSmithing(String uuid, String inputs, String result) {
+        Player player = player(uuid);
+        java.util.List<org.bukkit.inventory.ItemStack> slots = slots(inputs);
+        org.bukkit.inventory.ItemStack offered = FotonInventory.decode(result);
+        slots.add(offered == null ? new org.bukkit.inventory.ItemStack(org.bukkit.Material.AIR) : offered);
+        FotonSmithingInventory inventory = new FotonSmithingInventory(uuid,
+            slots.toArray(new org.bukkit.inventory.ItemStack[0]));
+        org.bukkit.event.inventory.PrepareSmithingEvent event = new org.bukkit.event.inventory.PrepareSmithingEvent(
+            new FotonInventoryView((FotonPlayer) player, inventory), offered);
+        EventBridge.dispatch(event);
+        return FotonInventory.encode(event.getResult());
+    }
+
+    /** An offer as the relay writes one: `result, costA, costB, uses,
+     * maxUses, rewardExp, xp, priceMultiplier, demand`. */
+    static org.bukkit.inventory.MerchantRecipe merchantRecipe(String encoded) {
+        String[] parts = encoded.split("\u001c", -1);
+        if (parts.length != 9) return null;
+        org.bukkit.inventory.MerchantRecipe recipe = new org.bukkit.inventory.MerchantRecipe(
+            FotonInventory.decode(parts[0]), Integer.parseInt(parts[3]), Integer.parseInt(parts[4]),
+            flag(parts[5]), Integer.parseInt(parts[6]), Float.parseFloat(parts[7]), Integer.parseInt(parts[8]));
+        org.bukkit.inventory.ItemStack first = FotonInventory.decode(parts[1]);
+        if (first != null) recipe.addIngredient(first);
+        org.bukkit.inventory.ItemStack second = FotonInventory.decode(parts[2]);
+        if (second != null) recipe.addIngredient(second);
+        return recipe;
+    }
+
+    /** Answers `cancelled`. A trade with a mob is a {@code PlayerTradeEvent}. */
+    public static String firePurchase(String uuid, String trader, String offer, String offers) {
+        Player player = player(uuid);
+        org.bukkit.inventory.MerchantRecipe trade = merchantRecipe(offer);
+        org.bukkit.entity.Entity mob = trader.isEmpty() ? null : FotonEntity.handle(Native.parse(trader));
+        io.papermc.paper.event.player.PlayerPurchaseEvent event;
+        if (mob instanceof org.bukkit.entity.AbstractVillager villager) {
+            event = new io.papermc.paper.event.player.PlayerTradeEvent(player, villager, trade, true, true);
+        } else {
+            java.util.List<org.bukkit.inventory.MerchantRecipe> recipes = new java.util.ArrayList<>();
+            for (String one : offers.isEmpty() ? new String[0] : offers.split(ITEM, -1)) {
+                org.bukkit.inventory.MerchantRecipe recipe = merchantRecipe(one);
+                if (recipe != null) recipes.add(recipe);
+            }
+            event = new io.papermc.paper.event.player.PlayerPurchaseEvent(player,
+                new FotonMerchantScreen(recipes), trade, false, true);
+        }
+        EventBridge.dispatch(event);
+        return answer(event.isCancelled());
+    }
+
+    /** The event a click in a menu raises: a crafting table's or a smithing
+     * table's result slot raises the event for crafting or forging, as Paper
+     * does, and every other click an {@code InventoryClickEvent}. */
+    static org.bukkit.event.inventory.InventoryClickEvent clickEvent(Player player,
+            org.bukkit.inventory.ItemStack current, org.bukkit.inventory.ItemStack cursor,
+            org.bukkit.event.inventory.ClickType click, int rawSlot) {
+        if (player == null || current == null || current.getType().isAir()) {
+            return new org.bukkit.event.inventory.InventoryClickEvent(player, current, cursor, click, rawSlot);
+        }
+        String type = Native.openMenuType(player.getUniqueId().toString());
+        if ("minecraft:crafting".equals(type) && rawSlot == 0) {
+            org.bukkit.inventory.Inventory top = player.getOpenInventory().getTopInventory();
+            if (top instanceof org.bukkit.inventory.CraftingInventory crafting) {
+                StringBuilder grid = new StringBuilder();
+                org.bukkit.inventory.ItemStack[] matrix = crafting.getMatrix();
+                for (int index = 0; index < matrix.length; index++) {
+                    if (index > 0) grid.append(ITEM);
+                    grid.append(FotonInventory.encode(matrix[index]));
+                }
+                String key = Native.craftingRecipe(grid.toString(), 3);
+                org.bukkit.NamespacedKey recipe = key == null ? null : org.bukkit.NamespacedKey.fromString(key);
+                if (recipe != null) {
+                    return new org.bukkit.event.inventory.CraftItemEvent(new FotonCraftingRecipe(recipe, current),
+                        player, current, cursor, click, rawSlot);
+                }
+            }
+        }
+        if ("minecraft:smithing".equals(type) && rawSlot == 3) {
+            return new org.bukkit.event.inventory.SmithItemEvent(player, current, cursor, click, rawSlot);
+        }
+        return new org.bukkit.event.inventory.InventoryClickEvent(player, current, cursor, click, rawSlot);
+    }
+
     /** Answers `cancelled, stacks`. */
     public static String fireHarvest(String uuid, String world, String block, String hand,
             String items) {

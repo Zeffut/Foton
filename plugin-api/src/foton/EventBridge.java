@@ -322,8 +322,8 @@ public final class EventBridge {
     }
 
     public static boolean fireInventoryClick(String uuid, String item, String cursor, String click, int rawSlot) {
-        org.bukkit.event.inventory.InventoryClickEvent event =
-            new org.bukkit.event.inventory.InventoryClickEvent(player(uuid), FotonInventory.decode(item), FotonInventory.decode(cursor), clickType(click), rawSlot);
+        org.bukkit.event.inventory.InventoryClickEvent event = EventRelay.clickEvent(player(uuid),
+            FotonInventory.decode(item), FotonInventory.decode(cursor), clickType(click), rawSlot);
         dispatch(event);
         return !event.isCancelled();
     }

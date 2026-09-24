@@ -137,7 +137,7 @@ use foton_registry::game_rules::GameRuleValue;
 use foton_registry::item_stack::ItemStack;
 use foton_registry::particle_type::ParticleData;
 use foton_registry::recipe::{
-    CraftingCategory, Ingredient, RecipeResult, ShapedRecipe, ShapelessRecipe,
+    CraftingCategory, CraftingInput, Ingredient, RecipeResult, ShapedRecipe, ShapelessRecipe,
 };
 use foton_registry::trading::ItemCost;
 use foton_registry::trading::MerchantOffer;
@@ -10277,6 +10277,35 @@ extern "system" fn hopper_inventory_slot(
     to_java(&mut env, value)
 }
 
+/// `foton.Native.craftingRecipe`: the key of the recipe a square crafting
+/// grid `width` wide makes, the stacks row by row, or null when none does.
+extern "system" fn crafting_recipe(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    items: JString<'_>,
+    width: jint,
+) -> jstring {
+    let items: Option<String> = env.get_string(&items).ok().map(Into::into);
+    let value = items.and_then(|items| {
+        let width = usize::try_from(width).ok().filter(|width| matches!(width, 2 | 3))?;
+        let stacks = items
+            .split('\u{1e}')
+            .map(parse_slot)
+            .collect::<Option<Vec<_>>>()?;
+        if stacks.len() != width * width {
+            return None;
+        }
+        let input = CraftingInput::positioned(width, width, stacks).input;
+        let recipe = if width == 2 {
+            REGISTRY.recipes.find_crafting_recipe_2x2(&input)
+        } else {
+            REGISTRY.recipes.find_crafting_recipe(&input)
+        }?;
+        Some(recipe.id().to_string())
+    });
+    to_java(&mut env, value)
+}
+
 /// `foton.Native.isFuel`: whether a furnace burns the encoded stack.
 extern "system" fn is_fuel(mut env: JNIEnv<'_>, _class: JClass<'_>, item: JString<'_>) -> jboolean {
     let Ok(text) = env.get_string(&item) else {
@@ -11715,6 +11744,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             hopper_inventory_slot as *mut c_void,
         ),
         method("isFuel", "(Ljava/lang/String;)Z", is_fuel as *mut c_void),
+        method(
+            "craftingRecipe",
+            "(Ljava/lang/String;I)Ljava/lang/String;",
+            crafting_recipe as *mut c_void,
+        ),
         method(
             "cookingRecipe",
             "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",

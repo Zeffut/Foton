@@ -11,8 +11,9 @@
 use std::sync::Arc;
 
 use foton_core::event::{
-    BlockBreakEvent, BlockDropItemEvent, BrewEvent, FurnaceBurnEvent, FurnaceSmeltEvent,
-    FurnaceStartSmeltEvent, EntitiesLoadEvent, EntityDamageEvent,
+    BlockBreakEvent, BlockDropItemEvent, BrewEvent, EnchantOffer, FurnaceBurnEvent,
+    FurnaceSmeltEvent, FurnaceStartSmeltEvent, PlayerPurchaseEvent, PrepareItemEnchantEvent,
+    PrepareSmithingEvent, EntitiesLoadEvent, EntityDamageEvent,
     PlayerHarvestBlockEvent, EntitiesUnloadEvent, EntityDismountEvent, EntityPlaceEvent,
     PlayerArmorChangeEvent, PlayerFailMoveEvent, PlayerItemConsumeEvent,
     PlayerToggleFlightEvent, PlayerVelocityEvent,
@@ -21,10 +22,12 @@ use foton_registry::REGISTRY;
 use foton_registry::equipment::EquipmentSlot;
 use foton_registry::item_stack::ItemStack;
 use foton_registry::recipe::{CookingKind, SmeltingRecipe};
+use foton_registry::trading::MerchantOffer;
 use foton_utils::Identifier;
 use foton_utils::types::InteractionHand;
 use foton_utils::{BlockPos, ChunkPos};
 use uuid::Uuid;
+use foton_core::event::Event as _;
 use foton_core::server::Server;
 use glam::DVec3;
 use jni::JavaVM;
@@ -410,6 +413,140 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: &Arc<JavaVM>) {
     });
 
     subscribe_cooking(server, vm);
+    subscribe_menus(server, vm);
+}
+
+/// Separates the fields of one merchant offer.
+const OFFER_FIELD: &str = "\u{1c}";
+
+/// Describes an offer as `result, costA, costB, uses, maxUses, rewardExp, xp,
+/// priceMultiplier, demand`, the costs being the base ones Paper reports.
+fn describe_offer(offer: &MerchantOffer) -> String {
+    [
+        describe_slot(offer.result()),
+        describe_slot(offer.base_cost_a()),
+        describe_slot(&offer.cost_b()),
+        offer.uses().to_string(),
+        offer.max_uses().to_string(),
+        bit(offer.should_reward_exp()).to_owned(),
+        offer.xp().to_string(),
+        offer.price_multiplier().to_string(),
+        offer.demand().to_string(),
+    ]
+    .join(OFFER_FIELD)
+}
+
+/// Writes the three enchanting offers, `key level cost` each, empty where
+/// the row is.
+fn enchant_offers(offers: &[Option<EnchantOffer>; 3]) -> String {
+    offers
+        .iter()
+        .map(|offer| {
+            offer.as_ref().map_or_else(String::new, |offer| {
+                format!("{} {} {}", offer.enchantment, offer.level, offer.cost)
+            })
+        })
+        .collect::<Vec<_>>()
+        .join(ITEM)
+}
+
+/// Reads [`enchant_offers`] back; `None` when the answer is malformed.
+fn parse_enchant_offers(text: &str) -> Option<[Option<EnchantOffer>; 3]> {
+    let rows = text.split(ITEM).collect::<Vec<_>>();
+    if rows.len() != 3 {
+        return None;
+    }
+    let mut offers: [Option<EnchantOffer>; 3] = [None, None, None];
+    for (slot, row) in rows.into_iter().enumerate() {
+        if row.is_empty() {
+            continue;
+        }
+        let mut parts = row.split(' ');
+        let enchantment = parts.next()?.parse::<Identifier>().ok()?;
+        let level = parts.next()?.parse::<i32>().ok()?;
+        let cost = parts.next()?.parse::<i32>().ok()?;
+        offers[slot] = Some(EnchantOffer {
+            enchantment,
+            level,
+            cost,
+        });
+    }
+    Some(offers)
+}
+
+/// The workstation screen events.
+fn subscribe_menus(server: &Arc<Server>, vm: &Arc<JavaVM>) {
+    let events = server.events();
+
+    let jvm = Arc::clone(vm);
+    events.on::<PrepareItemEnchantEvent, _>(owner(), move |event| {
+        let Some(answer) = text_call(
+            &jvm,
+            "firePrepareEnchant",
+            &[
+                &event.player().to_string(),
+                event.world(),
+                &block_position(event.table()),
+                &describe_slot(event.item()),
+                &enchant_offers(event.offers()),
+                &event.bonus().to_string(),
+                bit(event.is_cancelled()),
+            ],
+        ) else {
+            return;
+        };
+        let answer = fields(&answer);
+        let Some(cancelled) = flag(answer.first()) else {
+            return;
+        };
+        event.set_cancelled(cancelled);
+        if let Some(offers) = answer.get(1).and_then(|text| parse_enchant_offers(text)) {
+            event.set_offers(offers);
+        }
+    });
+
+    let jvm = Arc::clone(vm);
+    events.on::<PrepareSmithingEvent, _>(owner(), move |event| {
+        let Some(answer) = text_call(
+            &jvm,
+            "firePrepareSmithing",
+            &[
+                &event.player().to_string(),
+                &slot_list(event.inputs()),
+                &describe_slot(event.result()),
+            ],
+        ) else {
+            return;
+        };
+        if let Some(result) = parse_slot(&answer) {
+            event.set_result(result);
+        }
+    });
+
+    let jvm = Arc::clone(vm);
+    events.on::<PlayerPurchaseEvent, _>(owner(), move |event| {
+        let offers = event
+            .offers()
+            .iter()
+            .map(describe_offer)
+            .collect::<Vec<_>>()
+            .join(ITEM);
+        let Some(answer) = text_call(
+            &jvm,
+            "firePurchase",
+            &[
+                &event.player().to_string(),
+                &event.trader().map(|id| id.to_string()).unwrap_or_default(),
+                &describe_offer(event.offer()),
+                &offers,
+            ],
+        ) else {
+            return;
+        };
+        if flag(fields(&answer).first()) == Some(true) {
+            event.set_cancelled(true);
+        }
+    });
 }
 
 /// The furnace and brewing stand events.

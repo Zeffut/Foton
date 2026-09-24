@@ -116,6 +116,12 @@ impl MerchantHandler {
         Some((index, offers[index].clone()))
     }
 
+    /// The trade the current payment buys, if any.
+    #[must_use]
+    pub fn current_trade(&self, guard: &ContainerLockGuard) -> Option<MerchantOffer> {
+        self.active_trade(guard).map(|(_, offer)| offer)
+    }
+
     /// The experience the merchant would gain from the trade now set up.
     ///
     /// Vanilla parity: `MerchantContainer.getFutureXp`.

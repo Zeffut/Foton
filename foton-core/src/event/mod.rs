@@ -46,6 +46,8 @@ pub mod equipment;
 mod fertilize;
 pub mod inventory;
 mod lectern;
+/// Workstation screens: enchanting, smithing, trading.
+pub mod menus;
 /// How a player moves, and the server correcting it.
 pub mod movement;
 pub mod player;
@@ -81,6 +83,7 @@ pub use inventory::{
     InventoryOpenEvent, PrepareGrindstoneEvent, PrepareItemCraftEvent,
 };
 pub use lectern::PlayerTakeLecternBookEvent;
+pub use menus::{EnchantOffer, PlayerPurchaseEvent, PrepareItemEnchantEvent, PrepareSmithingEvent};
 pub use movement::{
     FailMoveReason, PlayerFailMoveEvent, PlayerToggleFlightEvent, PlayerVelocityEvent,
 };
