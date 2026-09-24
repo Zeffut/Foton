@@ -173,6 +173,7 @@ use uuid::Uuid;
 mod attributes;
 mod displays;
 mod entities;
+mod lifecycle;
 mod particles;
 mod support;
 
@@ -1035,7 +1036,7 @@ fn entity_by_uuid(uuid: &Uuid) -> Option<(Arc<World>, SharedEntity)> {
             return Some((Arc::clone(world), entity));
         }
     }
-    None
+    lifecycle::pending_entity(uuid)
 }
 
 extern "system" fn set_entity_custom_name_visible(
@@ -1331,6 +1332,9 @@ extern "system" fn remove_entity(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: 
     else {
         return;
     };
+    if lifecycle::discard_pending(&id) {
+        return;
+    }
     let Some((world, entity)) = entity_by_uuid(&id) else {
         return;
     };
@@ -13341,6 +13345,7 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
     bindings.extend(particles::bindings());
     bindings.extend(entities::bindings());
     bindings.extend(displays::bindings());
+    bindings.extend(lifecycle::bindings());
     bindings
 }
 

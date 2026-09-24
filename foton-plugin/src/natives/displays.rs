@@ -146,7 +146,7 @@ extern "system" fn set_display_billboard(
         return;
     };
     display(&mut env, &uuid, |data| {
-        data.billboard_render_constraints.set(billboard)
+        data.billboard_render_constraints.set(billboard);
     });
 }
 
@@ -197,10 +197,6 @@ extern "system" fn set_display_float(
     });
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a transformation is fourteen floats"
-)]
 extern "system" fn set_display_transformation(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -368,7 +364,7 @@ extern "system" fn set_text_display_background(
     argb: jint,
 ) {
     with_text_display(&mut env, &uuid, |display| {
-        display.set_background_color(argb)
+        display.set_background_color(argb);
     });
 }
 
@@ -388,7 +384,7 @@ extern "system" fn reset_text_display_background(
     uuid: JString<'_>,
 ) {
     with_text_display(&mut env, &uuid, |display| {
-        display.set_background_color(INITIAL_BACKGROUND)
+        display.set_background_color(INITIAL_BACKGROUND);
     });
 }
 
@@ -407,7 +403,7 @@ extern "system" fn set_text_display_flag(
         _ => return,
     };
     with_text_display(&mut env, &uuid, |display| {
-        display.set_style_flag(flag, enabled != 0)
+        display.set_style_flag(flag, enabled != 0);
     });
 }
 
@@ -468,6 +464,10 @@ extern "system" fn set_interaction_value(
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one flat list of natives and their descriptors, as in the parent module"
+)]
 pub(super) fn bindings() -> Vec<jni::NativeMethod> {
     vec![
         method(

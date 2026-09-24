@@ -21,7 +21,10 @@ public class FotonEntity implements Entity, org.bukkit.projectiles.ProjectileSou
     @Override public float getYaw() { double[] p = Native.entityPosition(getUniqueId().toString()); return p == null || p.length < 4 ? 0.0f : (float) p[3]; }
     @Override public float getPitch() { double[] p = Native.entityPosition(getUniqueId().toString()); return p == null || p.length < 5 ? 0.0f : (float) p[4]; }
     @Override public boolean isOnGround() { return Native.entityOnGround(id.toString()); }
-    @Override public boolean isValid() { return Native.entityWorld(getUniqueId().toString()) != null; }
+    @Override public boolean isValid() {
+        String id = getUniqueId().toString();
+        return Native.entityWorld(id) != null && !Native.entityIsPending(id);
+    }
     @Override public boolean isInvulnerable() { return Native.entityInvulnerable(id.toString()); }
     @Override public void setInvulnerable(boolean invulnerable) { Native.setEntityInvulnerable(id.toString(), invulnerable); }
     @Override public boolean isGlowing() { return Native.entityGlowing(id.toString()); }

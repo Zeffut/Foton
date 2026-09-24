@@ -20,6 +20,7 @@ use foton_registry::resolvable_profile::{
 use foton_registry::vanilla_damage_types;
 use foton_utils::Direction;
 use foton_utils::Downcast as _;
+use glam::DVec3;
 use jni::JNIEnv;
 use jni::objects::{JClass, JObjectArray, JString};
 use jni::sys::{jboolean, jdouble, jdoubleArray, jfloat, jint, jobjectArray, jstring};
@@ -380,7 +381,7 @@ extern "system" fn item_pickup_delay(
     with_item(&mut env, &uuid, ItemEntity::get_pickup_delay).unwrap_or(0)
 }
 
-/// CraftItem caps the delay at `Short.MAX_VALUE`, the width vanilla saves it in.
+/// `CraftItem` caps the delay at `Short.MAX_VALUE`, the width vanilla saves it in.
 extern "system" fn set_item_pickup_delay(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -526,8 +527,9 @@ extern "system" fn set_mannequin_profile(
     let Some(raw) = read_string_array(&mut env, &properties) else {
         return;
     };
-    let Some(properties) = raw
-        .chunks_exact(3)
+    let (triples, _) = raw.as_chunks::<3>();
+    let Some(properties) = triples
+        .iter()
         .map(|property| {
             let signature = (!property[2].is_empty()).then(|| property[2].clone());
             ProfileProperty::new(property[0].clone(), property[1].clone(), signature).ok()
@@ -625,7 +627,7 @@ extern "system" fn shulker_state(
         [
             f64::from(shulker.raw_peek_amount()),
             0.0,
-            f64::from(shulker.color().map_or(-1, |color| color.id())),
+            f64::from(shulker.color().map_or(-1, DyeColor::id)),
         ]
     });
     doubles(&mut env, state.as_ref().map(<[f64; 3]>::as_slice))
@@ -667,7 +669,7 @@ extern "system" fn set_shulker_attached_face(
         _ => return,
     };
     with_shulker(&mut env, &uuid, |shulker| {
-        shulker.set_attach_face(direction)
+        shulker.set_attach_face(direction);
     });
 }
 
@@ -679,7 +681,7 @@ extern "system" fn set_shulker_peek(
     peek: jint,
 ) {
     with_shulker(&mut env, &uuid, |shulker| {
-        shulker.set_raw_peek_amount(peek.clamp(0, 100))
+        shulker.set_raw_peek_amount(peek.clamp(0, 100));
     });
 }
 
@@ -696,6 +698,84 @@ extern "system" fn set_shulker_color(
     with_shulker(&mut env, &uuid, |shulker| shulker.set_color(color));
 }
 
+/// Paths the mob to a point and starts it walking, through its own navigation
+/// -- the same path finding its goals use, doors and water included. `false`
+/// when no path was found or the mob does not path at all.
+extern "system" fn mob_move_to(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    x: jdouble,
+    y: jdouble,
+    z: jdouble,
+    speed: jdouble,
+) -> jboolean {
+    if !(x.is_finite() && y.is_finite() && z.is_finite() && speed.is_finite()) {
+        return 0;
+    }
+    entity(&mut env, &uuid)
+        .and_then(|(_, entity)| {
+            let mob = entity.as_pathfinder_mob()?;
+            Some(jboolean::from(mob.move_to_pos(DVec3::new(x, y, z), speed)))
+        })
+        .unwrap_or(0)
+}
+
+extern "system" fn mob_stop_pathfinding(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) {
+    if let Some((_, entity)) = entity(&mut env, &uuid)
+        && let Some(mob) = entity.as_mob()
+    {
+        mob.mob_base().navigation().lock().stop();
+    }
+}
+
+/// Whether the mob is following a path it has not finished.
+extern "system" fn mob_has_path(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jboolean {
+    entity(&mut env, &uuid)
+        .and_then(|(_, entity)| {
+            let mob = entity.as_mob()?;
+            Some(jboolean::from(
+                !mob.mob_base().navigation().lock().is_done(),
+            ))
+        })
+        .unwrap_or(0)
+}
+
+/// The current path as `{next node index, reaches its target (0/1), then x,
+/// y, z of each node}`, or null when the mob has none.
+extern "system" fn mob_current_path(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jdoubleArray {
+    let path = entity(&mut env, &uuid).and_then(|(_, entity)| {
+        let mob = entity.as_mob()?;
+        let navigation = mob.mob_base().navigation().lock();
+        let path = navigation.path().filter(|path| !path.is_done())?;
+        let mut values = vec![
+            path.next_node_index() as f64,
+            f64::from(u8::from(path.can_reach())),
+        ];
+        for node in path.nodes() {
+            values.extend([f64::from(node.x), f64::from(node.y), f64::from(node.z)]);
+        }
+        Some(values)
+    });
+    doubles(&mut env, path.as_deref())
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "one flat list of natives and their descriptors, as in the parent module"
+)]
 pub(super) fn bindings() -> Vec<jni::NativeMethod> {
     vec![
         method(
@@ -752,6 +832,26 @@ pub(super) fn bindings() -> Vec<jni::NativeMethod> {
             "setShulkerAttachedFace",
             "(Ljava/lang/String;Ljava/lang/String;)V",
             set_shulker_attached_face as *mut c_void,
+        ),
+        method(
+            "mobMoveTo",
+            "(Ljava/lang/String;DDDD)Z",
+            mob_move_to as *mut c_void,
+        ),
+        method(
+            "mobStopPathfinding",
+            "(Ljava/lang/String;)V",
+            mob_stop_pathfinding as *mut c_void,
+        ),
+        method(
+            "mobHasPath",
+            "(Ljava/lang/String;)Z",
+            mob_has_path as *mut c_void,
+        ),
+        method(
+            "mobCurrentPath",
+            "(Ljava/lang/String;)[D",
+            mob_current_path as *mut c_void,
         ),
         method(
             "setShulkerPeek",

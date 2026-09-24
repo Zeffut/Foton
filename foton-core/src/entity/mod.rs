@@ -815,6 +815,7 @@ pub mod patrolling_monster;
 pub mod projectile;
 pub mod raider;
 mod registry;
+pub mod serialization;
 mod spawn;
 pub mod spawn_rules;
 pub mod spawn_util;

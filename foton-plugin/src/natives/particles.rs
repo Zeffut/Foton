@@ -130,7 +130,6 @@ fn requested(
 /// `force` is Bukkit's word for vanilla's `overrideLimiter`: the 512-block
 /// recipient radius, and a client that shows the particle whatever its
 /// particle setting.
-#[expect(clippy::too_many_arguments, reason = "mirrors World.spawnParticle")]
 extern "system" fn spawn_particles(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -194,9 +193,8 @@ extern "system" fn spawn_particles(
     }
 }
 
-/// CraftPlayer sends the packet straight to the player: no world or range
+/// `CraftPlayer` sends the packet straight to the player: no world or range
 /// check, since the plugin chose the recipient.
-#[expect(clippy::too_many_arguments, reason = "mirrors Player.spawnParticle")]
 extern "system" fn player_particles(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,

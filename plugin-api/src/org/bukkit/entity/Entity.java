@@ -170,6 +170,20 @@ public interface Entity extends CommandSender, org.bukkit.Nameable, org.bukkit.p
 
     default void remove() { }
 
+    /** Spawns an entity that is not in a world yet -- one from
+     * {@code UnsafeValues.deserializeEntity} -- at {@code location}, firing the
+     * spawn event with {@code reason}. False if it was already spawned, the
+     * event was cancelled, or the chunk is not loaded. */
+    default boolean spawnAt(Location location, org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason reason) {
+        if (location == null || location.getWorld() == null) throw new IllegalArgumentException("location");
+        return foton.Native.spawnPendingEntity(getUniqueId().toString(), location.getWorld().getName(),
+            location.getX(), location.getY(), location.getZ(), location.getYaw(), location.getPitch(),
+            reason == null ? "DEFAULT" : reason.name());
+    }
+    default boolean spawnAt(Location location) {
+        return spawnAt(location, org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.DEFAULT);
+    }
+
     boolean isDead();
     @Override String getCustomName();
     default void setCustomNameVisible(boolean visible) { foton.Native.setEntityCustomNameVisible(getUniqueId().toString(), visible); }
@@ -177,4 +191,5 @@ public interface Entity extends CommandSender, org.bukkit.Nameable, org.bukkit.p
 
     /** The scheduler for work that follows this entity. */
     io.papermc.paper.threadedregions.scheduler.EntityScheduler getScheduler();
+
 }

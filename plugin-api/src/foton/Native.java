@@ -672,6 +672,18 @@ public final class Native {
     public static native String entityEquipmentItem(String uuid, int slot);
     public static native void setEntityEquipmentItem(String uuid, int slot, String item);
 
+    /** The entity as Paper's serializeEntity writes it: gzipped vanilla NBT. */
+    public static native byte[] serializeEntity(String uuid);
+    /** Builds an unspawned entity from such a blob; the UUID it is held under. */
+    public static native String deserializeEntity(byte[] data, String world, boolean preserveUuid);
+    public static native boolean entityIsPending(String uuid);
+    public static native boolean spawnPendingEntity(String uuid, String world, double x, double y, double z, float yaw, float pitch, String reason);
+    public static native boolean mobMoveTo(String uuid, double x, double y, double z, double speed);
+    public static native void mobStopPathfinding(String uuid);
+    public static native boolean mobHasPath(String uuid);
+    /** {@code {next index, reaches (0/1), x, y, z...}} or null. */
+    public static native double[] mobCurrentPath(String uuid);
+
     public static UUID parse(String uuid) {
         if (uuid == null) return null;
         try {

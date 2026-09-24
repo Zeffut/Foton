@@ -120,6 +120,19 @@ public interface World extends org.bukkit.generator.WorldInfo, RegionAccessor, o
     default org.bukkit.entity.LightningStrike strikeLightning(Location location) { return null; }
     default org.bukkit.entity.LightningStrike strikeLightningEffect(Location location) { return null; }
     default <T extends org.bukkit.entity.Entity> T spawn(Location location, Class<T> clazz) { return null; }
+
+    /** Every entity in this world that is a {@code cls}. */
+    default <T extends org.bukkit.entity.Entity> java.util.Collection<T> getEntitiesByClass(Class<T> cls) {
+        java.util.ArrayList<T> found = new java.util.ArrayList<>();
+        if (cls != null) for (org.bukkit.entity.Entity entity : getEntities()) if (cls.isInstance(entity)) found.add(cls.cast(entity));
+        return found;
+    }
+
+    @SuppressWarnings("unchecked")
+    default <T extends org.bukkit.entity.Entity> java.util.Collection<T> getEntitiesByClass(Class<T>... classes) {
+        return (java.util.Collection<T>) getEntitiesByClasses(classes);
+    }
+
     default <T extends org.bukkit.entity.Entity> T spawn(Location location, Class<T> clazz,
             java.util.function.Consumer<? super T> function) {
         T entity = spawn(location, clazz);
@@ -356,4 +369,5 @@ public interface World extends org.bukkit.generator.WorldInfo, RegionAccessor, o
             return id;
         }
     }
+
 }
