@@ -5,7 +5,7 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.command.CommandSender;
 
 /** A player on the server, as a plugin sees one. */
-public interface Player extends HumanEntity {
+public interface Player extends HumanEntity, org.bukkit.OfflinePlayer {
     default void playEffect(org.bukkit.EntityEffect effect) { }
     default void playEffect(org.bukkit.Location location, org.bukkit.Effect effect, Object data) {
         if (location != null && location.getWorld() != null && data instanceof Number number)
@@ -160,10 +160,52 @@ public interface Player extends HumanEntity {
     void setPlayerListHeader(String header);
     void setPlayerListFooter(String footer);
     void setPlayerListHeaderFooter(String header, String footer);
+    // Paper's overloads, down to the force = false a player-targeted spawn
+    // defaults to and the extra = 1 of the overloads that take data but no extra.
     default void spawnParticle(org.bukkit.Particle particle, org.bukkit.Location location, int count) {
-        spawnParticle(particle, location, count, null);
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count);
     }
-    default void spawnParticle(org.bukkit.Particle particle, org.bukkit.Location location, int count, Object data) { }
+    default void spawnParticle(org.bukkit.Particle particle, double x, double y, double z, int count) {
+        this.spawnParticle(particle, x, y, z, count, null);
+    }
+    default <T> void spawnParticle(org.bukkit.Particle particle, org.bukkit.Location location, int count, T data) {
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count, data);
+    }
+    default <T> void spawnParticle(org.bukkit.Particle particle, double x, double y, double z, int count, T data) {
+        this.spawnParticle(particle, x, y, z, count, 0, 0, 0, data);
+    }
+    default void spawnParticle(org.bukkit.Particle particle, org.bukkit.Location location, int count, double offsetX, double offsetY, double offsetZ) {
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count, offsetX, offsetY, offsetZ);
+    }
+    default void spawnParticle(org.bukkit.Particle particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ) {
+        this.spawnParticle(particle, x, y, z, count, offsetX, offsetY, offsetZ, null);
+    }
+    default <T> void spawnParticle(org.bukkit.Particle particle, org.bukkit.Location location, int count, double offsetX, double offsetY, double offsetZ, T data) {
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count, offsetX, offsetY, offsetZ, data);
+    }
+    default <T> void spawnParticle(org.bukkit.Particle particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, T data) {
+        this.spawnParticle(particle, x, y, z, count, offsetX, offsetY, offsetZ, 1, data);
+    }
+    default void spawnParticle(org.bukkit.Particle particle, org.bukkit.Location location, int count, double offsetX, double offsetY, double offsetZ, double extra) {
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count, offsetX, offsetY, offsetZ, extra);
+    }
+    default void spawnParticle(org.bukkit.Particle particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, double extra) {
+        this.spawnParticle(particle, x, y, z, count, offsetX, offsetY, offsetZ, extra, null);
+    }
+    default <T> void spawnParticle(org.bukkit.Particle particle, org.bukkit.Location location, int count, double offsetX, double offsetY, double offsetZ, double extra, T data) {
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count, offsetX, offsetY, offsetZ, extra, data);
+    }
+    default <T> void spawnParticle(org.bukkit.Particle particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, double extra, T data) {
+        this.spawnParticle(particle, x, y, z, count, offsetX, offsetY, offsetZ, extra, data, false);
+    }
+    default <T> void spawnParticle(org.bukkit.Particle particle, org.bukkit.Location location, int count, double offsetX, double offsetY, double offsetZ, double extra, T data, boolean force) {
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count, offsetX, offsetY, offsetZ, extra, data, force);
+    }
+    /** Sends particles to this player alone, wherever they are; {@code force}
+     * asks the client to show them past its particle setting. */
+    default <T> void spawnParticle(org.bukkit.Particle particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, double extra, T data, boolean force) {
+        foton.FotonParticles.spawn(this, particle, x, y, z, count, offsetX, offsetY, offsetZ, extra, data, force);
+    }
 
     void sendActionBar(String message);
 

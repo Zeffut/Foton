@@ -1,6 +1,6 @@
 package foton;
 import java.util.UUID;
-public final class FotonLlama extends FotonLivingEntity implements org.bukkit.entity.Llama {
+public final class FotonLlama extends FotonAbstractHorse implements org.bukkit.entity.Llama {
     public FotonLlama(UUID id) { super(id); }
     @Override public boolean isCarryingChest() { return Native.entityHasChest(getUniqueId().toString()); }
     @Override public void setCarryingChest(boolean value) { Native.entitySetChest(getUniqueId().toString(), value); }

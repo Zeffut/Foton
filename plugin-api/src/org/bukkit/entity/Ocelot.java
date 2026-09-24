@@ -1,7 +1,7 @@
 package org.bukkit.entity;
 
 /** Vanilla ocelot entity view. */
-public interface Ocelot extends Animal {
+public interface Ocelot extends Animals {
     enum Type { WILD, BLACK_CAT, RED_CAT, SIAMESE_CAT }
     default Type getCatType() { return Type.WILD; }
     default void setCatType(Type type) { }

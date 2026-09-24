@@ -560,7 +560,6 @@ public final class Native {
     public static native boolean blockIndirectlyPowered(String world, int x, int y, int z);
     public static native byte skyLight(String world, int x, int y, int z);
     public static native boolean blockPassable(String world, int x, int y, int z);
-    public static native void spawnParticle(String world, String particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, double speed);
     public static native String lecternBook(String world, int x, int y, int z);
     public static native String[] lecternBookPages(String world, int x, int y, int z);
     public static native void lecternClearBook(String world, int x, int y, int z);
@@ -596,6 +595,16 @@ public final class Native {
     public static native String[] attributeModifierList(String uuid, String attribute);
     public static native boolean addAttributeModifierKeyed(String uuid, String attribute, String key, double amount, String operation, boolean persistent);
     public static native boolean removeAttributeModifierKeyed(String uuid, String attribute, String key);
+
+    /** Particles in a world: to every player in range when {@code receivers} is null. */
+    public static native void spawnParticles(String world, String[] receivers, String particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, double extra, String data, boolean force);
+    /** Particles sent to one player, wherever they are. */
+    public static native void playerParticles(String uuid, String particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, double extra, String data, boolean force);
+
+    /** A mob's carried inventory (villager, allay, piglin): -1 when it has none. */
+    public static native int carriedInventorySize(String uuid);
+    public static native String carriedInventorySlot(String uuid, int slot);
+    public static native void setCarriedInventorySlot(String uuid, int slot, String item);
 
     static UUID parse(String uuid) {
         try {

@@ -1,7 +1,7 @@
 package org.bukkit.entity;
 
 /** Bee entity. */
-public interface Bee extends Animal {
+public interface Bee extends Animals {
     default int getAnger() { return 0; }
     default void setAnger(int anger) { }
     default boolean hasNectar() { return false; }

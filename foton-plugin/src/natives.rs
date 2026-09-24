@@ -131,7 +131,6 @@ use foton_registry::entity_variant::AxolotlVariant;
 use foton_registry::game_rules::GameRuleType;
 use foton_registry::game_rules::GameRuleValue;
 use foton_registry::item_stack::ItemStack;
-use foton_registry::particle_type::ParticleData;
 use foton_registry::recipe::{
     CraftingCategory, Ingredient, RecipeResult, ShapedRecipe, ShapelessRecipe,
 };
@@ -175,6 +174,8 @@ use text_components::{TextComponent, content::Content as TextContent};
 use uuid::Uuid;
 
 mod attributes;
+mod entities;
+mod particles;
 mod support;
 
 /// The server the natives answer about.
@@ -4820,47 +4821,6 @@ extern "system" fn mushroom_cow_variant<'a>(
         Ok(value) => value,
         Err(_) => JString::from(JObject::null()),
     }
-}
-
-extern "system" fn spawn_particle(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    world_name: JString<'_>,
-    particle: JString<'_>,
-    x: jdouble,
-    y: jdouble,
-    z: jdouble,
-    count: jint,
-    ox: jdouble,
-    oy: jdouble,
-    oz: jdouble,
-    speed: jdouble,
-) {
-    let Ok(world_text): Result<String, _> = env.get_string(&world_name).map(Into::into) else {
-        return;
-    };
-    let Ok(particle_text): Result<String, _> = env.get_string(&particle).map(Into::into) else {
-        return;
-    };
-    let Ok(world_key) = world_text.parse::<Identifier>() else {
-        return;
-    };
-    let Ok(particle_key) = particle_text.parse::<Identifier>() else {
-        return;
-    };
-    let Some(world) = server().and_then(|server| server.worlds.get_owned(&world_key)) else {
-        return;
-    };
-    let Some(particle_type) = REGISTRY.particle_types.by_key(&particle_key) else {
-        return;
-    };
-    world.send_particles(
-        ParticleData::simple(particle_type),
-        DVec3::new(x, y, z),
-        count,
-        DVec3::new(ox, oy, oz),
-        speed,
-    );
 }
 
 extern "system" fn set_block_display_block(
@@ -12312,11 +12272,6 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             set_horse_inventory_slot as *mut c_void,
         ),
         method(
-            "spawnParticle",
-            "(Ljava/lang/String;Ljava/lang/String;DDDIDDDD)V",
-            spawn_particle as *mut c_void,
-        ),
-        method(
             "setBlockDisplayBlock",
             "(Ljava/lang/String;Ljava/lang/String;)V",
             set_block_display_block as *mut c_void,
@@ -13536,6 +13491,8 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
     ];
     // Entities, players and world queries live in their own modules.
     bindings.extend(attributes::bindings());
+    bindings.extend(particles::bindings());
+    bindings.extend(entities::bindings());
     bindings
 }
 

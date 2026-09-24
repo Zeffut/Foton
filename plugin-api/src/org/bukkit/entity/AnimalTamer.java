@@ -1,4 +1,8 @@
 package org.bukkit.entity;
 
-/** Owner identity exposed by Bukkit tameable entities. */
-public interface AnimalTamer extends org.bukkit.OfflinePlayer { }
+/** Something that can own a tamed animal: a player, online or not. */
+public interface AnimalTamer {
+    String getName();
+
+    java.util.UUID getUniqueId();
+}

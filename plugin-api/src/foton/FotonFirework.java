@@ -5,7 +5,7 @@ import org.bukkit.FireworkEffect;
 import org.bukkit.inventory.meta.FireworkMeta;
 
 /** Live Bukkit view of a Steel firework rocket. */
-public final class FotonFirework extends FotonEntity implements org.bukkit.entity.Firework {
+public final class FotonFirework extends FotonProjectile implements org.bukkit.entity.Firework {
     public FotonFirework(UUID id) { super(id); }
 
     @Override public FireworkMeta getFireworkMeta() {

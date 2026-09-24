@@ -9,6 +9,7 @@ use std::ptr::null_mut;
 use std::sync::Arc;
 
 use foton_core::entity::SharedEntity;
+use foton_core::player::Player;
 use foton_core::world::World;
 use foton_utils::Identifier;
 use jni::JNIEnv;
@@ -16,7 +17,7 @@ use jni::objects::{JDoubleArray, JString};
 use jni::sys::jdoubleArray;
 use uuid::Uuid;
 
-use super::entity_by_uuid;
+use super::{entity_by_uuid, server};
 
 /// A registered native, in the shape `RegisterNatives` wants.
 pub(super) fn method(name: &str, signature: &str, pointer: *mut c_void) -> jni::NativeMethod {
@@ -47,6 +48,18 @@ pub(super) fn entity(
 ) -> Option<(Arc<World>, SharedEntity)> {
     let id = Uuid::parse_str(&text(env, uuid)?).ok()?;
     entity_by_uuid(&id)
+}
+
+/// The online player a Java handle names.
+pub(super) fn player(env: &mut JNIEnv<'_>, uuid: &JString<'_>) -> Option<Arc<Player>> {
+    let id = Uuid::parse_str(&text(env, uuid)?).ok()?;
+    server()?.online_players().get_by_uuid(&id)
+}
+
+/// A world by the key a plugin holds it under.
+pub(super) fn world(env: &mut JNIEnv<'_>, name: &JString<'_>) -> Option<Arc<World>> {
+    let key = key(env, name)?;
+    server()?.worlds.get_owned(&key)
 }
 
 /// A Java `double[]`, or null when there is nothing to answer.

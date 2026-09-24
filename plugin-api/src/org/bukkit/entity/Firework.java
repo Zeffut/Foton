@@ -3,7 +3,7 @@ package org.bukkit.entity;
 import org.bukkit.inventory.meta.FireworkMeta;
 
 /** A launched firework rocket. */
-public interface Firework extends Entity {
+public interface Firework extends Projectile {
     default void setFireworkMeta(FireworkMeta meta) { }
     default FireworkMeta getFireworkMeta() { return new org.bukkit.inventory.meta.SimpleFireworkMeta(); }
     default java.util.UUID getSpawningEntity() {

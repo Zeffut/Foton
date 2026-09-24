@@ -3,7 +3,7 @@ package org.bukkit;
 import java.util.UUID;
 
 /** Somebody who has played here, whether or not they are here now. */
-public interface OfflinePlayer extends org.bukkit.configuration.serialization.ConfigurationSerializable {
+public interface OfflinePlayer extends org.bukkit.permissions.ServerOperator, org.bukkit.entity.AnimalTamer, org.bukkit.configuration.serialization.ConfigurationSerializable {
     UUID getUniqueId();
 
     String getName();

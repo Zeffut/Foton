@@ -4,12 +4,6 @@ import java.util.UUID;
 
 /** One world on the server. */
 public interface World extends org.bukkit.generator.WorldInfo, RegionAccessor, org.bukkit.metadata.Metadatable {
-    default void spawnParticle(org.bukkit.Particle particle, Location location, int count,
-            double offsetX, double offsetY, double offsetZ, double extra) {
-        if (particle == null || location == null || location.getWorld() != this) return;
-        foton.Native.spawnParticle(getName(), "minecraft:" + particle.name().toLowerCase(java.util.Locale.ROOT),
-            location.getX(), location.getY(), location.getZ(), count, offsetX, offsetY, offsetZ, extra);
-    }
     String getName();
     default long getSeed() { return 0L; }
     default double getCoordinateScale() { return 1.0D; }
@@ -273,26 +267,59 @@ public interface World extends org.bukkit.generator.WorldInfo, RegionAccessor, o
         return found;
     }
 
-    /** Particles with offsets, an extra value and particle-specific data.
-     *
-     * <p>The widest overload Bukkit has. `data` carries the thing the particle
-     * needs and nothing else can express -- a `DustOptions` for redstone, an
-     * `ItemStack` for item crack -- and is ignored by particles that take none. */
-    default void spawnParticle(Particle particle, Location location, int count,
-            double offsetX, double offsetY, double offsetZ, double extra, Object data) {
-        spawnParticle(particle, location, count, offsetX, offsetY, offsetZ, extra);
-    }
-
+    // Every overload funnels into the receivers/source/force form, with the
+    // defaults Paper gives them -- including force = true for a world-wide
+    // spawn, which is the 512-block recipient radius, and extra = 1 for the
+    // overloads that take data but no extra.
     default void spawnParticle(Particle particle, Location location, int count) {
-        spawnParticle(particle, location, count, 0, 0, 0, 0);
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count);
     }
-    default void spawnParticle(Particle particle, Location location, int count, Object data) {
-        spawnParticle(particle, location, count, 0, 0, 0, 0);
+    default void spawnParticle(Particle particle, double x, double y, double z, int count) {
+        this.spawnParticle(particle, x, y, z, count, null);
     }
-
-    default void spawnParticle(Particle particle, Location location, int count,
-            double offsetX, double offsetY, double offsetZ, Object data) {
-        spawnParticle(particle, location, count, offsetX, offsetY, offsetZ, 0);
+    default <T> void spawnParticle(Particle particle, Location location, int count, T data) {
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count, data);
+    }
+    default <T> void spawnParticle(Particle particle, double x, double y, double z, int count, T data) {
+        this.spawnParticle(particle, x, y, z, count, 0, 0, 0, data);
+    }
+    default void spawnParticle(Particle particle, Location location, int count, double offsetX, double offsetY, double offsetZ) {
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count, offsetX, offsetY, offsetZ);
+    }
+    default void spawnParticle(Particle particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ) {
+        this.spawnParticle(particle, x, y, z, count, offsetX, offsetY, offsetZ, null);
+    }
+    default <T> void spawnParticle(Particle particle, Location location, int count, double offsetX, double offsetY, double offsetZ, T data) {
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count, offsetX, offsetY, offsetZ, data);
+    }
+    default <T> void spawnParticle(Particle particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, T data) {
+        this.spawnParticle(particle, x, y, z, count, offsetX, offsetY, offsetZ, 1, data);
+    }
+    default void spawnParticle(Particle particle, Location location, int count, double offsetX, double offsetY, double offsetZ, double extra) {
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count, offsetX, offsetY, offsetZ, extra);
+    }
+    default void spawnParticle(Particle particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, double extra) {
+        this.spawnParticle(particle, x, y, z, count, offsetX, offsetY, offsetZ, extra, null);
+    }
+    default <T> void spawnParticle(Particle particle, Location location, int count, double offsetX, double offsetY, double offsetZ, double extra, T data) {
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count, offsetX, offsetY, offsetZ, extra, data);
+    }
+    default <T> void spawnParticle(Particle particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, double extra, T data) {
+        this.spawnParticle(particle, null, null, x, y, z, count, offsetX, offsetY, offsetZ, extra, data, true);
+    }
+    default <T> void spawnParticle(Particle particle, java.util.List<org.bukkit.entity.Player> receivers, org.bukkit.entity.Player source, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, double extra, T data) {
+        spawnParticle(particle, receivers, source, x, y, z, count, offsetX, offsetY, offsetZ, extra, data, true);
+    }
+    /** Sends particles to {@code receivers} (every player in this world when null)
+     * who can see {@code source}, within 32 blocks -- or 512 when {@code force}. */
+    default <T> void spawnParticle(Particle particle, java.util.List<org.bukkit.entity.Player> receivers, org.bukkit.entity.Player source, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, double extra, T data, boolean force) {
+        foton.FotonParticles.spawn(this, particle, receivers, source, x, y, z, count, offsetX, offsetY, offsetZ, extra, data, force);
+    }
+    default <T> void spawnParticle(Particle particle, Location location, int count, double offsetX, double offsetY, double offsetZ, double extra, T data, boolean force) {
+        this.spawnParticle(particle, location.getX(), location.getY(), location.getZ(), count, offsetX, offsetY, offsetZ, extra, data, force);
+    }
+    default <T> void spawnParticle(Particle particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, double extra, T data, boolean force) {
+        this.spawnParticle(particle, null, null, x, y, z, count, offsetX, offsetY, offsetZ, extra, data, force);
     }
     default void playSound(Location location, String sound, float volume, float pitch) { }
     default void playSound(Location location, Sound sound, SoundCategory category, float volume, float pitch) {

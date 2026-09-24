@@ -1,7 +1,7 @@
 package org.bukkit.entity;
 
 /** An entity with living characteristics. */
-public interface LivingEntity extends Damageable, org.bukkit.attribute.Attributable {
+public interface LivingEntity extends Damageable, org.bukkit.attribute.Attributable, org.bukkit.projectiles.ProjectileSource {
     default org.bukkit.block.Block getTargetBlock(java.util.Set<org.bukkit.Material> transparent, int maxDistance) {
         if (maxDistance <= 0 || getLocation() == null || getWorld() == null) return null;
         org.bukkit.Location origin = getEyeLocation();

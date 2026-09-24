@@ -1,7 +1,7 @@
 package org.bukkit.entity;
 
 /** An animal whose ownership state is backed by the live entity. */
-public interface Tameable extends Animal {
+public interface Tameable extends Animals {
     boolean isTamed();
     void setTamed(boolean tamed);
     AnimalTamer getOwner();

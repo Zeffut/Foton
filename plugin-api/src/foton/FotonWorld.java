@@ -278,6 +278,8 @@ public final class FotonWorld implements World {
         if ("frog".equalsIgnoreCase(type)) return new FotonFrog(uuid);
         if ("camel".equalsIgnoreCase(type) || "camel_husk".equalsIgnoreCase(type)) return new FotonCamel(uuid);
         if ("horse".equalsIgnoreCase(type)) return new FotonHorse(uuid);
+        if ("skeleton_horse".equalsIgnoreCase(type) || "zombie_horse".equalsIgnoreCase(type))
+            return new FotonAbstractHorse(uuid);
         if ("sheep".equalsIgnoreCase(type)) return new FotonSheep(uuid);
         if ("wolf".equalsIgnoreCase(type)) return new FotonWolf(uuid);
         if ("cat".equalsIgnoreCase(type)) return new FotonCat(uuid);

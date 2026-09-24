@@ -3,21 +3,9 @@ package foton;
 import java.util.UUID;
 
 /** Live Bukkit view of a vanilla horse. */
-public final class FotonHorse extends FotonLivingEntity implements org.bukkit.entity.Horse, org.bukkit.inventory.InventoryHolder {
+public final class FotonHorse extends FotonAbstractHorse implements org.bukkit.entity.Horse {
     public FotonHorse(UUID id) { super(id); }
-    @Override public int getDomestication() { return Native.horseTemper(getUniqueId().toString()); }
-    @Override public void setDomestication(int value) { Native.setHorseTemper(getUniqueId().toString(), value); }
-    @Override public int getMaxDomestication() { return Native.horseMaxTemper(getUniqueId().toString()); }
     @Override public org.bukkit.inventory.HorseInventory getInventory() { return new FotonHorseInventory(getUniqueId().toString()); }
-    @Override public org.bukkit.entity.AnimalTamer getOwner() {
-        String owner = Native.entityOwner(getUniqueId().toString());
-        if (owner == null) return null;
-        try { return new FotonAnimalTamer(UUID.fromString(owner), owner); }
-        catch (IllegalArgumentException ignored) { return null; }
-    }
-    @Override public void setOwner(org.bukkit.entity.AnimalTamer owner) {
-        Native.setEntityOwner(getUniqueId().toString(), owner == null ? null : owner.getUniqueId().toString());
-    }
     @Override public Color getColor() {
         String value = Native.horseVariant(getUniqueId().toString());
         if (value == null) return Color.WHITE;
