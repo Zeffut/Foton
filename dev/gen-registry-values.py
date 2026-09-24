@@ -144,8 +144,27 @@ def data_class(registries):
                  + array("float", [java_float(data["use_duration"]) for _, data in horns]) + ";")
     lines.append("    public static final float[] INSTRUMENT_RANGES = "
                  + array("float", [java_float(data["range"]) for _, data in horns]) + ";")
+    lines.append("    /** Items in minecraft:trimmable_armor, whose meta is ArmorMeta, as Paper gives them. */")
+    lines.append("    public static final String[] TRIMMABLE_ARMOR = "
+                 + array("String", [java_string(key) for key in item_tag("trimmable_armor")]) + ";")
     lines.append("}")
     return "\n".join(lines) + "\n"
+
+
+def item_tag(path, including=()):
+    """The items of an item tag, following the tags it includes, in data pack order."""
+    if path in including:
+        raise SystemExit(f"item tag {path} includes itself")
+    including = (*including, path)
+    source = DATAPACK / "tags" / "item" / f"{path}.json"
+    items = []
+    for value in json.loads(source.read_text(encoding="utf-8"))["values"]:
+        entry = value if isinstance(value, str) else value["id"]
+        if entry.startswith("#"):
+            items += item_tag(entry[1:].removeprefix("minecraft:"), including)
+        else:
+            items.append(entry.removeprefix("minecraft:"))
+    return list(dict.fromkeys(items))
 
 
 def main():

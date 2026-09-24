@@ -37,6 +37,7 @@ use jni::{JavaVM, errors::Error as JniError};
 use thiserror::Error;
 
 mod forward;
+mod item_components;
 mod natives;
 
 /// The class the Java side exposes to this one.

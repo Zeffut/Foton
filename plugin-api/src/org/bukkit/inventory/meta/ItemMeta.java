@@ -65,6 +65,21 @@ public interface ItemMeta extends Cloneable, org.bukkit.persistence.PersistentDa
         return java.util.Collections.emptyMap();
     }
     default boolean hasEnchants() { return !getEnchants().isEmpty(); }
+    boolean hasEnchant(org.bukkit.enchantments.Enchantment enchantment);
+
+    boolean hasEnchantmentGlintOverride();
+    /** Whether the item glints regardless of enchantments; throws when unset. */
+    Boolean getEnchantmentGlintOverride();
+    /** True glints without enchantments, false never glints, null clears the override. */
+    void setEnchantmentGlintOverride(Boolean override);
+
+    boolean hasMaxStackSize();
+    int getMaxStackSize();
+    void setMaxStackSize(Integer max);
+
+    boolean hasUseCooldown();
+    org.bukkit.inventory.meta.components.UseCooldownComponent getUseCooldown();
+    void setUseCooldown(org.bukkit.inventory.meta.components.UseCooldownComponent cooldown);
     default boolean hasItemFlag(org.bukkit.inventory.ItemFlag flag) { return false; }
     default void addItemFlags(org.bukkit.inventory.ItemFlag... flags) { }
     default void removeItemFlags(org.bukkit.inventory.ItemFlag... flags) { }

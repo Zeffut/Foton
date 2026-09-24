@@ -177,6 +177,8 @@ use simdnbt::owned::NbtTag;
 use text_components::{TextComponent, content::Content as TextContent};
 use uuid::Uuid;
 
+use crate::item_components;
+
 /// The server the natives answer about.
 ///
 /// A `static` because a JNI native is a bare function pointer with nowhere to
@@ -7811,6 +7813,7 @@ pub(crate) fn describe_slot(stack: &ItemStack) -> String {
             );
         }
     }
+    item_components::describe(stack, &mut value);
     value
 }
 
@@ -7989,22 +7992,12 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
     if !stored.is_empty() {
         stack.set(STORED_ENCHANTMENTS, stored);
     }
-    if let Some(effects) = metadata.iter().find(|value| {
-        !value.starts_with("damage=")
-            && !value.starts_with("namehex=")
-            && !value.starts_with("lorehex=")
-            && !value.starts_with("enchhex=")
-            && !value.starts_with("storedenchhex=")
-            && !value.starts_with("model=")
-            && !value.starts_with("modelfloat=")
-            && !value.starts_with("modelflag=")
-            && !value.starts_with("modelstrhex=")
-            && !value.starts_with("modelcolor=")
-            && !value.starts_with("itemmodelhex=")
-            && !value.starts_with("tooltipstylehex=")
-            && **value != "hidetooltip"
-            && **value != "unbreakable"
-    }) {
+    item_components::parse(&mut stack, &metadata);
+    // Potion effects are the one field with no name.
+    if let Some(effects) = metadata
+        .iter()
+        .find(|value| !value.contains('=') && **value != "hidetooltip" && **value != "unbreakable")
+    {
         use foton_registry::data_components::components::PotionContents;
         use foton_registry::data_components::vanilla_components::POTION_CONTENTS;
         use foton_registry::mob_effect::instance::MobEffectInstance;

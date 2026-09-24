@@ -13,6 +13,7 @@ public final class Checks {
         InventoryViewCheck.check();
         Items.check();
         RegistryValues.check();
+        ItemComponentsCheck.check();
         Colors.check();
         Commands.check();
         foton.PluginHost.disableAll();
