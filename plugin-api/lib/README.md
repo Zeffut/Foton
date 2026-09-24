@@ -27,6 +27,13 @@ The first version of this directory held Adventure 4.26.1 beside
 top of an API from Adventure 4. It compiled. That is exactly why the set is now
 pinned by digest and checked rather than trusted for compiling.
 
+`adventure-text-minimessage` is not something the API itself compiles against:
+it is here because Paper puts it on every plugin's classpath and plugins rely on
+that rather than shading it. Observer and Zelda Civ both call
+`MiniMessage.miniMessage()` without carrying a copy. Paper also provides
+`adventure-text-serializer-gson` and `-legacy`; neither of those two plugins
+references them, so they are not here until a plugin that does is tried.
+
 `examination-api` and `examination-string` are gone rather than updated:
 Adventure 5 dropped the dependency, and `adventure-api:5.2.0` names neither.
 
@@ -45,6 +52,7 @@ POM, not from memory and not carried over from the previous version.
 | adventure-api | 5.2.0 | MIT | Maven Central POM |
 | adventure-key | 5.2.0 | MIT | Maven Central POM |
 | adventure-text-logger-slf4j | 5.2.0 | MIT | Maven Central POM |
+| adventure-text-minimessage | 5.2.0 | MIT | PaperMC Maven POM |
 | adventure-text-serializer-plain | 5.2.0 | MIT | Maven Central POM |
 | annotations (JetBrains) | 26.1.0 | Apache-2.0 | Maven Central POM |
 | brigadier | 1.3.10 | MIT | `LICENSE` in Mojang/brigadier |
