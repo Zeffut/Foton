@@ -432,7 +432,21 @@ public final class FotonServer implements Server {
     private static final class Plugins implements PluginManager {
         private final java.util.Map<String, org.bukkit.permissions.Permission> permissions = new java.util.concurrent.ConcurrentHashMap<>();
         @Override public void registerEvents(Listener listener, Plugin plugin) {
+            requireEnabled(plugin, listener);
             EventBridge.register(listener, plugin);
+        }
+
+        /** Paper refuses a listener from a plugin that is not enabled: it
+         * would be registered after the plugin's handlers were already
+         * dropped, and outlive it. */
+        private static void requireEnabled(Plugin plugin, Object what) {
+            if (plugin == null) {
+                throw new IllegalArgumentException("Plugin cannot be null");
+            }
+            if (!plugin.isEnabled()) {
+                throw new org.bukkit.plugin.IllegalPluginAccessException(
+                    "Plugin attempted to register " + what + " while not enabled");
+            }
         }
 
         @Override public Plugin getPlugin(String name) {
@@ -475,6 +489,7 @@ public final class FotonServer implements Server {
                 org.bukkit.event.EventPriority priority,
                 org.bukkit.plugin.EventExecutor executor,
                 Plugin plugin) {
+            requireEnabled(plugin, event);
             EventBridge.register(listener, event, priority, executor, plugin);
         }
 
@@ -485,6 +500,7 @@ public final class FotonServer implements Server {
                 org.bukkit.plugin.EventExecutor executor,
                 Plugin plugin,
                 boolean ignoreCancelled) {
+            requireEnabled(plugin, event);
             EventBridge.register(
                 listener, event, priority, executor, plugin, ignoreCancelled);
         }

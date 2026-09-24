@@ -293,14 +293,18 @@ public final class PluginHost {
         org.bukkit.Bukkit.getMessenger().unregisterIncomingPluginChannel(plugin);
         org.bukkit.Bukkit.getMessenger().unregisterOutgoingPluginChannel(plugin);
         EventBridge.unregister(plugin);
+        // JavaPlugin.setEnabled(false) clears the flag before calling
+        // onDisable, so a plugin asking the scheduler for one last task from
+        // there is refused and can fall back to doing it inline.
+        if (plugin instanceof org.bukkit.plugin.java.JavaPlugin java) {
+            java.setEnabled(false);
+        }
         try {
             plugin.onDisable();
         } catch (Throwable error) {
             System.out.println("[host] " + plugin.getName() + " failed to disable: " + error);
         }
-        if (plugin instanceof org.bukkit.plugin.java.JavaPlugin java) {
-            java.setEnabled(false);
-        }
+        org.bukkit.Bukkit.getScheduler().cancelTasks(plugin);
         org.bukkit.plugin.java.PluginClassLoader loader =
             pluginLoaders.remove(plugin.getName().toLowerCase(java.util.Locale.ROOT));
         if (loader != null) {
