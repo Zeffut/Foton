@@ -441,6 +441,8 @@ async fn run_server(
 }
 
 async fn shutdown_worlds(server: &Arc<Server>) {
+    server.wait_for_world_cleanups().await;
+
     if let Err(error) = server.flush_known_players().await {
         log::error!("Failed to flush known player cache during shutdown: {error}");
     }
@@ -460,12 +462,6 @@ async fn shutdown_worlds(server: &Arc<Server>) {
                 player.gameprofile.name
             );
         }
-    }
-
-    for world in server.worlds.values() {
-        world.chunk_map.stop_generation_refill_loop();
-        world.chunk_map.task_tracker.close();
-        world.chunk_map.task_tracker.wait().await;
     }
 
     let mut players_to_save = Vec::new();
@@ -497,7 +493,12 @@ async fn shutdown_worlds(server: &Arc<Server>) {
     }
     let mut total_saved = 0;
     for world in server.worlds.values() {
-        world.cleanup(&mut total_saved).await;
+        if let Err(error) = world.cleanup(&mut total_saved).await {
+            log::error!(
+                "Failed to save world {} during shutdown: {error}",
+                world.key
+            );
+        }
     }
     log::info!("Saved {total_saved} chunks");
 

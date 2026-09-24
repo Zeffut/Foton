@@ -96,6 +96,17 @@ pub(super) struct WorldTickWorkers {
     workers: Vec<WorldTickWorker>,
 }
 
+pub(super) struct PendingWorldTickWorkerRemoval<'a> {
+    workers: &'a mut WorldTickWorkers,
+    index: usize,
+}
+
+impl PendingWorldTickWorkerRemoval<'_> {
+    pub(super) fn commit(self) {
+        drop(self.workers.workers.remove(self.index));
+    }
+}
+
 impl WorldTickWorkers {
     pub(super) fn spawn<S>(worlds: impl IntoIterator<Item = S>) -> io::Result<Self>
     where
@@ -119,22 +130,20 @@ impl WorldTickWorkers {
         Ok(())
     }
 
-    /// Removes a worker after the caller has completed the current tick boundary.
-    ///
-    /// Dropping the worker closes its request channel and joins the thread, so no
-    /// world tick can still be executing when this returns. The world itself is
-    /// intentionally not removed here; the server must first persist it and
-    /// detach it from the loaded-world map.
-    pub(super) fn remove(&mut self, key: &Identifier) -> bool {
-        let Some(index) = self
+    /// Preflights a worker removal without stopping or detaching the worker.
+    pub(super) fn prepare_removal(
+        &mut self,
+        key: &Identifier,
+    ) -> Option<PendingWorldTickWorkerRemoval<'_>> {
+        let key = key.to_string();
+        let index = self
             .workers
             .iter()
-            .position(|worker| worker.world_key.as_ref() == key.to_string())
-        else {
-            return false;
-        };
-        drop(self.workers.remove(index));
-        true
+            .position(|worker| worker.world_key.as_ref() == key)?;
+        Some(PendingWorldTickWorkerRemoval {
+            workers: self,
+            index,
+        })
     }
 
     pub(super) async fn tick_all(
@@ -177,8 +186,11 @@ mod tests {
         };
         assert!(block_on(workers.tick_all(1, true)).is_ok());
 
-        assert!(workers.remove(&first.key));
-        assert!(!workers.remove(&first.key));
+        let Some(removal) = workers.prepare_removal(&first.key) else {
+            panic!("first world tick worker should be removable");
+        };
+        removal.commit();
+        assert!(workers.prepare_removal(&first.key).is_none());
         assert!(workers.add(&first).is_ok());
         let Ok(timings) = block_on(workers.tick_all(2, true)) else {
             panic!("remaining worker should finish its tick");

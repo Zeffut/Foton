@@ -18,7 +18,7 @@ use foton_core::player::{
     ClientInformation, PlayerConnection,
     connection::{
         JavaNetworkWriter, OutboundPacket, OutboundPacketReceiver, OutboundPacketSender,
-        outbound_packet_channel,
+        outbound_packet_channel, write_final_disconnect,
     },
 };
 use foton_core::server::Server;
@@ -379,6 +379,27 @@ impl JavaTcpClient {
         }
     }
 
+    async fn send_final_bare_packet<P: ClientPacket>(&self, packet: P) {
+        let compression = self.compression.load();
+        let protocol = self.protocol.load();
+        let Ok(packet) = EncodedPacket::from_bare(packet, compression, protocol) else {
+            log::warn!(
+                "Client {}: dropping a disconnect packet that failed to encode",
+                self.id
+            );
+            return;
+        };
+
+        if let Err(err) =
+            write_final_disconnect(Self::write_network_packet(&self.network_writer, &packet)).await
+        {
+            log::warn!(
+                "Failed to send final disconnect packet to client {}: {err}",
+                self.id
+            );
+        }
+    }
+
     /// Sends an already encoded packet immediately, without queuing.
     pub async fn send_packet_now(&self, packet: &EncodedPacket) {
         match Self::write_network_packet_until_cancelled(
@@ -496,13 +517,13 @@ impl JavaTcpClient {
     pub fn send_packet(&self, packet: EncodedPacket) -> Result<(), PacketError> {
         self.outgoing_queue
             .try_send(OutboundPacket::Packet(packet))
-            .map_err(|e| {
+            .map_err(|error| {
+                self.close();
                 PacketError::SendError(format!(
-                    "Failed to send packet to client {}: {}",
-                    self.id, e
+                    "Failed to queue packet for client {}: {error:?}",
+                    self.id
                 ))
-            })?;
-        Ok(())
+            })
     }
 
     /// Starts a task that will send packets to the client from the outgoing packet queue.
@@ -1046,11 +1067,11 @@ impl JavaTcpClient {
         match self.protocol.load() {
             ConnectionProtocol::Login => {
                 let packet = CLoginDisconnect::new(&reason, self);
-                self.send_bare_packet_now(packet).await;
+                self.send_final_bare_packet(packet).await;
             }
             ConnectionProtocol::Play | ConnectionProtocol::Config => {
                 let packet = CDisconnect::new(&reason, self);
-                self.send_bare_packet_now(packet).await;
+                self.send_final_bare_packet(packet).await;
             }
             ConnectionProtocol::Handshake | ConnectionProtocol::Status => (),
         }

@@ -36,6 +36,14 @@ const UPDATE_CLEARED_MOVED_BLOCK: UpdateFlags = UpdateFlags::UPDATE_CLIENTS
     .union(UpdateFlags::UPDATE_KNOWN_SHAPE)
     .union(UpdateFlags::UPDATE_MOVE_BY_PISTON);
 const PISTON_NEIGHBOR_UPDATE_LIMIT: i32 = 512;
+const MAX_MOVED_BLOCKS: usize = 12;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MoveBlocksResult {
+    Moved,
+    NoMovement,
+    Rejected,
+}
 
 /// Vanilla `PistonBaseBlock` shared by normal and sticky pistons.
 #[block_behavior]
@@ -48,6 +56,58 @@ pub struct PistonBaseBlock {
 const EXTENDED: &BoolProperty = &BlockStateProperties::EXTENDED;
 const FACING: &EnumProperty<Direction> = &BlockStateProperties::FACING;
 const PISTON_TYPE: &EnumProperty<PistonType> = &BlockStateProperties::PISTON_TYPE;
+
+struct RetractionLevel<'a> {
+    world: &'a World,
+    arm_pos: BlockPos,
+    original_arm_state: BlockStateId,
+}
+
+impl LevelReader for RetractionLevel<'_> {
+    fn get_block_state(&self, pos: BlockPos) -> BlockStateId {
+        let state = self.world.get_block_state(pos);
+        if pos != self.arm_pos || state != self.original_arm_state {
+            return state;
+        }
+
+        if state.get_block() == &vanilla_blocks::PISTON_HEAD {
+            return vanilla_blocks::AIR.default_state();
+        }
+        if state.get_block() != &vanilla_blocks::MOVING_PISTON {
+            return state;
+        }
+
+        let Some(block_entity) = self.world.get_block_entity(pos) else {
+            return state;
+        };
+        let Some(piston) = block_entity.downcast_ref::<PistonMovingBlockEntity>() else {
+            return state;
+        };
+        if piston.is_source_piston() {
+            vanilla_blocks::AIR.default_state()
+        } else {
+            piston.moved_state()
+        }
+    }
+
+    fn raw_brightness(&self, pos: BlockPos, sky_darkening: u8) -> u8 {
+        self.world.raw_brightness(pos, sky_darkening)
+    }
+
+    fn min_y(&self) -> i32 {
+        self.world.get_min_y()
+    }
+
+    fn height(&self) -> i32 {
+        self.world.get_height()
+    }
+}
+
+impl PistonLevel for RetractionLevel<'_> {
+    fn is_within_world_border(&self, pos: BlockPos) -> bool {
+        self.world.is_block_within_world_border(pos)
+    }
+}
 
 impl PistonBaseBlock {
     /// Creates normal or sticky piston behavior from extracted constructor data.
@@ -221,6 +281,104 @@ impl PistonBaseBlock {
         !state.has_block_entity()
     }
 
+    fn is_ordered_subsequence(whole: &[BlockPos], candidate: &[BlockPos]) -> bool {
+        let mut next = 0;
+        for &candidate_pos in candidate {
+            let Some(offset) = whole[next..]
+                .iter()
+                .position(|&whole_pos| whole_pos == candidate_pos)
+            else {
+                return false;
+            };
+            next += offset + 1;
+        }
+        true
+    }
+
+    fn is_within_world(world: &dyn PistonLevel, pos: BlockPos) -> bool {
+        let min_y = i64::from(world.min_y());
+        let max_y = min_y + i64::from(world.height());
+        let y = i64::from(pos.y());
+        (min_y..max_y).contains(&y) && world.is_within_world_border(pos)
+    }
+
+    fn final_destination_is_available(
+        world: &dyn PistonLevel,
+        destination: BlockPos,
+        to_push: &[BlockPos],
+        to_destroy: &[BlockPos],
+    ) -> bool {
+        Self::is_within_world(world, destination)
+            && (world.get_block_state(destination).is_air()
+                || to_push.contains(&destination)
+                || to_destroy.contains(&destination))
+    }
+
+    fn validate_final_movement(
+        world: &dyn PistonLevel,
+        piston_pos: BlockPos,
+        direction: Direction,
+        extending: bool,
+        original_to_push: &[BlockPos],
+        final_to_push: &[BlockPos],
+    ) -> Option<Vec<BlockPos>> {
+        if final_to_push.len() > MAX_MOVED_BLOCKS
+            || !Self::is_ordered_subsequence(original_to_push, final_to_push)
+        {
+            return None;
+        }
+
+        let mut resolver = PistonStructureResolver::new(world, piston_pos, direction, extending);
+        if !resolver.resolve() || !Self::is_ordered_subsequence(resolver.to_push(), final_to_push) {
+            return None;
+        }
+
+        let push_direction = resolver.push_direction();
+        let to_destroy = resolver.to_destroy();
+        if to_destroy.iter().any(|pos| final_to_push.contains(pos)) {
+            return None;
+        }
+        if final_to_push.iter().any(|&pos| {
+            !Self::is_within_world(world, pos)
+                || !Self::final_destination_is_available(
+                    world,
+                    pos.relative(push_direction),
+                    final_to_push,
+                    to_destroy,
+                )
+        }) {
+            return None;
+        }
+
+        let arm_pos = piston_pos.relative(direction);
+        if extending
+            && !Self::final_destination_is_available(world, arm_pos, final_to_push, to_destroy)
+        {
+            return None;
+        }
+
+        Some(to_destroy.to_vec())
+    }
+
+    fn finish_retraction_arm(
+        world: &Arc<World>,
+        arm_pos: BlockPos,
+        original_arm_state: BlockStateId,
+    ) {
+        if world.get_block_state(arm_pos) != original_arm_state {
+            return;
+        }
+        if original_arm_state.get_block() == &vanilla_blocks::PISTON_HEAD {
+            world.set_block(
+                arm_pos,
+                vanilla_blocks::AIR.default_state(),
+                UPDATE_RETRACT_BASE,
+            );
+        } else if original_arm_state.get_block() == &vanilla_blocks::MOVING_PISTON {
+            Self::finish_moving_block_entity(world, arm_pos);
+        }
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "keeping vanilla's ordered piston mutation sequence together makes parity auditable"
@@ -231,38 +389,53 @@ impl PistonBaseBlock {
         piston_pos: BlockPos,
         direction: Direction,
         extending: bool,
-    ) -> bool {
+    ) -> MoveBlocksResult {
         let arm_pos = piston_pos.relative(direction);
-        if !extending && world.get_block_state(arm_pos).get_block() == &vanilla_blocks::PISTON_HEAD
-        {
-            world.set_block(
-                arm_pos,
-                vanilla_blocks::AIR.default_state(),
-                UPDATE_RETRACT_BASE,
-            );
-        }
-
-        let mut resolver =
-            PistonStructureResolver::new(world.as_ref(), piston_pos, direction, extending);
+        let retraction_level = (!extending).then(|| RetractionLevel {
+            world: world.as_ref(),
+            arm_pos,
+            original_arm_state: world.get_block_state(arm_pos),
+        });
+        let level: &dyn PistonLevel = match retraction_level.as_ref() {
+            Some(level) => level,
+            None => world.as_ref(),
+        };
+        let mut resolver = PistonStructureResolver::new(level, piston_pos, direction, extending);
         if !resolver.resolve() {
-            return false;
+            return MoveBlocksResult::NoMovement;
         }
 
-        let mut to_push = resolver.to_push().to_vec();
+        let original_to_push = resolver.to_push().to_vec();
         let mut piston_event = PistonEvent::new(
             world.key.to_string(),
             piston_pos,
-            to_push.clone(),
+            original_to_push.clone(),
             format!("{direction:?}"),
             extending,
         );
         world.fire_event(&mut piston_event);
         if piston_event.is_cancelled() {
-            return false;
+            return MoveBlocksResult::Rejected;
         }
-        to_push = piston_event.blocks().to_vec();
-        let to_destroy = resolver.to_destroy().to_vec();
+        let to_push = piston_event.blocks().to_vec();
+        let Some(to_destroy) = Self::validate_final_movement(
+            level,
+            piston_pos,
+            direction,
+            extending,
+            &original_to_push,
+            &to_push,
+        ) else {
+            return MoveBlocksResult::Rejected;
+        };
         let push_direction = resolver.push_direction();
+        if let Some(retraction_level) = retraction_level.as_ref() {
+            Self::finish_retraction_arm(
+                world,
+                retraction_level.arm_pos,
+                retraction_level.original_arm_state,
+            );
+        }
         let mut delete_after_move = Vec::with_capacity(to_push.len());
         let mut pushed_states = Vec::with_capacity(to_push.len());
         for &pos in &to_push {
@@ -409,33 +582,17 @@ impl PistonBaseBlock {
         if extending {
             world.update_neighbors_at(arm_pos, &vanilla_blocks::PISTON_HEAD);
         }
-        true
+        MoveBlocksResult::Moved
     }
 
-    fn trigger_retraction(
-        &self,
+    fn apply_retraction_base(
         world: &Arc<World>,
         pos: BlockPos,
+        moving_state: BlockStateId,
+        moved_state: BlockStateId,
         direction: Direction,
-        event: i32,
-        event_direction: i32,
     ) {
-        Self::finish_moving_block_entity(world, pos.relative(direction));
-
-        let piston_type = if self.sticky {
-            PistonType::Sticky
-        } else {
-            PistonType::Normal
-        };
-        let moving_state = vanilla_blocks::MOVING_PISTON
-            .default_state()
-            .set_value(FACING, direction)
-            .set_value(PISTON_TYPE, piston_type);
         world.set_block(pos, moving_state, UPDATE_RETRACT_BASE);
-        let moved_state = self
-            .block
-            .default_state()
-            .set_value(FACING, Self::direction_from_legacy_id(event_direction));
         world.set_block_entity(Self::moving_block_entity(
             world,
             pos,
@@ -452,6 +609,33 @@ impl PistonBaseBlock {
             UpdateFlags::UPDATE_CLIENTS,
             PISTON_NEIGHBOR_UPDATE_LIMIT,
         );
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Keep the vanilla piston retraction sequence together for behavioral parity and readability."
+    )]
+    fn trigger_retraction(
+        &self,
+        world: &Arc<World>,
+        pos: BlockPos,
+        direction: Direction,
+        event: i32,
+        event_direction: i32,
+    ) -> bool {
+        let piston_type = if self.sticky {
+            PistonType::Sticky
+        } else {
+            PistonType::Normal
+        };
+        let moving_state = vanilla_blocks::MOVING_PISTON
+            .default_state()
+            .set_value(FACING, direction)
+            .set_value(PISTON_TYPE, piston_type);
+        let moved_state = self
+            .block
+            .default_state()
+            .set_value(FACING, Self::direction_from_legacy_id(event_direction));
 
         let arm_pos = pos.relative(direction);
         if self.sticky {
@@ -470,7 +654,10 @@ impl PistonBaseBlock {
                 false
             };
 
-            if !piston_piece {
+            if piston_piece {
+                Self::finish_moving_block_entity(world, arm_pos);
+                Self::apply_retraction_base(world, pos, moving_state, moved_state, direction);
+            } else {
                 let reaction = two_state.get_block().config.push_reaction;
                 let piston = BLOCK_BEHAVIORS
                     .get_behavior(two_state.get_block())
@@ -487,12 +674,42 @@ impl PistonBaseBlock {
                     )
                     || (reaction != PushReaction::Normal && !piston)
                 {
+                    Self::finish_moving_block_entity(world, arm_pos);
+                    Self::apply_retraction_base(world, pos, moving_state, moved_state, direction);
                     world.remove_block(arm_pos, false);
                 } else {
-                    self.move_blocks(world, pos, direction, false);
+                    match self.move_blocks(world, pos, direction, false) {
+                        MoveBlocksResult::Moved => {
+                            Self::apply_retraction_base(
+                                world,
+                                pos,
+                                moving_state,
+                                moved_state,
+                                direction,
+                            );
+                        }
+                        MoveBlocksResult::NoMovement => {
+                            Self::finish_retraction_arm(
+                                world,
+                                arm_pos,
+                                world.get_block_state(arm_pos),
+                            );
+                            Self::apply_retraction_base(
+                                world,
+                                pos,
+                                moving_state,
+                                moved_state,
+                                direction,
+                            );
+                            world.remove_block(arm_pos, false);
+                        }
+                        MoveBlocksResult::Rejected => return false,
+                    }
                 }
             }
         } else {
+            Self::finish_moving_block_entity(world, arm_pos);
+            Self::apply_retraction_base(world, pos, moving_state, moved_state, direction);
             world.remove_block(arm_pos, false);
         }
 
@@ -509,6 +726,7 @@ impl PistonBaseBlock {
             pos,
             &GameEventContext::new(None, Some(moving_state)),
         );
+        true
     }
 }
 
@@ -576,7 +794,10 @@ impl BlockBehavior for PistonBaseBlock {
         }
 
         if event == 0 {
-            if !self.move_blocks(world, pos, direction, true) {
+            if !matches!(
+                self.move_blocks(world, pos, direction, true),
+                MoveBlocksResult::Moved
+            ) {
                 return false;
             }
             world.set_block(
@@ -598,7 +819,7 @@ impl BlockBehavior for PistonBaseBlock {
                 &GameEventContext::new(None, Some(extended_state)),
             );
         } else if matches!(event, 1 | 2) {
-            self.trigger_retraction(world, pos, direction, event, event_direction);
+            return self.trigger_retraction(world, pos, direction, event, event_direction);
         }
         true
     }
@@ -609,6 +830,33 @@ impl BlockBehavior for PistonBaseBlock {
 
     fn is_pathfindable(&self, _state: BlockStateId, _type: PathComputationType) -> bool {
         false
+    }
+}
+
+#[cfg(test)]
+impl PistonBaseBlock {
+    pub(crate) fn move_blocks_for_test(
+        &self,
+        world: &Arc<World>,
+        piston_pos: BlockPos,
+        direction: Direction,
+        extending: bool,
+    ) -> bool {
+        matches!(
+            self.move_blocks(world, piston_pos, direction, extending),
+            MoveBlocksResult::Moved
+        )
+    }
+
+    pub(crate) fn trigger_event_for_test(
+        &self,
+        state: BlockStateId,
+        world: &Arc<World>,
+        pos: BlockPos,
+        event: i32,
+        event_direction: i32,
+    ) -> bool {
+        self.trigger_event(state, world, pos, event, event_direction)
     }
 }
 
@@ -697,6 +945,118 @@ mod tests {
             false,
             Direction::East,
         ));
+    }
+
+    #[test]
+    fn event_injected_block_entity_is_rejected_before_movement() {
+        init_vanilla_registry();
+        init_behaviors();
+        let piston_pos = BlockPos::new(0, 64, 0);
+        let stone_pos = piston_pos.east();
+        let level =
+            TestLevel::default().with_block(stone_pos, vanilla_blocks::CHEST.default_state());
+
+        assert!(
+            PistonBaseBlock::validate_final_movement(
+                &level,
+                piston_pos,
+                Direction::East,
+                true,
+                &[stone_pos],
+                &[stone_pos],
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn event_output_must_preserve_resolver_order_and_safe_destinations() {
+        init_vanilla_registry();
+        init_behaviors();
+        let piston_pos = BlockPos::new(0, 64, 0);
+        let first = piston_pos.east();
+        let second = first.east();
+        let third = second.east();
+        let level = TestLevel::default()
+            .with_block(first, vanilla_blocks::STONE.default_state())
+            .with_block(second, vanilla_blocks::STONE.default_state());
+        let level_with_third = level.with_block(third, vanilla_blocks::STONE.default_state());
+
+        assert!(
+            PistonBaseBlock::validate_final_movement(
+                &TestLevel::default()
+                    .with_block(first, vanilla_blocks::STONE.default_state())
+                    .with_block(second, vanilla_blocks::STONE.default_state()),
+                piston_pos,
+                Direction::East,
+                true,
+                &[first, second],
+                &[first, second],
+            )
+            .is_some()
+        );
+        assert!(
+            PistonBaseBlock::validate_final_movement(
+                &level_with_third,
+                piston_pos,
+                Direction::East,
+                true,
+                &[first, second],
+                &[second, first],
+            )
+            .is_none()
+        );
+        assert!(
+            PistonBaseBlock::validate_final_movement(
+                &level_with_third,
+                piston_pos,
+                Direction::East,
+                true,
+                &[first, second],
+                &[first, third],
+            )
+            .is_none()
+        );
+        assert!(
+            PistonBaseBlock::validate_final_movement(
+                &level_with_third,
+                piston_pos,
+                Direction::East,
+                true,
+                &[first, second],
+                &[piston_pos],
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn event_injected_thirteenth_block_is_rejected_before_movement() {
+        init_vanilla_registry();
+        init_behaviors();
+        let piston_pos = BlockPos::new(0, 64, 0);
+        let level = TestLevel::default();
+        let original: Vec<_> = (1..=12)
+            .map(|offset| piston_pos.relative_n(Direction::East, offset))
+            .collect();
+        let too_long: Vec<_> = (1..=13)
+            .map(|offset| piston_pos.relative_n(Direction::East, offset))
+            .collect();
+        for &pos in &too_long {
+            level.set_test_block(pos, vanilla_blocks::STONE.default_state());
+        }
+
+        assert!(
+            PistonBaseBlock::validate_final_movement(
+                &level,
+                piston_pos,
+                Direction::East,
+                true,
+                &original,
+                &too_long,
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -883,5 +1243,66 @@ mod tests {
                 .get_block_state(piston_pos.relative_n(Direction::East, 2))
                 .is_air()
         );
+    }
+
+    #[test]
+    fn sticky_retraction_finishes_when_attached_block_cannot_move() {
+        init_vanilla_registry();
+        init_behaviors();
+        let world = fresh_test_world("sticky_piston_no_pull");
+        let piston_pos = BlockPos::new(8, 64, 8);
+        let head_pos = piston_pos.east();
+        let slime_pos = piston_pos.relative_n(Direction::East, 2);
+        let attached_pos = slime_pos.above();
+        let attached_positions: Vec<_> = (0..13)
+            .map(|offset| attached_pos.relative_n(Direction::Up, offset))
+            .collect();
+        let _holder = insert_ready_full_chunk(&world, ChunkPos::from_block_pos(piston_pos));
+        let piston_state = vanilla_blocks::STICKY_PISTON
+            .default_state()
+            .set_value(FACING, Direction::East)
+            .set_value(EXTENDED, true);
+        let head_state = vanilla_blocks::PISTON_HEAD
+            .default_state()
+            .set_value(FACING, Direction::East)
+            .set_value(PISTON_TYPE, PistonType::Sticky);
+        assert!(world.set_block(piston_pos, piston_state, UpdateFlags::UPDATE_NONE));
+        assert!(world.set_block(head_pos, head_state, UpdateFlags::UPDATE_NONE));
+        assert!(world.set_block(
+            slime_pos,
+            vanilla_blocks::SLIME_BLOCK.default_state(),
+            UpdateFlags::UPDATE_NONE,
+        ));
+        for &attached_pos in &attached_positions {
+            assert!(world.set_block(
+                attached_pos,
+                vanilla_blocks::SLIME_BLOCK.default_state(),
+                UpdateFlags::UPDATE_NONE,
+            ));
+        }
+
+        let piston = PistonBaseBlock::new(&vanilla_blocks::STICKY_PISTON, true);
+        assert!(piston.trigger_event_for_test(piston_state, &world, piston_pos, 1, 5,));
+        assert_eq!(
+            world.get_block_state(piston_pos).get_block(),
+            &vanilla_blocks::MOVING_PISTON
+        );
+        assert!(world.get_block_state(head_pos).is_air());
+
+        tick_block_entities(&world, 3);
+        let base = world.get_block_state(piston_pos);
+        assert_eq!(base.get_block(), &vanilla_blocks::STICKY_PISTON);
+        assert!(!base.get_value(EXTENDED));
+        assert!(world.get_block_state(head_pos).is_air());
+        assert_eq!(
+            world.get_block_state(slime_pos).get_block(),
+            &vanilla_blocks::SLIME_BLOCK
+        );
+        for attached_pos in attached_positions {
+            assert_eq!(
+                world.get_block_state(attached_pos).get_block(),
+                &vanilla_blocks::SLIME_BLOCK
+            );
+        }
     }
 }

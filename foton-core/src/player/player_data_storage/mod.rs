@@ -48,7 +48,8 @@ const GLOBAL_MAGIC: [u8; 4] = *b"STLG";
 const PLAYER_STORAGE_VERSION: u16 = 11;
 const GLOBAL_STORAGE_VERSION: u16 = 3;
 const GLOBAL_PLAYER_DATA_VERSION: i32 = 2;
-const MAX_PLAYER_DATA_FILE_BYTES: u64 = 64 * 1024 * 1024;
+/// Largest compressed player data file accepted from disk.
+const MAX_PLAYER_DATA_FILE_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_DECOMPRESSED_PLAYER_DATA_BYTES: usize = 64 * 1024 * 1024;
 const PLAYER_DATA_DECOMPRESSION_BUFFER_BYTES: usize = 8 * 1024;
 const FILE_LOCK_STRIPES: usize = 256;
@@ -1482,7 +1483,7 @@ mod tests {
     use simdnbt::owned::NbtCompound;
     use std::{
         env,
-        io::repeat,
+        io::{Write, repeat},
         sync::{
             Arc,
             atomic::{AtomicBool, Ordering},
@@ -1498,6 +1499,64 @@ mod tests {
             .expect("system clock should be after unix epoch")
             .as_nanos();
         env::temp_dir().join(format!("fotonmc-player-storage-{name}-{suffix}"))
+    }
+
+    #[tokio::test]
+    async fn oversized_compressed_player_file_is_rejected_before_loading() {
+        let root = temp_storage_root("oversized-compressed");
+        let storage = FilePlayerDataStorage::new(root.clone())
+            .await
+            .expect("test storage should initialize");
+        let uuid = Uuid::from_u128(7);
+        let players_dir = storage
+            .domain_players_dir("minecraft")
+            .expect("the test domain name is valid");
+        let path = FilePlayerDataStorage::player_file(&players_dir, uuid);
+        fs::create_dir_all(path.parent().expect("player path should have a parent"))
+            .await
+            .expect("player directory should be created");
+        let file = fs::File::create(&path)
+            .await
+            .expect("player file should be created");
+        file.set_len(MAX_PLAYER_DATA_FILE_BYTES + 1)
+            .await
+            .expect("sparse player file should be extended");
+
+        let error = storage
+            .load_domain("minecraft", uuid)
+            .await
+            .expect_err("oversized compressed input must be rejected");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("exceeds the"));
+
+        fs::remove_dir_all(root)
+            .await
+            .expect("temporary storage should be removable");
+    }
+
+    #[test]
+    fn player_decompression_stops_at_the_output_limit() {
+        let mut compressed = Vec::new();
+        {
+            let mut encoder = zstd::stream::Encoder::new(&mut compressed, 1)
+                .expect("test encoder should initialize");
+            let block = vec![0u8; 1024 * 1024];
+            for _ in 0..=(MAX_DECOMPRESSED_PLAYER_DATA_BYTES / block.len()) {
+                encoder
+                    .write_all(&block)
+                    .expect("test bomb should compress");
+            }
+            encoder.finish().expect("test frame should finish");
+        }
+        assert!(compressed.len() < 1024 * 1024);
+
+        let mut file = Vec::with_capacity(6 + compressed.len());
+        file.extend_from_slice(&PLAYER_MAGIC);
+        file.extend_from_slice(&PLAYER_STORAGE_VERSION.to_le_bytes());
+        file.extend_from_slice(&compressed);
+        let error = decode_file(PLAYER_MAGIC, PLAYER_STORAGE_VERSION, &file)
+            .expect_err("decoded player data must be bounded");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
 
     /// An ender chest's contents survive the save format.

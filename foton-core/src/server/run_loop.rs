@@ -15,7 +15,27 @@ use crate::command::functions::CommandFunction;
 use crate::event::{AsyncTabCompleteEvent, CommandEvent, ServerTickEvent};
 use foton_utils::Identifier;
 use std::mem::take;
-use tokio::sync::oneshot::{Receiver, channel};
+use tokio::sync::oneshot::{self, Receiver, channel};
+
+fn detach_world(
+    worlds: &super::WorldMap,
+    workers: &mut WorldTickWorkers,
+    key: &Identifier,
+) -> Result<Arc<World>, String> {
+    worlds
+        .validate_removal(key)
+        .map_err(|error| format!("{error:?}"))?;
+    let Some(worker_removal) = workers.prepare_removal(key) else {
+        log::error!(
+            target: "foton::server::world_removal",
+            "Requested world {key} has no tick worker"
+        );
+        return Err("world has no tick worker".to_owned());
+    };
+    let world = worlds.remove(key).map_err(|error| format!("{error:?}"))?;
+    worker_removal.commit();
+    Ok(world)
+}
 
 impl Server {
     /// Runs gameplay packets, game ticks, and chunk sending. Game-tick boundaries
@@ -729,24 +749,49 @@ impl Server {
     /// Attaches worlds constructed asynchronously at a tick safe-point.
     fn process_world_additions(&self, workers: &mut WorldTickWorkers) {
         let worlds = take(&mut *self.pending_world_additions.lock());
-        for (world, completion) in worlds {
+        for (world, completion, reservation) in worlds {
             let key = world.key.clone();
+            let cleanup_world = Arc::clone(&world);
             if let Err(error) = self.worlds.insert(key.clone(), world) {
-                let _ = completion.send(Err(error));
+                self.cleanup_rejected_world(cleanup_world, reservation, completion, error);
                 continue;
             }
             let Some(world) = self.worlds.get(&key) else {
-                let _ = completion.send(Err(format!("world {key} was not attached")));
+                let error = format!("world {key} was not attached");
+                self.cleanup_rejected_world(cleanup_world, reservation, completion, error);
                 continue;
             };
             if let Err(error) = workers.add(&world) {
                 log::error!("Failed to start tick worker for {key}: {error}");
                 let _ = self.worlds.remove(&key);
-                let _ = completion.send(Err(error.to_string()));
+                self.cleanup_rejected_world(
+                    cleanup_world,
+                    reservation,
+                    completion,
+                    error.to_string(),
+                );
             } else {
+                drop(reservation);
                 let _ = completion.send(Ok(()));
             }
         }
+    }
+
+    fn cleanup_rejected_world(
+        &self,
+        world: Arc<World>,
+        reservation: super::WorldKeyReservation,
+        completion: oneshot::Sender<Result<(), String>>,
+        error: String,
+    ) {
+        self.world_tasks.cleanups.spawn_on(
+            async move {
+                world.cleanup_without_save().await;
+                drop(reservation);
+                let _ = completion.send(Err(error));
+            },
+            self.chunk_runtime.handle(),
+        );
     }
 
     /// Queues a loaded-world removal for the next tick safe-point.
@@ -806,39 +851,55 @@ impl Server {
                 save,
                 completion,
             } = request;
-            let Some(world) = self.worlds.get_owned(&key) else {
-                continue;
+            let reservation = match self.reserve_world_cleanup_key(&key) {
+                Ok(reservation) => reservation,
+                Err(error) => {
+                    log::debug!("World removal deferred for {key}: {error}");
+                    if let Some(sender) = completion {
+                        let _ = sender.send(Err(error));
+                    }
+                    continue;
+                }
             };
-            if !workers.remove(&key) {
-                log::error!("Requested world {key} has no tick worker");
-                if let Some(sender) = completion {
-                    let _ = sender.send(Err("world has no tick worker".to_owned()));
+            let world = match detach_world(&self.worlds, workers, &key) {
+                Ok(world) => world,
+                Err(error) => {
+                    log::debug!("World removal deferred for {key}: {error}");
+                    if let Some(sender) = completion {
+                        let _ = sender.send(Err(error));
+                    }
+                    continue;
                 }
-                continue;
-            }
-            if let Err(error) = self.worlds.remove(&key) {
-                log::debug!("World removal deferred for {key}: {error:?}");
-                if let Some(sender) = completion {
-                    let _ = sender.send(Err(format!("{error:?}")));
-                }
-                continue;
-            }
-            if !save {
-                if let Some(sender) = completion {
-                    let _ = sender.send(Ok(0));
-                }
-                continue;
-            }
+            };
             // Persistence is I/O and must not stall the serialized game tick.
-            let runtime = Arc::clone(&self.chunk_runtime);
-            let _cleanup = runtime.spawn(async move {
-                let mut saved = 0;
-                world.cleanup(&mut saved).await;
-                tracing::debug!(world = %key, saved_chunks = saved, "World cleanup finished");
-                if let Some(sender) = completion {
-                    let _ = sender.send(Ok(saved));
+            self.world_tasks.cleanups.spawn_on(async move {
+                let result = if save {
+                    let mut saved = 0;
+                    match world.cleanup(&mut saved).await {
+                        Ok(()) => Ok(saved),
+                        Err(error) => Err(error.to_string()),
+                    }
+                } else {
+                    world.cleanup_without_save().await;
+                    Ok(0)
+                };
+                match result {
+                    Ok(saved) => {
+                        drop(reservation);
+                        tracing::debug!(world = %key, saved_chunks = saved, "World cleanup finished");
+                        if let Some(sender) = completion {
+                            let _ = sender.send(Ok(saved));
+                        }
+                    }
+                    Err(error) => {
+                        drop(reservation);
+                        log::error!("World cleanup failed for {key}: {error}");
+                        if let Some(sender) = completion {
+                            let _ = sender.send(Err(error));
+                        }
+                    }
                 }
-            });
+            }, self.chunk_runtime.handle());
         }
     }
 
@@ -894,15 +955,197 @@ impl Server {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use super::Server;
-    use crate::{
-        player::ResetReason,
-        test_support::{TestPlayerBuilder, fresh_test_world, insert_ready_full_chunk},
+    use std::{
+        iter::empty,
+        sync::{Arc, Once},
     };
-    use foton_utils::ChunkPos;
+
+    use super::{Server, detach_world};
+    use crate::{
+        config::ResolvedDomainConfig,
+        player::ResetReason,
+        server::{WorldMap, world_tick_workers::WorldTickWorkers},
+        test_support::{
+            TestPlayerBuilder, fresh_test_world, fresh_test_world_in_domain,
+            insert_ready_full_chunk,
+        },
+        world::World,
+    };
+    use foton_utils::{ChunkPos, Identifier, locks::SyncMutex};
+    use futures::executor::block_on;
+    use log::{Level, Log, Metadata, Record};
     use rustc_hash::FxHashMap;
+
+    struct WorldRemovalLogger;
+
+    static WORLD_REMOVAL_LOGGER: WorldRemovalLogger = WorldRemovalLogger;
+    static WORLD_REMOVAL_LOGGER_INIT: Once = Once::new();
+    static WORLD_REMOVAL_LOGS: SyncMutex<Vec<(Level, String)>> = SyncMutex::new(Vec::new());
+
+    impl Log for WorldRemovalLogger {
+        fn enabled(&self, metadata: &Metadata<'_>) -> bool {
+            metadata.target() == "foton::server::world_removal"
+        }
+
+        fn log(&self, record: &Record<'_>) {
+            if !self.enabled(record.metadata()) {
+                return;
+            }
+            let mut logs = WORLD_REMOVAL_LOGS.lock();
+            logs.push((record.level(), record.args().to_string()));
+        }
+
+        fn flush(&self) {}
+    }
+
+    fn capture_world_removal_logs() {
+        WORLD_REMOVAL_LOGGER_INIT.call_once(|| {
+            let _ = log::set_logger(&WORLD_REMOVAL_LOGGER);
+            log::set_max_level(log::LevelFilter::Trace);
+        });
+        let mut logs = WORLD_REMOVAL_LOGS.lock();
+        logs.clear();
+    }
+
+    fn domain(default_world: Identifier) -> ResolvedDomainConfig {
+        ResolvedDomainConfig {
+            name: "main".to_owned(),
+            default_world: default_world.clone(),
+            worlds: vec![default_world],
+        }
+    }
+
+    #[test]
+    fn rejecting_default_world_removal_keeps_its_tick_worker() {
+        let world = fresh_test_world_in_domain("main", "spawn");
+        let key = world.key.clone();
+        let worlds = WorldMap::new("main".to_owned(), &[domain(key.clone())], &[]);
+        assert!(worlds.insert(key.clone(), Arc::clone(&world)).is_ok());
+        let Ok(mut workers) = WorldTickWorkers::spawn([&world]) else {
+            panic!("world tick worker should start");
+        };
+
+        let Err(error) = detach_world(&worlds, &mut workers, &key) else {
+            panic!("default world removal must be rejected");
+        };
+        assert_eq!(error, "DefaultWorld");
+        assert!(worlds.get(&key).is_some());
+        assert!(block_on(workers.tick_all(1, true)).is_ok());
+        assert_eq!(world.game_time(), 1);
+    }
+
+    #[test]
+    fn rejecting_world_with_players_removal_keeps_its_tick_worker() {
+        let world = fresh_test_world_in_domain("main", "arena");
+        let key = world.key.clone();
+        let worlds = WorldMap::new(
+            "main".to_owned(),
+            &[domain(Identifier::new("main", "spawn"))],
+            &[],
+        );
+        let player = TestPlayerBuilder::new(Arc::clone(&world), "player", 1).build();
+        assert!(world.players.insert(player));
+        assert!(worlds.insert(key.clone(), Arc::clone(&world)).is_ok());
+        let Ok(mut workers) = WorldTickWorkers::spawn([&world]) else {
+            panic!("world tick worker should start");
+        };
+
+        let Err(error) = detach_world(&worlds, &mut workers, &key) else {
+            panic!("world removal with players must be rejected");
+        };
+        assert_eq!(error, "PlayersPresent(1)");
+        assert!(worlds.get(&key).is_some());
+        assert!(block_on(workers.tick_all(1, true)).is_ok());
+        assert_eq!(world.game_time(), 1);
+    }
+
+    #[test]
+    fn missing_tick_worker_does_not_detach_live_world() {
+        let world = fresh_test_world_in_domain("main", "arena");
+        let key = world.key.clone();
+        let worlds = WorldMap::new(
+            "main".to_owned(),
+            &[domain(Identifier::new("main", "spawn"))],
+            &[],
+        );
+        assert!(worlds.insert(key.clone(), Arc::clone(&world)).is_ok());
+        let Ok(mut workers) = WorldTickWorkers::spawn(empty::<&Arc<World>>()) else {
+            panic!("empty worker set should initialize");
+        };
+
+        let Err(error) = detach_world(&worlds, &mut workers, &key) else {
+            panic!("missing worker must reject world removal");
+        };
+        assert_eq!(error, "world has no tick worker");
+        let Some(remaining_world) = worlds.get(&key) else {
+            panic!("missing worker must not detach the live world");
+        };
+        assert!(Arc::ptr_eq(&remaining_world, &world));
+    }
+
+    #[test]
+    fn missing_tick_worker_is_logged_as_an_error() {
+        capture_world_removal_logs();
+        let world = fresh_test_world_in_domain("main", "arena_without_worker");
+        let key = world.key.clone();
+        let worlds = WorldMap::new(
+            "main".to_owned(),
+            &[domain(Identifier::new("main", "spawn"))],
+            &[],
+        );
+        assert!(worlds.insert(key.clone(), world).is_ok());
+        let Ok(mut workers) = WorldTickWorkers::spawn(empty::<&Arc<World>>()) else {
+            panic!("empty worker set should initialize");
+        };
+
+        assert!(detach_world(&worlds, &mut workers, &key).is_err());
+
+        let logs = WORLD_REMOVAL_LOGS.lock();
+        assert!(logs.iter().any(|(level, message)| {
+            *level == Level::Error
+                && message == "Requested world main:arena_without_worker has no tick worker"
+        }));
+    }
+
+    #[test]
+    fn successful_detach_removes_world_and_worker_while_other_world_keeps_ticking() {
+        let removed = fresh_test_world_in_domain("main", "arena");
+        let remaining = fresh_test_world_in_domain("main", "lobby");
+        let removed_key = removed.key.clone();
+        let remaining_key = remaining.key.clone();
+        let worlds = WorldMap::new(
+            "main".to_owned(),
+            &[domain(Identifier::new("main", "spawn"))],
+            &[],
+        );
+        assert!(
+            worlds
+                .insert(removed_key.clone(), Arc::clone(&removed))
+                .is_ok()
+        );
+        assert!(
+            worlds
+                .insert(remaining_key.clone(), Arc::clone(&remaining))
+                .is_ok()
+        );
+        let Ok(mut workers) = WorldTickWorkers::spawn([&removed, &remaining]) else {
+            panic!("world tick workers should start");
+        };
+
+        let Ok(detached) = detach_world(&worlds, &mut workers, &removed_key) else {
+            panic!("eligible world should detach");
+        };
+
+        assert!(Arc::ptr_eq(&detached, &removed));
+        assert!(worlds.get(&removed_key).is_none());
+        assert!(worlds.get(&remaining_key).is_some());
+        let Ok(timings) = block_on(workers.tick_all(1, true)) else {
+            panic!("remaining world worker should tick");
+        };
+        assert_eq!(timings.len(), 1);
+        assert_eq!(removed.game_time(), 0);
+        assert_eq!(remaining.game_time(), 1);
+    }
 
     #[test]
     fn chunk_send_commit_rechecks_live_world_membership() {

@@ -31,7 +31,7 @@ use crate::{
 };
 
 /// Minimum chunks per tick (vanilla: 0.01)
-const MIN_CHUNKS_PER_TICK: f32 = 0.01;
+const MIN_CHUNKS_PER_TICK: f32 = 0.01f32;
 /// Maximum chunks per tick (vanilla: 64.0)
 const MAX_CHUNKS_PER_TICK: f32 = 64.0;
 /// Starting chunks per tick (vanilla: 9.0)
@@ -538,7 +538,7 @@ impl ChunkSender {
 
         self.unacknowledged_batches = self.unacknowledged_batches.saturating_sub(1);
 
-        // Handle NaN and clamp to Vanilla's valid range.
+        // Vanilla clamps this client-controlled pacing value to 0.01..=64.0.
         self.desired_chunks_per_tick = if desired_chunks_per_tick.is_nan() {
             MIN_CHUNKS_PER_TICK
         } else {
@@ -807,10 +807,7 @@ mod tests {
 
         assert!(sender.on_chunk_batch_received_by_client(f32::NAN));
         assert_eq!(sender.unacknowledged_batches, 0);
-        assert_eq!(
-            sender.desired_chunks_per_tick.to_bits(),
-            MIN_CHUNKS_PER_TICK.to_bits()
-        );
+        assert_eq!(sender.desired_chunks_per_tick.to_bits(), 0.01_f32.to_bits());
         assert_eq!(sender.batch_quota.to_bits(), 1.0_f32.to_bits());
         assert_eq!(
             sender.max_unacknowledged_batches,
@@ -819,24 +816,22 @@ mod tests {
     }
 
     #[test]
-    fn chunk_batch_ack_clamps_non_finite_and_extreme_feedback_to_vanilla_bounds() {
-        for (feedback, expected) in [
-            (f32::NEG_INFINITY, MIN_CHUNKS_PER_TICK),
-            (-1.0, MIN_CHUNKS_PER_TICK),
-            (500.0, MAX_CHUNKS_PER_TICK),
-            (f32::INFINITY, MAX_CHUNKS_PER_TICK),
+    fn chunk_batch_ack_clamps_non_finite_and_out_of_range_rates() {
+        for (requested, expected) in [
+            (f32::NAN, 0.01_f32),
+            (f32::NEG_INFINITY, 0.01_f32),
+            (-1.0_f32, 0.01_f32),
+            (32.0_f32, 32.0_f32),
+            (f32::INFINITY, 64.0_f32),
+            (500.0_f32, 64.0_f32),
         ] {
             let mut sender = ChunkSender {
                 unacknowledged_batches: 1,
                 ..ChunkSender::default()
             };
 
-            assert!(sender.on_chunk_batch_received_by_client(feedback));
-            assert_eq!(
-                sender.desired_chunks_per_tick.to_bits(),
-                expected.to_bits(),
-                "unexpected pacing result for {feedback}"
-            );
+            assert!(sender.on_chunk_batch_received_by_client(requested));
+            assert_eq!(sender.desired_chunks_per_tick.to_bits(), expected.to_bits());
         }
     }
 

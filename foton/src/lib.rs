@@ -20,6 +20,7 @@ use std::{
     path::{Path, PathBuf, absolute},
     sync::{Arc, OnceLock, Weak},
     thread::Builder,
+    time::Duration,
 };
 
 use foton_bedrock::config::BedrockConfig;
@@ -31,8 +32,28 @@ use foton_plugin::{PluginHost, PluginHostConfig};
 use foton_utils::locks::SyncMutex;
 use rustc_hash::FxHashMap;
 use sha2::{Digest, Sha256};
-use tokio::{net::TcpListener, runtime::Runtime, select};
+use tokio::{net::TcpListener, runtime::Runtime, select, time::sleep};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
+
+const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(50);
+
+async fn accept_error_backoff(duration: Duration) {
+    sleep(duration).await;
+}
+
+async fn accept_or_backoff<T>(accept_result: io::Result<T>, duration: Duration) -> Option<T> {
+    match accept_result {
+        Ok(accepted) => Some(accepted),
+        Err(error) => {
+            log::warn!(
+                "Failed to accept Java connection: {error}; retrying after {} ms",
+                duration.as_millis()
+            );
+            accept_error_backoff(duration).await;
+            None
+        }
+    }
+}
 
 /// Command-line arguments.
 pub mod args;
@@ -364,11 +385,12 @@ impl FotonServer {
         }
 
         let rcon_listener = if rcon_config.enable {
-            let address = SocketAddr::new(rcon_config.bind_address, rcon_config.port);
+            let address = SocketAddr::new(rcon_config.bind, rcon_config.port);
             match rcon::RconListener::bind(
-                rcon_config.bind_address,
+                rcon_config.bind,
                 rcon_config.port,
                 rcon_config.password.into(),
+                rcon_config.max_connections,
             )
             .await
             {
@@ -457,7 +479,9 @@ impl FotonServer {
                     break;
                 }
                 accept_result = self.tcp_listener.accept() => {
-                    let Ok((connection, address)) = accept_result else {
+                    let Some((connection, address)) =
+                        accept_or_backoff(accept_result, ACCEPT_ERROR_BACKOFF).await
+                    else {
                         continue;
                     };
                     let Some(connection_permit) = JavaTcpClient::try_acquire_connection_slot(
@@ -977,14 +1001,16 @@ mod tests {
         env, fs, io,
         net::{IpAddr, Ipv4Addr, SocketAddr},
         path::Path,
+        time::Duration,
     };
 
     use sha2::{Digest, Sha256};
+    use tokio::time::Instant;
 
     use super::{
         BedrockConfig, CancellationToken, FotonServerError, PLUGIN_RUNTIME_JARS,
-        PLUGIN_RUNTIME_LICENSES, SourceConnectionLimiter, lowercase_hex, resolve_run_directory,
-        start_bedrock_supervisor, validate_installed_plugin_runtime,
+        PLUGIN_RUNTIME_LICENSES, SourceConnectionLimiter, accept_or_backoff, lowercase_hex,
+        resolve_run_directory, start_bedrock_supervisor, validate_installed_plugin_runtime,
     };
 
     fn write_runtime_fixture(directory: &Path) {
@@ -1089,6 +1115,20 @@ mod tests {
             error.to_string(),
             "failed to bind rcon to [::1]:25575: occupied"
         );
+    }
+
+    #[tokio::test]
+    async fn production_accept_error_path_waits_before_retrying() {
+        let started = Instant::now();
+
+        let accepted = accept_or_backoff::<()>(
+            Err(io::Error::other("test accept failure")),
+            Duration::from_millis(20),
+        )
+        .await;
+
+        assert!(accepted.is_none());
+        assert!(started.elapsed() >= Duration::from_millis(20));
     }
 
     #[test]

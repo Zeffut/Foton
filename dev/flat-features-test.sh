@@ -69,7 +69,7 @@ start_server() {
   nohup "$BIN" > server.log 2>&1 < /dev/null &
   PID=$!
   for _ in $(seq 1 180); do
-    ss -ltn 2>/dev/null | grep -q ":$port" && return 0
+    python3 "$ROOT/dev/wait-tcp.py" 127.0.0.1 "$port" 1 "$PID" >/dev/null 2>&1 && return 0
     sleep 1
   done
   echo "SERVER NEVER LISTENED ON $port (a rejected generator config aborts startup)"

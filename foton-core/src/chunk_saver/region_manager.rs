@@ -4,16 +4,23 @@
 //! Chunk data is read on-demand from disk and converted directly to runtime
 //! format, avoiding memory duplication.
 
+#[cfg(test)]
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::{
     fmt,
     io::{self},
-    path::PathBuf,
+    mem,
+    path::{Path, PathBuf},
     sync::Weak,
 };
 use zstd::bulk::decompress;
 
+#[cfg(test)]
+use foton_utils::locks::SyncMutex;
 use foton_utils::{ChunkPos, locks::AsyncRwLock};
 use rustc_hash::FxHashMap;
+#[cfg(test)]
+use tokio::sync::Notify;
 use tokio::{
     fs::{self, File, OpenOptions},
     io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
@@ -45,6 +52,13 @@ impl fmt::Display for CorruptChunkData {
 /// slot that goes corrupt, regenerates, and goes corrupt again.
 const MAX_QUARANTINED_COPIES_PER_SLOT: u32 = 16;
 
+/// Largest file whose sector count and chunk offsets fit the region layout.
+///
+/// Saves append new chunk data without reclaiming old sectors, so the bound
+/// must include every sector addressable by the on-disk `u32` offsets rather
+/// than only the sectors currently retained by the chunk table.
+const MAX_REGION_FILE_SIZE: u64 = u32::MAX as u64 * SECTOR_SIZE as u64;
+
 /// Manages region files with seek-based chunk access.
 ///
 /// Only keeps region headers (8KB each) in memory, not chunk data.
@@ -54,6 +68,18 @@ pub struct RegionManager {
     base_path: PathBuf,
     /// Open region file handles with their headers.
     regions: AsyncRwLock<FxHashMap<RegionPos, RegionHandle>>,
+    #[cfg(test)]
+    directory_sync_failure: SyncMutex<Option<PathBuf>>,
+    #[cfg(test)]
+    directory_syncs: SyncMutex<Vec<PathBuf>>,
+    #[cfg(test)]
+    header_write_failures: AtomicUsize,
+    #[cfg(test)]
+    pause_header_writes: AtomicBool,
+    #[cfg(test)]
+    header_write_started: Notify,
+    #[cfg(test)]
+    resume_header_writes: Notify,
 }
 
 /// Prepared chunk data ready to be saved asynchronously.
@@ -101,6 +127,18 @@ impl RegionManager {
         Self {
             base_path: base_path.into(),
             regions: AsyncRwLock::new(FxHashMap::default()),
+            #[cfg(test)]
+            directory_sync_failure: SyncMutex::new(None),
+            #[cfg(test)]
+            directory_syncs: SyncMutex::new(Vec::new()),
+            #[cfg(test)]
+            header_write_failures: AtomicUsize::new(0),
+            #[cfg(test)]
+            pause_header_writes: AtomicBool::new(false),
+            #[cfg(test)]
+            header_write_started: Notify::new(),
+            #[cfg(test)]
+            resume_header_writes: Notify::new(),
         }
     }
 
@@ -124,6 +162,7 @@ impl RegionManager {
             .open(&path)
             .await?;
 
+        let file_size = file.metadata().await?.len();
         // Read and verify magic + version
         let mut header_bytes = [0u8; FILE_HEADER_SIZE];
         file.read_exact(&mut header_bytes).await?;
@@ -140,14 +179,22 @@ impl RegionManager {
         if version != FORMAT_VERSION {
             // Version mismatch — backup the old file and create a fresh region.
             drop(file);
-            let backup_path = path.with_extension(format!("srg.v{version}.bak"));
+            let backup_path = self.backup_incompatible_region(&path, version).await?;
             tracing::warn!(
                 "Region file {} has version {version} (expected {FORMAT_VERSION}), backing up to {} and recreating",
                 path.display(),
                 backup_path.display()
             );
-            fs::rename(&path, &backup_path).await?;
             return self.create_region(pos).await;
+        }
+
+        if file_size > MAX_REGION_FILE_SIZE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "region file is {file_size} bytes, exceeding the format limit of {MAX_REGION_FILE_SIZE} bytes"
+                ),
+            ));
         }
 
         // Read chunk table
@@ -161,7 +208,6 @@ impl RegionManager {
         })?;
 
         // Calculate file size in sectors
-        let file_size = file.seek(io::SeekFrom::End(0)).await?;
         let file_sectors = file_size.div_ceil(SECTOR_SIZE as u64) as u32;
         Self::validate_region_entries(&header, file_sectors)?;
 
@@ -174,9 +220,65 @@ impl RegionManager {
         })
     }
 
+    /// Moves an incompatible region aside without replacing an earlier backup.
+    async fn backup_incompatible_region(
+        &self,
+        path: &PathBuf,
+        version: u16,
+    ) -> io::Result<PathBuf> {
+        let parent = path.parent().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "region path has no parent directory",
+            )
+        })?;
+        let extension = format!("srg.v{version}.bak");
+        for attempt in 0..=u32::MAX {
+            let backup_path = if attempt == 0 {
+                path.with_extension(&extension)
+            } else {
+                path.with_extension(format!("{extension}.{attempt}"))
+            };
+
+            match fs::hard_link(path, &backup_path).await {
+                Ok(()) => {
+                    self.sync_directory(parent).await?;
+                    if let Err(remove_error) = fs::remove_file(path).await {
+                        return match fs::remove_file(&backup_path).await {
+                            Ok(()) => match self.sync_directory(parent).await {
+                                Ok(()) => Err(remove_error),
+                                Err(sync_error) => Err(io::Error::new(
+                                    sync_error.kind(),
+                                    format!(
+                                        "failed to remove incompatible region ({remove_error}); removed backup cleanup but failed to sync its directory ({sync_error})"
+                                    ),
+                                )),
+                            },
+                            Err(cleanup_error) => Err(io::Error::new(
+                                cleanup_error.kind(),
+                                format!(
+                                    "failed to remove incompatible region after linking its backup ({remove_error}); failed to clean up {} ({cleanup_error})",
+                                    backup_path.display()
+                                ),
+                            )),
+                        };
+                    }
+                    self.sync_directory(parent).await?;
+                    return Ok(backup_path);
+                }
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "all incompatible-region backup suffixes are occupied",
+        ))
+    }
+
     /// Creates a new empty region file.
     async fn create_region(&self, pos: RegionPos) -> io::Result<RegionHandle> {
-        fs::create_dir_all(&self.base_path).await?;
+        self.create_directories_durable(&self.base_path).await?;
 
         let path = self.region_path(pos);
         let mut file = OpenOptions::new()
@@ -197,6 +299,8 @@ impl RegionManager {
         let header = RegionHeader::new();
         file.write_all(&header.to_bytes()).await?;
         file.flush().await?;
+        file.sync_all().await?;
+        self.sync_directory(&self.base_path).await?;
 
         Ok(RegionHandle {
             file,
@@ -212,7 +316,22 @@ impl RegionManager {
     /// This is the commit point of a chunk save: until the header names the new
     /// sectors, the old copy is what a reload finds. It is fsynced for the same
     /// reason a database fsyncs its commit record.
-    async fn write_header(file: &mut File, header: &RegionHeader) -> io::Result<()> {
+    async fn write_header(&self, file: &mut File, header: &RegionHeader) -> io::Result<()> {
+        #[cfg(test)]
+        if self.pause_header_writes.load(Ordering::Acquire) {
+            self.header_write_started.notify_one();
+            self.resume_header_writes.notified().await;
+        }
+        #[cfg(test)]
+        if self
+            .header_write_failures
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |remaining| {
+                remaining.checked_sub(1)
+            })
+            .is_ok()
+        {
+            return Err(io::Error::other("injected header write failure"));
+        }
         file.seek(io::SeekFrom::Start(FILE_HEADER_SIZE as u64))
             .await?;
         file.write_all(&header.to_bytes()).await?;
@@ -269,10 +388,7 @@ impl RegionManager {
     }
 
     fn validate_region_entries(header: &RegionHeader, file_sectors: u32) -> io::Result<()> {
-        // A sparse corrupt file may report billions of sectors while the
-        // header can name at most 1,024 allocations. Track those allocations,
-        // not every logical sector in the file.
-        let mut allocations = Vec::new();
+        let mut allocations = Vec::with_capacity(CHUNK_TABLE_SIZE / 8);
         for (index, &entry) in header.entries.iter().enumerate() {
             if !entry.exists() {
                 continue;
@@ -286,16 +402,74 @@ impl RegionManager {
         }
         allocations.sort_unstable_by_key(|&(start, _, _)| start);
         for pair in allocations.windows(2) {
-            let [(_, previous_end, _), (next_start, _, next_index)] = pair else {
-                continue;
-            };
-            if next_start < previous_end {
+            let (_, previous_end, _) = pair[0];
+            let (current_start, _, current_index) = pair[1];
+            if current_start < previous_end {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("chunk table entry {next_index} overlaps another region allocation"),
+                    format!("chunk table entry {current_index} overlaps another region allocation"),
                 ));
             }
         }
+        Ok(())
+    }
+
+    async fn create_directories_durable(&self, directory: &Path) -> io::Result<()> {
+        let mut missing = Vec::new();
+        let mut current = directory.to_owned();
+        while !fs::try_exists(&current).await? {
+            let parent = current.parent().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("directory {} has no parent", current.display()),
+                )
+            })?;
+            let parent = if parent.as_os_str().is_empty() {
+                PathBuf::from(".")
+            } else {
+                parent.to_owned()
+            };
+            missing.push(current);
+            current = parent;
+        }
+
+        while let Some(path) = missing.pop() {
+            match fs::create_dir(&path).await {
+                Ok(()) => {
+                    let parent = path.parent().ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            format!("directory {} has no parent", path.display()),
+                        )
+                    })?;
+                    let parent = if parent.as_os_str().is_empty() {
+                        Path::new(".")
+                    } else {
+                        parent
+                    };
+                    self.sync_directory(parent).await?;
+                }
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    }
+
+    async fn sync_directory(&self, directory: &Path) -> io::Result<()> {
+        #[cfg(test)]
+        {
+            self.directory_syncs.lock().push(directory.to_owned());
+            if self.directory_sync_failure.lock().as_deref() == Some(directory) {
+                return Err(io::Error::other("injected directory sync failure"));
+            }
+        }
+        #[cfg(unix)]
+        {
+            File::open(directory).await?.sync_all().await?;
+        }
+        #[cfg(not(unix))]
+        let _ = directory;
         Ok(())
     }
 
@@ -306,7 +480,11 @@ impl RegionManager {
     /// bytes are regenerated terrain -- overwriting the first copy would trade
     /// the player's build for a hillside. The first copy wins, and later ones
     /// queue up beside it.
-    async fn free_quarantine_path(&self, region_pos: RegionPos, index: usize) -> Option<PathBuf> {
+    async fn free_quarantine_path(
+        &self,
+        region_pos: RegionPos,
+        index: usize,
+    ) -> io::Result<PathBuf> {
         let directory = self.base_path.join("corrupt");
         let stem = format!("{}.{index}", region_pos.filename());
         for attempt in 0..MAX_QUARANTINED_COPIES_PER_SLOT {
@@ -315,56 +493,67 @@ impl RegionManager {
             } else {
                 directory.join(format!("{stem}.{attempt}.chunk"))
             };
-            if !fs::try_exists(&path).await.unwrap_or(false) {
-                return Some(path);
+            if !fs::try_exists(&path).await? {
+                return Ok(path);
             }
         }
-        None
+        Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("chunk slot already has {MAX_QUARANTINED_COPIES_PER_SLOT} quarantined copies"),
+        ))
     }
 
     /// Copies a chunk's raw bytes aside so clearing its slot destroys nothing.
     ///
-    /// Best effort on purpose: if the copy cannot be written, the slot is still
-    /// cleared, because a chunk that cannot be decoded and cannot be quarantined
-    /// would otherwise fail the same way on every single load forever. What is
-    /// not acceptable is *silently* destroying it, which is what this exists to
-    /// stop.
     async fn quarantine_chunk_bytes(
         &self,
         file: &mut File,
         region_pos: RegionPos,
         index: usize,
         entry: ChunkEntry,
-    ) {
-        let Some(path) = self.free_quarantine_path(region_pos, index).await else {
-            tracing::error!(
-                region = %region_pos.filename(),
-                index,
-                "Chunk failed to decode and already has {MAX_QUARANTINED_COPIES_PER_SLOT} copies                  set aside; keeping those and clearing the slot"
-            );
-            return;
-        };
-        let outcome = async {
-            let bytes = Self::read_chunk_data(file, entry.sector_offset, entry.size_bytes).await?;
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent).await?;
-            }
-            fs::write(&path, &bytes).await?;
-            io::Result::Ok(bytes.len())
+    ) -> io::Result<()> {
+        let path = self.free_quarantine_path(region_pos, index).await?;
+        let bytes = Self::read_chunk_data(file, entry.sector_offset, entry.size_bytes).await?;
+        let parent = path.parent().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "quarantine path has no parent directory",
+            )
+        })?;
+        self.create_directories_durable(parent).await?;
+        let mut quarantine = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .await?;
+        if let Err(write_error) = quarantine.write_all(&bytes).await {
+            drop(quarantine);
+            return match fs::remove_file(&path).await {
+                Ok(()) => Err(write_error),
+                Err(cleanup_error) => Err(io::Error::new(
+                    cleanup_error.kind(),
+                    format!(
+                        "failed to write quarantine copy ({write_error}); failed to clean up {} ({cleanup_error})",
+                        path.display()
+                    ),
+                )),
+            };
         }
-        .await;
+        quarantine.flush().await?;
+        quarantine.sync_all().await?;
+        drop(quarantine);
+        self.sync_directory(parent).await?;
+        tracing::warn!(
+            path = %path.display(),
+            bytes = bytes.len(),
+            "Chunk failed to decode; its bytes were copied aside before the slot was cleared"
+        );
+        Ok(())
+    }
 
-        match outcome {
-            Ok(len) => tracing::warn!(
-                path = %path.display(),
-                bytes = len,
-                "Chunk failed to decode; its bytes were copied aside before the slot was cleared"
-            ),
-            Err(error) => tracing::error!(
-                path = %path.display(),
-                "Chunk failed to decode and could not be copied aside ({error}); clearing the slot anyway"
-            ),
-        }
+    fn set_pending_header_entry(handle: &mut RegionHandle, index: usize, entry: ChunkEntry) {
+        handle.header.entries[index] = entry;
+        handle.header_dirty = true;
     }
 
     async fn clear_corrupt_chunk_if_unchanged(
@@ -387,13 +576,10 @@ impl RegionManager {
         // server stays usable -- but the bytes it replaces are the only copy of
         // whatever a player built there. Keep them.
         self.quarantine_chunk_bytes(&mut handle.file, region_pos, index, expected_entry)
-            .await;
+            .await?;
 
-        handle.header.entries[index] = ChunkEntry::empty();
-        if let Err(error) = Self::write_header(&mut handle.file, &handle.header).await {
-            handle.header.entries[index] = expected_entry;
-            return Err(error);
-        }
+        Self::set_pending_header_entry(handle, index, ChunkEntry::empty());
+        self.write_header(&mut handle.file, &handle.header).await?;
         handle.header_dirty = false;
         Ok(true)
     }
@@ -405,6 +591,18 @@ impl RegionManager {
         data: &[u8],
         file_sectors: &mut u32,
     ) -> io::Result<()> {
+        let sectors_used = u32::try_from(data.len().div_ceil(SECTOR_SIZE)).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "chunk data sector count exceeds the region format",
+            )
+        })?;
+        let end_sector = sector_offset.checked_add(sectors_used).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "chunk data sector range exceeds the region format",
+            )
+        })?;
         let byte_offset = u64::from(sector_offset) * SECTOR_SIZE as u64;
         file.seek(io::SeekFrom::Start(byte_offset)).await?;
         file.write_all(data).await?;
@@ -416,8 +614,6 @@ impl RegionManager {
         }
 
         // Update file sectors if we wrote past the end
-        let sectors_used = data.len().div_ceil(SECTOR_SIZE) as u32;
-        let end_sector = sector_offset + sectors_used;
         if end_sector > *file_sectors {
             *file_sectors = end_sector;
         }
@@ -525,17 +721,21 @@ impl RegionManager {
             return Err(error);
         }
 
-        // Update header entry
-        handle.header.entries[index] =
-            super::format::ChunkEntry::new(sector_offset, compressed.len() as u32, status);
+        // Mark the commit pending before any header I/O can yield. If this task
+        // is cancelled or the write fails, the cached handle stays dirty so a
+        // later flush or shutdown retries it.
+        Self::set_pending_header_entry(
+            handle,
+            index,
+            super::format::ChunkEntry::new(sector_offset, compressed.len() as u32, status),
+        );
 
         // If we opened this region and no chunks are loaded from it,
         // write the header and close it immediately
         if we_opened_region && handle.loaded_chunk_count == 0 {
-            Self::write_header(&mut handle.file, &handle.header).await?;
+            self.write_header(&mut handle.file, &handle.header).await?;
+            handle.header_dirty = false;
             regions.remove(&region_pos);
-        } else {
-            handle.header_dirty = true;
         }
 
         Ok(true)
@@ -756,7 +956,7 @@ impl RegionManager {
             // them, so the next load reports the chunks as absent and the terrain
             // silently regenerates over whatever the player built. Put the handle
             // back instead.
-            if let Err(error) = Self::write_header(&mut handle.file, &handle.header).await {
+            if let Err(error) = self.write_header(&mut handle.file, &handle.header).await {
                 regions.insert(region_pos, handle);
                 return Err(error);
             }
@@ -813,7 +1013,7 @@ impl RegionManager {
 
         for handle in regions.values_mut() {
             if handle.header_dirty {
-                Self::write_header(&mut handle.file, &handle.header).await?;
+                self.write_header(&mut handle.file, &handle.header).await?;
                 handle.header_dirty = false;
             }
         }
@@ -828,17 +1028,20 @@ impl RegionManager {
     pub async fn close_all(&self) -> io::Result<()> {
         let mut regions = self.regions.write().await;
 
-        // One failing region must not cost the others their commit: `drain`
-        // has already taken every handle, so returning early here would drop
-        // the rest unwritten. Write them all, then report the first failure.
+        // Write every region even after an earlier failure, while retaining
+        // failed dirty handles so a later shutdown attempt can retry them.
         let mut first_error = None;
-        for (_, mut handle) in regions.drain() {
-            if handle.header_dirty
-                && let Err(error) = Self::write_header(&mut handle.file, &handle.header).await
-            {
-                first_error.get_or_insert(error);
+        for (region_pos, mut handle) in mem::take(&mut *regions) {
+            if handle.header_dirty {
+                match self.write_header(&mut handle.file, &handle.header).await {
+                    Ok(()) => {}
+                    Err(error) => {
+                        first_error.get_or_insert(error);
+                        regions.insert(region_pos, handle);
+                    }
+                }
             }
-            // File handle is dropped here, closing the file
+            // Successful and already-clean handles are dropped here.
         }
 
         first_error.map_or(Ok(()), Err)
@@ -849,14 +1052,16 @@ impl RegionManager {
 mod tests {
     use std::{
         env,
+        io::Write as _,
         path::Path,
-        process,
+        process, slice,
         sync::{
-            Weak,
+            Arc, Weak,
             atomic::{AtomicU64, Ordering},
         },
     };
 
+    use super::super::format::CHUNKS_PER_REGION;
     use super::*;
     use crate::chunk_saver::{PersistentChunk, PersistentLightData};
 
@@ -942,6 +1147,583 @@ mod tests {
         assert!(ChunkEntry::from_bytes(bytes).is_some_and(|entry| entry.exists()));
     }
 
+    async fn assert_slot_is_empty_on_disk(directory: &Path, pos: ChunkPos) {
+        let region_pos = RegionPos::from_chunk(pos.0.x, pos.0.y);
+        let path = directory.join(region_pos.filename());
+        let mut file = File::open(path)
+            .await
+            .expect("test region should remain readable");
+        let (local_x, local_z) = RegionPos::local_chunk_pos(pos.0.x, pos.0.y);
+        let index = RegionHeader::chunk_index(local_x, local_z);
+        file.seek(io::SeekFrom::Start(
+            FILE_HEADER_SIZE as u64 + (index * 8) as u64,
+        ))
+        .await
+        .expect("chunk table entry should be seekable");
+        let mut bytes = [0; 8];
+        file.read_exact(&mut bytes)
+            .await
+            .expect("chunk table entry should be readable");
+        assert!(ChunkEntry::from_bytes(bytes).is_some_and(|entry| !entry.exists()));
+    }
+
+    #[tokio::test]
+    async fn a_pending_header_commit_survives_cancellation_before_write() {
+        let directory = test_directory("pending-header");
+        let pos = ChunkPos::new(0, 0);
+        let region_pos = RegionPos::from_chunk(pos.0.x, pos.0.y);
+        let manager = RegionManager::new(&directory);
+        let mut handle = manager
+            .create_region(region_pos)
+            .await
+            .expect("test region should be created");
+        handle
+            .file
+            .set_len(u64::from(FIRST_DATA_SECTOR + 1) * SECTOR_SIZE as u64)
+            .await
+            .expect("test region should contain the pending sector");
+        handle.file_sectors = FIRST_DATA_SECTOR + 1;
+        manager.regions.write().await.insert(region_pos, handle);
+
+        let entry = ChunkEntry::new(FIRST_DATA_SECTOR, 1, ChunkStatus::Empty);
+        {
+            let mut regions = manager.regions.write().await;
+            let handle = regions
+                .get_mut(&region_pos)
+                .expect("test region should remain cached");
+            RegionManager::set_pending_header_entry(handle, 0, entry);
+        }
+
+        manager
+            .flush_all()
+            .await
+            .expect("a later flush should commit the pending header");
+        drop(manager);
+
+        let reopened = RegionManager::new(&directory);
+        assert!(
+            reopened
+                .acquire_chunk(pos)
+                .await
+                .expect("the committed header should reopen")
+        );
+        reopened
+            .release_chunk(pos)
+            .await
+            .expect("reopened region should release");
+        fs::remove_dir_all(directory)
+            .await
+            .expect("test directory should be removable");
+    }
+
+    #[tokio::test]
+    async fn close_all_keeps_a_dirty_handle_when_its_header_write_fails() {
+        let directory = test_directory("close-header-retry");
+        let pos = ChunkPos::new(0, 0);
+        let region_pos = RegionPos::from_chunk(pos.0.x, pos.0.y);
+        let manager = RegionManager::new(&directory);
+        let mut handle = manager
+            .create_region(region_pos)
+            .await
+            .expect("test region should be created");
+        handle
+            .file
+            .set_len(u64::from(FIRST_DATA_SECTOR + 1) * SECTOR_SIZE as u64)
+            .await
+            .expect("test region should contain the pending sector");
+        handle.file_sectors = FIRST_DATA_SECTOR + 1;
+        RegionManager::set_pending_header_entry(
+            &mut handle,
+            0,
+            ChunkEntry::new(FIRST_DATA_SECTOR, 1, ChunkStatus::Empty),
+        );
+        manager.regions.write().await.insert(region_pos, handle);
+        manager.header_write_failures.store(1, Ordering::Release);
+
+        let error = manager
+            .close_all()
+            .await
+            .expect_err("the injected header failure should be reported");
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        {
+            let regions = manager.regions.read().await;
+            let retained = regions
+                .get(&region_pos)
+                .expect("the failed dirty handle must remain retryable");
+            assert!(retained.header_dirty);
+        }
+
+        manager
+            .close_all()
+            .await
+            .expect("a later close should retry and commit the header");
+        assert!(manager.regions.read().await.is_empty());
+        let reopened = RegionManager::new(&directory);
+        assert!(
+            reopened
+                .chunk_exists(pos)
+                .await
+                .expect("the retried header should be readable")
+        );
+
+        fs::remove_dir_all(directory)
+            .await
+            .expect("test directory should be removable");
+    }
+
+    #[tokio::test]
+    async fn failed_corrupt_slot_header_write_remains_dirty_and_retryable() {
+        let directory = test_directory("corrupt-header-retry");
+        let pos = ChunkPos::new(0, 0);
+        let payload = b"this is not a zstd frame";
+        write_test_region(&directory, pos, payload, payload.len() as u32)
+            .await
+            .expect("test region should be written");
+        let manager = RegionManager::new(&directory);
+        manager.header_write_failures.store(1, Ordering::Release);
+        assert!(
+            manager
+                .acquire_chunk(pos)
+                .await
+                .expect("region should open")
+        );
+
+        let Err(error) = manager
+            .load_chunk(pos, 0, 16, Weak::new(), &test_thread_pool())
+            .await
+        else {
+            panic!("the injected header failure should be reported");
+        };
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert!(
+            !manager
+                .chunk_exists(pos)
+                .await
+                .expect("the pending clear should remain visible in memory")
+        );
+        manager
+            .flush_all()
+            .await
+            .expect("a later flush should retry the pending clear");
+        manager
+            .release_chunk(pos)
+            .await
+            .expect("region should release");
+        assert_slot_is_empty_on_disk(&directory, pos).await;
+
+        fs::remove_dir_all(directory)
+            .await
+            .expect("test directory should be removable");
+    }
+
+    #[tokio::test]
+    async fn cancelled_corrupt_slot_header_write_remains_dirty_and_retryable() {
+        let directory = test_directory("corrupt-header-cancellation");
+        let pos = ChunkPos::new(0, 0);
+        let payload = b"this is not a zstd frame";
+        write_test_region(&directory, pos, payload, payload.len() as u32)
+            .await
+            .expect("test region should be written");
+        let manager = Arc::new(RegionManager::new(&directory));
+        assert!(
+            manager
+                .acquire_chunk(pos)
+                .await
+                .expect("region should open")
+        );
+        manager.pause_header_writes.store(true, Ordering::Release);
+        let write_started = manager.header_write_started.notified();
+        let task_manager = Arc::clone(&manager);
+        let thread_pool = Arc::new(test_thread_pool());
+        let task_pool = Arc::clone(&thread_pool);
+        let load = tokio::spawn(async move {
+            task_manager
+                .load_chunk(pos, 0, 16, Weak::new(), &task_pool)
+                .await
+        });
+        write_started.await;
+
+        load.abort();
+        let Err(error) = load.await else {
+            panic!("the paused load should be cancelled");
+        };
+        assert!(error.is_cancelled());
+        manager.pause_header_writes.store(false, Ordering::Release);
+        assert!(
+            !manager
+                .chunk_exists(pos)
+                .await
+                .expect("the cancelled clear should remain visible in memory")
+        );
+        manager
+            .flush_all()
+            .await
+            .expect("a later flush should commit the cancelled clear");
+        manager
+            .release_chunk(pos)
+            .await
+            .expect("region should release");
+        assert_slot_is_empty_on_disk(&directory, pos).await;
+
+        fs::remove_dir_all(directory)
+            .await
+            .expect("test directory should be removable");
+    }
+
+    #[test]
+    fn maximum_sparse_region_entries_are_checked_by_interval() {
+        let mut header = RegionHeader::new();
+        header.entries[0] = ChunkEntry::new(u32::MAX - 2, 1, ChunkStatus::Empty);
+        header.entries[1] = ChunkEntry::new(u32::MAX - 2, 1, ChunkStatus::Empty);
+
+        let error = RegionManager::validate_region_entries(&header, u32::MAX)
+            .expect_err("overlapping intervals must be rejected");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("overlaps"));
+    }
+
+    #[tokio::test]
+    async fn oversized_sparse_region_is_rejected_before_sector_tracking() {
+        let directory = test_directory("oversized-sparse");
+        let pos = ChunkPos::new(0, 0);
+        let manager = RegionManager::new(&directory);
+        manager
+            .create_region(RegionPos::from_chunk(pos.0.x, pos.0.y))
+            .await
+            .expect("test region should be created");
+
+        let path = directory.join(RegionPos::from_chunk(0, 0).filename());
+        let file = OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .await
+            .expect("test region should reopen");
+        file.set_len(MAX_REGION_FILE_SIZE + 1)
+            .await
+            .expect("sparse file should extend without allocating its contents");
+
+        let Err(error) = manager.acquire_chunk(pos).await else {
+            panic!("a region larger than the format capacity must be rejected");
+        };
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+
+        fs::remove_dir_all(directory)
+            .await
+            .expect("test directory should be removable");
+    }
+
+    #[tokio::test]
+    async fn chunk_write_rejects_sector_overflow_before_extending_a_sparse_file() {
+        let directory = test_directory("write-sector-overflow");
+        fs::create_dir_all(&directory)
+            .await
+            .expect("test directory should be created");
+        let path = directory.join("overflow.srg");
+        let mut file = File::create(&path)
+            .await
+            .expect("test file should be created");
+        let mut file_sectors = FIRST_DATA_SECTOR;
+
+        let error = RegionManager::write_chunk_data(&mut file, u32::MAX, &[1], &mut file_sectors)
+            .await
+            .expect_err("a sector range outside the format must be rejected");
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(file_sectors, FIRST_DATA_SECTOR);
+        assert_eq!(
+            file.metadata()
+                .await
+                .expect("test file metadata should be readable")
+                .len(),
+            0,
+            "validation must happen before seek or write"
+        );
+        fs::remove_dir_all(directory)
+            .await
+            .expect("test directory should be removable");
+    }
+
+    #[tokio::test]
+    async fn new_region_reports_a_failed_directory_commit_and_can_be_reopened() {
+        let directory = test_directory("new-region-directory-sync");
+        fs::create_dir_all(&directory)
+            .await
+            .expect("test directory should be created");
+        let pos = ChunkPos::new(0, 0);
+        let manager = RegionManager::new(&directory);
+        manager
+            .directory_sync_failure
+            .lock()
+            .replace(directory.clone());
+
+        let error = manager
+            .acquire_chunk(pos)
+            .await
+            .expect_err("a failed namespace commit must fail region creation");
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert!(
+            fs::try_exists(manager.region_path(RegionPos::from_chunk(0, 0)))
+                .await
+                .expect("the fully written file path should be checkable")
+        );
+
+        manager.directory_sync_failure.lock().take();
+        assert!(
+            !manager
+                .acquire_chunk(pos)
+                .await
+                .expect("the durable file contents should reopen on retry")
+        );
+        manager
+            .release_chunk(pos)
+            .await
+            .expect("region should release");
+        fs::remove_dir_all(directory)
+            .await
+            .expect("test directory should be removable");
+    }
+
+    #[tokio::test]
+    async fn creating_a_missing_region_directory_commits_each_namespace_level() {
+        let root = test_directory("new-region-directory-create");
+        fs::create_dir_all(&root)
+            .await
+            .expect("test root should be created");
+        let directory = root.join("regions");
+        let pos = ChunkPos::new(0, 0);
+        let manager = RegionManager::new(&directory);
+
+        assert!(
+            !manager
+                .acquire_chunk(pos)
+                .await
+                .expect("new region should be created")
+        );
+        assert_eq!(
+            *manager.directory_syncs.lock(),
+            [root.clone(), directory.clone()]
+        );
+        manager
+            .release_chunk(pos)
+            .await
+            .expect("region should release");
+        fs::remove_dir_all(root)
+            .await
+            .expect("test directory should be removable");
+    }
+
+    #[tokio::test]
+    async fn valid_append_history_beyond_live_table_size_still_opens() {
+        let directory = test_directory("append-history");
+        let pos = ChunkPos::new(0, 0);
+        let manager = RegionManager::new(&directory);
+        manager
+            .create_region(RegionPos::from_chunk(pos.0.x, pos.0.y))
+            .await
+            .expect("test region should be created");
+
+        let live_table_bound = ((FILE_HEADER_SIZE + CHUNK_TABLE_SIZE).div_ceil(SECTOR_SIZE)
+            + CHUNKS_PER_REGION * MAX_CHUNK_SIZE.div_ceil(SECTOR_SIZE))
+            as u64
+            * SECTOR_SIZE as u64;
+        let path = directory.join(RegionPos::from_chunk(0, 0).filename());
+        let file = OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .await
+            .expect("test region should reopen");
+        file.set_len(live_table_bound + 1)
+            .await
+            .expect("append history should extend without allocating its contents");
+
+        assert!(
+            !manager
+                .acquire_chunk(pos)
+                .await
+                .expect("valid append history should still open")
+        );
+        manager
+            .release_chunk(pos)
+            .await
+            .expect("region should release");
+        fs::remove_dir_all(directory)
+            .await
+            .expect("test directory should be removable");
+    }
+
+    #[tokio::test]
+    async fn version_backup_collision_preserves_both_region_files() {
+        let directory = test_directory("version-backup-collision");
+        fs::create_dir_all(&directory)
+            .await
+            .expect("test directory should be created");
+        let pos = ChunkPos::new(0, 0);
+        let region_pos = RegionPos::from_chunk(pos.0.x, pos.0.y);
+        let region_path = directory.join(region_pos.filename());
+        let old_version = FORMAT_VERSION - 1;
+        let mut old_region = vec![0u8; FILE_HEADER_SIZE];
+        old_region[0..4].copy_from_slice(&REGION_MAGIC);
+        old_region[4..6].copy_from_slice(&old_version.to_le_bytes());
+        fs::write(&region_path, &old_region)
+            .await
+            .expect("old region should be written");
+        let first_backup = region_path.with_extension(format!("srg.v{old_version}.bak"));
+        fs::write(&first_backup, b"first backup")
+            .await
+            .expect("existing backup should be written");
+
+        let manager = RegionManager::new(&directory);
+        assert!(
+            !manager
+                .acquire_chunk(pos)
+                .await
+                .expect("old region should be backed up and recreated")
+        );
+        assert_eq!(
+            fs::read(&first_backup)
+                .await
+                .expect("first backup should remain readable"),
+            b"first backup"
+        );
+        let second_backup = region_path.with_extension(format!("srg.v{old_version}.bak.1"));
+        assert_eq!(
+            fs::read(second_backup)
+                .await
+                .expect("old region should use the next free backup name"),
+            old_region
+        );
+        assert_eq!(
+            *manager.directory_syncs.lock(),
+            [directory.clone(), directory.clone(), directory.clone()],
+            "the hard link, original removal, and replacement creation each mutate the directory"
+        );
+
+        manager
+            .release_chunk(pos)
+            .await
+            .expect("region should release");
+        fs::remove_dir_all(directory)
+            .await
+            .expect("test directory should be removable");
+    }
+
+    #[tokio::test]
+    async fn incompatible_backup_is_synced_before_the_original_is_removed() {
+        let directory = test_directory("backup-link-directory-sync");
+        fs::create_dir_all(&directory)
+            .await
+            .expect("test directory should be created");
+        let pos = ChunkPos::new(0, 0);
+        let region_pos = RegionPos::from_chunk(pos.0.x, pos.0.y);
+        let region_path = directory.join(region_pos.filename());
+        let old_version = FORMAT_VERSION - 1;
+        let mut old_region = vec![0u8; FILE_HEADER_SIZE];
+        old_region[0..4].copy_from_slice(&REGION_MAGIC);
+        old_region[4..6].copy_from_slice(&old_version.to_le_bytes());
+        fs::write(&region_path, &old_region)
+            .await
+            .expect("old region should be written");
+        let manager = RegionManager::new(&directory);
+        manager
+            .directory_sync_failure
+            .lock()
+            .replace(directory.clone());
+
+        let error = manager
+            .acquire_chunk(pos)
+            .await
+            .expect_err("a failed backup-link commit should stop replacement");
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert!(
+            fs::try_exists(&region_path)
+                .await
+                .expect("source path should be checked")
+        );
+        let backup = region_path.with_extension(format!("srg.v{old_version}.bak"));
+        assert!(
+            fs::try_exists(backup)
+                .await
+                .expect("backup path should be checked")
+        );
+
+        fs::remove_dir_all(directory)
+            .await
+            .expect("test directory should be removable");
+    }
+
+    #[tokio::test]
+    async fn oversized_incompatible_version_is_backed_up_before_size_rejection() {
+        let directory = test_directory("oversized-version-backup");
+        fs::create_dir_all(&directory)
+            .await
+            .expect("test directory should be created");
+        let pos = ChunkPos::new(0, 0);
+        let region_pos = RegionPos::from_chunk(pos.0.x, pos.0.y);
+        let region_path = directory.join(region_pos.filename());
+        let old_version = FORMAT_VERSION - 1;
+        let mut old_header = [0u8; FILE_HEADER_SIZE];
+        old_header[0..4].copy_from_slice(&REGION_MAGIC);
+        old_header[4..6].copy_from_slice(&old_version.to_le_bytes());
+        fs::write(&region_path, old_header)
+            .await
+            .expect("old region should be written");
+        let first_backup = region_path.with_extension(format!("srg.v{old_version}.bak"));
+        fs::write(&first_backup, b"first backup")
+            .await
+            .expect("existing backup should be written");
+        let file = OpenOptions::new()
+            .write(true)
+            .open(&region_path)
+            .await
+            .expect("old region should reopen");
+        file.set_len(MAX_REGION_FILE_SIZE + 1)
+            .await
+            .expect("sparse old region should extend without allocating its contents");
+
+        let manager = RegionManager::new(&directory);
+        assert!(
+            !manager
+                .acquire_chunk(pos)
+                .await
+                .expect("oversized old region should be backed up and recreated")
+        );
+        assert_eq!(
+            fs::read(&first_backup)
+                .await
+                .expect("first backup should remain readable"),
+            b"first backup"
+        );
+        let second_backup = region_path.with_extension(format!("srg.v{old_version}.bak.1"));
+        assert_eq!(
+            fs::metadata(&second_backup)
+                .await
+                .expect("oversized old region should be preserved")
+                .len(),
+            MAX_REGION_FILE_SIZE + 1
+        );
+        let mut backup = File::open(&second_backup)
+            .await
+            .expect("oversized backup should remain readable");
+        let mut backed_up_header = [0u8; FILE_HEADER_SIZE];
+        backup
+            .read_exact(&mut backed_up_header)
+            .await
+            .expect("backup header should remain readable");
+        assert_eq!(&backed_up_header[0..4], &REGION_MAGIC);
+        assert_eq!(
+            u16::from_le_bytes([backed_up_header[4], backed_up_header[5]]),
+            old_version
+        );
+
+        manager
+            .release_chunk(pos)
+            .await
+            .expect("new region should release");
+        fs::remove_dir_all(directory)
+            .await
+            .expect("test directory should be removable");
+    }
+
     /// A decompression bomb is refused instead of being expanded into memory.
     ///
     /// A zstd frame says nothing useful about how far it expands, so an
@@ -949,9 +1731,18 @@ mod tests {
     /// map, a restored backup -- into as much memory as the attacker likes.
     #[test]
     fn a_decompression_bomb_is_refused_rather_than_expanded() {
-        // A gigabyte of zeroes compresses to a few kilobytes.
-        let bomb = zstd::encode_all(vec![0u8; 1024 * 1024 * 1024].as_slice(), 3)
-            .expect("the bomb should compress");
+        let mut bomb = Vec::new();
+        {
+            let block = vec![0u8; 1024 * 1024];
+            let mut encoder = zstd::stream::Encoder::new(&mut bomb, 3)
+                .expect("the bomb encoder should initialize");
+            for _ in 0..=(MAX_DECOMPRESSED_CHUNK_BYTES / block.len()) {
+                encoder
+                    .write_all(&block)
+                    .expect("the bomb should compress progressively");
+            }
+            encoder.finish().expect("the bomb should finish");
+        }
         assert!(
             bomb.len() < 1024 * 1024,
             "the point of the test is that a small payload expands hugely, but              this one is {} bytes",
@@ -960,7 +1751,7 @@ mod tests {
 
         assert!(
             decompress(&bomb, MAX_DECOMPRESSED_CHUNK_BYTES).is_err(),
-            "a gigabyte is past the per-chunk ceiling and must be refused"
+            "a payload over the per-chunk ceiling must be refused"
         );
 
         // A payload of a realistic size still round-trips.
@@ -1276,6 +2067,158 @@ mod tests {
             .release_chunk(pos)
             .await
             .expect("region should release");
+        fs::remove_dir_all(directory)
+            .await
+            .expect("test directory should be removable");
+    }
+
+    #[tokio::test]
+    async fn failed_quarantine_write_keeps_the_original_slot() {
+        let directory = test_directory("quarantine-write-failure");
+        let pos = ChunkPos::new(0, 0);
+        let payload = b"payload must not be decoded";
+        write_test_region(&directory, pos, payload, payload.len() as u32)
+            .await
+            .expect("test region should be written");
+        fs::write(directory.join("corrupt"), b"not a directory")
+            .await
+            .expect("quarantine blocker should be written");
+
+        let manager = RegionManager::new(&directory);
+        assert!(
+            manager
+                .acquire_chunk(pos)
+                .await
+                .expect("region should open")
+        );
+        let Err(error) = manager
+            .load_chunk(pos, 0, 16, Weak::new(), &test_thread_pool())
+            .await
+        else {
+            panic!("failed quarantine must abort corrupt-slot removal");
+        };
+        assert_ne!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(manager.chunk_exists(pos).await.expect("slot should remain"));
+        manager
+            .release_chunk(pos)
+            .await
+            .expect("region should release");
+        assert_slot_exists_on_disk(&directory, pos).await;
+
+        fs::remove_dir_all(directory)
+            .await
+            .expect("test directory should be removable");
+    }
+
+    #[tokio::test]
+    async fn failed_new_quarantine_parent_sync_keeps_the_original_slot() {
+        let directory = test_directory("quarantine-parent-sync-failure");
+        let pos = ChunkPos::new(0, 0);
+        let payload = b"payload must not be decoded";
+        write_test_region(&directory, pos, payload, payload.len() as u32)
+            .await
+            .expect("test region should be written");
+
+        let manager = RegionManager::new(&directory);
+        manager
+            .directory_sync_failure
+            .lock()
+            .replace(directory.clone());
+        assert!(
+            manager
+                .acquire_chunk(pos)
+                .await
+                .expect("region should open")
+        );
+        let Err(error) = manager
+            .load_chunk(pos, 0, 16, Weak::new(), &test_thread_pool())
+            .await
+        else {
+            panic!("a failed quarantine-directory commit must abort slot removal");
+        };
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert!(manager.chunk_exists(pos).await.expect("slot should remain"));
+        assert_eq!(
+            *manager.directory_syncs.lock(),
+            slice::from_ref(&directory),
+            "the new quarantine directory must be committed before a file is published inside it"
+        );
+
+        manager
+            .release_chunk(pos)
+            .await
+            .expect("region should release");
+        assert_slot_exists_on_disk(&directory, pos).await;
+        fs::remove_dir_all(directory)
+            .await
+            .expect("test directory should be removable");
+    }
+
+    #[tokio::test]
+    async fn exhausted_quarantine_names_keep_existing_backups_and_the_slot() {
+        let directory = test_directory("quarantine-collisions");
+        let pos = ChunkPos::new(0, 0);
+        let payload = b"payload must not be decoded";
+        write_test_region(&directory, pos, payload, payload.len() as u32)
+            .await
+            .expect("test region should be written");
+
+        let region_pos = RegionPos::from_chunk(pos.0.x, pos.0.y);
+        let (local_x, local_z) = RegionPos::local_chunk_pos(pos.0.x, pos.0.y);
+        let index = RegionHeader::chunk_index(local_x, local_z);
+        let corrupt = directory.join("corrupt");
+        fs::create_dir_all(&corrupt)
+            .await
+            .expect("quarantine directory should be created");
+        for attempt in 0..MAX_QUARANTINED_COPIES_PER_SLOT {
+            let suffix = if attempt == 0 {
+                String::new()
+            } else {
+                format!(".{attempt}")
+            };
+            fs::write(
+                corrupt.join(format!("{}.{index}{suffix}.chunk", region_pos.filename())),
+                format!("existing-{attempt}"),
+            )
+            .await
+            .expect("existing quarantine copy should be written");
+        }
+
+        let manager = RegionManager::new(&directory);
+        assert!(
+            manager
+                .acquire_chunk(pos)
+                .await
+                .expect("region should open")
+        );
+        assert!(
+            manager
+                .load_chunk(pos, 0, 16, Weak::new(), &test_thread_pool())
+                .await
+                .is_err(),
+            "an exhausted collision-safe namespace must not clear the slot"
+        );
+        assert!(manager.chunk_exists(pos).await.expect("slot should remain"));
+        for attempt in 0..MAX_QUARANTINED_COPIES_PER_SLOT {
+            let suffix = if attempt == 0 {
+                String::new()
+            } else {
+                format!(".{attempt}")
+            };
+            let path = corrupt.join(format!("{}.{index}{suffix}.chunk", region_pos.filename()));
+            assert_eq!(
+                fs::read_to_string(path)
+                    .await
+                    .expect("existing quarantine copy should remain readable"),
+                format!("existing-{attempt}")
+            );
+        }
+        manager
+            .release_chunk(pos)
+            .await
+            .expect("region should release");
+        assert_slot_exists_on_disk(&directory, pos).await;
+
         fs::remove_dir_all(directory)
             .await
             .expect("test directory should be removable");

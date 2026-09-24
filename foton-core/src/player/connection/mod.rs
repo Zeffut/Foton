@@ -9,7 +9,7 @@ mod java;
 
 pub use java::{
     BundleBuilder, JavaConnection, JavaNetworkWriter, OutboundPacket, OutboundPacketReceiver,
-    OutboundPacketSender, outbound_packet_channel,
+    OutboundPacketSender, outbound_packet_channel, write_final_disconnect,
 };
 pub(crate) use java::{ScheduledPacketExecution, ScheduledPlayPacket};
 
@@ -121,6 +121,10 @@ pub trait NetworkConnection: Send + Sync {
 /// The `Java` variant handles real Java connections while `Other` supports tests
 /// and alternative backends.
 #[enum_dispatch(NetworkConnection)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "one per player and always behind an Arc, so the size gap costs nothing; boxing Java would add an indirection to every packet sent"
+)]
 pub enum PlayerConnection {
     /// A real Java client connection.
     Java(JavaConnection),

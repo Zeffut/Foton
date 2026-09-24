@@ -65,6 +65,7 @@ mod tests {
             online_mode: true,
             whitelist_enabled: false,
             auth_server: None,
+            allow_insecure_auth_server: false,
             profile_server: None,
             services_server: None,
             encryption: true,

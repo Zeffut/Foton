@@ -34,7 +34,7 @@ use tokio::{
 };
 use uuid::Uuid;
 
-use crate::behavior::init_behaviors;
+use crate::behavior::{blocks::PistonBaseBlock, init_behaviors};
 use crate::chunk_saver::registry::WorldStorageRegistry;
 use crate::command::execution::{
     CommandArgumentSource, CommandExecutionContext, CommandPermissionSource, CommandResultCallback,
@@ -69,7 +69,7 @@ use super::player_admission::{PendingPlayerJoin, PlayerAdmissionState, PlayerLog
 use super::{
     AsyncMutex, CancellationToken, ChunkSender, CommandRegistry, CommandRequest,
     CommandRequestQueue, DomainCommandStorage, DomainMapData, DomainPlayerData, DomainPlayerState,
-    DomainScoreboards, EnderPearlRestoreJob, FxHashMap, KeyStore, KnownPlayerCacheState,
+    DomainScoreboards, EnderPearlRestoreJob, FxHashMap, FxHashSet, KeyStore, KnownPlayerCacheState,
     KnownPlayers, Notify, PacketProcessor, PersistentEnderPearl, PersistentEntity,
     PersistentPlayerData, PersistentRootVehicle, PlayerDataStorage, PlayerDisconnectQueue,
     PlayerJoinQueue, PlayerMap, PlayerPermissionUpdateError, PreparedSpawn, RegistryCache,
@@ -81,13 +81,13 @@ use super::{
 };
 use crate::boss_event::custom::DomainCustomBossEvents;
 use crate::event::{
-    BlockBreakEvent, EventBus, PlayerChatEvent, PlayerJoinEvent, PlayerLoginAbortEvent,
+    BlockBreakEvent, EventBus, PistonEvent, PlayerChatEvent, PlayerJoinEvent, PlayerLoginAbortEvent,
 };
 use crate::player::game_mode::block_breaking::BlockBreakAction;
 use crate::test_support::init_test_logger;
 use foton_protocol::packets::game::SChat;
 use foton_registry::blocks::block_state_ext::BlockStateExt as _;
-use foton_registry::blocks::properties::Direction;
+use foton_registry::blocks::properties::{BlockStateProperties, Direction};
 use foton_utils::Identifier;
 use foton_utils::types::GameType;
 use tokio::sync::oneshot::channel;
@@ -206,6 +206,7 @@ fn test_runtime_config() -> Arc<RuntimeConfig> {
         online_mode: false,
         whitelist_enabled: false,
         auth_server: None,
+        allow_insecure_auth_server: false,
         profile_server: None,
         services_server: None,
         encryption: false,
@@ -252,6 +253,15 @@ async fn test_server(
     .await
 }
 
+fn single_thread_pool() -> Arc<rayon::ThreadPool> {
+    Arc::new(
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .build()
+            .expect("test thread pool should initialize"),
+    )
+}
+
 async fn test_server_with_worlds(
     default_domain: String,
     domains: &[ResolvedDomainConfig],
@@ -259,9 +269,6 @@ async fn test_server_with_worlds(
     player_permission_states: PermissionSubjectIndex,
     storage_root: &Path,
 ) -> Result<Arc<Server>, String> {
-    // Server fixtures exercise block behavior through the same global registry
-    // as production. Initialize it here so test outcomes do not depend on
-    // another test having run first.
     init_behaviors();
     let worlds = WorldMap::new(default_domain, domains, &[]);
     for world in loaded_worlds {
@@ -304,6 +311,8 @@ async fn test_server_with_worlds(
                 .chunk_map
                 .chunk_runtime,
         ),
+        world_tasks: super::WorldTaskTrackers::new(),
+        world_key_reservations: Arc::new(SyncMutex::new(FxHashSet::default())),
         world_save_path: storage_root.to_path_buf(),
         config,
         permission_groups,
@@ -328,18 +337,8 @@ async fn test_server_with_worlds(
             .expect("test generator registry should initialize"),
         world_storage_registry: WorldStorageRegistry::new_with_builtins()
             .expect("test storage registry should initialize"),
-        generation_pool: Arc::new(
-            rayon::ThreadPoolBuilder::new()
-                .num_threads(1)
-                .build()
-                .expect("test generation pool should initialize"),
-        ),
-        chunk_encoding_pool: Arc::new(
-            rayon::ThreadPoolBuilder::new()
-                .num_threads(1)
-                .build()
-                .expect("test chunk encoding pool should initialize"),
-        ),
+        generation_pool: single_thread_pool(),
+        chunk_encoding_pool: single_thread_pool(),
         jobs: ServerJobQueue::new(),
         player_data_storage,
         player_permission_states: SyncRwLock::new(player_permission_states),
@@ -358,9 +357,239 @@ async fn test_server_with_worlds(
         pending_world_changes: SyncMutex::new(Vec::new()),
         pending_world_removals: SyncMutex::new(Vec::new()),
         pending_world_additions: SyncMutex::new(Vec::new()),
+        world_creation_closed: AtomicBool::new(false),
         events: EventBus::new(),
         pending_domain_switches: SyncMutex::new(Vec::new()),
     }))
+}
+
+#[test]
+fn invalid_piston_event_output_leaves_world_unchanged() {
+    let world = fresh_test_world("piston_invalid_event_output");
+    let runtime = Builder::new_current_thread().enable_all().build();
+    let Ok(runtime) = runtime else {
+        panic!("test runtime should initialize");
+    };
+    runtime.block_on(async {
+        let storage_root = test_storage_root("piston-invalid-event-output");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await;
+        let Ok(server) = server else {
+            panic!("test server should initialize");
+        };
+        server.attach_worlds();
+
+        let piston_pos = BlockPos::new(8, 64, 8);
+        let moved_pos = piston_pos.east();
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(piston_pos));
+        let piston_state = vanilla_blocks::PISTON
+            .default_state()
+            .set_value(&BlockStateProperties::FACING, Direction::East)
+            .set_value(&BlockStateProperties::EXTENDED, false);
+        let moved_state = vanilla_blocks::STONE.default_state();
+        assert!(world.set_block(piston_pos, piston_state, UpdateFlags::UPDATE_NONE));
+        assert!(world.set_block(moved_pos, moved_state, UpdateFlags::UPDATE_NONE));
+        server.events.on::<PistonEvent, _>(
+            Identifier::new_static("test", "invalid_piston_event_output"),
+            |event| {
+                let piston_pos = event.piston();
+                event.blocks_mut().push(piston_pos);
+            },
+        );
+
+        let piston = PistonBaseBlock::new(&vanilla_blocks::PISTON, false);
+        assert!(!piston.move_blocks_for_test(&world, piston_pos, Direction::East, true,));
+        assert_eq!(world.get_block_state(piston_pos), piston_state);
+        assert_eq!(world.get_block_state(moved_pos), moved_state);
+        assert!(world.get_block_entity(moved_pos).is_none());
+
+        drop(server);
+        if let Err(error) = fs::remove_dir_all(&storage_root).await {
+            panic!("test storage should be removed: {error}");
+        }
+    });
+}
+
+#[test]
+fn piston_event_rechecks_destruction_after_world_replacement() {
+    let world = fresh_test_world("piston_replaced_destruction_target");
+    let runtime = Builder::new_current_thread().enable_all().build();
+    let Ok(runtime) = runtime else {
+        panic!("test runtime should initialize");
+    };
+    runtime.block_on(async {
+        let storage_root = test_storage_root("piston-replaced-destruction-target");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await;
+        let Ok(server) = server else {
+            panic!("test server should initialize");
+        };
+        server.attach_worlds();
+
+        let piston_pos = BlockPos::new(8, 64, 8);
+        let moved_pos = piston_pos.east();
+        let destruction_pos = piston_pos.relative_n(Direction::East, 2);
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(piston_pos));
+        let piston_state = vanilla_blocks::PISTON
+            .default_state()
+            .set_value(&BlockStateProperties::FACING, Direction::East)
+            .set_value(&BlockStateProperties::EXTENDED, false);
+        let moved_state = vanilla_blocks::STONE.default_state();
+        assert!(world.set_block(piston_pos, piston_state, UpdateFlags::UPDATE_NONE));
+        assert!(world.set_block(moved_pos, moved_state, UpdateFlags::UPDATE_NONE));
+        assert!(world.set_block(
+            destruction_pos,
+            vanilla_blocks::DANDELION.default_state(),
+            UpdateFlags::UPDATE_NONE,
+        ));
+        let replacement = vanilla_blocks::STONE.default_state();
+        let world_for_listener = Arc::clone(&world);
+        server.events.on::<PistonEvent, _>(
+            Identifier::new_static("test", "replace_piston_destruction_target"),
+            move |_| {
+                let _ = world_for_listener.set_block(
+                    destruction_pos,
+                    replacement,
+                    UpdateFlags::UPDATE_NONE,
+                );
+            },
+        );
+
+        let piston = PistonBaseBlock::new(&vanilla_blocks::PISTON, false);
+        assert!(!piston.move_blocks_for_test(&world, piston_pos, Direction::East, true,));
+        assert_eq!(world.get_block_state(piston_pos), piston_state);
+        assert_eq!(world.get_block_state(moved_pos), moved_state);
+        assert_eq!(world.get_block_state(destruction_pos), replacement);
+        assert!(world.get_block_entity(moved_pos).is_none());
+
+        drop(server);
+        if let Err(error) = fs::remove_dir_all(&storage_root).await {
+            panic!("test storage should be removed: {error}");
+        }
+    });
+}
+
+#[test]
+fn cancelled_piston_retraction_leaves_world_unchanged() {
+    let world = fresh_test_world("piston_cancelled_retraction");
+    let runtime = Builder::new_current_thread().enable_all().build();
+    let Ok(runtime) = runtime else {
+        panic!("test runtime should initialize");
+    };
+    runtime.block_on(async {
+        let storage_root = test_storage_root("piston-cancelled-retraction");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await;
+        let Ok(server) = server else {
+            panic!("test server should initialize");
+        };
+        server.attach_worlds();
+
+        let piston_pos = BlockPos::new(8, 64, 8);
+        let head_pos = piston_pos.east();
+        let pulled_pos = piston_pos.relative_n(Direction::East, 2);
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(piston_pos));
+        let piston_state = vanilla_blocks::STICKY_PISTON
+            .default_state()
+            .set_value(&BlockStateProperties::FACING, Direction::East)
+            .set_value(&BlockStateProperties::EXTENDED, true);
+        let head_state = vanilla_blocks::PISTON_HEAD
+            .default_state()
+            .set_value(&BlockStateProperties::FACING, Direction::East);
+        let pulled_state = vanilla_blocks::STONE.default_state();
+        assert!(world.set_block(piston_pos, piston_state, UpdateFlags::UPDATE_NONE));
+        assert!(world.set_block(head_pos, head_state, UpdateFlags::UPDATE_NONE));
+        assert!(world.set_block(pulled_pos, pulled_state, UpdateFlags::UPDATE_NONE));
+        server.events.on::<PistonEvent, _>(
+            Identifier::new_static("test", "cancel_piston_retraction"),
+            |event| event.set_cancelled(true),
+        );
+
+        let piston = PistonBaseBlock::new(&vanilla_blocks::STICKY_PISTON, true);
+        assert!(!piston.trigger_event_for_test(piston_state, &world, piston_pos, 1, 5,));
+        assert_eq!(world.get_block_state(piston_pos), piston_state);
+        assert_eq!(world.get_block_state(head_pos), head_state);
+        assert_eq!(world.get_block_state(pulled_pos), pulled_state);
+        assert!(world.get_block_entity(piston_pos).is_none());
+        assert!(world.get_block_entity(head_pos).is_none());
+        assert!(world.get_block_entity(pulled_pos).is_none());
+
+        drop(server);
+        if let Err(error) = fs::remove_dir_all(&storage_root).await {
+            panic!("test storage should be removed: {error}");
+        }
+    });
+}
+
+#[test]
+fn invalid_piston_retraction_output_leaves_world_unchanged() {
+    let world = fresh_test_world("piston_invalid_retraction");
+    let runtime = Builder::new_current_thread().enable_all().build();
+    let Ok(runtime) = runtime else {
+        panic!("test runtime should initialize");
+    };
+    runtime.block_on(async {
+        let storage_root = test_storage_root("piston-invalid-retraction");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await;
+        let Ok(server) = server else {
+            panic!("test server should initialize");
+        };
+        server.attach_worlds();
+
+        let piston_pos = BlockPos::new(8, 64, 8);
+        let head_pos = piston_pos.east();
+        let pulled_pos = piston_pos.relative_n(Direction::East, 2);
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(piston_pos));
+        let piston_state = vanilla_blocks::STICKY_PISTON
+            .default_state()
+            .set_value(&BlockStateProperties::FACING, Direction::East)
+            .set_value(&BlockStateProperties::EXTENDED, true);
+        let head_state = vanilla_blocks::PISTON_HEAD
+            .default_state()
+            .set_value(&BlockStateProperties::FACING, Direction::East);
+        let pulled_state = vanilla_blocks::STONE.default_state();
+        assert!(world.set_block(piston_pos, piston_state, UpdateFlags::UPDATE_NONE));
+        assert!(world.set_block(head_pos, head_state, UpdateFlags::UPDATE_NONE));
+        assert!(world.set_block(pulled_pos, pulled_state, UpdateFlags::UPDATE_NONE));
+        server.events.on::<PistonEvent, _>(
+            Identifier::new_static("test", "invalid_piston_retraction"),
+            |event| {
+                let piston_pos = event.piston();
+                event.blocks_mut().push(piston_pos);
+            },
+        );
+
+        let piston = PistonBaseBlock::new(&vanilla_blocks::STICKY_PISTON, true);
+        assert!(!piston.trigger_event_for_test(piston_state, &world, piston_pos, 1, 5,));
+        assert_eq!(world.get_block_state(piston_pos), piston_state);
+        assert_eq!(world.get_block_state(head_pos), head_state);
+        assert_eq!(world.get_block_state(pulled_pos), pulled_state);
+        assert!(world.get_block_entity(piston_pos).is_none());
+        assert!(world.get_block_entity(head_pos).is_none());
+        assert!(world.get_block_entity(pulled_pos).is_none());
+
+        drop(server);
+        if let Err(error) = fs::remove_dir_all(&storage_root).await {
+            panic!("test storage should be removed: {error}");
+        }
+    });
 }
 
 #[tokio::test]
@@ -381,6 +610,152 @@ async fn world_creation_request_poll_and_wait_are_non_blocking() {
         request.wait().await,
         WorldCreationState::Failed("build failed".to_owned())
     );
+}
+
+#[test]
+fn world_key_reservation_blocks_recreation_until_cleanup_releases_it() {
+    let world = fresh_test_world_in_domain("main", "spawn");
+    let runtime = Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime should initialize");
+    runtime.block_on(async move {
+        let storage_root = test_storage_root("world-key-reservation");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await
+        .expect("test server should initialize");
+        let key = Identifier::new("main", "arena");
+
+        let reservation = server
+            .reserve_world_cleanup_key(&key)
+            .expect("cleanup should reserve an unused world key");
+        assert!(server.reserve_world_key(&key).is_err());
+        drop(reservation);
+        let reservation = server
+            .reserve_world_key(&key)
+            .expect("released cleanup reservation should permit recreation");
+        drop(reservation);
+
+        drop(server);
+        if let Err(error) = fs::remove_dir_all(&storage_root).await {
+            panic!("test storage should be removed: {error}");
+        }
+    });
+}
+
+#[test]
+fn world_creation_closes_admission_and_cleans_pending_additions() {
+    let world = fresh_test_world_in_domain("main", "spawn");
+    let pending_world = fresh_test_world_in_domain("main", "pending");
+    let runtime = Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime should initialize");
+    runtime.block_on(async move {
+        let storage_root = test_storage_root("world-creation-shutdown");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await
+        .expect("test server should initialize");
+        let pending_key = pending_world.key.clone();
+        let reservation = server
+            .reserve_world_key(&pending_key)
+            .expect("pending world should reserve its key");
+        let (sender, receiver) = channel();
+        server
+            .pending_world_additions
+            .lock()
+            .push((pending_world, sender, reservation));
+
+        server.wait_for_world_cleanups().await;
+
+        assert_eq!(
+            receiver
+                .await
+                .expect("pending creation sender should remain live"),
+            Err("world creation stopped before safe-point attachment".to_owned())
+        );
+        assert!(
+            server
+                .reserve_world_key(&Identifier::new("main", "after-shutdown"))
+                .is_err()
+        );
+
+        drop(server);
+        if let Err(error) = fs::remove_dir_all(&storage_root).await {
+            panic!("test storage should be removed: {error}");
+        }
+    });
+}
+
+#[test]
+fn shutdown_waits_for_an_in_flight_world_creation_task() {
+    let world = fresh_test_world_in_domain("main", "spawn");
+    let runtime = Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime should initialize");
+    runtime.block_on(async move {
+        let storage_root = test_storage_root("world-creation-in-flight-shutdown");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await
+        .expect("test server should initialize");
+        let key = Identifier::new("main", "in-flight");
+        let (started_sender, started_receiver) = channel();
+        let (finish_sender, finish_receiver) = channel();
+        server
+            .spawn_tracked_world_creation(&key, move |reservation| async move {
+                let _reservation = reservation;
+                let _ = started_sender.send(());
+                let _ = finish_receiver.await;
+            })
+            .expect("world creation should enter before shutdown");
+        started_receiver
+            .await
+            .expect("world creation should start running");
+
+        let shutdown_server = Arc::clone(&server);
+        let shutdown = tokio::spawn(async move {
+            shutdown_server.wait_for_world_cleanups().await;
+        });
+        while !server.world_creation_closed.load(Ordering::Acquire) {
+            yield_now().await;
+        }
+        assert!(
+            !shutdown.is_finished(),
+            "shutdown must wait while an admitted construction is still running"
+        );
+        assert!(
+            server
+                .spawn_tracked_world_creation(&Identifier::new("main", "too-late"), |_| async {},)
+                .is_err(),
+            "shutdown must close creation admission"
+        );
+
+        finish_sender
+            .send(())
+            .expect("in-flight task should still be waiting");
+        shutdown
+            .await
+            .expect("shutdown task should finish after construction exits");
+        assert!(!server.world_key_reservations.lock().contains(&key));
+
+        drop(server);
+        if let Err(error) = fs::remove_dir_all(&storage_root).await {
+            panic!("test storage should be removed: {error}");
+        }
+    });
 }
 
 #[test]

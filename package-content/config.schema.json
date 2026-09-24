@@ -58,6 +58,11 @@
           "description": "Optional authentication endpoint for online-mode hasJoined checks. Omit to use Mojang's session server.",
           "format": "uri"
         },
+        "allow_insecure_auth_server": {
+          "type": "boolean",
+          "description": "Allow a non-loopback HTTP authentication endpoint. HTTPS remains the default.",
+          "default": false
+        },
         "profile_server": {
           "type": "string",
           "description": "Optional endpoint for online-mode player name-to-profile lookups. Omit to use Mojang's profile service.",
@@ -238,6 +243,20 @@
               "description": "Whether the rcon port is opened at all",
               "default": false
             },
+            "bind": {
+              "description": "IP address rcon listens on. Keep loopback unless remote administration is required",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "format": "ipv4"
+                },
+                {
+                  "type": "string",
+                  "format": "ipv6"
+                }
+              ],
+              "default": "127.0.0.1"
+            },
             "port": {
               "type": "integer",
               "description": "Port rcon listens on",
@@ -245,10 +264,12 @@
               "maximum": 65535,
               "default": 25575
             },
-            "bind_address": {
-              "type": "string",
-              "description": "IP address rcon listens on; loopback is the secure default because Source Rcon is plaintext",
-              "default": "127.0.0.1"
+            "max_connections": {
+              "type": "integer",
+              "description": "Maximum simultaneous rcon connections",
+              "minimum": 1,
+              "maximum": 65535,
+              "default": 8
             },
             "password": {
               "type": "string",

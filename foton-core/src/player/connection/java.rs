@@ -1,8 +1,9 @@
 //! This module contains the `JavaConnection` struct, which is used to represent a connection to a Java client.
+use std::future::Future;
 use std::io::Cursor;
 use std::net::SocketAddr;
 use std::sync::{Arc, LazyLock, Weak};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::vec::IntoIter;
 
 use foton_protocol::packet_reader::TCPNetworkDecoder;
@@ -106,6 +107,33 @@ const GLOBAL_OUTBOUND_RELIABLE_BYTE_RESERVE: usize = MAX_PACKET_DATA_SIZE * 2;
 
 /// Maximum time a socket write may keep a connection task alive.
 const NETWORK_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// A final disconnect is best effort: the connection is closing either way.
+const FINAL_DISCONNECT_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// Vanilla sends a keep-alive every fifteen seconds and times out the next one.
+const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(15);
+
+async fn with_disconnect_write_deadline<F>(deadline: Duration, write: F) -> Result<(), PacketError>
+where
+    F: Future<Output = Result<(), PacketError>>,
+{
+    match timeout(deadline, write).await {
+        Ok(result) => result,
+        Err(_) => Err(PacketError::SendError(format!(
+            "final disconnect write exceeded its {} ms deadline",
+            deadline.as_millis()
+        ))),
+    }
+}
+
+/// Runs a final disconnect write with the connection shutdown deadline.
+pub async fn write_final_disconnect<F>(write: F) -> Result<(), PacketError>
+where
+    F: Future<Output = Result<(), PacketError>>,
+{
+    with_disconnect_write_deadline(FINAL_DISCONNECT_WRITE_TIMEOUT, write).await
+}
 
 /// Bounded sender for a Java connection's outbound packets.
 #[derive(Clone)]
@@ -789,6 +817,7 @@ pub(crate) enum ScheduledPacketExecution {
 }
 
 enum ScheduledPlayPacketKind {
+    PingRequest(SPingRequest),
     AcceptTeleportation(SAcceptTeleportation),
     Attack(SAttack),
     Interact(SInteract),
@@ -838,7 +867,6 @@ enum ScheduledPlayPacketKind {
 
 enum ImmediatePlayPacket {
     KeepAlive(SKeepAlive),
-    PingRequest(SPingRequest),
     ChunkBatchReceived(SChunkBatchReceived),
     Unknown(i32),
 }
@@ -855,6 +883,11 @@ impl ScheduledPlayPacket {
             self.0,
             ScheduledPlayPacketKind::AcceptTeleportation(_) | ScheduledPlayPacketKind::PlayerLoaded
         )
+    }
+
+    /// Returns whether this packet is allowed to run while a domain switch is in progress.
+    pub(crate) const fn is_maintenance_packet(&self) -> bool {
+        matches!(self.0, ScheduledPlayPacketKind::PingRequest(_))
     }
 
     /// Returns whether this is the death screen's one-shot respawn request.
@@ -874,6 +907,11 @@ impl ScheduledPlayPacket {
         }))
     }
 
+    #[cfg(test)]
+    pub(crate) const fn ping_request_for_test(time: i64) -> Self {
+        Self(ScheduledPlayPacketKind::PingRequest(SPingRequest { time }))
+    }
+
     /// Returns the handler's audited cross-player concurrency class.
     ///
     /// This match is intentionally exhaustive so every newly implemented packet requires an
@@ -882,7 +920,8 @@ impl ScheduledPlayPacket {
         match &self.0 {
             // These handlers touch player-owned state or use an individually linearizable shared
             // operation. The player lane preserves same-player order.
-            ScheduledPlayPacketKind::ChatSessionUpdate(_)
+            ScheduledPlayPacketKind::PingRequest(_)
+            | ScheduledPlayPacketKind::ChatSessionUpdate(_)
             | ScheduledPlayPacketKind::ClientInformation(_)
             | ScheduledPlayPacketKind::ClientTickEnd
             | ScheduledPlayPacketKind::PlayerLoaded
@@ -962,7 +1001,8 @@ impl ScheduledPlayPacket {
     pub(crate) const fn can_process_before_join(&self) -> bool {
         matches!(
             &self.0,
-            ScheduledPlayPacketKind::AcceptTeleportation(_)
+            ScheduledPlayPacketKind::PingRequest(_)
+                | ScheduledPlayPacketKind::AcceptTeleportation(_)
                 | ScheduledPlayPacketKind::ClientInformation(_)
                 | ScheduledPlayPacketKind::ClientTickEnd
                 | ScheduledPlayPacketKind::CustomClickAction(_)
@@ -1067,6 +1107,9 @@ impl ScheduledPlayPacket {
 
         let kind = self.0;
         match kind {
+            ScheduledPlayPacketKind::PingRequest(packet) => {
+                player.send_packet(CPongResponse::new(packet.time));
+            }
             ScheduledPlayPacketKind::AcceptTeleportation(packet) => {
                 player.handle_accept_teleportation(packet);
             }
@@ -1235,28 +1278,65 @@ impl BundleBuilder {
     }
 }
 
-/// Milliseconds since the Unix epoch, saturating rather than panicking.
+/// Milliseconds since the Unix epoch for the opaque keep-alive identifier.
 ///
 /// `duration_since(UNIX_EPOCH)` only fails when the wall clock is set before
 /// 1970, which a bad RTC or a container with no clock source can produce. The
 /// release profile is `panic = "abort"`, so panicking here would kill the
-/// server outright -- taking every unsaved chunk with it -- over a clock that
-/// the keep-alive logic can perfectly well treat as "time zero".
+/// server outright. Elapsed-time decisions use [`Instant`] instead.
 fn now_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+        .map_or(0, |elapsed| elapsed.as_millis() as u64)
 }
 
-#[expect(
-    clippy::struct_field_names,
-    reason = "alive_ prefix is intentional to group related keep-alive fields"
-)]
 struct KeepAliveTracker {
-    alive_time: u64,
-    alive_pending: bool,
-    alive_id: u64,
+    sent_at: Option<Instant>,
+    pending: bool,
+    id: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum KeepAliveTick {
+    None,
+    Send(u64),
+    Timeout,
+}
+
+impl KeepAliveTracker {
+    const fn new() -> Self {
+        Self {
+            sent_at: None,
+            pending: false,
+            id: 0,
+        }
+    }
+
+    fn tick_at(&mut self, now: Instant, id: u64) -> KeepAliveTick {
+        if self
+            .sent_at
+            .is_some_and(|sent_at| now.saturating_duration_since(sent_at) < KEEP_ALIVE_INTERVAL)
+        {
+            return KeepAliveTick::None;
+        }
+        if self.pending {
+            return KeepAliveTick::Timeout;
+        }
+
+        self.sent_at = Some(now);
+        self.pending = true;
+        self.id = id;
+        KeepAliveTick::Send(id)
+    }
+
+    fn acknowledge_at(&mut self, id: u64, now: Instant) -> Option<Duration> {
+        if !self.pending || id != self.id {
+            return None;
+        }
+        let sent_at = self.sent_at?;
+        self.pending = false;
+        Some(now.saturating_duration_since(sent_at))
+    }
 }
 
 /// A connection to a Java client.
@@ -1304,11 +1384,7 @@ impl JavaConnection {
             translation,
             translated_serverbound,
             player,
-            keep_alive_tracker: SyncMutex::new(KeepAliveTracker {
-                alive_time: 0,
-                alive_pending: false,
-                alive_id: 0,
-            }),
+            keep_alive_tracker: SyncMutex::new(KeepAliveTracker::new()),
             latency: SyncMutex::new(0),
             unhandled_packet_ids: SyncMutex::new(Vec::new()),
         }
@@ -1437,44 +1513,31 @@ impl JavaConnection {
 
     fn keep_connection_alive(&self) {
         let mut tracker = self.keep_alive_tracker.lock();
-        let now = now_millis();
+        let action = tracker.tick_at(Instant::now(), now_millis());
+        drop(tracker);
 
-        // `saturating_sub`, not `-`: the wall clock can move backwards (an NTP
-        // correction, a VM resumed from a snapshot), and in release this
-        // subtraction wraps to a colossal number that clears the 15 s gate at
-        // once. Every player with a keep-alive in flight is then dropped for
-        // "timeout" on the same tick. `handle_keep_alive` below already
-        // saturates; this side did not.
-        if now.saturating_sub(tracker.alive_time) >= 15000 {
-            if tracker.alive_pending {
+        match action {
+            KeepAliveTick::None => {}
+            KeepAliveTick::Send(id) => self.send_control_packet(CKeepAlive::new(id as i64)),
+            KeepAliveTick::Timeout => {
                 self.disconnect(translations::DISCONNECT_TIMEOUT.msg());
-            } else {
-                tracker.alive_pending = true;
-                tracker.alive_id = now;
-                tracker.alive_time = now;
-                self.send_control_packet(CKeepAlive::new(tracker.alive_id as i64));
             }
         }
     }
 
     /// Handles a keep alive packet.
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "latency saturates at u32::MAX ms (~49 days), which is unreachable in practice"
-    )]
     fn handle_keep_alive(&self, packet: SKeepAlive) {
         let mut tracker = self.keep_alive_tracker.lock();
-        if tracker.alive_pending && packet.id as u64 == tracker.alive_id {
-            let now = now_millis();
-
-            let time = now.saturating_sub(tracker.alive_time) as u32;
-            tracker.alive_pending = false;
-            drop(tracker);
-            let mut latency = self.latency.lock();
-            *latency = (*latency * 3 + time) / 4;
-        } else {
+        let elapsed = tracker.acknowledge_at(packet.id as u64, Instant::now());
+        drop(tracker);
+        let Some(elapsed) = elapsed else {
             self.disconnect(translations::DISCONNECT_TIMEOUT.msg());
-        }
+            return;
+        };
+        let time = u32::try_from(elapsed.as_millis()).unwrap_or(u32::MAX);
+        let mut latency = self.latency.lock();
+        let smoothed = (u64::from(*latency) * 3 + u64::from(time)) / 4;
+        *latency = u32::try_from(smoothed).unwrap_or(u32::MAX);
     }
 
     /// Returns the current latency in milliseconds.
@@ -1865,7 +1928,7 @@ impl JavaConnection {
             play::S_SEEN_ADVANCEMENTS => scheduled(ScheduledPlayPacketKind::SeenAdvancements(
                 SSeenAdvancements::read_packet(data)?,
             )),
-            play::S_PING_REQUEST => DecodedPlayPacket::Immediate(ImmediatePlayPacket::PingRequest(
+            play::S_PING_REQUEST => scheduled(ScheduledPlayPacketKind::PingRequest(
                 SPingRequest::read_packet(data)?,
             )),
             play::S_CHANGE_GAME_MODE => scheduled(ScheduledPlayPacketKind::ChangeGameMode(
@@ -1881,9 +1944,6 @@ impl JavaConnection {
     fn handle_immediate_packet(&self, packet: ImmediatePlayPacket, player: &Player) {
         match packet {
             ImmediatePlayPacket::KeepAlive(packet) => self.handle_keep_alive(packet),
-            ImmediatePlayPacket::PingRequest(packet) => {
-                player.send_packet(CPongResponse::new(packet.time));
-            }
             ImmediatePlayPacket::ChunkBatchReceived(packet) => {
                 player
                     .chunk_sender
@@ -2158,7 +2218,11 @@ impl NetworkConnection for JavaConnection {
 
 #[cfg(test)]
 mod tests {
-    use std::array;
+    use std::{
+        array,
+        future::pending,
+        time::{Duration, Instant},
+    };
 
     use crate::{
         entity::{Entity as _, LivingEntity as _},
@@ -2169,9 +2233,11 @@ mod tests {
     use foton_registry::{blocks::properties::Direction, item_stack::ItemStack};
     use foton_utils::{BlockPos, codec::VarInt, types::InteractionHand};
     use rustc_hash::FxHashMap;
-    use tokio::io::AsyncReadExt;
-    use tokio::net::{TcpListener, TcpStream};
-    use tokio::time::sleep;
+    use tokio::{
+        io::AsyncReadExt,
+        net::{TcpListener, TcpStream},
+        time::{sleep, timeout},
+    };
     use uuid::Uuid;
 
     use super::*;
@@ -2651,6 +2717,29 @@ mod tests {
     }
 
     #[test]
+    fn ping_during_domain_maintenance_uses_player_local_scheduling() {
+        let world = fresh_test_world("scheduled_domain_maintenance_ping");
+        let player = TestPlayerBuilder::new(world, "PingTester", 1).build();
+        let Some(token) = player.begin_pending_world_change() else {
+            panic!("test player should acquire a world-change token");
+        };
+        assert!(player.begin_domain_switch(token));
+
+        let decoded = JavaConnection::decode_domain_gated_packet(
+            RawPacket::new(play::S_PING_REQUEST, 42_i64.to_be_bytes().to_vec()),
+            &player,
+        );
+        let Ok(Some(DecodedPlayPacket::Scheduled(packet))) = decoded else {
+            panic!("ping during domain maintenance should be scheduled");
+        };
+
+        assert_eq!(packet.execution(), ScheduledPacketExecution::PlayerLocal);
+
+        assert!(player.finish_domain_switch(token));
+        assert!(player.finish_pending_world_change(token));
+    }
+
+    #[test]
     fn custom_payload_defaults_to_global_exclusive_scheduling() {
         let channel = b"minecraft:brand";
         let mut payload = vec![channel.len() as u8];
@@ -2979,6 +3068,82 @@ mod tests {
     }
 
     #[test]
+    fn backward_wall_clock_does_not_delay_monotonic_keep_alive_timeout() {
+        let started_at = Instant::now();
+        let mut tracker = KeepAliveTracker::new();
+
+        assert_eq!(
+            tracker.tick_at(started_at, 10_000),
+            KeepAliveTick::Send(10_000)
+        );
+        assert_eq!(
+            tracker.tick_at(started_at + Duration::from_secs(14), 1),
+            KeepAliveTick::None
+        );
+        assert_eq!(
+            tracker.tick_at(started_at + Duration::from_secs(15), 2),
+            KeepAliveTick::Timeout
+        );
+    }
+
+    #[test]
+    fn keep_alive_round_trip_uses_monotonic_time_after_wall_clock_rollback() {
+        let started_at = Instant::now();
+        let mut tracker = KeepAliveTracker::new();
+
+        assert_eq!(
+            tracker.tick_at(started_at, 10_000),
+            KeepAliveTick::Send(10_000)
+        );
+        assert_eq!(
+            tracker.tick_at(started_at + Duration::from_millis(10), 1),
+            KeepAliveTick::None
+        );
+        assert_eq!(
+            tracker.acknowledge_at(10_000, started_at + Duration::from_millis(42)),
+            Some(Duration::from_millis(42))
+        );
+    }
+
+    #[test]
+    fn wrong_keep_alive_id_keeps_pending_state_until_timeout() {
+        let started_at = Instant::now();
+        let mut tracker = KeepAliveTracker::new();
+
+        assert_eq!(
+            tracker.tick_at(started_at, 10_000),
+            KeepAliveTick::Send(10_000)
+        );
+        assert_eq!(
+            tracker.acknowledge_at(10_001, started_at + Duration::from_millis(10)),
+            None
+        );
+        assert_eq!(
+            tracker.tick_at(started_at + Duration::from_secs(15), 10_002),
+            KeepAliveTick::Timeout
+        );
+    }
+
+    #[test]
+    fn valid_keep_alive_ack_clears_pending_state_for_the_next_probe() {
+        let started_at = Instant::now();
+        let mut tracker = KeepAliveTracker::new();
+
+        assert_eq!(
+            tracker.tick_at(started_at, 10_000),
+            KeepAliveTick::Send(10_000)
+        );
+        assert_eq!(
+            tracker.acknowledge_at(10_000, started_at + Duration::from_millis(10)),
+            Some(Duration::from_millis(10))
+        );
+        assert_eq!(
+            tracker.tick_at(started_at + Duration::from_secs(15), 10_001),
+            KeepAliveTick::Send(10_001)
+        );
+    }
+
+    #[test]
     fn chunk_batch_ack_uses_the_immediate_connection_path() {
         let decoded = decode(RawPacket::new(
             play::S_CHUNK_BATCH_RECEIVED,
@@ -2993,5 +3158,19 @@ mod tests {
                 }
             ))
         ));
+    }
+
+    #[tokio::test]
+    async fn final_disconnect_write_is_deadline_bounded() {
+        let result = timeout(
+            Duration::from_secs(1),
+            with_disconnect_write_deadline(
+                Duration::from_millis(20),
+                pending::<Result<(), PacketError>>(),
+            ),
+        )
+        .await;
+
+        assert!(matches!(result, Ok(Err(PacketError::SendError(_)))));
     }
 }

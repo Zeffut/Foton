@@ -49,10 +49,10 @@ cleanup() {
 }
 
 for _ in $(seq 1 180); do
-  ss -ltn 2>/dev/null | grep -q ":$PORT" && break
+  python3 "$ROOT/dev/wait-tcp.py" 127.0.0.1 "$PORT" 1 "$PID" >/dev/null 2>&1 && break
   sleep 1
 done
-if ! ss -ltn 2>/dev/null | grep -q ":$PORT"; then
+if ! python3 "$ROOT/dev/wait-tcp.py" 127.0.0.1 "$PORT" 1 "$PID" >/dev/null 2>&1; then
   echo "SERVER NEVER LISTENED ON $PORT"
   sed 's/\x1b\[[0-9;]*[A-Za-z]//g' server.log | tail -20
   cleanup; exit 1
