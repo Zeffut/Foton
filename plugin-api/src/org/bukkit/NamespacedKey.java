@@ -3,6 +3,9 @@ package org.bukkit;
 import org.bukkit.plugin.Plugin;
 
 public final class NamespacedKey {
+    /** The namespace of everything vanilla. */
+    public static final String MINECRAFT = "minecraft";
+
     private final String namespace;
     private final String key;
 

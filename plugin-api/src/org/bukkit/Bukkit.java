@@ -53,6 +53,8 @@ public final class Bukkit {
         if (type == org.bukkit.Particle.class) return (Registry<T>) Registry.PARTICLE_TYPE;
         if (type == org.bukkit.inventory.meta.trim.TrimPattern.class) return (Registry<T>) Registry.TRIM_PATTERN;
         if (type == org.bukkit.inventory.meta.trim.TrimMaterial.class) return (Registry<T>) Registry.TRIM_MATERIAL;
+        if (type == org.bukkit.block.banner.PatternType.class) return (Registry<T>) Registry.BANNER_PATTERN;
+        if (type == org.bukkit.MusicInstrument.class) return (Registry<T>) Registry.INSTRUMENT;
         throw new IllegalArgumentException("Unsupported registry type: " + type);
     }
     private static volatile boolean stopping;

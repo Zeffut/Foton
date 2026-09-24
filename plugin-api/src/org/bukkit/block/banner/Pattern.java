@@ -7,10 +7,9 @@ public final class Pattern {
     private final DyeColor color;
     private final PatternType pattern;
     public Pattern(DyeColor color, PatternType pattern) { this.color = color; this.pattern = pattern; }
-    public Pattern(DyeColor color, String pattern) { this(color, PatternType.of(pattern)); }
     public Pattern(java.util.Map<String, Object> serialized) {
         this(parseColor(serialized == null ? null : serialized.get("color")),
-            serialized == null ? null : PatternType.of(String.valueOf(serialized.get("pattern"))));
+            serialized == null ? null : PatternType.getByIdentifier(String.valueOf(serialized.get("pattern"))));
     }
     private static DyeColor parseColor(Object value) {
         if (value == null) return null;
@@ -25,4 +24,9 @@ public final class Pattern {
         result.put("pattern", pattern == null ? null : pattern.getIdentifier());
         return result;
     }
+    @Override public boolean equals(Object other) {
+        return other instanceof Pattern that && color == that.color && java.util.Objects.equals(pattern, that.pattern);
+    }
+    @Override public int hashCode() { return java.util.Objects.hash(color, pattern); }
+    @Override public String toString() { return "Pattern{color=" + color + ", pattern=" + pattern + "}"; }
 }
