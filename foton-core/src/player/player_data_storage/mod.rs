@@ -30,6 +30,7 @@ use super::player_data::{
     PersistentEnderPearl, PersistentPlayerData, PersistentRootVehicle, PersistentSlot,
     PersistentStatistic,
 };
+use super::recipe_book::PersistentRecipeBook;
 use crate::chunk_saver::PersistentEntity;
 use crate::config::StorageSelection;
 use crate::level_data::RespawnData;
@@ -44,7 +45,7 @@ use foton_utils::{BlockPos, Identifier};
 
 const PLAYER_MAGIC: [u8; 4] = *b"STLP";
 const GLOBAL_MAGIC: [u8; 4] = *b"STLG";
-const PLAYER_STORAGE_VERSION: u16 = 11;
+const PLAYER_STORAGE_VERSION: u16 = 12;
 const GLOBAL_STORAGE_VERSION: u16 = 3;
 const GLOBAL_PLAYER_DATA_VERSION: i32 = 2;
 /// Largest compressed player data file accepted from disk.
@@ -122,6 +123,7 @@ struct PlayerDataFile {
     advancements: Vec<AdvancementFile>,
     /// Statistics, keyed by name rather than by registry id.
     statistics: Vec<StatisticFile>,
+    recipe_book: RecipeBookFile,
     /// Written `LivingEntity.addAdditionalSaveData` compound.
     living_nbt: Vec<u8>,
 }
@@ -136,6 +138,13 @@ struct AdvancementFile {
 struct CriterionFile {
     name: String,
     obtained_epoch_millis: i64,
+}
+
+#[derive(SchemaWrite, SchemaRead)]
+struct RecipeBookFile {
+    recipes: Vec<String>,
+    to_be_displayed: Vec<String>,
+    settings: [bool; 8],
 }
 
 #[derive(SchemaWrite, SchemaRead)]
@@ -823,6 +832,11 @@ impl PlayerDataFile {
                     count: statistic.count,
                 })
                 .collect(),
+            recipe_book: RecipeBookFile {
+                recipes: data.recipe_book.recipes.clone(),
+                to_be_displayed: data.recipe_book.to_be_displayed.clone(),
+                settings: data.recipe_book.settings,
+            },
             living_nbt: data.living_nbt.clone(),
         })
     }
@@ -914,6 +928,11 @@ impl PlayerDataFile {
                 .collect(),
             advancements,
             statistics,
+            recipe_book: PersistentRecipeBook {
+                recipes: self.recipe_book.recipes,
+                to_be_displayed: self.recipe_book.to_be_displayed,
+                settings: self.recipe_book.settings,
+            },
             living_nbt: self.living_nbt,
         })
     }
@@ -1285,6 +1304,32 @@ mod tests {
         assert_eq!(restored.living_nbt, living_bytes);
     }
 
+    /// The recipe book survives the file format, settings flags in place.
+    #[test]
+    fn the_recipe_book_survives_the_player_file() {
+        let mut data = sample_player_file(PLAYER_DATA_VERSION);
+        data.recipe_book = RecipeBookFile {
+            recipes: vec!["minecraft:cake".to_owned(), "zeldaciv:sifflet".to_owned()],
+            to_be_displayed: vec!["zeldaciv:sifflet".to_owned()],
+            settings: [true, false, false, true, false, false, true, true],
+        };
+
+        let encoded = encode_player_file(&data).expect("player file should encode");
+        let restored = decode_player_file(&encoded)
+            .expect("player file should decode")
+            .into_persistent()
+            .expect("the file reads back at the current version");
+
+        assert_eq!(
+            restored.recipe_book,
+            PersistentRecipeBook {
+                recipes: vec!["minecraft:cake".to_owned(), "zeldaciv:sifflet".to_owned()],
+                to_be_displayed: vec!["zeldaciv:sifflet".to_owned()],
+                settings: [true, false, false, true, false, false, true, true],
+            }
+        );
+    }
+
     fn sample_player_file(data_version: i32) -> PlayerDataFile {
         PlayerDataFile {
             data_version,
@@ -1340,6 +1385,11 @@ mod tests {
                 value: "minecraft:jump".to_owned(),
                 count: 12,
             }],
+            recipe_book: RecipeBookFile {
+                recipes: Vec::new(),
+                to_be_displayed: Vec::new(),
+                settings: [false; 8],
+            },
             living_nbt: Vec::new(),
         }
     }

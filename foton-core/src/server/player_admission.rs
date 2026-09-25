@@ -239,6 +239,9 @@ impl Server {
 
         player.reset(Arc::clone(&state.world), ResetReason::InitialJoin);
         Self::apply_domain_player_state(&player, &state);
+        // Vanilla parity: `sendInitialRecipeBook` in `PlayerList.placeNewPlayer`,
+        // after the login packet and before the player enters the level.
+        player.send_initial_recipe_book();
         let residence_token = player.domain_residence_token();
         let restores = self.prepare_domain_restores(&player, &state);
         if !Self::install_domain_restores(&player, residence_token, &restores) {
