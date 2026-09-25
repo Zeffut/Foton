@@ -281,13 +281,25 @@ impl Server {
         }
     }
 
+    /// Hands a player what their client keeps of the domain they have just
+    /// entered: their recipe book, then the domain's teams.
+    ///
+    /// Vanilla parity: `sendInitialRecipeBook` followed by
+    /// `updateEntireScoreboard` in `PlayerList.placeNewPlayer`. Both are sent
+    /// again on a domain switch, because the book is saved per domain and the
+    /// client keeps its old copy across the respawn packet.
+    pub(super) fn send_domain_state(&self, player: &Player, left: Option<&str>, entered: &str) {
+        player.send_initial_recipe_book();
+        self.send_domain_teams(player, left, entered);
+    }
+
     /// Sends a player every team of a domain they have just entered, after
     /// taking off the teams of the one they left.
     ///
     /// Vanilla parity: the team half of `PlayerList.updateEntireScoreboard`,
     /// sent on login; on a domain switch the client still holds the previous
     /// domain's teams, which would otherwise keep colouring names there.
-    pub(super) fn send_domain_teams(&self, player: &Player, left: Option<&str>, entered: &str) {
+    fn send_domain_teams(&self, player: &Player, left: Option<&str>, entered: &str) {
         if let Some(scoreboard) = left.and_then(|domain| self.scoreboards.get(domain)) {
             for removal in scoreboard.team_removals() {
                 player.send_packet(removal);

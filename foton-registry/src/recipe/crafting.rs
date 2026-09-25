@@ -56,6 +56,10 @@ pub struct ShapedRecipe {
 impl ShapedRecipe {
     /// Creates a new shaped recipe, pre-computing symmetry.
     #[must_use]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one argument per field of vanilla's ShapedRecipe; a builder would only rename them"
+    )]
     pub fn new(
         id: Identifier,
         category: CraftingCategory,

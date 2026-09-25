@@ -54,6 +54,8 @@ pub struct CRecipeBookAdd {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Write as _;
+
     use foton_registry::recipe::RecipeDisplayEntry;
     use foton_registry::{REGISTRY, init_vanilla_registry};
     use foton_utils::Identifier;
@@ -89,7 +91,7 @@ mod tests {
     /// The whole chain in one: the recipe's own data, vanilla's rules for
     /// turning it into a display (the milk bucket's remainder, the tag kept as
     /// a tag, the furnace's fuel and category), and the wire shape of every
-    /// field down to the optional group being a shifted VarInt.
+    /// field down to the optional group being a shifted `VarInt`.
     #[test]
     fn encodes_vanilla_recipes_byte_for_byte_like_vanilla() {
         init_vanilla_registry();
@@ -112,7 +114,10 @@ mod tests {
         let mut bytes = Vec::new();
         packet.write(&mut bytes).expect("packet encodes");
 
-        let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+        let hex = bytes.iter().fold(String::new(), |mut hex, byte| {
+            let _ = write!(hex, "{byte:02x}");
+            hex
+        });
         assert_eq!(hex, VANILLA);
     }
 }

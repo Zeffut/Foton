@@ -252,9 +252,6 @@ impl DomainSwitchJob {
             .reset_after_detached_domain_restore(Arc::clone(&state.world), || {
                 Server::apply_domain_player_state(&restore_player, &state);
             });
-        // The book is saved per domain, and a respawn packet leaves the
-        // client's copy alone: replace it with the one this domain restored.
-        self.player.send_initial_recipe_book();
         if !Server::install_domain_restores(&self.player, self.residence_token, &restores) {
             return self.finish_source_disconnect(Some(
                 "domain switch lost its residence before target restore installation",
@@ -274,7 +271,7 @@ impl DomainSwitchJob {
             return JobPoll::Finished;
         }
         self.source_data = None;
-        server.send_domain_teams(&self.player, Some(&self.source_domain), &self.target_domain);
+        server.send_domain_state(&self.player, Some(&self.source_domain), &self.target_domain);
         if !self.player.finish_pending_world_change(self.pending_token) {
             tracing::error!(
                 player = %self.player.gameprofile.name,

@@ -45,7 +45,7 @@ pub struct RecipeBookSettings {
 impl RecipeBookSettings {
     /// One screen's settings.
     #[must_use]
-    pub const fn get(&self, book: RecipeBookType) -> RecipeBookTypeSettings {
+    pub const fn get(self, book: RecipeBookType) -> RecipeBookTypeSettings {
         match book {
             RecipeBookType::Crafting => self.crafting,
             RecipeBookType::Furnace => self.furnace,

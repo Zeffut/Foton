@@ -8,8 +8,8 @@
 //! is the recipe registry's business ([`foton_registry::recipe::BookRecipe`]).
 
 use foton_protocol::packets::game::{
-    CRecipeBookAdd, CRecipeBookRemove, CRecipeBookSettings, RecipeBookAddEntry,
-    RecipeBookSettings, RecipeBookType, RecipeBookTypeSettings,
+    CRecipeBookAdd, CRecipeBookRemove, CRecipeBookSettings, RecipeBookAddEntry, RecipeBookSettings,
+    RecipeBookType, RecipeBookTypeSettings,
 };
 use foton_registry::REGISTRY;
 use foton_utils::Identifier;
@@ -130,11 +130,16 @@ impl Player {
                 };
                 book.known.insert(key.clone());
                 book.highlight.insert(key.clone());
-                entries.extend(recipe.displays.into_iter().map(|contents| RecipeBookAddEntry {
-                    contents,
-                    notification: recipe.show_notification,
-                    highlight: true,
-                }));
+                entries.extend(
+                    recipe
+                        .displays
+                        .into_iter()
+                        .map(|contents| RecipeBookAddEntry {
+                            contents,
+                            notification: recipe.show_notification,
+                            highlight: true,
+                        }),
+                );
                 unlocked.push(key.clone());
             }
         }
@@ -199,22 +204,25 @@ impl Player {
     /// domain, because the book is saved per domain and the client would
     /// otherwise keep the one it left behind.
     pub fn send_initial_recipe_book(&self) {
-        let (settings, entries) = {
-            let book = self.recipe_book.lock();
-            let mut entries = Vec::with_capacity(book.known.len());
-            for key in &book.known {
-                let Some(recipe) = REGISTRY.recipes.book_recipe(key) else {
-                    continue;
-                };
-                let highlight = book.highlight.contains(key);
-                entries.extend(recipe.displays.into_iter().map(|contents| RecipeBookAddEntry {
-                    contents,
-                    notification: false,
-                    highlight,
-                }));
-            }
-            (book.settings, entries)
-        };
+        let (settings, entries) =
+            {
+                let book = self.recipe_book.lock();
+                let mut entries = Vec::with_capacity(book.known.len());
+                for key in &book.known {
+                    let Some(recipe) = REGISTRY.recipes.book_recipe(key) else {
+                        continue;
+                    };
+                    let highlight = book.highlight.contains(key);
+                    entries.extend(recipe.displays.into_iter().map(|contents| {
+                        RecipeBookAddEntry {
+                            contents,
+                            notification: false,
+                            highlight,
+                        }
+                    }));
+                }
+                (book.settings, entries)
+            };
         self.send_packet(CRecipeBookSettings { settings });
         self.send_packet(CRecipeBookAdd {
             entries,
@@ -285,7 +293,8 @@ mod tests {
     #[test]
     fn a_saved_book_loads_back_without_the_recipes_that_are_gone() {
         let mut book = ServerRecipeBook::default();
-        book.known.extend([key("cake"), key("oak_planks"), key("removed")]);
+        book.known
+            .extend([key("cake"), key("oak_planks"), key("removed")]);
         book.highlight.insert(key("cake"));
         book.settings.set(
             RecipeBookType::BlastFurnace,
@@ -298,7 +307,11 @@ mod tests {
         let saved = book.pack();
         assert_eq!(
             saved.recipes,
-            ["minecraft:cake", "minecraft:oak_planks", "minecraft:removed"]
+            [
+                "minecraft:cake",
+                "minecraft:oak_planks",
+                "minecraft:removed"
+            ]
         );
         assert_eq!(
             saved.settings,
@@ -308,7 +321,10 @@ mod tests {
         let mut restored = ServerRecipeBook::default();
         restored.load(&saved, |recipe| recipe != &key("removed"));
 
-        assert_eq!(restored.known, FxHashSet::from_iter([key("cake"), key("oak_planks")]));
+        assert_eq!(
+            restored.known,
+            FxHashSet::from_iter([key("cake"), key("oak_planks")])
+        );
         assert_eq!(restored.highlight, FxHashSet::from_iter([key("cake")]));
         assert_eq!(restored.settings, book.settings);
     }

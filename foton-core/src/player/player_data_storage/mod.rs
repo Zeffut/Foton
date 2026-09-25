@@ -147,6 +147,26 @@ struct RecipeBookFile {
     settings: [bool; 8],
 }
 
+impl From<&PersistentRecipeBook> for RecipeBookFile {
+    fn from(book: &PersistentRecipeBook) -> Self {
+        Self {
+            recipes: book.recipes.clone(),
+            to_be_displayed: book.to_be_displayed.clone(),
+            settings: book.settings,
+        }
+    }
+}
+
+impl From<RecipeBookFile> for PersistentRecipeBook {
+    fn from(book: RecipeBookFile) -> Self {
+        Self {
+            recipes: book.recipes,
+            to_be_displayed: book.to_be_displayed,
+            settings: book.settings,
+        }
+    }
+}
+
 #[derive(SchemaWrite, SchemaRead)]
 struct StatisticFile {
     stat_type: String,
@@ -832,11 +852,7 @@ impl PlayerDataFile {
                     count: statistic.count,
                 })
                 .collect(),
-            recipe_book: RecipeBookFile {
-                recipes: data.recipe_book.recipes.clone(),
-                to_be_displayed: data.recipe_book.to_be_displayed.clone(),
-                settings: data.recipe_book.settings,
-            },
+            recipe_book: RecipeBookFile::from(&data.recipe_book),
             living_nbt: data.living_nbt.clone(),
         })
     }
@@ -928,11 +944,7 @@ impl PlayerDataFile {
                 .collect(),
             advancements,
             statistics,
-            recipe_book: PersistentRecipeBook {
-                recipes: self.recipe_book.recipes,
-                to_be_displayed: self.recipe_book.to_be_displayed,
-                settings: self.recipe_book.settings,
-            },
+            recipe_book: self.recipe_book.into(),
             living_nbt: self.living_nbt,
         })
     }

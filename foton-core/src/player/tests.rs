@@ -25,6 +25,7 @@ use glam::DVec3;
 use text_components::TextComponent;
 use uuid::Uuid;
 
+use crate::advancement::ADVANCEMENT_TREE;
 use crate::behavior::{InteractionResult, init_behaviors};
 use crate::chunk_saver::PersistentEntity;
 use crate::entity::{
@@ -1436,8 +1437,10 @@ fn awarding_a_recipe_unlocks_it_once_and_completes_its_advancement() {
         .connection(connection)
         .build();
     let cake = foton_utils::Identifier::vanilla_static("cake");
-    let advancement = crate::advancement::ADVANCEMENT_TREE
-        .index_of(&foton_utils::Identifier::vanilla_static("recipes/food/cake"))
+    let advancement = ADVANCEMENT_TREE
+        .index_of(&foton_utils::Identifier::vanilla_static(
+            "recipes/food/cake",
+        ))
         .expect("vanilla has a cake recipe advancement");
     let sent = |id| {
         sent_packets
@@ -1452,7 +1455,11 @@ fn awarding_a_recipe_unlocks_it_once_and_completes_its_advancement() {
     assert!(player.has_advancement(advancement));
     assert_eq!(sent(C_RECIPE_BOOK_ADD), 1);
 
-    assert_eq!(player.award_recipes([&cake]), 0, "a known recipe is not new");
+    assert_eq!(
+        player.award_recipes([&cake]),
+        0,
+        "a known recipe is not new"
+    );
     assert_eq!(sent(C_RECIPE_BOOK_ADD), 1, "and is not sent again");
 
     assert_eq!(player.reset_recipes([&cake]), 1);

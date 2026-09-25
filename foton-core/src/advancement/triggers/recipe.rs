@@ -11,7 +11,9 @@ use crate::player::Player;
 /// vanilla `recipes/...` advancement listens for its own recipe here, which is
 /// what stops it from granting that recipe again.
 pub fn recipe_unlocked(player: &Player, key: &Identifier) {
-    fire(player, "minecraft:recipe_unlocked", |instance| {
-        matches!(instance, TriggerInstance::RecipeUnlocked { recipe, .. } if recipe == key)
-    });
+    fire(
+        player,
+        "minecraft:recipe_unlocked",
+        |instance| matches!(instance, TriggerInstance::RecipeUnlocked { recipe, .. } if recipe == key),
+    );
 }

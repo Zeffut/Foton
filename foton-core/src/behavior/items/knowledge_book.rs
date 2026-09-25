@@ -1,8 +1,8 @@
 //! The knowledge book.
 
 use foton_macros::item_behavior;
-use foton_registry::{REGISTRY, vanilla_items, vanilla_stat_types};
 use foton_registry::data_components::vanilla_components::RECIPES;
+use foton_registry::{REGISTRY, vanilla_items, vanilla_stat_types};
 
 use crate::behavior::{InteractionResult, ItemBehavior, UseItemContext};
 

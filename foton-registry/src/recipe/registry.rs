@@ -9,9 +9,9 @@ use rustc_hash::FxHashSet;
 
 use super::RecipeResult;
 use super::book::{BookRecipe, RecipeDisplayIndex};
-use super::display::CookingStation;
 use super::cooking::{CookingKind, SmeltingRecipe};
 use super::crafting::{CraftingInput, CraftingRecipe, ShapedRecipe, ShapelessRecipe};
+use super::display::CookingStation;
 use super::smithing::SmithingTransformRecipe;
 use super::stonecutting::StonecuttingRecipe;
 use crate::item_stack::ItemStack;
@@ -200,8 +200,18 @@ impl RecipeRegistry {
         if let Some(recipe) = index.read().recipe(key) {
             return Some(recipe.clone());
         }
-        let shaped = self.runtime_shaped.read().iter().find(|r| &r.id == key).copied();
-        let shapeless = self.runtime_shapeless.read().iter().find(|r| &r.id == key).copied();
+        let shaped = self
+            .runtime_shaped
+            .read()
+            .iter()
+            .find(|r| &r.id == key)
+            .copied();
+        let shapeless = self
+            .runtime_shapeless
+            .read()
+            .iter()
+            .find(|r| &r.id == key)
+            .copied();
         let source = match (shaped, shapeless) {
             (Some(recipe), _) => recipe.display_source(),
             (None, Some(recipe)) => recipe.display_source(),

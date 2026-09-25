@@ -20,10 +20,10 @@ use foton_protocol::packets::game::{
     SContainerSlotStateChanged, SEditBook, SInteract, SJigsawGenerate, SMovePlayer, SMovePlayerPos,
     SMovePlayerPosRot, SMovePlayerRot, SMovePlayerStatusOnly, SMoveVehicle, SPickItemFromBlock,
     SPlayerAbilities, SPlayerAction, SPlayerCommand, SPlayerInput, SPlayerLoad,
-    SRecipeBookChangeSettings, SRecipeBookSeenRecipe, SRenameItem,
-    SSeenAdvancements, SSelectBundleItem, SSelectTrade, SSetBeacon, SSetCarriedItem,
-    SSetCommandBlock, SSetCommandMinecart, SSetCreativeModeSlot, SSetJigsawBlock,
-    SSetStructureBlock, SSignUpdate, SSpectatorAction, SSwing, SUseItem, SUseItemOn,
+    SRecipeBookChangeSettings, SRecipeBookSeenRecipe, SRenameItem, SSeenAdvancements,
+    SSelectBundleItem, SSelectTrade, SSetBeacon, SSetCarriedItem, SSetCommandBlock,
+    SSetCommandMinecart, SSetCreativeModeSlot, SSetJigsawBlock, SSetStructureBlock, SSignUpdate,
+    SSpectatorAction, SSwing, SUseItem, SUseItemOn,
 };
 
 use foton_protocol::utils::{ConnectionProtocol, PacketError, RawPacket};
@@ -375,7 +375,9 @@ impl ScheduledPlayPacket {
             | ScheduledPlayPacketKind::ClientCommand(_)
             | ScheduledPlayPacketKind::SeenAdvancements(_)
             | ScheduledPlayPacketKind::RecipeBookChangeSettings(_)
-            | ScheduledPlayPacketKind::RecipeBookSeenRecipe(_) => ScheduledPacketExecution::PlayerLocal,
+            | ScheduledPlayPacketKind::RecipeBookSeenRecipe(_) => {
+                ScheduledPacketExecution::PlayerLocal
+            }
             ScheduledPlayPacketKind::PlayerCommand(packet) => match packet.action {
                 PlayerCommandAction::StartSprinting
                 | PlayerCommandAction::StopSprinting
@@ -1275,16 +1277,16 @@ impl JavaConnection {
             play::S_SEEN_ADVANCEMENTS => scheduled(ScheduledPlayPacketKind::SeenAdvancements(
                 SSeenAdvancements::read_packet(data)?,
             )),
-            play::S_RECIPE_BOOK_CHANGE_SETTINGS => scheduled(
-                ScheduledPlayPacketKind::RecipeBookChangeSettings(
+            play::S_RECIPE_BOOK_CHANGE_SETTINGS => {
+                scheduled(ScheduledPlayPacketKind::RecipeBookChangeSettings(
                     SRecipeBookChangeSettings::read_packet(data)?,
-                ),
-            ),
-            play::S_RECIPE_BOOK_SEEN_RECIPE => scheduled(
-                ScheduledPlayPacketKind::RecipeBookSeenRecipe(SRecipeBookSeenRecipe::read_packet(
-                    data,
-                )?),
-            ),
+                ))
+            }
+            play::S_RECIPE_BOOK_SEEN_RECIPE => {
+                scheduled(ScheduledPlayPacketKind::RecipeBookSeenRecipe(
+                    SRecipeBookSeenRecipe::read_packet(data)?,
+                ))
+            }
             play::S_PING_REQUEST => scheduled(ScheduledPlayPacketKind::PingRequest(
                 SPingRequest::read_packet(data)?,
             )),

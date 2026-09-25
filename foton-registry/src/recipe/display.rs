@@ -176,9 +176,9 @@ impl SlotDisplay {
         match ingredient {
             Ingredient::Empty => Self::Empty,
             Ingredient::Tag(tag) => Self::Tag(tag.clone()),
-            Ingredient::Item(item) => Self::Composite(vec![Self::for_single_item(*item)]),
+            Ingredient::Item(item) => Self::Composite(vec![Self::for_single_item(item)]),
             Ingredient::Choice(items) => {
-                Self::Composite(items.iter().map(|item| Self::for_single_item(*item)).collect())
+                Self::Composite(items.iter().copied().map(Self::for_single_item).collect())
             }
         }
     }
@@ -232,7 +232,7 @@ impl WriteTo for SlotDisplay {
         VarInt(self.type_id()).write(writer)?;
         match self {
             Self::Empty | Self::AnyFuel => Ok(()),
-            Self::Item(item) => write_item(*item, writer),
+            Self::Item(item) => write_item(item, writer),
             Self::ItemStack(stack) => stack.write(writer),
             Self::Tag(tag) => tag.write(writer),
             Self::WithRemainder { input, remainder } => {
@@ -381,7 +381,7 @@ fn write_ingredient_contents(ingredient: &Ingredient, writer: &mut dyn Write) ->
     let count = i32::try_from(items.len()).map_err(|_| Error::other("too many items"))?;
     VarInt(count + 1).write(&mut writer)?;
     for item in items {
-        write_item(*item, &mut writer)?;
+        write_item(item, &mut writer)?;
     }
     Ok(())
 }
@@ -450,7 +450,11 @@ impl ShapedRecipe {
             Some(RecipeDisplay::CraftingShaped {
                 width: i32::try_from(self.width).ok()?,
                 height: i32::try_from(self.height).ok()?,
-                ingredients: self.pattern.iter().map(SlotDisplay::of_ingredient).collect(),
+                ingredients: self
+                    .pattern
+                    .iter()
+                    .map(SlotDisplay::of_ingredient)
+                    .collect(),
                 result,
                 crafting_station: SlotDisplay::Item(&vanilla_items::CRAFTING_TABLE),
             })
