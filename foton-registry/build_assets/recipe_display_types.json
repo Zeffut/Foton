@@ -1,0 +1,22 @@
+[
+  {
+    "id": 0,
+    "key": "minecraft:crafting_shapeless"
+  },
+  {
+    "id": 1,
+    "key": "minecraft:crafting_shaped"
+  },
+  {
+    "id": 2,
+    "key": "minecraft:furnace"
+  },
+  {
+    "id": 3,
+    "key": "minecraft:stonecutter"
+  },
+  {
+    "id": 4,
+    "key": "minecraft:smithing"
+  }
+]

@@ -271,7 +271,7 @@ impl DomainSwitchJob {
             return JobPoll::Finished;
         }
         self.source_data = None;
-        server.send_domain_teams(&self.player, Some(&self.source_domain), &self.target_domain);
+        server.send_domain_state(&self.player, Some(&self.source_domain), &self.target_domain);
         if !self.player.finish_pending_world_change(self.pending_token) {
             tracing::error!(
                 player = %self.player.gameprofile.name,

@@ -10,6 +10,7 @@
 //! (such as runtime recipes) expose their own synchronized write path.
 
 use crate::packet_tap;
+use std::borrow::Cow;
 use std::fmt::Write;
 use std::mem;
 use std::ptr::null_mut;
@@ -8185,6 +8186,10 @@ extern "system" fn recipe_add_shapeless(
                     item: result_item,
                     count,
                 },
+                // Bukkit's defaults: a recipe that sets neither is ungrouped
+                // and filed under misc, and it unlocks with a toast.
+                show_notification: true,
+                group: Cow::Borrowed(""),
             }),
     )
 }
@@ -8289,6 +8294,7 @@ extern "system" fn recipe_add_shaped(
             count,
         },
         true,
+        Cow::Borrowed(""),
     )))
 }
 
@@ -11176,6 +11182,84 @@ extern "system" fn is_sneaking(
     jboolean::from(player(&mut env, &uuid).is_some_and(|player| player.is_crouching()))
 }
 
+/// Parses the recipe keys a plugin handed over, dropping any that do not parse.
+///
+/// Paper drops them the same way: `bukkitKeysToMinecraftRecipes` keeps only
+/// the keys the recipe manager resolves, and a malformed key resolves to
+/// nothing.
+fn recipe_keys(env: &mut JNIEnv<'_>, keys: &JObjectArray<'_>) -> Vec<Identifier> {
+    read_string_array(env, keys)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|key| key.parse().ok())
+        .collect()
+}
+
+/// `foton.Native.discoverRecipes` -- Paper's `CraftHumanEntity.discoverRecipes`,
+/// which is `ServerPlayer.awardRecipes`.
+extern "system" fn discover_recipes(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    keys: JObjectArray<'_>,
+) -> jint {
+    let Some(player) = player(&mut env, &uuid) else {
+        return 0;
+    };
+    let keys = recipe_keys(&mut env, &keys);
+    i32::try_from(player.award_recipes(&keys)).unwrap_or(i32::MAX)
+}
+
+/// `foton.Native.undiscoverRecipes` -- `ServerPlayer.resetRecipes`.
+extern "system" fn undiscover_recipes(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    keys: JObjectArray<'_>,
+) -> jint {
+    let Some(player) = player(&mut env, &uuid) else {
+        return 0;
+    };
+    let keys = recipe_keys(&mut env, &keys);
+    i32::try_from(player.reset_recipes(&keys)).unwrap_or(i32::MAX)
+}
+
+/// `foton.Native.hasDiscoveredRecipe` -- `ServerRecipeBook.contains`.
+extern "system" fn has_discovered_recipe(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    key: JString<'_>,
+) -> jboolean {
+    let Some(player) = player(&mut env, &uuid) else {
+        return u8::from(false);
+    };
+    let known = env
+        .get_string(&key)
+        .ok()
+        .and_then(|key| key.to_str().ok()?.parse::<Identifier>().ok())
+        .is_some_and(|key| player.has_recipe(&key));
+    u8::from(known)
+}
+
+/// `foton.Native.discoveredRecipes` -- every key the book knows.
+extern "system" fn discovered_recipes(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jobjectArray {
+    let keys: Vec<String> = player(&mut env, &uuid)
+        .map(|player| {
+            player
+                .known_recipes()
+                .iter()
+                .map(ToString::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    string_array(&mut env, &keys)
+}
+
 extern "system" fn open_book(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) {
     let Some(player) = player(&mut env, &uuid) else {
         return;
@@ -11915,6 +11999,26 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "openBook",
             "(Ljava/lang/String;)V",
             open_book as *mut c_void,
+        ),
+        method(
+            "discoverRecipes",
+            "(Ljava/lang/String;[Ljava/lang/String;)I",
+            discover_recipes as *mut c_void,
+        ),
+        method(
+            "undiscoverRecipes",
+            "(Ljava/lang/String;[Ljava/lang/String;)I",
+            undiscover_recipes as *mut c_void,
+        ),
+        method(
+            "hasDiscoveredRecipe",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            has_discovered_recipe as *mut c_void,
+        ),
+        method(
+            "discoveredRecipes",
+            "(Ljava/lang/String;)[Ljava/lang/String;",
+            discovered_recipes as *mut c_void,
         ),
         method(
             "teleport",

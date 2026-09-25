@@ -19,6 +19,22 @@ public interface HumanEntity extends LivingEntity, AnimalTamer, org.bukkit.inven
 
     void closeInventory();
 
+    /** Adds the recipe to this human's recipe book; whether it was new. */
+    default boolean discoverRecipe(org.bukkit.NamespacedKey recipe) {
+        return this.discoverRecipes(java.util.Arrays.asList(recipe)) != 0;
+    }
+    /** Adds the recipes to the recipe book, ignoring the ones already known; how many were new. */
+    int discoverRecipes(java.util.Collection<org.bukkit.NamespacedKey> recipes);
+    /** Takes the recipe out of the recipe book; whether it was known. */
+    default boolean undiscoverRecipe(org.bukkit.NamespacedKey recipe) {
+        return this.undiscoverRecipes(java.util.Arrays.asList(recipe)) != 0;
+    }
+    /** Takes the recipes out of the recipe book; how many were known. */
+    int undiscoverRecipes(java.util.Collection<org.bukkit.NamespacedKey> recipes);
+    boolean hasDiscoveredRecipe(org.bukkit.NamespacedKey recipe);
+    /** An immutable set of every recipe in the recipe book. */
+    java.util.Set<org.bukkit.NamespacedKey> getDiscoveredRecipes();
+
     /** An action bar message, formatting kept. */
     default void sendActionBar(net.kyori.adventure.text.Component message) {
         if (message != null) foton.Native.sendActionBarComponent(getUniqueId().toString(), foton.FotonComponents.toJson(message));

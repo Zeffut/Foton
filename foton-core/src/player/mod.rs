@@ -23,6 +23,7 @@ pub mod player_data;
 pub mod player_data_storage;
 pub mod player_inventory;
 mod profile;
+pub mod recipe_book;
 mod shoulder;
 mod sleep;
 mod sleep_state;
@@ -349,6 +350,13 @@ pub struct Player {
     /// which is the same thing through a different door.
     advancements: SyncMutex<PlayerAdvancements>,
 
+    /// The recipes this player knows, which of them are still new, and how
+    /// each screen left its book.
+    ///
+    /// Vanilla parity: `ServerPlayer.recipeBook`. Saved with the domain's
+    /// player data, like the advancements that unlock most of it.
+    recipe_book: SyncMutex<recipe_book::ServerRecipeBook>,
+
     /// The player inventory as the advancement triggers last saw it.
     ///
     /// Vanilla parity: `AbstractContainerMenu.lastSlots`, which is what decides
@@ -630,6 +638,7 @@ impl Player {
             fishing: SyncMutex::new(None),
             raid_omen_position: SyncMutex::new(None),
             advancements: SyncMutex::new(PlayerAdvancements::new()),
+            recipe_book: SyncMutex::new(recipe_book::ServerRecipeBook::default()),
             last_seen_inventory: SyncMutex::new(
                 vec![ItemStack::empty(); PlayerInventory::CONTAINER_SIZE].into_boxed_slice(),
             ),

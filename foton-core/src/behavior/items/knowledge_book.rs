@@ -1,8 +1,8 @@
 //! The knowledge book.
 
 use foton_macros::item_behavior;
-use foton_registry::REGISTRY;
 use foton_registry::data_components::vanilla_components::RECIPES;
+use foton_registry::{REGISTRY, vanilla_items, vanilla_stat_types};
 
 use crate::behavior::{InteractionResult, ItemBehavior, UseItemContext};
 
@@ -10,14 +10,7 @@ use crate::behavior::{InteractionResult, ItemBehavior, UseItemContext};
 ///
 /// Vanilla parity: `KnowledgeBookItem.use`, including its ordering quirk -- the
 /// book is consumed before the list is checked, so an empty or broken one is
-/// still eaten.
-///
-/// Foton gap: Foton has no recipe book. There is no per-player set of known
-/// recipes, no persistence for one, and none of the eight recipe-book packets
-/// exist beyond their generated ids, so nothing can be unlocked or told to the
-/// client. Everything up to that point is ported: the component is read, the
-/// stack is consumed, every listed recipe is resolved against the registry, and
-/// an unresolvable one fails the use exactly as Vanilla's does.
+/// still eaten, and one unknown recipe fails the whole book.
 #[item_behavior]
 pub struct KnowledgeBookItem;
 
@@ -43,7 +36,10 @@ impl ItemBehavior for KnowledgeBookItem {
             }
         }
 
-        // Vanilla awards the recipes here through `Player.awardRecipes`.
+        context.player.award_recipes(&recipes);
+        context
+            .player
+            .award_stat_for(&vanilla_stat_types::USED, &*vanilla_items::KNOWLEDGE_BOOK);
         InteractionResult::Success
     }
 }

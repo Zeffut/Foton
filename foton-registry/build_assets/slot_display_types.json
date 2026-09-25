@@ -1,0 +1,46 @@
+[
+  {
+    "id": 0,
+    "key": "minecraft:empty"
+  },
+  {
+    "id": 1,
+    "key": "minecraft:any_fuel"
+  },
+  {
+    "id": 2,
+    "key": "minecraft:with_any_potion"
+  },
+  {
+    "id": 3,
+    "key": "minecraft:only_with_component"
+  },
+  {
+    "id": 4,
+    "key": "minecraft:item"
+  },
+  {
+    "id": 5,
+    "key": "minecraft:item_stack"
+  },
+  {
+    "id": 6,
+    "key": "minecraft:tag"
+  },
+  {
+    "id": 7,
+    "key": "minecraft:dyed"
+  },
+  {
+    "id": 8,
+    "key": "minecraft:smithing_trim"
+  },
+  {
+    "id": 9,
+    "key": "minecraft:with_remainder"
+  },
+  {
+    "id": 10,
+    "key": "minecraft:composite"
+  }
+]

@@ -15,6 +15,7 @@
 pub mod entity;
 pub mod inventory;
 pub mod item;
+pub mod recipe;
 pub mod world;
 
 use foton_registry::advancement::TriggerInstance;

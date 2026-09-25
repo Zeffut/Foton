@@ -736,6 +736,12 @@ public final class Native {
     public static native int entitySurroundings(String uuid);
     public static native void clearPlayerTitle(String uuid);
     public static native int playerCooldown(String uuid, String group);
+    /** Unlocks recipes in the player's recipe book; returns how many book entries were new. */
+    public static native int discoverRecipes(String uuid, String[] keys);
+    /** Forgets recipes; returns how many book entries were removed. */
+    public static native int undiscoverRecipes(String uuid, String[] keys);
+    public static native boolean hasDiscoveredRecipe(String uuid, String key);
+    public static native String[] discoveredRecipes(String uuid);
     public static native void setPlayerCooldown(String uuid, String group, int ticks);
     public static native void setPlayerItemCooldown(String uuid, String item, int ticks);
     /** Vanilla's Input flags from the player's last input packet. */

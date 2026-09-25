@@ -23,12 +23,12 @@ use crate::{
 
 use super::{
     ENDER_CHEST_SLOTS, Player, PlayerRespawnConfig, abilities::Abilities, experience::Experience,
-    food_data::FoodData, player_inventory::PlayerInventory,
+    food_data::FoodData, player_inventory::PlayerInventory, recipe_book::PersistentRecipeBook,
 };
 
 /// Current data version for player saves.
 /// Increment when making breaking changes to the format.
-pub const PLAYER_DATA_VERSION: i32 = 11;
+pub const PLAYER_DATA_VERSION: i32 = 12;
 
 /// Persistent player data saved by Foton's storage backend.
 ///
@@ -155,6 +155,10 @@ pub struct PersistentPlayerData {
     /// against the registry that produced it, and a save has to survive a
     /// registry growing a new entry in the middle.
     pub statistics: Vec<PersistentStatistic>,
+
+    /// Vanilla parity: the `recipeBook` tag, domain-scoped like the
+    /// advancements that unlock most of it.
+    pub recipe_book: PersistentRecipeBook,
 
     /// The half of the save every living entity has, as a written NBT compound.
     ///
@@ -375,6 +379,7 @@ impl PersistentPlayerData {
             ender_pearls,
             advancements,
             statistics,
+            recipe_book: player.saved_recipe_book(),
             living_nbt,
         }
     }
@@ -545,6 +550,7 @@ impl Player {
         self.set_score(0);
         self.set_seen_credits(false);
         self.reset_advancements();
+        self.reset_recipe_book();
         self.load_statistics([]);
         // Vanilla parity: the `this.wardenSpawnTracker.reset()` of `ServerPlayer.reset`,
         // which is what makes dying to a warden clear the way to the next one.
@@ -745,6 +751,7 @@ impl PersistentPlayerData {
         }
         self.apply_advancements(player);
         self.apply_statistics(player);
+        player.load_recipe_book(&self.recipe_book);
         player.set_enchantment_seed(self.enchantment_seed);
         player.set_score(self.score);
         player.set_seen_credits(self.seen_credits);

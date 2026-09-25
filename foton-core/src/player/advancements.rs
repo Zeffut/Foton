@@ -251,9 +251,10 @@ impl Player {
         if rewards.experience != 0 {
             self.give_experience_points(rewards.experience);
         }
-        // The recipe rewards are what unlock a recipe in the recipe book.
-        // Foton has no recipe book yet, so there is nothing to unlock into;
-        // the criterion itself is still awarded, so the progress is not lost.
+        // Vanilla parity: `player.awardRecipesByKey(this.recipes)`.
+        if !rewards.recipes.is_empty() {
+            self.award_recipes(rewards.recipes);
+        }
         if !rewards.loot.is_empty() || rewards.function.is_some() {
             log::warn!(
                 "advancement reward carries loot or a function, which Foton does not grant yet"
