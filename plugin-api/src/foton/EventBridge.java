@@ -183,24 +183,32 @@ public final class EventBridge {
 
     /** A player joined. Returns what to announce, or null to announce nothing. */
     public static String fireJoin(String uuid, String message) {
-        PlayerJoinEvent event = new PlayerJoinEvent(player(uuid), message);
+        PlayerJoinEvent event = new PlayerJoinEvent(player(uuid), FotonText.component(message));
         dispatch(event);
-        return event.getJoinMessage();
+        return FotonText.json(event.joinMessage());
     }
 
+    /** Answers the kick message as JSON text, or an empty string to admit. */
     public static String fireLogin(String uuid) {
         PlayerLoginEvent event = new PlayerLoginEvent(player(uuid));
         dispatch(event);
-        return event.isCancelled() ? event.getKickMessage() : "";
+        if (!event.isCancelled()) return "";
+        net.kyori.adventure.text.Component reason = event.kickMessage();
+        return FotonText.json(reason == null ? net.kyori.adventure.text.Component.empty() : reason);
     }
 
     public static String fireAsyncPreLogin(String name, String uuid, String address) {
         try {
             org.bukkit.event.player.AsyncPlayerPreLoginEvent event = new org.bukkit.event.player.AsyncPlayerPreLoginEvent(
                 name, UUID.fromString(uuid), java.net.InetAddress.getByName(address));
-            if (FotonServer.isNameBanned(name) || FotonServer.isIpBanned(address)) {
+            org.bukkit.BanEntry<?> ban = FotonServer.profileBan(UUID.fromString(uuid), name);
+            org.bukkit.BanEntry<?> ipBan = ban == null ? FotonServer.ipBan(address) : null;
+            if (ban != null) {
                 event.disallow(org.bukkit.event.player.AsyncPlayerPreLoginEvent.Result.KICK_BANNED,
-                    "You are banned from this server.");
+                    FotonProfileBanList.kickMessage(ban, false));
+            } else if (ipBan != null) {
+                event.disallow(org.bukkit.event.player.AsyncPlayerPreLoginEvent.Result.KICK_BANNED,
+                    FotonProfileBanList.kickMessage(ipBan, true));
             } else {
                 dispatch(event);
             }
@@ -322,8 +330,8 @@ public final class EventBridge {
     }
 
     public static boolean fireInventoryClick(String uuid, String item, String cursor, String click, int rawSlot) {
-        org.bukkit.event.inventory.InventoryClickEvent event =
-            new org.bukkit.event.inventory.InventoryClickEvent(player(uuid), FotonInventory.decode(item), FotonInventory.decode(cursor), clickType(click), rawSlot);
+        org.bukkit.event.inventory.InventoryClickEvent event = EventRelay.clickEvent(player(uuid),
+            FotonInventory.decode(item), FotonInventory.decode(cursor), clickType(click), rawSlot);
         dispatch(event);
         return !event.isCancelled();
     }
@@ -445,12 +453,12 @@ public final class EventBridge {
         return record.event();
     }
 
-    public static boolean fireEntityDamage(String damager, String entity, String cause) {
+    public static boolean fireEntityDamage(String damager, String entity, String cause, boolean critical) {
         org.bukkit.entity.Entity target = FotonEntity.handle(Native.parse(entity));
         org.bukkit.event.entity.EntityDamageByEntityEvent event =
             new org.bukkit.event.entity.EntityDamageByEntityEvent(
                 FotonEntity.handle(Native.parse(damager)), target,
-                damageCause(cause));
+                damageCause(cause), critical);
         dispatch(event);
         if (target instanceof org.bukkit.entity.LivingEntity) {
             LAST_DAMAGE.put(target.getUniqueId(), new DamageRecord(event, Bukkit.getCurrentTick()));
@@ -503,10 +511,10 @@ public final class EventBridge {
 
     /** A player left. Returns what to announce, or null to announce nothing. */
     public static String fireQuit(String uuid, String message) {
-        PlayerQuitEvent event = new PlayerQuitEvent(player(uuid), message);
+        PlayerQuitEvent event = new PlayerQuitEvent(player(uuid), FotonText.component(message));
         dispatch(event);
         FotonMessenger.forgetPlayer(uuid);
-        return event.getQuitMessage();
+        return FotonText.json(event.quitMessage());
     }
 
     /** Somebody asked for completions. Returns the list a listener claimed,
@@ -608,10 +616,7 @@ public final class EventBridge {
 
     /** A player is breaking a block. Returns false when a plugin stopped it. */
     public static boolean fireBlockBreak(String uuid, int x, int y, int z, String world) {
-        BlockBreakEvent event =
-            new BlockBreakEvent(new FotonBlock(new FotonWorld(world), x, y, z), player(uuid));
-        dispatch(event);
-        return !event.isCancelled();
+        return EventRelay.fireBlockBreak(uuid, world, x + " " + y + " " + z, "0").startsWith("0");
     }
 
     /** A player is placing a block. Returns false when a plugin stopped it. */
@@ -703,9 +708,15 @@ public final class EventBridge {
         dispatch(event);
         return !event.isCancelled();
     }
-    public static boolean fireEntityResurrect(String uuid) {
+    /** Returns whether the entity is saved. Without a totem the event starts
+     * cancelled, and a plugin that un-cancels it grants the life anyway. */
+    public static boolean fireEntityResurrect(String uuid, String hand, boolean cancelled) {
+        org.bukkit.entity.Entity entity = FotonEntity.handle(Native.parse(uuid));
+        org.bukkit.entity.LivingEntity living = entity instanceof org.bukkit.entity.LivingEntity alive
+            ? alive : new FotonLivingEntity(java.util.UUID.fromString(uuid));
         org.bukkit.event.entity.EntityResurrectEvent event = new org.bukkit.event.entity.EntityResurrectEvent(
-            new FotonLivingEntity(java.util.UUID.fromString(uuid)));
+            living, hand.isEmpty() ? null : org.bukkit.inventory.EquipmentSlot.valueOf(hand));
+        event.setCancelled(cancelled);
         dispatch(event);
         return !event.isCancelled();
     }

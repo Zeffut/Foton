@@ -40,6 +40,7 @@ mod forward;
 mod item_components;
 mod natives;
 mod packet_tap;
+mod relay;
 mod scoreboard_natives;
 
 /// The class the Java side exposes to this one.

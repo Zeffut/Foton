@@ -49,6 +49,8 @@ final class Services {
         }
 
         @Override public java.io.File getDataFolder() { return null; }
+        @Override public void saveConfig() {}
+        @Override public void reloadConfig() {}
         @Override public org.bukkit.plugin.PluginDescriptionFile getDescription() { return null; }
         @Override public org.bukkit.Server getServer() { return null; }
         @Override public java.util.logging.Logger getLogger() { return null; }

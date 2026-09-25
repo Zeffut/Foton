@@ -13,7 +13,7 @@ import org.bukkit.event.HandlerList;
  * left those listeners silent for the case they were written for.
  */
 public class CreatureSpawnEvent extends EntitySpawnEvent implements Cancellable {
-    public enum SpawnReason { NATURAL, SPAWNER, SPAWNER_EGG, DISPENSE_EGG, EGG, BREEDING, COMMAND, CUSTOM, DEFAULT }
+    public enum SpawnReason { NATURAL, SPAWNER, SPAWNER_EGG, DISPENSE_EGG, EGG, BREEDING, BEEHIVE, COMMAND, CUSTOM, DEFAULT }
     private final Location location;
     private final SpawnReason reason;
     private static final HandlerList HANDLERS = new HandlerList();

@@ -28,6 +28,7 @@ mod dynamic_name;
 mod end_crystal_item;
 mod ender_eye;
 mod ender_pearl;
+mod entity_place;
 mod firework_rocket;
 mod fishing_rod;
 mod flint_and_steel;

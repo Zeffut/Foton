@@ -146,13 +146,13 @@ public interface World extends org.bukkit.generator.WorldInfo, RegionAccessor, o
     default boolean isChunkGenerated(int x, int z) { return isChunkLoaded(x, z); }
     default String getGameRuleValue(String rule) { return null; }
     default <T> boolean setGameRule(GameRule<T> rule, T value) {
-        return rule != null && value != null && foton.Native.setWorldGameRule(getName(), rule.getName(), String.valueOf(value));
+        return rule != null && value != null && foton.Native.setWorldGameRule(getName(), rule.getKey().toString(), rule.toStored(value));
     }
     default <T> T getGameRuleDefault(GameRule<T> rule) {
-        return rule == null ? null : rule.parse(foton.Native.worldGameRuleDefault(getName(), rule.getName()));
+        return rule == null ? null : rule.parse(foton.Native.worldGameRuleDefault(getName(), rule.getKey().toString()));
     }
     default <T> T getGameRuleValue(GameRule<T> rule) {
-        return rule == null ? null : rule.parse(getGameRuleValue(rule.getName()));
+        return rule == null ? null : rule.parse(getGameRuleValue(rule.getKey().toString()));
     }
     default String[] getGameRules() {
         return java.util.Arrays.stream(GameRule.values()).map(GameRule::getName).toArray(String[]::new);

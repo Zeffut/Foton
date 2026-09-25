@@ -313,6 +313,11 @@ impl Merchant for MerchantState {
         ExperienceOrbEntity::award(&world, position + glam::DVec3::new(0.0, 0.5, 0.0), pop_xp);
     }
 
+    fn trader(&self) -> Option<Uuid> {
+        let world = self.world.upgrade()?;
+        Some(world.get_entity_by_id(self.entity_id)?.uuid())
+    }
+
     fn notify_trade_updated(&self, _result: &ItemStack) {
         // Vanilla plays the villager's yes/no grunt here through
         // `AbstractVillager.notifyTradeUpdated`. The sound needs the mob's

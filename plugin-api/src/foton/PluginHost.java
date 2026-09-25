@@ -31,8 +31,8 @@ public final class PluginHost {
     private static final Map<String, org.bukkit.plugin.java.PluginClassLoader> pluginLoaders = new HashMap<>();
     /** Plugins Foton ships because the upstream one cannot run here, keyed by lower-case name. */
     private static final Set<String> bundledNames = new HashSet<>();
-    /** Where plugins keep their data, bundled ones included. */
-    private static File pluginsDirectory;
+    /** Where plugins keep their data, bundled ones included; the update folder lives in it. */
+    private static volatile File pluginsDirectory = new File("plugins");
 
     private PluginHost() {}
 
@@ -42,10 +42,19 @@ public final class PluginHost {
         return enableAll();
     }
 
+    /** bukkit.yml's default `settings.update-folder`. */
+    public static final String UPDATE_FOLDER = "update";
+
+    /** Where a plugin stages a new copy of its own jar for the next start. */
+    public static File updateFolder() {
+        return new File(pluginsDirectory, UPDATE_FOLDER);
+    }
+
     /** Discovers and loads plugins, invoking only their onLoad lifecycle phase. */
     public static int loadAllOnLoad(String directory) {
         ensureServer();
-        pluginsDirectory = new File(directory);
+        pluginsDirectory = new File(directory).getAbsoluteFile();
+        applyUpdates(pluginsDirectory);
         List<File> ordered = orderedJars(pluginsDirectory);
         int loadedNow = 0;
         for (File jar : ordered) {
@@ -80,6 +89,27 @@ public final class PluginHost {
     private static void ensureServer() {
         if (org.bukkit.Bukkit.getServer() == null) {
             org.bukkit.Bukkit.setServer(new FotonServer());
+        }
+    }
+
+    /** SimplePluginManager's update step: a jar in the update folder with the
+     * same file name as a plugin jar replaces it before anything is loaded,
+     * and is removed once copied. A self-updating plugin stages its download
+     * there because the running jar cannot be overwritten safely. */
+    private static void applyUpdates(File dir) {
+        File updates = new File(dir, UPDATE_FOLDER);
+        File[] jars = dir.listFiles((d, name) -> name.endsWith(".jar"));
+        if (jars == null || !updates.isDirectory()) return;
+        for (File jar : jars) {
+            File staged = new File(updates, jar.getName());
+            if (!staged.isFile()) continue;
+            try {
+                Files.copy(staged.toPath(), jar.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                Files.delete(staged.toPath());
+                System.out.println("[host] updated " + jar.getName() + " from " + UPDATE_FOLDER + "/");
+            } catch (java.io.IOException error) {
+                System.out.println("[host] could not apply update for " + jar.getName() + ": " + error);
+            }
         }
     }
 
@@ -323,14 +353,18 @@ public final class PluginHost {
         org.bukkit.Bukkit.getMessenger().unregisterIncomingPluginChannel(plugin);
         org.bukkit.Bukkit.getMessenger().unregisterOutgoingPluginChannel(plugin);
         EventBridge.unregister(plugin);
+        // JavaPlugin.setEnabled(false) clears the flag before calling
+        // onDisable, so a plugin asking the scheduler for one last task from
+        // there is refused and can fall back to doing it inline.
+        if (plugin instanceof org.bukkit.plugin.java.JavaPlugin java) {
+            java.setEnabled(false);
+        }
         try {
             plugin.onDisable();
         } catch (Throwable error) {
             System.out.println("[host] " + plugin.getName() + " failed to disable: " + error);
         }
-        if (plugin instanceof org.bukkit.plugin.java.JavaPlugin java) {
-            java.setEnabled(false);
-        }
+        org.bukkit.Bukkit.getScheduler().cancelTasks(plugin);
         org.bukkit.plugin.java.PluginClassLoader loader =
             pluginLoaders.remove(plugin.getName().toLowerCase(java.util.Locale.ROOT));
         if (loader != null) {

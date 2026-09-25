@@ -11,11 +11,15 @@ use foton_protocol::packets::game::CMerchantOffers;
 use foton_registry::vanilla_menu_types;
 
 use crate::entity::Entity as _;
+use crate::event::{Event as _, PlayerPurchaseEvent};
 use crate::inventory::container::{ResultContainer, SimpleContainer};
 use crate::inventory::prelude::*;
 use crate::inventory::slots::{MerchantHandler, NO_TRADE_SELECTED};
 use crate::player::player_inventory::PlayerInventory;
 use crate::trading::Merchant;
+
+/// The result slot's index in the trading screen.
+const RESULT_SLOT: usize = 2;
 
 /// Builds the trading menu for `merchant`.
 #[must_use]
@@ -68,6 +72,77 @@ pub struct MerchantKind {
 }
 
 impl MerchantKind {
+    /// Sends the merchant's offers to the screen.
+    ///
+    /// Vanilla parity: the offers half of `Merchant.openTradingScreen`.
+    fn send_offers(&self, behavior: &MenuBehavior, player: &Player) {
+        let offers = self.merchant.offers().lock().clone();
+        if offers.is_empty() {
+            return;
+        }
+        player.send_packet(CMerchantOffers {
+            container_id: i32::from(behavior.container_id()),
+            offers,
+            villager_level: self.merchant.merchant_level(),
+            villager_xp: self.merchant.villager_xp(),
+            show_progress: self.merchant.show_progress_bar(),
+            can_restock: self.merchant.can_restock(),
+        });
+    }
+
+    /// Asks plugins whether the trade now set up may be taken. True when
+    /// there is none to take.
+    ///
+    /// Paper parity: `PlayerPurchaseEvent` from `MerchantResultSlot.onTake`,
+    /// asked before the take here so that a refusal leaves nothing to undo.
+    /// A refusal sends the offers again, as Paper does, so the screen shows
+    /// the stock as it really is.
+    fn purchase_allowed(
+        &self,
+        behavior: &MenuBehavior,
+        guard: &ContainerLockGuard,
+        player: &Player,
+    ) -> bool {
+        let Some(offer) = self.handler.current_trade(guard) else {
+            return true;
+        };
+        let offers = self.merchant.offers().lock().to_vec();
+        let mut event =
+            PlayerPurchaseEvent::new(player.uuid(), self.merchant.trader(), offer, offers);
+        player.fire_event(&mut event);
+        if !event.is_cancelled() {
+            return true;
+        }
+        self.send_offers(behavior, player);
+        false
+    }
+
+    /// Whether `click` takes from the result slot, and so buys.
+    fn takes_result(behavior: &MenuBehavior, guard: &ContainerLockGuard, click: Click) -> bool {
+        match click {
+            Click::Pickup { slot, .. } => {
+                if slot != RESULT_SLOT {
+                    return false;
+                }
+                // Vanilla takes the result into an empty hand, or onto a
+                // matching stack with room for all of it.
+                let carried = behavior.carried();
+                let Some(result) = behavior
+                    .slots()
+                    .get(RESULT_SLOT)
+                    .map(|view| view.get_item(guard).clone())
+                else {
+                    return false;
+                };
+                carried.is_empty()
+                    || (ItemStack::is_same_item_same_components(carried, &result)
+                        && carried.count() + result.count() <= carried.max_stack_size())
+            }
+            Click::Swap { slot, .. } | Click::Throw { slot, .. } => slot == RESULT_SLOT,
+            _ => false,
+        }
+    }
+
     /// The container holding the two payment slots.
     #[cfg(test)]
     pub(crate) fn payment_id_for_tests(&self) -> ContainerId {
@@ -100,19 +175,7 @@ impl MenuKind for MerchantKind {
         player: &Player,
     ) {
         self.merchant.set_trading_player(Some(player.uuid()));
-
-        let offers = self.merchant.offers().lock().clone();
-        if !offers.is_empty() {
-            player.send_packet(CMerchantOffers {
-                container_id: i32::from(behavior.container_id()),
-                offers,
-                villager_level: self.merchant.merchant_level(),
-                villager_xp: self.merchant.villager_xp(),
-                show_progress: self.merchant.show_progress_bar(),
-                can_restock: self.merchant.can_restock(),
-            });
-        }
-
+        self.send_offers(behavior, player);
         self.handler.update_result(guard);
     }
 
@@ -136,6 +199,36 @@ impl MenuKind for MerchantKind {
     ) {
         self.selection_hint.store(selected_trade, Ordering::Relaxed);
         self.handler.update_result(guard);
+    }
+
+    fn on_slot_clicked(
+        &mut self,
+        behavior: &mut MenuBehavior,
+        guard: &mut ContainerLockGuard,
+        click: Click,
+        player: &Player,
+    ) -> ClickOutcome {
+        if Self::takes_result(behavior, guard, click)
+            && !self.purchase_allowed(behavior, guard, player)
+        {
+            return ClickOutcome::Consume;
+        }
+        ClickOutcome::Fallthrough
+    }
+
+    /// A shift-click on the result buys once per pass of vanilla's loop, so
+    /// each pass asks plugins; a refusal ends the loop with nothing moved.
+    fn quick_move(
+        &mut self,
+        behavior: &mut MenuBehavior,
+        guard: &mut ContainerLockGuard,
+        slot_index: usize,
+        player: &Player,
+    ) -> Option<ItemStack> {
+        if slot_index != RESULT_SLOT || self.purchase_allowed(behavior, guard, player) {
+            return None;
+        }
+        Some(ItemStack::empty())
     }
 
     /// Vanilla parity: `MerchantMenu.canTakeItemForPickAll`, which answers false

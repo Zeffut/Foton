@@ -6,6 +6,7 @@ use foton_registry::data_components::components::ItemDamageFunction;
 use foton_registry::data_components::vanilla_components::{
     self, BLOCKS_ATTACKS, DEATH_PROTECTION, KINETIC_WEAPON,
 };
+use foton_registry::equipment::EquipmentSlotType;
 use foton_registry::particle_type::{BlockParticleOption, ParticleData};
 use foton_registry::vanilla_particle_types;
 
@@ -15,7 +16,7 @@ use crate::behavior::ITEM_BEHAVIORS;
 use crate::behavior::item::apply_one_consume_effect;
 use crate::entity::kill_score;
 use crate::event::EntityDeathEvent;
-use crate::event::{EntityResurrectEvent, Event};
+use crate::event::{EntityDamageEvent, EntityResurrectEvent, Event, PlayerArmorChangeEvent};
 use crate::inventory::lock::{ContainerId, ContainerLockGuard, ContainerRef};
 use crate::physics::collision;
 use crate::player::player_inventory::PlayerInventory;
@@ -883,6 +884,38 @@ pub trait LivingEntity: Entity {
         self.living_hurt_server(world, source, amount)
     }
 
+    /// Spends the invulnerability frames on `damage`, answering whether the
+    /// hit counts as a full one and the amount that lands, or `None` when
+    /// nothing does.
+    ///
+    /// Paper parity: damage no entity is behind is first offered to plugins
+    /// as `EntityDamageEvent`, on the amount that would land, before the
+    /// frames are spent; entity damage has its own by-entity event.
+    fn land_damage(
+        &self,
+        world: &World,
+        source: &DamageSource,
+        damage: f32,
+    ) -> Option<(bool, f32)> {
+        let bypass = source.bypasses_cooldown();
+        let mut plugin_damage = None;
+        if let Some(cause) = EntityDamageEvent::environmental_cause(source) {
+            let landing = self.living_base().preview_damage_cooldown(damage, bypass)?;
+            let mut event = EntityDamageEvent::new(self.uuid(), cause, f64::from(landing));
+            world.fire_event(&mut event);
+            if Event::is_cancelled(&event) {
+                return None;
+            }
+            plugin_damage = Some(event.damage() as f32);
+        }
+        let (took_full_damage, landed) =
+            self.living_base().apply_damage_cooldown(damage, bypass)?;
+        Some((
+            took_full_damage,
+            plugin_damage.map_or(landed, |changed| changed.max(0.0)),
+        ))
+    }
+
     /// Runs the shared body of [`Self::hurt_server`].
     /// The shared part of vanilla `LivingEntity.hurtServer`.
     fn living_hurt_server(&self, world: &World, source: &DamageSource, amount: f32) -> bool {
@@ -950,9 +983,7 @@ pub trait LivingEntity: Entity {
             damage = f32::MAX;
         }
 
-        let Some((took_full_damage, effective_amount)) = self
-            .living_base()
-            .apply_damage_cooldown(damage, source.bypasses_cooldown())
+        let Some((took_full_damage, effective_amount)) = self.land_damage(world, source, damage)
         else {
             return false;
         };
@@ -1191,14 +1222,18 @@ pub trait LivingEntity: Entity {
         let hand = [InteractionHand::MainHand, InteractionHand::OffHand]
             .into_iter()
             .find(|hand| self.get_item_in_hand(*hand).get(DEATH_PROTECTION).is_some());
-        let Some(hand) = hand else {
-            return false;
-        };
-        let mut event = EntityResurrectEvent::new(self.uuid());
+        // Paper parity: asked even with no totem, starting cancelled.
+        let mut event = EntityResurrectEvent::new(self.uuid(), hand);
         world.fire_event(&mut event);
         if Event::is_cancelled(&event) {
             return false;
         }
+        let Some(hand) = hand else {
+            // A plugin granted the life: no totem to spend, no totem effects.
+            self.set_health(1.0);
+            self.broadcast_entity_event(EntityStatus::ProtectedFromDeath);
+            return true;
+        };
         let stack = self.get_item_in_hand(hand);
         // Vanilla parity: the bare `itemStack.shrink(1)`, which has no creative
         // branch. `copy_with_count(0)` is not empty enough: the stack still
@@ -2479,7 +2514,17 @@ pub trait LivingEntity: Entity {
             return;
         };
         if active.remaining_ticks() <= 0 {
+            let mut replacement = None;
+            if let Some(player) = self.as_player() {
+                let Some(decision) = player.fire_item_consume(hand, item) else {
+                    return;
+                };
+                (item, replacement) = decision;
+            }
             item = behavior.finish_using(&mut item, &world, user);
+            if let Some(replacement) = replacement {
+                item = replacement;
+            }
             self.stop_using_item();
         }
 
@@ -2957,6 +3002,25 @@ pub trait LivingEntity: Entity {
             self.on_equipment_changed(*slot, previous, current);
             self.living_base()
                 .refresh_equipment_attribute_modifiers(*slot, current);
+        }
+
+        // Paper parity: `PlayerArmorChangeEvent`, fired from this same
+        // comparison for a player's four armor slots.
+        if let Some(player) = self.as_player()
+            && let Some(world) = self.level()
+        {
+            for (slot, previous, current) in &changes {
+                if slot.slot_type() != EquipmentSlotType::HumanoidArmor {
+                    continue;
+                }
+                let mut event = PlayerArmorChangeEvent::new(
+                    player.gameprofile.id,
+                    *slot,
+                    previous.clone(),
+                    current.clone(),
+                );
+                world.fire_event(&mut event);
+            }
         }
 
         let main_hand = changes

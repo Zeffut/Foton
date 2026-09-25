@@ -82,6 +82,9 @@ public interface Player extends HumanEntity, org.bukkit.OfflinePlayer {
     default void removePotionEffect(org.bukkit.potion.PotionEffectType type) { }
     default org.bukkit.attribute.AttributeInstance getAttribute(org.bukkit.attribute.Attribute attribute) { return null; }
     default void updateCommands() { }
+    /** This player's progress on an advancement. */
+    org.bukkit.advancement.AdvancementProgress getAdvancementProgress(org.bukkit.advancement.Advancement advancement);
+
     default com.destroystokyo.paper.profile.PlayerProfile getPlayerProfile() {
         return null;
     }

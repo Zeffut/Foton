@@ -13,6 +13,7 @@ pub mod food_data;
 /// Game mode specific logic for player interactions.
 pub mod game_mode;
 mod health_sync;
+mod item_consume;
 mod item_cooldowns;
 mod lifecycle;
 mod map_sync;
@@ -1707,6 +1708,10 @@ impl Entity for Player {
         let Some(old_vehicle) = old_vehicle else {
             return;
         };
+        // A plugin kept the player on.
+        if self.vehicle().is_some() {
+            return;
+        }
 
         self.remove_active_effects_for_vehicle(old_vehicle.as_ref());
         self.send_packet(CSetPassengers::new(

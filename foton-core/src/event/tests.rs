@@ -5,6 +5,7 @@ use std::sync::Arc;
 use foton_utils::Identifier;
 use foton_utils::downcast::{DowncastType, DowncastTypeKey};
 use foton_utils::locks::SyncMutex;
+use foton_utils::types::InteractionHand;
 
 use super::{
     EntityResurrectEvent, Event, EventBus, EventPriority, ThunderChangeEvent, WeatherChangeEvent,
@@ -216,7 +217,8 @@ fn cancelled_resurrection_skips_consumption_listener() {
         move |_| *consumed_by_listener.lock() = true,
     );
 
-    let mut event = EntityResurrectEvent::new(uuid::Uuid::from_u128(42));
+    let mut event =
+        EntityResurrectEvent::new(uuid::Uuid::from_u128(42), Some(InteractionHand::MainHand));
     bus.fire(&mut event);
 
     assert!(event.is_cancelled());

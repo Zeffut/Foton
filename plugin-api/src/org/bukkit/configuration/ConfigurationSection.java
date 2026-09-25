@@ -26,6 +26,10 @@ public interface ConfigurationSection {
 
     boolean contains(String path);
 
+    /** Whether the path holds a value, counting the defaults only when
+     * `ignoreDefault` is false. `contains(path)` is `contains(path, false)`. */
+    boolean contains(String path, boolean ignoreDefault);
+
     boolean isSet(String path);
 
     String getCurrentPath();

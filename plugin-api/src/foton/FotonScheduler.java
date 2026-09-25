@@ -74,7 +74,21 @@ public final class FotonScheduler implements BukkitScheduler {
         return offTick(plugin, task, Math.max(0, delayTicks), Math.max(1, periodTicks));
     }
 
+    /** CraftScheduler's check: a disabled plugin -- one inside its own
+     * `onDisable`, most often -- is refused rather than given a task nothing
+     * will ever cancel. Plugins catch this to do the work inline instead. */
+    static void validate(Plugin plugin) {
+        if (plugin == null) {
+            throw new IllegalArgumentException("Plugin cannot be null");
+        }
+        if (!plugin.isEnabled()) {
+            throw new org.bukkit.plugin.IllegalPluginAccessException(
+                "Plugin attempted to register task while disabled");
+        }
+    }
+
     private static BukkitTask offTick(Plugin plugin, Runnable body, long delay, long period) {
+        validate(plugin);
         Async task = new Async(nextId.getAndIncrement(), plugin, period > 0);
         active.put(task.id, task);
         Runnable guarded = () -> {
@@ -207,6 +221,7 @@ public final class FotonScheduler implements BukkitScheduler {
     }
 
     private static Scheduled submit(Plugin plugin, Runnable body, long delay, long period) {
+        validate(plugin);
         Scheduled task = new Scheduled(nextId.getAndIncrement(), plugin, body, delay, period);
         active.put(task.id, task);
         pending.add(task);

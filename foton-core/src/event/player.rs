@@ -891,7 +891,7 @@ impl PlayerDeathEvent {
 /// A player has completed protocol login and may enter the world.
 pub struct PlayerLoginEvent {
     player: Arc<Player>,
-    kick_message: Option<String>,
+    kick_message: Option<TextComponent>,
 }
 
 /// A player attempted to interact with an entity.
@@ -1010,11 +1010,11 @@ impl PlayerLoginEvent {
     }
     #[must_use]
     /// Returns the denial message, if admission was denied.
-    pub fn kick_message(&self) -> Option<&str> {
-        self.kick_message.as_deref()
+    pub const fn kick_message(&self) -> Option<&TextComponent> {
+        self.kick_message.as_ref()
     }
     /// Denies admission with a kick message.
-    pub fn deny(&mut self, message: String) {
+    pub fn deny(&mut self, message: TextComponent) {
         self.kick_message = Some(message);
     }
 }

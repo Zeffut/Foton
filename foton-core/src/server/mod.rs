@@ -10,6 +10,8 @@ mod run_loop;
 mod service_keys;
 /// The tick rate manager for the server.
 pub mod tick_rate_manager;
+/// Paper's one, five and fifteen minute TPS averages.
+pub mod tps_average;
 mod world_tick_workers;
 /// Domain-aware loaded world map.
 pub mod worlds;
@@ -730,15 +732,11 @@ impl Server {
 
     /// Returns a cached statistic for the player's last active domain.
     #[must_use]
-    pub fn offline_statistic(&self, uuid: Uuid, statistic: &str) -> i32 {
+    pub fn offline_statistic(&self, uuid: Uuid, custom_stat: &Identifier) -> i32 {
         let Some(data) = self.global_player_data(uuid) else {
             return 0;
         };
-        let value = match statistic {
-            "JUMP" => "minecraft:jump",
-            "TIME_SINCE_REST" => "minecraft:time_since_rest",
-            _ => return 0,
-        };
+        let value = custom_stat.to_string();
         data.statistics
             .iter()
             .find(|entry| entry.stat_type == "minecraft:custom" && entry.value == value)

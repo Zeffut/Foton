@@ -91,7 +91,11 @@ public final class FotonBlock implements Block {
 
     @Override
     public BlockData getBlockData() {
-        String text = world == null ? null : Native.blockState(world.getName(), x, y, z);
+        return dataOf(world == null ? null : Native.blockState(world.getName(), x, y, z));
+    }
+
+    /** The typed Bukkit view of a block state written `minecraft:name[props]`. */
+    static BlockData dataOf(String text) {
         if (text != null && text.startsWith("minecraft:bell")) {
             return new org.bukkit.block.data.type.SimpleBellData(text);
         }
@@ -149,6 +153,10 @@ public final class FotonBlock implements Block {
         }
         if (getType() == Material.HOPPER) {
             return new FotonHopper(this, getBlockData());
+        }
+        if (getType() == Material.FURNACE || getType() == Material.BLAST_FURNACE
+                || getType() == Material.SMOKER) {
+            return new FotonFurnace(this, getBlockData());
         }
         if (getType() == Material.CRAFTER) {
             return new FotonCrafter(this, getBlockData());

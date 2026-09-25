@@ -31,11 +31,25 @@ pub mod block;
 pub mod command;
 /// A command a player typed, before the server has read it.
 pub mod command_preprocess;
+/// Blocks that cook and brew on their own.
+pub mod cooking;
+/// Damage no entity is behind.
+pub mod damage;
+/// What a block gives when a player breaks or picks from it.
+pub mod drops;
 /// Events about entities that are not players.
 pub mod entity;
+/// Entities arriving in the world and leaving their vehicles.
+pub mod entity_lifecycle;
+/// What a player wears and what they finish using.
+pub mod equipment;
 mod fertilize;
 pub mod inventory;
 mod lectern;
+/// Workstation screens: enchanting, smithing, trading.
+pub mod menus;
+/// How a player moves, and the server correcting it.
+pub mod movement;
 pub mod player;
 pub mod server;
 /// Events about a world rather than anyone in it.
@@ -48,6 +62,9 @@ pub use block::{
 };
 pub use command::{AsyncTabCompleteEvent, CommandEvent};
 pub use command_preprocess::PlayerCommandPreprocessEvent;
+pub use cooking::{BrewEvent, FurnaceBurnEvent, FurnaceSmeltEvent, FurnaceStartSmeltEvent};
+pub use damage::EntityDamageEvent;
+pub use drops::{BlockDropItemEvent, PlayerHarvestBlockEvent};
 pub use entity::{
     BlockExplodeEvent, CreatureSpawnEvent, EntityChangeBlockEvent, EntityDamageByEntityEvent,
     EntityDeathEvent, EntityExplodeEvent, EntityMountEvent, EntityPickupItemEvent,
@@ -56,12 +73,21 @@ pub use entity::{
     ExpBottleEvent, ExplosionPrimeEvent, HangingBreakEvent, HangingPlaceEvent, ItemSpawnEvent,
     LightningStrikeEvent, PreCreatureSpawnEvent, ProjectileLaunchEvent,
 };
+pub use entity_lifecycle::{
+    EntitiesLoadEvent, EntitiesUnloadEvent, EntityDismountEvent, EntityPlaceEvent,
+};
+pub use equipment::{PlayerArmorChangeEvent, PlayerItemConsumeEvent};
 pub use fertilize::BlockFertilizeEvent;
 pub use inventory::{
     CrafterCraftEvent, InventoryClickEvent, InventoryCloseEvent, InventoryDragEvent,
     InventoryOpenEvent, PrepareGrindstoneEvent, PrepareItemCraftEvent,
 };
 pub use lectern::PlayerTakeLecternBookEvent;
+pub use menus::{EnchantOffer, PlayerPurchaseEvent, PrepareItemEnchantEvent, PrepareSmithingEvent};
+pub use movement::{
+    FailMoveReason, PlayerFailMoveEvent, PlayerTeleportEvent, PlayerToggleFlightEvent,
+    PlayerVelocityEvent, TeleportCause,
+};
 pub use player::{
     AsyncPlayerPreLoginEvent, AsyncPlayerPreLoginResult, FoodLevelChangeEvent,
     PlayerAdvancementCriterionGrantEvent, PlayerAdvancementDoneEvent, PlayerBucketEmptyEvent,
@@ -72,7 +98,7 @@ pub use player::{
     PlayerLoginEvent, PlayerMoveEvent, PlayerOpenSignCause, PlayerOpenSignEvent, PlayerPortalEvent,
     PlayerQuitEvent, PlayerRespawnEvent, PlayerSpawnLocationEvent,
 };
-pub use server::ServerTickEvent;
+pub use server::{ServerListPingEvent, ServerTickEvent};
 pub use world::{
     ChunkLoadEvent, ChunkPopulateEvent, ChunkUnloadEvent, PortalCreateEvent, ThunderChangeEvent,
     WeatherChangeEvent,

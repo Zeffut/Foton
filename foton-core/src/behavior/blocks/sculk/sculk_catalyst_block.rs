@@ -22,7 +22,7 @@ use foton_utils::{BlockPos, BlockStateId};
 
 use crate::behavior::block::{BlockBehavior, BlockEntityCreation};
 use crate::behavior::context::BlockPlaceContext;
-use crate::behavior::try_drop_experience;
+use crate::behavior::sample_block_experience;
 use crate::block_entity::BLOCK_ENTITIES;
 use crate::block_entity::BlockEntityTicker;
 use crate::world::World;
@@ -85,17 +85,14 @@ impl BlockBehavior for SculkCatalystBlock {
         )
     }
 
-    fn spawn_after_break(
+    fn experience_drop(
         &self,
         _state: BlockStateId,
-        world: &Arc<World>,
-        pos: BlockPos,
+        _world: &Arc<World>,
+        _pos: BlockPos,
         tool: &ItemStack,
-        drop_experience: bool,
-    ) {
-        if drop_experience {
-            try_drop_experience(world, pos, tool, &self.experience);
-        }
+    ) -> i32 {
+        sample_block_experience(tool, &self.experience)
     }
 }
 

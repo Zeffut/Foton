@@ -89,6 +89,14 @@ pub trait Merchant: Send + Sync {
         false
     }
 
+    /// The mob doing the selling, or `None` for a merchant with no body.
+    ///
+    /// Paper parity: what decides between `PlayerTradeEvent`, whose merchant
+    /// is an `AbstractVillager`, and a plain `PlayerPurchaseEvent`.
+    fn trader(&self) -> Option<Uuid> {
+        None
+    }
+
     /// Whether this merchant is still a valid trading partner for `player`.
     ///
     /// Vanilla parity: `stillValid`, which for a mob means alive, still trading

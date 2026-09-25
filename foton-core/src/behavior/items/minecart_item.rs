@@ -15,6 +15,7 @@ use foton_registry::vanilla_game_events;
 use glam::DVec3;
 
 use crate::behavior::blocks::rail_shape_at;
+use crate::behavior::items::entity_place::entity_place_allowed;
 use crate::behavior::{InteractionResult, ItemBehavior, UseOnContext};
 use crate::entity::{ENTITIES, next_entity_id};
 use crate::world::LevelReader as _;
@@ -75,7 +76,16 @@ impl ItemBehavior for MinecartItem {
             return InteractionResult::Fail;
         };
 
-        if context.world.try_add_entity(cart).is_err() {
+        if context.world.try_add_entity(cart.clone()).is_err() {
+            return InteractionResult::Fail;
+        }
+        if !entity_place_allowed(
+            context.world,
+            &cart,
+            context.player,
+            (pos, context.hit_result.direction),
+            context.hand,
+        ) {
             return InteractionResult::Fail;
         }
 

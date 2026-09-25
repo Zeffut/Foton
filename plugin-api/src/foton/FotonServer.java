@@ -21,7 +21,8 @@ import org.bukkit.scheduler.BukkitScheduler;
 
 /** The one Server, answering out of Foton. */
 public final class FotonServer implements Server {
-    private static final SimpleBanList<String> NAME_BANS = new SimpleBanList<>();
+    private static final FotonProfileBanList PROFILE_BANS =
+        new FotonProfileBanList(new java.io.File("banned-players.json"));
     private static final SimpleBanList<String> IP_BANS = new SimpleBanList<>();
     private static final org.bukkit.command.CommandMap COMMAND_MAP = (fallback, command) -> {
         if (command == null) return false;
@@ -59,6 +60,21 @@ public final class FotonServer implements Server {
     @Override
     public ServicesManager getServicesManager() {
         return services;
+    }
+
+    @Override
+    public double[] getTPS() {
+        return Native.serverTps();
+    }
+
+    @Override
+    public String getUpdateFolder() {
+        return PluginHost.UPDATE_FOLDER;
+    }
+
+    @Override
+    public java.io.File getUpdateFolderFile() {
+        return PluginHost.updateFolder();
     }
 
     @Override
@@ -299,11 +315,35 @@ public final class FotonServer implements Server {
     }
 
     @Override public org.bukkit.BanList<?> getBanList(org.bukkit.BanList.Type type) {
-        return type == org.bukkit.BanList.Type.IP ? IP_BANS : NAME_BANS;
+        return type == org.bukkit.BanList.Type.IP ? IP_BANS : PROFILE_BANS;
     }
 
-    static boolean isNameBanned(String name) { return NAME_BANS.isBannedIgnoreCase(name); }
-    static boolean isIpBanned(String address) { return IP_BANS.isBanned(address); }
+    /** The ban on a player joining as `id` and `name`, if one applies. */
+    static org.bukkit.BanEntry<?> profileBan(UUID id, String name) { return PROFILE_BANS.banOf(id, name); }
+    static org.bukkit.BanEntry<String> ipBan(String address) { return IP_BANS.getBanEntry(address); }
+
+    @Override public boolean hasWhitelist() { return Native.whitelistEnabled(); }
+
+    @Override
+    public org.bukkit.OfflinePlayer getOfflinePlayerIfCached(String name) {
+        if (name == null) return null;
+        Player online = getPlayerExact(name);
+        if (online != null) return new FotonOfflinePlayer(online.getUniqueId(), online.getName());
+        String id = Native.knownPlayerIdByName(name);
+        UUID parsed = id == null ? null : Native.parse(id);
+        return parsed == null ? null : new FotonOfflinePlayer(parsed, name);
+    }
+
+    @Override
+    public java.util.Iterator<org.bukkit.advancement.Advancement> advancementIterator() {
+        List<org.bukkit.advancement.Advancement> all = new ArrayList<>();
+        for (String key : Native.advancementKeys()) {
+            org.bukkit.advancement.Advancement advancement =
+                org.bukkit.Bukkit.getAdvancement(org.bukkit.NamespacedKey.fromString(key));
+            if (advancement != null) all.add(advancement);
+        }
+        return java.util.Collections.unmodifiableList(all).iterator();
+    }
 
     @Override
     public ConsoleCommandSender getConsoleSender() {
@@ -432,7 +472,21 @@ public final class FotonServer implements Server {
     private static final class Plugins implements PluginManager {
         private final java.util.Map<String, org.bukkit.permissions.Permission> permissions = new java.util.concurrent.ConcurrentHashMap<>();
         @Override public void registerEvents(Listener listener, Plugin plugin) {
+            requireEnabled(plugin, listener);
             EventBridge.register(listener, plugin);
+        }
+
+        /** Paper refuses a listener from a plugin that is not enabled: it
+         * would be registered after the plugin's handlers were already
+         * dropped, and outlive it. */
+        private static void requireEnabled(Plugin plugin, Object what) {
+            if (plugin == null) {
+                throw new IllegalArgumentException("Plugin cannot be null");
+            }
+            if (!plugin.isEnabled()) {
+                throw new org.bukkit.plugin.IllegalPluginAccessException(
+                    "Plugin attempted to register " + what + " while not enabled");
+            }
         }
 
         @Override public Plugin getPlugin(String name) {
@@ -475,6 +529,7 @@ public final class FotonServer implements Server {
                 org.bukkit.event.EventPriority priority,
                 org.bukkit.plugin.EventExecutor executor,
                 Plugin plugin) {
+            requireEnabled(plugin, event);
             EventBridge.register(listener, event, priority, executor, plugin);
         }
 
@@ -485,6 +540,7 @@ public final class FotonServer implements Server {
                 org.bukkit.plugin.EventExecutor executor,
                 Plugin plugin,
                 boolean ignoreCancelled) {
+            requireEnabled(plugin, event);
             EventBridge.register(
                 listener, event, priority, executor, plugin, ignoreCancelled);
         }

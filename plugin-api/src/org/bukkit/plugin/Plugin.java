@@ -8,6 +8,10 @@ public interface Plugin {
         return org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(file);
     }
     java.io.File getDataFolder();
+    /** Writes the in-memory config.yml back to the data folder. */
+    void saveConfig();
+    /** Discards the in-memory config.yml and reads it again from disk. */
+    void reloadConfig();
     PluginDescriptionFile getDescription();
     org.bukkit.Server getServer();
     java.util.logging.Logger getLogger();

@@ -1,33 +1,30 @@
 package org.bukkit.event.player;
 
+import net.kyori.adventure.text.Component;
+import org.bukkit.entity.Player;
 import org.bukkit.event.HandlerList;
 
-import org.bukkit.entity.Player;
-
+/** A player left; what is announced is {@link #quitMessage()}, and null
+ * announces nothing. */
 public class PlayerQuitEvent extends PlayerEvent {
-    private String quitMessage;
+    private static final HandlerList HANDLERS = new HandlerList();
+    private Component quitMessage;
 
-    public PlayerQuitEvent(Player player, String quitMessage) {
+    public PlayerQuitEvent(Player player, Component quitMessage) {
         super(player);
         this.quitMessage = quitMessage;
     }
 
-    public String getQuitMessage() { return quitMessage; }
-
-    public void setQuitMessage(String message) { this.quitMessage = message; }
-
-    /** Bukkit gives every event its own handler list, and plugins reach for
-     * the static one to register or unregister by hand. Foton dispatches
-     * through foton.EventBridge instead, so this is the shape rather than the
-     * mechanism -- but a plugin that cannot find it does not compile. */
-    private static final HandlerList HANDLERS = new HandlerList();
-
-    @Override
-    public HandlerList getHandlers() {
-        return HANDLERS;
+    @Deprecated
+    public PlayerQuitEvent(Player player, String quitMessage) {
+        this(player, PlayerJoinEvent.fromLegacy(quitMessage));
     }
 
-    public static HandlerList getHandlerList() {
-        return HANDLERS;
-    }
+    public Component quitMessage() { return quitMessage; }
+    public void quitMessage(Component quitMessage) { this.quitMessage = quitMessage; }
+    @Deprecated public String getQuitMessage() { return PlayerJoinEvent.toLegacy(quitMessage); }
+    @Deprecated public void setQuitMessage(String quitMessage) { this.quitMessage = PlayerJoinEvent.fromLegacy(quitMessage); }
+
+    @Override public HandlerList getHandlers() { return HANDLERS; }
+    public static HandlerList getHandlerList() { return HANDLERS; }
 }

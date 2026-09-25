@@ -1,6 +1,15 @@
 use foton_macros::{ClientPacket, WriteTo};
 use foton_registry::packets::status::C_STATUS_RESPONSE;
 use serde::Serialize;
+use text_components::TextComponent;
+
+/// Writes a component in Minecraft's JSON text form, hex colours included.
+fn minecraft_json<S: serde::Serializer>(
+    component: &TextComponent,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    foton_utils::text::json::to_json(component).serialize(serializer)
+}
 
 #[derive(Serialize, Clone, Debug)]
 pub struct Sample {
@@ -26,7 +35,9 @@ pub struct Version {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Status {
-    pub description: String,
+    /// The MOTD, as a text component so it may carry colours.
+    #[serde(serialize_with = "minecraft_json")]
+    pub description: TextComponent,
     pub players: Option<Players>,
     pub version: Option<Version>,
     pub favicon: Option<String>,
@@ -54,7 +65,7 @@ mod tests {
     #[test]
     fn secure_chat_enforcement_uses_vanilla_json_name() {
         let status = Status {
-            description: String::new(),
+            description: text_components::TextComponent::new(),
             players: None,
             version: None,
             favicon: None,

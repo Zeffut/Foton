@@ -15,6 +15,8 @@ foton-registry.workspace = true
 foton-utils.workspace = true
 # A sound is played at a point, and the point is a glam vector.
 glam.workspace = true
+# Components cross to and from Java as Minecraft's JSON text.
+serde_json.workspace = true
 text_components.workspace = true
 uuid.workspace = true
 jni = "0.21"
@@ -26,7 +28,6 @@ libloading = "0.8"
 rustc-hash.workspace = true
 # Adventure components and book pages cross as vanilla JSON text.
 serde.workspace = true
-serde_json.workspace = true
 simdnbt.workspace = true
 thiserror.workspace = true
 

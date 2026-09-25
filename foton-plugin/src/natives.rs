@@ -18,8 +18,11 @@ use std::sync::{Arc, OnceLock, Weak};
 use std::thread::{self, ThreadId};
 use std::time::{Duration, Instant};
 
+use crate::relay::{cooking_kind, describe_cooking};
+use foton_core::advancement::ADVANCEMENT_TREE;
 use foton_core::behavior::blocks::vegetation::tree_grower::generate_tree as grow_tree;
 use foton_core::block_entity::entities::BannerBlockEntity;
+use foton_core::block_entity::entities::FurnaceBlockEntity;
 use foton_core::block_entity::entities::HopperBlockEntity;
 use foton_core::block_entity::entities::JukeboxBlockEntity;
 use foton_core::block_entity::entities::LecternBlockEntity;
@@ -116,6 +119,7 @@ use foton_protocol::packets::game::{
 use foton_registry::attribute::AttributeRef;
 use foton_registry::blocks::behavior::PushReaction;
 use foton_registry::blocks::block_state_ext::BlockStateExt;
+use foton_registry::blocks::properties::BlockStateProperties;
 use foton_registry::data_components::components::{
     CustomModelData, ItemEnchantments, ItemLore, TooltipDisplay,
 };
@@ -128,12 +132,14 @@ use foton_registry::enchantment::{Enchantment, EnchantmentRef};
 use foton_registry::entity_type::EntityTypeRef;
 use foton_registry::entity_type::MobCategory;
 use foton_registry::entity_variant::AxolotlVariant;
+use foton_registry::fuel;
 use foton_registry::game_rules::GameRuleType;
 use foton_registry::game_rules::GameRuleValue;
 use foton_registry::item_stack::ItemStack;
 use foton_registry::recipe::{
-    CraftingCategory, Ingredient, RecipeResult, ShapedRecipe, ShapelessRecipe,
+    CraftingCategory, CraftingInput, Ingredient, RecipeResult, ShapedRecipe, ShapelessRecipe,
 };
+use foton_registry::stat::{CustomStatRef, Stat};
 use foton_registry::trading::ItemCost;
 use foton_registry::trading::MerchantOffer;
 use foton_registry::vanilla_block_entity_types::SIGN;
@@ -142,7 +148,6 @@ use foton_registry::{
     REGISTRY, RegistryEntry as _, RegistryExt as _, TaggedRegistryExt as _, vanilla_entities,
     vanilla_items,
 };
-use foton_registry::{stat::Stat, vanilla_custom_stats};
 use foton_utils::entity_events::EntityStatus;
 use foton_utils::locks::{SyncMutex, SyncRwLock};
 use foton_utils::nbt::{merge_nbt_compounds, parse_snbt_compound, to_canonical_snbt};
@@ -162,9 +167,9 @@ use foton_utils::{BlockPos, BlockStateId, WorldAabb};
 use foton_utils::{Downcast as _, Identifier};
 use glam::DVec3;
 use jni::JNIEnv;
-use jni::objects::{JByteArray, JClass, JDoubleArray, JObject, JObjectArray, JString};
+use jni::objects::{JByteArray, JClass, JDoubleArray, JIntArray, JObject, JObjectArray, JString};
 use jni::sys::{
-    jboolean, jbyte, jdouble, jdoubleArray, jfloat, jint, jlong, jobjectArray, jstring,
+    jboolean, jbyte, jdouble, jdoubleArray, jfloat, jint, jintArray, jlong, jobjectArray, jstring,
 };
 use rustc_hash::FxHashMap;
 use simdnbt::owned::NbtCompound;
@@ -7047,6 +7052,96 @@ extern "system" fn advancement_criteria(
     string_array(&mut env, &values)
 }
 
+/// `foton.Native.advancementKeys`: every advancement the server knows.
+extern "system" fn advancement_keys(mut env: JNIEnv<'_>, _class: JClass<'_>) -> jobjectArray {
+    let keys = REGISTRY
+        .advancements
+        .iter()
+        .map(|advancement| advancement.key.to_string())
+        .collect::<Vec<_>>();
+    string_array(&mut env, &keys)
+}
+
+/// An online player and the tree node of an advancement, from their Java
+/// names.
+fn player_and_advancement(
+    env: &mut JNIEnv<'_>,
+    uuid: &JString<'_>,
+    key: &JString<'_>,
+) -> Option<(Arc<Player>, usize)> {
+    let player = player(env, uuid)?;
+    let key: String = env.get_string(key).ok()?.into();
+    let node = ADVANCEMENT_TREE.index_of(&key.parse::<Identifier>().ok()?)?;
+    Some((player, node))
+}
+
+/// `foton.Native.playerAdvancementProgress`: `1` or `0` for whether the
+/// player has the advancement, then one entry per criterion -- its name, and
+/// after a unit separator the epoch millisecond it was met, when it was.
+/// Null for a player not online or an unknown advancement.
+extern "system" fn player_advancement_progress(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    key: JString<'_>,
+) -> jobjectArray {
+    let Some((player, node)) = player_and_advancement(&mut env, &uuid, &key) else {
+        return null_mut();
+    };
+    let mut values = vec![
+        if player.has_advancement(node) {
+            "1"
+        } else {
+            "0"
+        }
+        .to_owned(),
+    ];
+    values.extend(
+        player
+            .advancement_criteria(node)
+            .into_iter()
+            .map(|(name, obtained)| match obtained {
+                Some(millis) => format!("{name}\u{1f}{millis}"),
+                None => name.to_owned(),
+            }),
+    );
+    string_array(&mut env, &values)
+}
+
+/// `foton.Native.playerAdvancementCriterion`: awards or revokes one
+/// criterion, answering whether that changed anything.
+///
+/// Awarding can finish the advancement and hand out its rewards, which
+/// touches the world, so it is done on the tick thread only.
+extern "system" fn player_advancement_criterion(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    key: JString<'_>,
+    criterion: JString<'_>,
+    award: jboolean,
+) -> jboolean {
+    let Some((player, node)) = player_and_advancement(&mut env, &uuid, &key) else {
+        return 0;
+    };
+    let Ok(criterion) = env.get_string(&criterion).map(String::from) else {
+        return 0;
+    };
+    if award == 0 {
+        return jboolean::from(player.revoke_advancement_criterion(node, &criterion));
+    }
+    if !on_tick() {
+        return 0;
+    }
+    jboolean::from(player.award_advancement_criterion(node, &criterion).granted)
+}
+
+/// `foton.Native.whitelistEnabled`: whether admission is limited to the
+/// whitelist.
+extern "system" fn whitelist_enabled(_env: JNIEnv<'_>, _class: JClass<'_>) -> jboolean {
+    jboolean::from(server().is_some_and(|server| server.config.whitelist_enabled))
+}
+
 extern "system" fn player_address(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -7727,7 +7822,7 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
 }
 
 /// A block state as `minecraft:name[facing=north]`, the way `/setblock` writes it.
-fn describe_state(state: BlockStateId) -> Option<String> {
+pub(crate) fn describe_state(state: BlockStateId) -> Option<String> {
     let block = REGISTRY.blocks.by_state_id(state)?;
     let properties = REGISTRY.blocks.get_properties(state);
     if properties.is_empty() {
@@ -7773,12 +7868,28 @@ extern "system" fn statistic_value(
     let Some(player) = player(&mut env, &uuid) else {
         return 0;
     };
-    let stat = match statistic.to_str().ok() {
-        Some("TIME_SINCE_REST") => Stat::custom(&vanilla_custom_stats::TIME_SINCE_REST),
-        Some("JUMP") => Stat::custom(&vanilla_custom_stats::JUMP),
-        _ => return 0,
+    let Some(stat) = statistic.to_str().ok().and_then(bukkit_custom_stat) else {
+        return 0;
     };
-    player.stat_value(stat)
+    player.stat_value(Stat::custom(stat))
+}
+
+/// The vanilla custom statistic an untyped Bukkit `Statistic` names.
+///
+/// Bukkit keys one `minecraft:<lowercase name>`, which is vanilla's own key
+/// except where vanilla renamed the statistic since; those go through the
+/// rename vanilla's `DataFixers` applies to old saves.
+fn bukkit_custom_stat(name: &str) -> Option<CustomStatRef> {
+    let legacy = name.to_ascii_lowercase();
+    let current = match legacy.as_str() {
+        // Vanilla `DataFixers`: the `StatsRenameFix` pair
+        // `minecraft:play_one_minute` -> `minecraft:play_time`.
+        "play_one_minute" => "play_time",
+        other => other,
+    };
+    REGISTRY
+        .custom_stats
+        .by_key(&Identifier::vanilla(current.to_owned()))
 }
 
 extern "system" fn offline_statistic(
@@ -7796,9 +7907,10 @@ extern "system" fn offline_statistic(
     let Ok(uuid) = Uuid::parse_str(uuid_text.to_str().unwrap_or_default()) else {
         return 0;
     };
-    server().map_or(0, |server| {
-        server.offline_statistic(uuid, statistic_text.to_str().unwrap_or_default())
-    })
+    let Some(stat) = bukkit_custom_stat(statistic_text.to_str().unwrap_or_default()) else {
+        return 0;
+    };
+    server().map_or(0, |server| server.offline_statistic(uuid, &stat.key))
 }
 
 extern "system" fn is_operator(
@@ -9256,9 +9368,7 @@ extern "system" fn server_tps(env: JNIEnv<'_>, _class: JClass<'_>) -> jdoubleArr
     let Some(server) = server() else {
         return null_mut();
     };
-    let manager = server.tick_rate_manager.read();
-    let tps = f64::from(manager.get_tps());
-    let values = [tps, tps, tps];
+    let values = server.tick_rate_manager.read().tps_averages();
     let Ok(array) = env.new_double_array(3) else {
         return null_mut();
     };
@@ -10010,6 +10120,130 @@ extern "system" fn hopper_inventory_slot(
         })
     });
     to_java(&mut env, value)
+}
+
+/// `foton.Native.craftingRecipe`: the key of the recipe a square crafting
+/// grid `width` wide makes, the stacks row by row, or null when none does.
+extern "system" fn crafting_recipe(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    items: JString<'_>,
+    width: jint,
+) -> jstring {
+    let items: Option<String> = env.get_string(&items).ok().map(Into::into);
+    let value = items.and_then(|items| {
+        let width = usize::try_from(width)
+            .ok()
+            .filter(|width| matches!(width, 2 | 3))?;
+        let stacks = items
+            .split('\u{1e}')
+            .map(parse_slot)
+            .collect::<Option<Vec<_>>>()?;
+        if stacks.len() != width * width {
+            return None;
+        }
+        let input = CraftingInput::positioned(width, width, stacks).input;
+        let recipe = if width == 2 {
+            REGISTRY.recipes.find_crafting_recipe_2x2(&input)
+        } else {
+            REGISTRY.recipes.find_crafting_recipe(&input)
+        }?;
+        Some(recipe.id().to_string())
+    });
+    to_java(&mut env, value)
+}
+
+/// `foton.Native.isFuel`: whether a furnace burns the encoded stack.
+extern "system" fn is_fuel(mut env: JNIEnv<'_>, _class: JClass<'_>, item: JString<'_>) -> jboolean {
+    let Ok(text) = env.get_string(&item) else {
+        return 0;
+    };
+    let text: String = text.into();
+    jboolean::from(parse_slot(&text).is_some_and(|stack| fuel::is_fuel(&stack)))
+}
+
+/// `foton.Native.cookingRecipe`: the recipe by which a furnace, blast furnace
+/// or smoker (`block`) cooks the encoded stack, described as
+/// [`describe_cooking`] does, or null when none does.
+extern "system" fn cooking_recipe(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    block: JString<'_>,
+    item: JString<'_>,
+) -> jstring {
+    let block: Option<String> = env.get_string(&block).ok().map(Into::into);
+    let item: Option<String> = env.get_string(&item).ok().map(Into::into);
+    let value = block.zip(item).and_then(|(block, item)| {
+        let kind = cooking_kind(&block)?;
+        let stack = parse_slot(&item).filter(|stack| !stack.is_empty())?;
+        let recipe = REGISTRY.recipes.find_cooking_recipe(kind, &stack)?;
+        Some(describe_cooking(recipe))
+    });
+    to_java(&mut env, value)
+}
+
+/// `foton.Native.furnaceTimes`: `{burn, cook, cookTotal}`, or null where no
+/// furnace, smoker or blast furnace stands.
+extern "system" fn furnace_times(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jint,
+    y: jint,
+    z: jint,
+) -> jintArray {
+    let Some(times) = world(&mut env, &name).and_then(|world| {
+        let entity = world.get_block_entity(BlockPos::new(x, y, z))?;
+        let furnace = entity.downcast_ref::<FurnaceBlockEntity>()?;
+        Some(furnace.times())
+    }) else {
+        return null_mut();
+    };
+    let Ok(array) = env.new_int_array(3) else {
+        return null_mut();
+    };
+    if env.set_int_array_region(&array, 0, &times).is_err() {
+        return null_mut();
+    }
+    array.into_raw()
+}
+
+/// `foton.Native.setFurnaceTimes`: writes a `Furnace` snapshot's times back,
+/// lighting or putting out the block to match the burn, as Bukkit does.
+extern "system" fn set_furnace_times(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jint,
+    y: jint,
+    z: jint,
+    times: JIntArray<'_>,
+) {
+    let mut values = [0; 3];
+    if env.get_int_array_region(&times, 0, &mut values).is_err() {
+        return;
+    }
+    let Some(world) = world(&mut env, &name) else {
+        return;
+    };
+    let pos = BlockPos::new(x, y, z);
+    let Some(entity) = world.get_block_entity(pos) else {
+        return;
+    };
+    let Some(furnace) = entity.downcast_ref::<FurnaceBlockEntity>() else {
+        return;
+    };
+    furnace.set_times(values);
+    let state = world.get_block_state(pos);
+    let lit = state.set_value(&BlockStateProperties::LIT, values[0] > 0);
+    if lit == state {
+        return;
+    }
+    if on_tick() {
+        world.set_block(pos, lit, UpdateFlags::UPDATE_ALL);
+    } else {
+        DEFERRED.lock().push((world.key.clone(), pos, lit));
+    }
 }
 
 extern "system" fn hopper_set_inventory_slot(
@@ -11370,6 +11604,27 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "hopperInventorySlot",
             "(Ljava/lang/String;IIII)Ljava/lang/String;",
             hopper_inventory_slot as *mut c_void,
+        ),
+        method("isFuel", "(Ljava/lang/String;)Z", is_fuel as *mut c_void),
+        method(
+            "craftingRecipe",
+            "(Ljava/lang/String;I)Ljava/lang/String;",
+            crafting_recipe as *mut c_void,
+        ),
+        method(
+            "cookingRecipe",
+            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            cooking_recipe as *mut c_void,
+        ),
+        method(
+            "furnaceTimes",
+            "(Ljava/lang/String;III)[I",
+            furnace_times as *mut c_void,
+        ),
+        method(
+            "setFurnaceTimes",
+            "(Ljava/lang/String;III[I)V",
+            set_furnace_times as *mut c_void,
         ),
         method(
             "hopperSetInventorySlot",
@@ -13403,6 +13658,22 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "(Ljava/lang/String;)[Ljava/lang/String;",
             advancement_criteria as *mut c_void,
         ),
+        method(
+            "advancementKeys",
+            "()[Ljava/lang/String;",
+            advancement_keys as *mut c_void,
+        ),
+        method(
+            "playerAdvancementProgress",
+            "(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;",
+            player_advancement_progress as *mut c_void,
+        ),
+        method(
+            "playerAdvancementCriterion",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z)Z",
+            player_advancement_criterion as *mut c_void,
+        ),
+        method("whitelistEnabled", "()Z", whitelist_enabled as *mut c_void),
         method(
             "playerRespawnWorld",
             "(Ljava/lang/String;)Ljava/lang/String;",

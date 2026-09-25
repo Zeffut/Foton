@@ -19,7 +19,7 @@ use foton_utils::value_providers::IntProvider;
 use foton_utils::{BlockPos, BlockStateId};
 
 use crate::behavior::context::BlockPlaceContext;
-use crate::behavior::{BlockBehavior, try_drop_experience};
+use crate::behavior::{BlockBehavior, sample_block_experience};
 use crate::world::World;
 
 /// Vanilla `SculkBlock`.
@@ -43,16 +43,13 @@ impl BlockBehavior for SculkBlock {
         Some(self.block.default_state())
     }
 
-    fn spawn_after_break(
+    fn experience_drop(
         &self,
         _state: BlockStateId,
-        world: &Arc<World>,
-        pos: BlockPos,
+        _world: &Arc<World>,
+        _pos: BlockPos,
         tool: &ItemStack,
-        drop_experience: bool,
-    ) {
-        if drop_experience {
-            try_drop_experience(world, pos, tool, &self.experience);
-        }
+    ) -> i32 {
+        sample_block_experience(tool, &self.experience)
     }
 }

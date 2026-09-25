@@ -120,6 +120,18 @@ impl Player {
         self.advancements.lock().revoke_all(node)
     }
 
+    /// Each criterion of one advancement, with when this player met it, if
+    /// they have.
+    #[must_use]
+    pub fn advancement_criteria(&self, node: usize) -> Vec<(&'static str, Option<i64>)> {
+        self.advancements
+            .lock()
+            .progress(node)
+            .criteria()
+            .map(|(name, progress)| (name, progress.obtained()))
+            .collect()
+    }
+
     /// Whether this player has finished an advancement.
     #[must_use]
     pub fn has_advancement(&self, node: usize) -> bool {

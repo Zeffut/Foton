@@ -29,6 +29,7 @@ use simdnbt::borrow::{BaseNbtCompound as BorrowedNbtCompound, NbtCompound as Nbt
 use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
 
 use crate::block_entity::{BlockEntity, BlockEntityBase, BlockEntityName, ImplicitComponentInput};
+use crate::event::{Event as _, FurnaceBurnEvent, FurnaceSmeltEvent, FurnaceStartSmeltEvent};
 use crate::inventory::container::{Container, SlotsForFace};
 use crate::inventory::lock::{ContainerRef, SharedContainer};
 use crate::world::World;
@@ -173,14 +174,26 @@ impl FurnaceContainer {
     }
 
     /// Moves the finished item into the result slot and consumes one input.
+    /// Returns whether it did.
     ///
-    /// Vanilla parity: `AbstractFurnaceBlockEntity.burn`.
-    fn burn(&mut self, burn_result: &ItemStack) {
-        if self.items[SLOT_RESULT].is_empty() {
+    /// Vanilla parity: `AbstractFurnaceBlockEntity.burn`, with Paper's
+    /// allowance for a `FurnaceSmeltEvent` result: an empty one consumes the
+    /// input and adds nothing, and one the result slot cannot take consumes
+    /// nothing. The input is read again because a listener ran since the
+    /// cook finished and may have taken it.
+    fn burn(&mut self, burn_result: &ItemStack) -> bool {
+        if self.items[SLOT_INPUT].is_empty() {
+            return false;
+        }
+        if burn_result.is_empty() {
+            // Nothing comes out.
+        } else if self.items[SLOT_RESULT].is_empty() {
             self.items[SLOT_RESULT] = burn_result.clone();
-        } else {
+        } else if ItemStack::is_same_item_same_components(&self.items[SLOT_RESULT], burn_result) {
             let grown = self.items[SLOT_RESULT].count() + burn_result.count();
             self.items[SLOT_RESULT].set_count(grown);
+        } else {
+            return false;
         }
 
         // Vanilla turns the bucket in the fuel slot back into a water bucket when a
@@ -193,6 +206,7 @@ impl FurnaceContainer {
 
         let remaining = self.items[SLOT_INPUT].count() - 1;
         self.items[SLOT_INPUT].set_count(remaining);
+        true
     }
 
     /// Consumes one fuel item, leaving its crafting remainder behind.
@@ -218,7 +232,111 @@ impl FurnaceContainer {
     }
 }
 
+/// What one tick of a lit or lightable furnace works on, read under the lock
+/// so the events can run without it.
+struct Cooking {
+    fuel: ItemStack,
+    burn_duration: i32,
+    source: ItemStack,
+    recipe: Identifier,
+    result: ItemStack,
+    cooking_time: i32,
+    /// Whether no cook is under way, which is when one starts.
+    starting: bool,
+}
+
 impl FurnaceBlockEntity {
+    /// Lights the furnace from its fuel, after plugins had their say.
+    ///
+    /// Paper parity: `FurnaceBurnEvent`. Returns whether the furnace is lit
+    /// afterwards, or `None` when a plugin refused.
+    fn light(&self, world: &Arc<World>, pos: BlockPos, cooking: &Cooking) -> Option<bool> {
+        let mut event = FurnaceBurnEvent::new(
+            world.key.to_string(),
+            pos,
+            cooking.fuel.clone(),
+            cooking.burn_duration,
+        );
+        world.fire_event(&mut event);
+        if event.is_cancelled() {
+            return None;
+        }
+        let mut container = self.container.lock();
+        container.lit_time_remaining = event.burn_time();
+        container.lit_total_time = event.burn_time();
+        let lit = container.lit_time_remaining > 0;
+        // A furnace a plugin lit without burning keeps its fuel item.
+        if lit && event.burning() && event.consume_fuel() && !container.items[SLOT_FUEL].is_empty()
+        {
+            container.consume_fuel();
+        }
+        Some(lit)
+    }
+
+    /// Advances the cook one tick, and finishes it when it is done.
+    ///
+    /// Paper parity: `FurnaceStartSmeltEvent` when a cook begins, which may
+    /// change its length, and `FurnaceSmeltEvent` when one ends, which may
+    /// change or refuse the result.
+    fn cook(&self, world: &Arc<World>, pos: BlockPos, cooking: Cooking) {
+        if cooking.starting {
+            let mut event = FurnaceStartSmeltEvent::new(
+                world.key.to_string(),
+                pos,
+                cooking.source.clone(),
+                cooking.recipe.clone(),
+                cooking.cooking_time,
+            );
+            world.fire_event(&mut event);
+            self.container.lock().cooking_total_time = event.total_cook_time();
+        }
+        let finished = {
+            let mut container = self.container.lock();
+            container.cooking_timer += 1;
+            let finished = container.cooking_timer >= container.cooking_total_time;
+            if finished {
+                container.cooking_timer = 0;
+                container.cooking_total_time = cooking.cooking_time;
+            }
+            finished
+        };
+        if !finished {
+            return;
+        }
+        let mut event = FurnaceSmeltEvent::new(
+            world.key.to_string(),
+            pos,
+            cooking.source,
+            cooking.result,
+            cooking.recipe.clone(),
+        );
+        world.fire_event(&mut event);
+        if event.is_cancelled() {
+            return;
+        }
+        let mut container = self.container.lock();
+        if container.burn(event.result()) {
+            *container.recipes_used.entry(cooking.recipe).or_insert(0) += 1;
+        }
+    }
+
+    /// Mirrors the progress into the data slots the open menus read.
+    fn publish_data(&self) {
+        let container = self.container.lock();
+        self.data
+            .lit_time_remaining
+            .store(container.lit_time_remaining, Ordering::Relaxed);
+        self.data
+            .lit_total_time
+            .store(container.lit_total_time, Ordering::Relaxed);
+        self.data
+            .cooking_timer
+            .store(container.cooking_timer, Ordering::Relaxed);
+        self.data
+            .cooking_total_time
+            .store(container.cooking_total_time, Ordering::Relaxed);
+    }
+
     /// Creates a furnace block entity of the given cooking family.
     #[must_use]
     pub fn new_of_kind(
@@ -290,6 +408,31 @@ impl FurnaceBlockEntity {
         )
     }
 
+    /// Ticks of fuel left, ticks into the current cook, and ticks the cook
+    /// takes in all.
+    #[must_use]
+    pub fn times(&self) -> [i32; 3] {
+        let container = self.container.lock();
+        [
+            container.lit_time_remaining,
+            container.cooking_timer,
+            container.cooking_total_time,
+        ]
+    }
+
+    /// Sets what [`Self::times`] reads.
+    ///
+    /// Bukkit's `Furnace.update` writes these back from a snapshot. The burn
+    /// also becomes the burn's full length, which is what the flame gauge is
+    /// drawn against.
+    pub fn set_times(&self, [burn, cook, cook_total]: [i32; 3]) {
+        let mut container = self.container.lock();
+        container.lit_time_remaining = burn;
+        container.lit_total_time = burn;
+        container.cooking_timer = cook;
+        container.cooking_total_time = cook_total;
+    }
+
     /// Returns whether the furnace is currently burning fuel.
     #[must_use]
     pub fn is_lit(&self) -> bool {
@@ -327,69 +470,68 @@ impl BlockEntity for FurnaceBlockEntity {
         &self.base
     }
 
+    /// Vanilla parity: `AbstractFurnaceBlockEntity.serverTick`, with Paper's
+    /// three events fired where Paper fires them. The container is unlocked
+    /// while each runs, since a listener reading this furnace is the norm.
     fn tick(&self, world: &Arc<World>) {
         let pos = self.get_block_pos();
-        let mut container = self.container.lock();
+        let (was_lit, mut is_lit, cooking) = {
+            let mut container = self.container.lock();
+            let was_lit = container.lit_time_remaining > 0;
+            if was_lit {
+                container.lit_time_remaining -= 1;
+            }
+            let is_lit = container.lit_time_remaining > 0;
 
-        let was_lit = container.lit_time_remaining > 0;
-        if was_lit {
-            container.lit_time_remaining -= 1;
-        }
-        let mut is_lit = container.lit_time_remaining > 0;
+            let has_fuel = !container.items[SLOT_FUEL].is_empty();
+            let has_ingredient = !container.items[SLOT_INPUT].is_empty();
 
-        let has_fuel = !container.items[SLOT_FUEL].is_empty();
-        let has_ingredient = !container.items[SLOT_INPUT].is_empty();
-
-        if is_lit || (has_fuel && has_ingredient) {
-            match container.cooking_result() {
-                Some((recipe_id, burn_result, cooking_time))
-                    if container.can_burn(&burn_result) =>
-                {
-                    if !is_lit {
-                        let new_lit_time = {
-                            let fuel = container.items[SLOT_FUEL].clone();
-                            container.burn_duration(&fuel)
-                        };
-                        container.lit_time_remaining = new_lit_time;
-                        container.lit_total_time = new_lit_time;
-                        if new_lit_time > 0 {
-                            container.consume_fuel();
-                            is_lit = true;
-                        }
+            let cooking = if is_lit || (has_fuel && has_ingredient) {
+                match container.cooking_result() {
+                    Some((recipe, result, cooking_time)) if container.can_burn(&result) => {
+                        let fuel = container.items[SLOT_FUEL].clone();
+                        Some(Cooking {
+                            burn_duration: container.burn_duration(&fuel),
+                            fuel,
+                            source: container.items[SLOT_INPUT].clone(),
+                            recipe,
+                            result,
+                            cooking_time,
+                            starting: container.cooking_timer == 0,
+                        })
                     }
-
-                    if is_lit {
-                        container.cooking_timer += 1;
-                        if container.cooking_timer >= container.cooking_total_time {
-                            container.cooking_timer = 0;
-                            container.cooking_total_time = cooking_time;
-                            container.burn(&burn_result);
-                            *container.recipes_used.entry(recipe_id).or_insert(0) += 1;
-                        }
-                    } else {
+                    _ => {
                         container.cooking_timer = 0;
+                        None
                     }
                 }
-                _ => container.cooking_timer = 0,
+            } else {
+                if container.cooking_timer > 0 {
+                    let cooled = container.cooking_timer - BURN_COOL_SPEED;
+                    container.cooking_timer = cooled.clamp(0, container.cooking_total_time);
+                }
+                None
+            };
+            (was_lit, is_lit, cooking)
+        };
+
+        if let Some(cooking) = cooking {
+            if !is_lit {
+                let Some(lit) = self.light(world, pos, &cooking) else {
+                    // Paper returns from the whole tick on a refused light.
+                    self.publish_data();
+                    return;
+                };
+                is_lit = lit;
             }
-        } else if container.cooking_timer > 0 {
-            let cooled = container.cooking_timer - BURN_COOL_SPEED;
-            container.cooking_timer = cooled.clamp(0, container.cooking_total_time);
+            if is_lit {
+                self.cook(world, pos, cooking);
+            } else {
+                self.container.lock().cooking_timer = 0;
+            }
         }
 
-        self.data
-            .lit_time_remaining
-            .store(container.lit_time_remaining, Ordering::Relaxed);
-        self.data
-            .lit_total_time
-            .store(container.lit_total_time, Ordering::Relaxed);
-        self.data
-            .cooking_timer
-            .store(container.cooking_timer, Ordering::Relaxed);
-        self.data
-            .cooking_total_time
-            .store(container.cooking_total_time, Ordering::Relaxed);
-        drop(container);
+        self.publish_data();
 
         if was_lit != is_lit {
             let state = self.get_block_state();

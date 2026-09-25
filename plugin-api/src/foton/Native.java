@@ -109,6 +109,17 @@ public final class Native {
     public static native String[] signLines(String world, int x, int y, int z);
     public static native String hopperCustomName(String world, int x, int y, int z);
     public static native String hopperInventorySlot(String world, int x, int y, int z, int slot);
+    /** The key of the recipe a square crafting grid `width` wide makes of
+     * the encoded stacks, row by row, or null. */
+    public static native String craftingRecipe(String items, int width);
+    /** Whether a furnace burns the encoded stack. */
+    public static native boolean isFuel(String item);
+    /** The recipe by which the furnace-like block `block` cooks the encoded
+     * stack, as {@link EventRelay#cookingRecipe} reads it, or null. */
+    public static native String cookingRecipe(String block, String item);
+    /** `{burn, cook, cookTotal}` of a furnace, smoker or blast furnace, or null. */
+    public static native int[] furnaceTimes(String world, int x, int y, int z);
+    public static native void setFurnaceTimes(String world, int x, int y, int z, int[] times);
     public static native boolean jukeboxIsPlaying(String world, int x, int y, int z);
     public static native String jukeboxRecord(String world, int x, int y, int z);
     public static native void jukeboxSetRecord(String world, int x, int y, int z, String item);
@@ -299,6 +310,15 @@ public final class Native {
     public static native void playerEntityEffect(String uuid, String effect);
     public static native String playerAddress(String uuid);
     public static native String[] advancementCriteria(String key);
+    /** Every advancement the server knows. */
+    public static native String[] advancementKeys();
+    /** `1`/`0` for done, then each criterion as its name, followed by a unit
+     * separator and the epoch millisecond when met; null for a player not online or an unknown advancement. */
+    public static native String[] playerAdvancementProgress(String uuid, String key);
+    /** Awards (on the main thread only) or revokes one criterion. */
+    public static native boolean playerAdvancementCriterion(String uuid, String key, String criterion, boolean award);
+    /** Whether admission is limited to the whitelist. */
+    public static native boolean whitelistEnabled();
     public static native String[] advancementDisplay(String key);
     public static native String playerRespawnWorld(String uuid);
     public static native double[] playerRespawnPosition(String uuid);

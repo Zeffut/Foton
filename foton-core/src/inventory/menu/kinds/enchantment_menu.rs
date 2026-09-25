@@ -5,10 +5,14 @@
 //! from, and a clue for each offer so the client can show one enchantment name
 //! before the player commits.
 
+use std::array;
 use std::sync::Arc;
 
 use foton_registry::blocks::block_state_ext::BlockStateExt as _;
-use foton_registry::{RegistryEntry as _, vanilla_blocks, vanilla_items, vanilla_menu_types};
+use foton_registry::{
+    REGISTRY, RegistryEntry as _, RegistryExt as _, vanilla_blocks, vanilla_items,
+    vanilla_menu_types,
+};
 use foton_utils::random::Random as _;
 use foton_utils::random::legacy_random::LegacyRandom;
 use foton_utils::{
@@ -21,6 +25,7 @@ use crate::enchantment_selection::{EnchantmentInstance, apply_enchantments};
 use crate::enchantment_selection::{
     OFFER_COUNT, enchanting_table_candidates, enchantment_cost, select_enchantment,
 };
+use crate::event::{EnchantOffer, Event as _, PrepareItemEnchantEvent};
 use crate::inventory::container::SimpleContainer;
 use crate::inventory::prelude::*;
 use crate::player::player_inventory::PlayerInventory;
@@ -130,12 +135,33 @@ impl EnchantmentKind {
     fn recompute_offers(&mut self, behavior: &mut MenuBehavior, player: &Player) {
         let item = self.enchant_slots.lock().get_item(SLOT_ITEM).clone();
 
-        if item.is_empty() || !item.is_enchantable() {
+        if item.is_empty() {
             self.clear_offers(behavior);
             return;
         }
-
+        // Paper parity: CraftBukkit relaxes vanilla's `isEnchantable` test so
+        // that `PrepareItemEnchantEvent` can offer to enchant anything; the
+        // event starts cancelled for an item vanilla would refuse.
         let bookshelves = self.count_bookshelves();
+        if item.is_enchantable() {
+            self.roll_offers(behavior, player, &item, bookshelves);
+        } else {
+            self.clear_offers(behavior);
+        }
+        self.prepare_event(behavior, player, &item, bookshelves);
+    }
+
+    /// Rolls the three costs and their clues.
+    ///
+    /// Vanilla parity: the body of `EnchantmentMenu.slotsChanged`.
+    fn roll_offers(
+        &mut self,
+        behavior: &mut MenuBehavior,
+        player: &Player,
+        item: &ItemStack,
+        bookshelves: i32,
+    ) {
+        let item = item.clone();
         let seed = player.enchantment_seed();
         // The wire carries a short, and vanilla casts rather than clamps. The
         // difference matters here and nowhere else: a seed is a full-range int,
@@ -181,6 +207,61 @@ impl EnchantmentKind {
             self.enchant_clues[slot].set(behavior, id);
             let level = i16::try_from(first.level).unwrap_or(i16::MAX);
             self.level_clues[slot].set(behavior, level);
+        }
+    }
+
+    /// Lets plugins see, change or refuse the offers.
+    ///
+    /// Paper parity: `PrepareItemEnchantEvent`. An offer exists where the row
+    /// has a clue; cancelling blanks every row, and otherwise each row becomes
+    /// what the listener left in it.
+    fn prepare_event(
+        &mut self,
+        behavior: &mut MenuBehavior,
+        player: &Player,
+        item: &ItemStack,
+        bookshelves: i32,
+    ) {
+        let view: &MenuBehavior = behavior;
+        let offers: [Option<EnchantOffer>; OFFER_COUNT] = array::from_fn(|slot| {
+            let id = usize::try_from(self.enchant_clues[slot].get(view)).ok()?;
+            let enchantment = REGISTRY.enchantments.by_id(id)?;
+            Some(EnchantOffer {
+                enchantment: enchantment.key().clone(),
+                level: i32::from(self.level_clues[slot].get(view)),
+                cost: self.cost_values[slot],
+            })
+        });
+        let mut event = PrepareItemEnchantEvent::new(
+            player.gameprofile.id,
+            self.world.key.to_string(),
+            self.block_pos,
+            item.clone(),
+            offers,
+            bookshelves,
+            item.is_enchantable(),
+        );
+        player.fire_event(&mut event);
+        if event.is_cancelled() {
+            self.clear_offers(behavior);
+            return;
+        }
+        for (slot, offer) in event.offers().iter().enumerate() {
+            let clue = offer.as_ref().and_then(|offer| {
+                let id = REGISTRY.enchantments.id_from_key(&offer.enchantment)?;
+                Some((i16::try_from(id).ok()?, offer))
+            });
+            let Some((id, offer)) = clue else {
+                self.cost_values[slot] = 0;
+                self.costs[slot].set(behavior, 0);
+                self.enchant_clues[slot].set(behavior, -1);
+                self.level_clues[slot].set(behavior, -1);
+                continue;
+            };
+            self.cost_values[slot] = offer.cost;
+            self.costs[slot].set(behavior, clamp_to_i16(offer.cost));
+            self.enchant_clues[slot].set(behavior, id);
+            self.level_clues[slot].set(behavior, clamp_to_i16(offer.level));
         }
     }
 

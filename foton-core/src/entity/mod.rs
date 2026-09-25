@@ -996,6 +996,11 @@ pub fn start_riding_entities(passenger: &SharedEntity, entity_to_ride: &SharedEn
 
     if passenger.is_passenger() {
         passenger.stop_riding();
+        // Paper parity: a plugin that refused the dismount also refuses the
+        // switch to the new vehicle.
+        if passenger.is_passenger() {
+            return false;
+        }
     }
 
     passenger.set_pose(EntityPose::Standing);

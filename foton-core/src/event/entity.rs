@@ -3,6 +3,7 @@ use std::sync::Arc;
 use foton_registry::item_stack::ItemStack;
 use foton_utils::BlockPos;
 use foton_utils::downcast::{DowncastType, DowncastTypeKey};
+use foton_utils::types::InteractionHand;
 use glam::DVec3;
 use uuid::Uuid;
 
@@ -80,6 +81,7 @@ impl ExplosionPrimeEvent {
 #[derive(Debug)]
 pub struct EntityResurrectEvent {
     entity: Uuid,
+    hand: Option<InteractionHand>,
     cancelled: bool,
 }
 // SAFETY: This Foton-owned key uniquely identifies this concrete event type.
@@ -94,16 +96,26 @@ impl Event for EntityResurrectEvent {
 impl EntityResurrectEvent {
     /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
     #[must_use]
-    pub const fn new(entity: Uuid) -> Self {
+    ///
+    /// `hand` is the hand holding death protection. With none the event starts
+    /// cancelled, and a listener that un-cancels it saves the entity anyway --
+    /// Paper's contract, which a plugin granting a free life relies on.
+    pub const fn new(entity: Uuid, hand: Option<InteractionHand>) -> Self {
         Self {
             entity,
-            cancelled: false,
+            hand,
+            cancelled: hand.is_none(),
         }
     }
     /// Which entity this is about.
     #[must_use]
     pub const fn entity_id(&self) -> Uuid {
         self.entity
+    }
+    /// The hand holding death protection, if any.
+    #[must_use]
+    pub const fn hand(&self) -> Option<InteractionHand> {
+        self.hand
     }
     /// Stops this from happening, or lets it happen again.
     pub const fn set_cancelled(&mut self, cancelled: bool) {
@@ -536,6 +548,7 @@ pub struct EntityDamageByEntityEvent {
     damager: Uuid,
     entity: Uuid,
     cause: String,
+    critical: bool,
     cancelled: bool,
 }
 
@@ -736,8 +749,20 @@ impl EntityDamageByEntityEvent {
             damager,
             entity,
             cause,
+            critical: false,
             cancelled: false,
         }
+    }
+    /// Marks the hit as a critical one, as vanilla decided it.
+    #[must_use]
+    pub const fn with_critical(mut self, critical: bool) -> Self {
+        self.critical = critical;
+        self
+    }
+    /// Whether this is a critical hit.
+    #[must_use]
+    pub const fn critical(&self) -> bool {
+        self.critical
     }
     /// Who dealt the damage.
     #[must_use]

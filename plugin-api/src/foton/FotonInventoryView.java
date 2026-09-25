@@ -21,7 +21,15 @@ public final class FotonInventoryView implements InventoryView {
             ? new FotonCraftingInventory(owner)
             : "minecraft:grindstone".equals(menuType)
                 ? new FotonGrindstoneInventory(owner)
-                : new FotonMenuInventory(owner);
+                : "minecraft:furnace".equals(menuType)
+                    ? new FotonFurnaceMenuInventory(owner, org.bukkit.Material.FURNACE)
+                    : "minecraft:blast_furnace".equals(menuType)
+                        ? new FotonFurnaceMenuInventory(owner, org.bukkit.Material.BLAST_FURNACE)
+                        : "minecraft:smoker".equals(menuType)
+                            ? new FotonFurnaceMenuInventory(owner, org.bukkit.Material.SMOKER)
+                            : "minecraft:smithing".equals(menuType)
+                                ? new FotonSmithingInventory(owner)
+                                : new FotonMenuInventory(owner);
         String title = Native.openMenuTitle(player.getUniqueId().toString());
         this.title = title == null ? "" : title;
     }

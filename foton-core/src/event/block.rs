@@ -637,6 +637,7 @@ pub struct BlockBreakEvent {
     state: BlockStateId,
     cancelled: bool,
     drop_items: bool,
+    exp_to_drop: i32,
 }
 
 // SAFETY: This Foton-owned key uniquely identifies the concrete Rust type
@@ -661,7 +662,26 @@ impl BlockBreakEvent {
             state,
             cancelled: false,
             drop_items: true,
+            exp_to_drop: 0,
         }
+    }
+
+    /// Sets the experience the break will drop, sampled before it happens.
+    #[must_use]
+    pub const fn with_exp_to_drop(mut self, exp_to_drop: i32) -> Self {
+        self.exp_to_drop = exp_to_drop;
+        self
+    }
+
+    /// The experience the break will drop.
+    #[must_use]
+    pub const fn exp_to_drop(&self) -> i32 {
+        self.exp_to_drop
+    }
+
+    /// Changes the experience the break will drop.
+    pub const fn set_exp_to_drop(&mut self, exp_to_drop: i32) {
+        self.exp_to_drop = if exp_to_drop < 0 { 0 } else { exp_to_drop };
     }
 
     /// The player breaking it.

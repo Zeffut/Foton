@@ -53,7 +53,7 @@ public class FotonOfflinePlayer implements OfflinePlayer {
 
     @Override public void setWhitelisted(boolean value) { if (id != null) Native.setPlayerWhitelisted(id.toString(), value); }
 
-    @Override public boolean isBanned() { return name != null && FotonServer.isNameBanned(name); }
+    @Override public boolean isBanned() { return FotonServer.profileBan(id, name) != null; }
 
     @Override public long getFirstPlayed() { return id == null ? 0L : Native.firstPlayed(id.toString()); }
 

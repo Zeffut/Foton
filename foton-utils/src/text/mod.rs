@@ -1,4 +1,6 @@
 //! This module contains everything related to text components.
+/// Minecraft's JSON text form, as Adventure and the server list read it.
+pub mod json;
 mod nbt;
 
 pub use nbt::command_nbt_component;

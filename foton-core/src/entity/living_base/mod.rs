@@ -1866,6 +1866,23 @@ impl LivingEntityBase {
         }
     }
 
+    /// What [`Self::apply_damage_cooldown`] would answer, without recording
+    /// the hit.
+    ///
+    /// Lets a plugin see the damage that will actually land -- the part above
+    /// the last hit during invulnerability frames -- and refuse it before the
+    /// frames are spent on it.
+    pub fn preview_damage_cooldown(&self, amount: f32, bypasses_cooldown: bool) -> Option<f32> {
+        let state = self.state.lock();
+        if state.death_processed {
+            return None;
+        }
+        if state.invulnerable_time > 10 && !bypasses_cooldown {
+            return (amount > state.last_hurt).then(|| amount - state.last_hurt);
+        }
+        Some(amount)
+    }
+
     /// Applies vanilla hurt cooldown bookkeeping.
     ///
     /// Returns `None` when damage should be ignored because death was already

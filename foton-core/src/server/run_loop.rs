@@ -199,6 +199,7 @@ impl Server {
                 tick_manager.tick();
                 let runs_normally = tick_manager.runs_normally();
                 tick_manager.increment_tick_count();
+                tick_manager.record_tick_start(tick_start);
                 (tick_manager.tick_count, runs_normally)
             };
 

@@ -13,6 +13,7 @@ use foton_utils::{BlockPos, BlockStateId, Direction};
 use rand::{Rng, RngExt};
 use std::sync::Arc;
 
+use crate::behavior::block::offer_harvest;
 use crate::behavior::blocks::vegetation::bonemealable::BonemealAction;
 use crate::behavior::blocks::vegetation::growing_plant_head_block::{
     GrowingPlantHead, GrowingPlantHeadBlock,
@@ -86,7 +87,13 @@ impl CaveVinesBlock {
             .with_block_state(state)
             .with_interacting_entity(entity_loot_ref(source_entity));
 
-        let items = vanilla_loot_tables::HARVEST_CAVE_VINE.get_random_items(&mut ctx);
+        let mut items = vanilla_loot_tables::HARVEST_CAVE_VINE.get_random_items(&mut ctx);
+        if let Some(player) = source_entity.as_player() {
+            let Some(harvested) = offer_harvest(player, world, pos, items) else {
+                return InteractionResult::Success;
+            };
+            items = harvested;
+        }
         for item in items {
             world.pop_resource(pos, item);
         }
