@@ -167,6 +167,9 @@ public final class EventBridge {
                 // error message.
                 System.out.println("[events] " + handler.plugin.getName() + " threw in "
                     + handler.name() + ": " + rootOf(error));
+                // The stack, as Paper logs it: the message alone names nothing
+                // a plugin author could act on.
+                rootOf(error).printStackTrace(System.out);
                 reportException(handler.plugin, handler.name(), error);
             }
         }

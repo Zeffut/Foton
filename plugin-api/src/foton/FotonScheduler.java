@@ -102,8 +102,11 @@ public final class FotonScheduler implements BukkitScheduler {
             } catch (Throwable error) {
                 // Nothing above this catches: an exception on the executor
                 // thread would silently stop a repeating task forever.
-                System.out.println("[scheduler] " + plugin.getName()
-                    + " threw in an async task: " + error);
+                // CraftAsyncTask's wording, with the stack: without it the
+                // exception names nothing a plugin author could act on.
+                plugin.getLogger().log(java.util.logging.Level.WARNING, String.format(
+                    "Plugin %s generated an exception while executing task %s",
+                    plugin.getDescription().getFullName(), task.id), error);
             } finally {
                 task.running = false;
                 task.thread = null;
@@ -272,8 +275,10 @@ public final class FotonScheduler implements BukkitScheduler {
             } catch (Throwable error) {
                 // A plugin's task throwing must not stop the tick, and must not
                 // reach Foton: an exception crossing JNI is a crash.
-                System.out.println("[scheduler] " + ready.plugin.getName()
-                    + " threw in a task: " + error);
+                // CraftScheduler's wording, with the stack, as above.
+                ready.plugin.getLogger().log(java.util.logging.Level.WARNING, String.format(
+                    "Task #%s for %s generated an exception",
+                    ready.id, ready.plugin.getDescription().getFullName()), error);
             } finally {
                 ready.running = false;
                 ready.thread = null;
