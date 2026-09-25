@@ -351,6 +351,11 @@ pub mod vanilla_recipes;
 
 #[expect(warnings)]
 #[rustfmt::skip]
+#[path = "generated/vanilla_recipe_book_registries.rs"]
+pub mod vanilla_recipe_book_registries;
+
+#[expect(warnings)]
+#[rustfmt::skip]
 #[path = "generated/vanilla_entities.rs"]
 pub mod vanilla_entities;
 

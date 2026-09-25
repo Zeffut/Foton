@@ -65,6 +65,7 @@ mod pig_variants;
 mod poi_types;
 mod position_source_types;
 mod potions;
+mod recipe_book_registries;
 mod recipes;
 mod sound_events;
 mod sound_types;
@@ -142,6 +143,7 @@ const TIMELINE_TAGS: &str = "timeline_tags";
 const ZOMBIE_NAUTILUS_VARIANTS: &str = "zombie_nautilus_variants";
 const SULFUR_CUBE_ARCHETYPES: &str = "sulfur_cube_archetypes";
 const RECIPES: &str = "recipes";
+const RECIPE_BOOK_REGISTRIES: &str = "recipe_book_registries";
 const VANILLA_ENTITIES: &str = "entities";
 const ENTITY_DATA: &str = "entity_data";
 const FLUIDS: &str = "fluids";
@@ -232,6 +234,7 @@ pub fn main() {
         (zombie_nautilus_variants::build(), ZOMBIE_NAUTILUS_VARIANTS),
         (sulfur_cube_archetypes::build(), SULFUR_CUBE_ARCHETYPES),
         (recipes::build(), RECIPES),
+        (recipe_book_registries::build(), RECIPE_BOOK_REGISTRIES),
         (entities::build(), VANILLA_ENTITIES),
         (entity_data::build(), ENTITY_DATA),
         (fluids::build(), FLUIDS),

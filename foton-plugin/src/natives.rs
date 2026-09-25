@@ -10,6 +10,7 @@
 //! (such as runtime recipes) expose their own synchronized write path.
 
 use crate::packet_tap;
+use std::borrow::Cow;
 use std::fmt::Write;
 use std::mem;
 use std::ptr::null_mut;
@@ -8073,6 +8074,10 @@ extern "system" fn recipe_add_shapeless(
                     item: result_item,
                     count,
                 },
+                // Bukkit's defaults: a recipe that sets neither is ungrouped
+                // and filed under misc, and it unlocks with a toast.
+                show_notification: true,
+                group: Cow::Borrowed(""),
             }),
     )
 }
@@ -8177,6 +8182,7 @@ extern "system" fn recipe_add_shaped(
             count,
         },
         true,
+        Cow::Borrowed(""),
     )))
 }
 
