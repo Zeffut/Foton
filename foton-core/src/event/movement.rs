@@ -237,3 +237,95 @@ impl PlayerVelocityEvent {
         self.cancelled = cancelled;
     }
 }
+
+/// Why a player is being moved somewhere else.
+///
+/// Bukkit parity: the `PlayerTeleportEvent.TeleportCause` values Foton
+/// raises.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TeleportCause {
+    /// Something consumed teleported them: a chorus fruit, or any item with a
+    /// `teleport_randomly` consume effect.
+    ConsumableEffect,
+}
+
+impl TeleportCause {
+    /// Bukkit's name for it.
+    #[must_use]
+    pub const fn bukkit_name(self) -> &'static str {
+        match self {
+            Self::ConsumableEffect => "CONSUMABLE_EFFECT",
+        }
+    }
+}
+
+/// A player is about to be teleported.
+///
+/// Bukkit parity: `PlayerTeleportEvent`. Cancelling keeps them where they
+/// were; a changed destination is where they go.
+pub struct PlayerTeleportEvent {
+    player: Uuid,
+    from: DVec3,
+    to: DVec3,
+    cause: TeleportCause,
+    cancelled: bool,
+}
+
+// SAFETY: This Foton-owned key uniquely identifies the concrete Rust type.
+unsafe impl DowncastType for PlayerTeleportEvent {
+    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/player_teleport");
+}
+
+impl Event for PlayerTeleportEvent {
+    fn is_cancelled(&self) -> bool {
+        self.cancelled
+    }
+}
+
+impl PlayerTeleportEvent {
+    /// Creates the event for a move from `from` to `to`.
+    #[must_use]
+    pub const fn new(player: Uuid, from: DVec3, to: DVec3, cause: TeleportCause) -> Self {
+        Self {
+            player,
+            from,
+            to,
+            cause,
+            cancelled: false,
+        }
+    }
+
+    /// Who is moving.
+    #[must_use]
+    pub const fn player(&self) -> Uuid {
+        self.player
+    }
+
+    /// Where they are.
+    #[must_use]
+    pub const fn from(&self) -> DVec3 {
+        self.from
+    }
+
+    /// Where they are going.
+    #[must_use]
+    pub const fn to(&self) -> DVec3 {
+        self.to
+    }
+
+    /// Sends them somewhere else.
+    pub const fn set_to(&mut self, to: DVec3) {
+        self.to = to;
+    }
+
+    /// Why.
+    #[must_use]
+    pub const fn cause(&self) -> TeleportCause {
+        self.cause
+    }
+
+    /// Keeps them where they are, or lets them go again.
+    pub const fn set_cancelled(&mut self, cancelled: bool) {
+        self.cancelled = cancelled;
+    }
+}

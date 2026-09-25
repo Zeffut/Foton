@@ -14,32 +14,32 @@ use std::sync::Arc;
 use crate::natives;
 use crate::natives::describe_slot;
 use crate::natives::parse_slot;
+use crate::relay::{self, component};
 use foton_core::entity::conversion::ConversionReason;
 use foton_core::event::AsyncTabCompleteEvent;
-use foton_core::event::Event;
 use foton_core::event::EntityTargetEvent;
+use foton_core::event::Event;
 use foton_core::event::ExplosionPrimeEvent;
 use foton_core::event::{
-    AsyncPlayerPreLoginEvent, AsyncPlayerPreLoginResult, BlockBurnEvent,
-    BlockDamageEvent, BlockDispenseEvent, BlockExpEvent, BlockExplodeEvent, BlockFadeEvent,
-    BlockFertilizeEvent, BlockFromToEvent, BlockGrowEvent, BlockIgniteEvent, BlockPlaceEvent,
-    BlockPreDispenseEvent, BlockSpreadEvent, ChunkLoadEvent, ChunkPopulateEvent, ChunkUnloadEvent,
-    CommandEvent, CrafterCraftEvent, CreatureSpawnEvent, EntityChangeBlockEvent,
-    EntityDamageByEntityEvent, EntityDeathEvent, EntityExplodeEvent, EntityMountEvent,
-    EntityPickupItemEvent, EntityPortalEvent, EntityPushedByEntityAttackEvent,
-    EntityRegainHealthEvent, EntityRemoveFromWorldEvent, EntityResurrectEvent,
-    EntityTransformEvent, ExpBottleEvent, FoodLevelChangeEvent, HangingBreakEvent,
-    HangingPlaceEvent, InventoryClickEvent, InventoryCloseEvent, InventoryDragEvent,
-    InventoryOpenEvent, ItemSpawnEvent, LeavesDecayEvent, LightningStrikeEvent, PistonEvent,
-    PlayerAdvancementCriterionGrantEvent, PlayerAdvancementDoneEvent, PlayerBucketEmptyEvent,
-    PlayerBucketFillEvent, PlayerChatEvent, PlayerClientLoadedWorldEvent,
-    PlayerCommandPreprocessEvent, PlayerCustomPayloadEvent, PlayerDeathEvent, PlayerDropItemEvent,
-    PlayerFishEvent, PlayerInteractEntityEvent, PlayerInteractEvent, PlayerItemBreakEvent,
-    PlayerJoinEvent, PlayerLocaleChangeEvent, PlayerLoginEvent, PlayerMoveEvent,
-    PlayerOpenSignCause, PlayerOpenSignEvent, PlayerPortalEvent, PlayerQuitEvent,
-    PlayerRespawnEvent, PlayerSpawnLocationEvent, PlayerTakeLecternBookEvent, PortalCreateEvent,
-    PreCreatureSpawnEvent, PrepareItemCraftEvent, ProjectileLaunchEvent, ServerTickEvent,
-    SignChangeEvent, ThunderChangeEvent, WeatherChangeEvent,
+    AsyncPlayerPreLoginEvent, AsyncPlayerPreLoginResult, BlockBurnEvent, BlockDamageEvent,
+    BlockDispenseEvent, BlockExpEvent, BlockExplodeEvent, BlockFadeEvent, BlockFertilizeEvent,
+    BlockFromToEvent, BlockGrowEvent, BlockIgniteEvent, BlockPlaceEvent, BlockPreDispenseEvent,
+    BlockSpreadEvent, ChunkLoadEvent, ChunkPopulateEvent, ChunkUnloadEvent, CommandEvent,
+    CrafterCraftEvent, CreatureSpawnEvent, EntityChangeBlockEvent, EntityDamageByEntityEvent,
+    EntityDeathEvent, EntityExplodeEvent, EntityMountEvent, EntityPickupItemEvent,
+    EntityPortalEvent, EntityPushedByEntityAttackEvent, EntityRegainHealthEvent,
+    EntityRemoveFromWorldEvent, EntityResurrectEvent, EntityTransformEvent, ExpBottleEvent,
+    FoodLevelChangeEvent, HangingBreakEvent, HangingPlaceEvent, InventoryClickEvent,
+    InventoryCloseEvent, InventoryDragEvent, InventoryOpenEvent, ItemSpawnEvent, LeavesDecayEvent,
+    LightningStrikeEvent, PistonEvent, PlayerAdvancementCriterionGrantEvent,
+    PlayerAdvancementDoneEvent, PlayerBucketEmptyEvent, PlayerBucketFillEvent, PlayerChatEvent,
+    PlayerClientLoadedWorldEvent, PlayerCommandPreprocessEvent, PlayerCustomPayloadEvent,
+    PlayerDeathEvent, PlayerDropItemEvent, PlayerFishEvent, PlayerInteractEntityEvent,
+    PlayerInteractEvent, PlayerItemBreakEvent, PlayerJoinEvent, PlayerLocaleChangeEvent,
+    PlayerLoginEvent, PlayerMoveEvent, PlayerOpenSignCause, PlayerOpenSignEvent, PlayerPortalEvent,
+    PlayerQuitEvent, PlayerRespawnEvent, PlayerSpawnLocationEvent, PlayerTakeLecternBookEvent,
+    PortalCreateEvent, PreCreatureSpawnEvent, PrepareItemCraftEvent, ProjectileLaunchEvent,
+    ServerTickEvent, SignChangeEvent, ThunderChangeEvent, WeatherChangeEvent,
 };
 use foton_core::event::{
     PlayerChangedWorldEvent, PlayerCommandSendEvent, PlayerGameModeChangeEvent, PlayerItemHeldEvent,
@@ -748,7 +748,7 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     events.on::<PlayerLoginEvent, _>(owner(), move |event| {
         let uuid = event.player().gameprofile.id.to_string();
         if let Some(message) = login_call(&jvm, &uuid) {
-            event.deny(crate::relay::component(&message));
+            event.deny(component(&message));
         }
     });
 
@@ -975,22 +975,26 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     let jvm = Arc::clone(&vm);
     events.on::<PlayerJoinEvent, _>(owner(), move |event| {
         let uuid = event.player().gameprofile.id.to_string();
-        let message = event.message().map(|message| json::to_json(message).to_string());
+        let message = event
+            .message()
+            .map(|message| json::to_json(message).to_string());
         match string_call(&jvm, "fireJoin", &uuid, message.as_deref()) {
             Answer::Unreachable => {}
             Answer::Nothing => event.set_message(None),
-            Answer::Message(text) => event.set_message(Some(crate::relay::component(&text))),
+            Answer::Message(text) => event.set_message(Some(component(&text))),
         }
     });
 
     let jvm = Arc::clone(&vm);
     events.on::<PlayerQuitEvent, _>(owner(), move |event| {
         let uuid = event.player().gameprofile.id.to_string();
-        let message = event.message().map(|message| json::to_json(message).to_string());
+        let message = event
+            .message()
+            .map(|message| json::to_json(message).to_string());
         match string_call(&jvm, "fireQuit", &uuid, message.as_deref()) {
             Answer::Unreachable => {}
             Answer::Nothing => event.set_message(None),
-            Answer::Message(text) => event.set_message(Some(crate::relay::component(&text))),
+            Answer::Message(text) => event.set_message(Some(component(&text))),
         }
     });
 
@@ -1122,7 +1126,6 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
         }
     });
 
-
     let jvm = Arc::clone(&vm);
     events.on::<BlockPlaceEvent, _>(owner(), move |event| {
         if !block_place_call(&jvm, event.player(), event.position(), event.item()) {
@@ -1158,7 +1161,7 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
         );
     });
 
-    crate::relay::subscribe(server, &vm);
+    relay::subscribe(server, &vm);
 
     // The tick. Not a gameplay event: it is what makes `runTask` mean what
     // Bukkit says it means. A plugin hands over a Runnable from whatever

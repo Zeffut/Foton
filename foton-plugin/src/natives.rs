@@ -17,8 +17,9 @@ use std::sync::{Arc, OnceLock, Weak};
 use std::thread::{self, ThreadId};
 use std::time::{Duration, Instant};
 
-use foton_core::behavior::blocks::vegetation::tree_grower::generate_tree as grow_tree;
+use crate::relay::{cooking_kind, describe_cooking};
 use foton_core::advancement::ADVANCEMENT_TREE;
+use foton_core::behavior::blocks::vegetation::tree_grower::generate_tree as grow_tree;
 use foton_core::block_entity::entities::BannerBlockEntity;
 use foton_core::block_entity::entities::FurnaceBlockEntity;
 use foton_core::block_entity::entities::HopperBlockEntity;
@@ -133,6 +134,7 @@ use foton_registry::entity_data::{Quaternionf, Vector3f};
 use foton_registry::entity_type::EntityTypeRef;
 use foton_registry::entity_type::MobCategory;
 use foton_registry::entity_variant::AxolotlVariant;
+use foton_registry::fuel;
 use foton_registry::game_rules::GameRuleType;
 use foton_registry::game_rules::GameRuleValue;
 use foton_registry::item_stack::ItemStack;
@@ -140,17 +142,16 @@ use foton_registry::particle_type::ParticleData;
 use foton_registry::recipe::{
     CraftingCategory, CraftingInput, Ingredient, RecipeResult, ShapedRecipe, ShapelessRecipe,
 };
+use foton_registry::stat::{CustomStatRef, Stat};
 use foton_registry::trading::ItemCost;
 use foton_registry::trading::MerchantOffer;
 use foton_registry::vanilla_block_entity_types::SIGN;
 use foton_registry::vanilla_damage_types::PLAYER_ATTACK;
 use foton_registry::vanilla_game_rules::TNT_EXPLOSION_DROP_DECAY;
-use foton_registry::fuel;
 use foton_registry::{
     REGISTRY, RegistryEntry as _, RegistryExt as _, TaggedRegistryExt as _, vanilla_entities,
     vanilla_items,
 };
-use foton_registry::stat::{CustomStatRef, Stat};
 use foton_utils::entity_events::EntityStatus;
 use foton_utils::locks::{SyncMutex, SyncRwLock};
 use foton_utils::nbt::{merge_nbt_compounds, parse_snbt_compound, to_canonical_snbt};
@@ -170,9 +171,7 @@ use foton_utils::{BlockPos, BlockStateId, WorldAabb};
 use foton_utils::{Downcast as _, Identifier};
 use glam::DVec3;
 use jni::JNIEnv;
-use jni::objects::{
-    JByteArray, JClass, JDoubleArray, JIntArray, JObject, JObjectArray, JString,
-};
+use jni::objects::{JByteArray, JClass, JDoubleArray, JIntArray, JObject, JObjectArray, JString};
 use jni::sys::{
     jboolean, jbyte, jdouble, jdoubleArray, jfloat, jint, jintArray, jlong, jobjectArray, jstring,
 };
@@ -7283,7 +7282,14 @@ extern "system" fn player_advancement_progress(
     let Some((player, node)) = player_and_advancement(&mut env, &uuid, &key) else {
         return null_mut();
     };
-    let mut values = vec![if player.has_advancement(node) { "1" } else { "0" }.to_owned()];
+    let mut values = vec![
+        if player.has_advancement(node) {
+            "1"
+        } else {
+            "0"
+        }
+        .to_owned(),
+    ];
     values.extend(
         player
             .advancement_criteria(node)
@@ -10371,7 +10377,9 @@ extern "system" fn crafting_recipe(
 ) -> jstring {
     let items: Option<String> = env.get_string(&items).ok().map(Into::into);
     let value = items.and_then(|items| {
-        let width = usize::try_from(width).ok().filter(|width| matches!(width, 2 | 3))?;
+        let width = usize::try_from(width)
+            .ok()
+            .filter(|width| matches!(width, 2 | 3))?;
         let stacks = items
             .split('\u{1e}')
             .map(parse_slot)
@@ -10401,7 +10409,7 @@ extern "system" fn is_fuel(mut env: JNIEnv<'_>, _class: JClass<'_>, item: JStrin
 
 /// `foton.Native.cookingRecipe`: the recipe by which a furnace, blast furnace
 /// or smoker (`block`) cooks the encoded stack, described as
-/// [`crate::relay::describe_cooking`] does, or null when none does.
+/// [`describe_cooking`] does, or null when none does.
 extern "system" fn cooking_recipe(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -10411,10 +10419,10 @@ extern "system" fn cooking_recipe(
     let block: Option<String> = env.get_string(&block).ok().map(Into::into);
     let item: Option<String> = env.get_string(&item).ok().map(Into::into);
     let value = block.zip(item).and_then(|(block, item)| {
-        let kind = crate::relay::cooking_kind(&block)?;
+        let kind = cooking_kind(&block)?;
         let stack = parse_slot(&item).filter(|stack| !stack.is_empty())?;
         let recipe = REGISTRY.recipes.find_cooking_recipe(kind, &stack)?;
-        Some(crate::relay::describe_cooking(recipe))
+        Some(describe_cooking(recipe))
     });
     to_java(&mut env, value)
 }

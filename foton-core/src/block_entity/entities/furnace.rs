@@ -266,10 +266,7 @@ impl FurnaceBlockEntity {
         container.lit_total_time = event.burn_time();
         let lit = container.lit_time_remaining > 0;
         // A furnace a plugin lit without burning keeps its fuel item.
-        if lit
-            && event.burning()
-            && event.consume_fuel()
-            && !container.items[SLOT_FUEL].is_empty()
+        if lit && event.burning() && event.consume_fuel() && !container.items[SLOT_FUEL].is_empty()
         {
             container.consume_fuel();
         }

@@ -27,7 +27,9 @@ pub fn to_json(component: &TextComponent) -> Value {
 /// one.
 #[must_use]
 pub fn from_json(text: &str) -> Option<TextComponent> {
-    let mut value = serde_json::from_str::<Value>(text).ok().filter(Value::is_object)?;
+    let mut value = serde_json::from_str::<Value>(text)
+        .ok()
+        .filter(Value::is_object)?;
     to_model(&mut value);
     serde_json::from_value(value).ok()
 }

@@ -1,12 +1,12 @@
 use std::f32::consts::PI;
 
 use foton_registry::DyeColor;
-use foton_registry::equipment::EquipmentSlotType;
 use foton_registry::attribute::AttributeRef;
 use foton_registry::data_components::components::ItemDamageFunction;
 use foton_registry::data_components::vanilla_components::{
     self, BLOCKS_ATTACKS, DEATH_PROTECTION, KINETIC_WEAPON,
 };
+use foton_registry::equipment::EquipmentSlotType;
 use foton_registry::particle_type::{BlockParticleOption, ParticleData};
 use foton_registry::vanilla_particle_types;
 
@@ -884,6 +884,38 @@ pub trait LivingEntity: Entity {
         self.living_hurt_server(world, source, amount)
     }
 
+    /// Spends the invulnerability frames on `damage`, answering whether the
+    /// hit counts as a full one and the amount that lands, or `None` when
+    /// nothing does.
+    ///
+    /// Paper parity: damage no entity is behind is first offered to plugins
+    /// as `EntityDamageEvent`, on the amount that would land, before the
+    /// frames are spent; entity damage has its own by-entity event.
+    fn land_damage(
+        &self,
+        world: &World,
+        source: &DamageSource,
+        damage: f32,
+    ) -> Option<(bool, f32)> {
+        let bypass = source.bypasses_cooldown();
+        let mut plugin_damage = None;
+        if let Some(cause) = EntityDamageEvent::environmental_cause(source) {
+            let landing = self.living_base().preview_damage_cooldown(damage, bypass)?;
+            let mut event = EntityDamageEvent::new(self.uuid(), cause, f64::from(landing));
+            world.fire_event(&mut event);
+            if Event::is_cancelled(&event) {
+                return None;
+            }
+            plugin_damage = Some(event.damage() as f32);
+        }
+        let (took_full_damage, landed) =
+            self.living_base().apply_damage_cooldown(damage, bypass)?;
+        Some((
+            took_full_damage,
+            plugin_damage.map_or(landed, |changed| changed.max(0.0)),
+        ))
+    }
+
     /// Runs the shared body of [`Self::hurt_server`].
     /// The shared part of vanilla `LivingEntity.hurtServer`.
     fn living_hurt_server(&self, world: &World, source: &DamageSource, amount: f32) -> bool {
@@ -951,36 +983,10 @@ pub trait LivingEntity: Entity {
             damage = f32::MAX;
         }
 
-        // Paper parity: `EntityDamageEvent` for damage no entity is behind,
-        // fired on the amount that would land, before the invulnerability
-        // frames are spent. Entity damage has its own by-entity event.
-        let mut plugin_damage = None;
-        if let Some(cause) = EntityDamageEvent::environmental_cause(source) {
-            let Some(landing) = self
-                .living_base()
-                .preview_damage_cooldown(damage, source.bypasses_cooldown())
-            else {
-                return false;
-            };
-            let mut event = EntityDamageEvent::new(self.uuid(), cause, f64::from(landing));
-            world.fire_event(&mut event);
-            if Event::is_cancelled(&event) {
-                return false;
-            }
-            if event.damage() != f64::from(landing) {
-                plugin_damage = Some(event.damage() as f32);
-            }
-        }
-
-        let Some((took_full_damage, mut effective_amount)) = self
-            .living_base()
-            .apply_damage_cooldown(damage, source.bypasses_cooldown())
+        let Some((took_full_damage, effective_amount)) = self.land_damage(world, source, damage)
         else {
             return false;
         };
-        if let Some(changed) = plugin_damage {
-            effective_amount = changed.max(0.0);
-        }
 
         self.before_actually_hurt(source, effective_amount);
         self.actually_hurt(world, source, effective_amount);

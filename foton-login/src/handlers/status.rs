@@ -2,13 +2,13 @@
 
 use foton_core::config::RuntimeConfig;
 use foton_core::event::ServerListPingEvent;
-use text_components::TextComponent;
 use foton_protocol::packets::{
     common::{CPongResponse, SPingRequest},
     status::{CStatusResponse, Players, Sample, Status, Version},
 };
 use foton_registry::packets::CURRENT_MC_PROTOCOL;
 use foton_utils::MC_VERSION;
+use text_components::TextComponent;
 
 use crate::tcp_client::JavaTcpClient;
 

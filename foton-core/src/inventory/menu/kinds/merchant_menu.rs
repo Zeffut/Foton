@@ -208,7 +208,8 @@ impl MenuKind for MerchantKind {
         click: Click,
         player: &Player,
     ) -> ClickOutcome {
-        if Self::takes_result(behavior, guard, click) && !self.purchase_allowed(behavior, guard, player)
+        if Self::takes_result(behavior, guard, click)
+            && !self.purchase_allowed(behavior, guard, player)
         {
             return ClickOutcome::Consume;
         }

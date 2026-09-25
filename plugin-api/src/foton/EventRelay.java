@@ -441,6 +441,24 @@ public final class EventRelay {
         return answer(FotonText.json(event.motd()), event.getMaxPlayers());
     }
 
+    /** Answers `cancelled, x y z`. The player keeps their own rotation. */
+    public static String fireTeleport(String uuid, String from, String to, String cause) {
+        Player player = player(uuid);
+        World world = player.getWorld();
+        Location origin = location(world, from);
+        Location destination = location(world, to);
+        Location look = player.getLocation();
+        origin.setYaw(look.getYaw());
+        origin.setPitch(look.getPitch());
+        destination.setYaw(look.getYaw());
+        destination.setPitch(look.getPitch());
+        org.bukkit.event.player.PlayerTeleportEvent event = new org.bukkit.event.player.PlayerTeleportEvent(
+            player, origin, destination, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.valueOf(cause));
+        EventBridge.dispatch(event);
+        Location target = event.getTo() == null ? destination : event.getTo();
+        return answer(event.isCancelled(), target.getX() + " " + target.getY() + " " + target.getZ());
+    }
+
     /** Answers `cancelled, stacks`. */
     public static String fireHarvest(String uuid, String world, String block, String hand,
             String items) {

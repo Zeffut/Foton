@@ -23,12 +23,12 @@ use foton_utils::{
     types::{GameType, InteractionHand, UpdateFlags},
 };
 
-use crate::behavior::{BLOCK_BEHAVIORS, BlockLootContext, ITEM_BEHAVIORS};
+use crate::behavior::{BLOCK_BEHAVIORS, BlockBehavior, BlockLootContext, ITEM_BEHAVIORS};
 use crate::block_entity::SharedBlockEntity;
-use crate::entity::{Entity, LivingEntity};
-use crate::event::BlockDamageEvent;
 use crate::entity::RemovalReason;
 use crate::entity::entities::objects::items::ItemEntity;
+use crate::entity::{Entity, LivingEntity};
+use crate::event::BlockDamageEvent;
 use crate::event::{BlockBreakEvent, BlockDropItemEvent, Event as _};
 use crate::fluid::fluid_state_to_block;
 use crate::player::Player;
@@ -127,6 +127,45 @@ impl Default for BlockBreakingManager {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Asks plugins about a player breaking a block, offering the experience the
+/// break would drop. Returns whether the block drops its items and how much
+/// experience it drops, or `None` when a plugin refused the break.
+///
+/// Paper parity: `BlockBreakEvent`. The experience is sampled before the
+/// break, from the standing block and the tool as it is, and only for a break
+/// that would drop the block's loot.
+fn fire_block_break(
+    player: &Player,
+    world: &Arc<World>,
+    pos: BlockPos,
+    state: BlockStateId,
+    behavior: &dyn BlockBehavior,
+) -> Option<(bool, i32)> {
+    let game_mode = player.game_mode();
+    let tool = {
+        let inv = player.inventory.lock();
+        let main_hand = inv.get_item_in_hand(InteractionHand::MainHand);
+        main_hand.copy_with_count(main_hand.count)
+    };
+    let harvests = tool.is_correct_tool_for_drops(state) || !requires_correct_tool(state);
+    let expected_exp =
+        if game_mode != GameType::Creative && game_mode != GameType::Spectator && harvests {
+            behavior.experience_drop(state, world, pos, &tool)
+        } else {
+            0
+        };
+
+    let Some(shared) = player.shared() else {
+        return Some((true, expected_exp));
+    };
+    let mut event = BlockBreakEvent::new(shared, pos, state).with_exp_to_drop(expected_exp);
+    player.fire_event(&mut event);
+    if event.is_cancelled() {
+        return None;
+    }
+    Some((event.drop_items(), event.exp_to_drop()))
 }
 
 impl BlockBreakingManager {
@@ -379,35 +418,12 @@ impl BlockBreakingManager {
 
         let behavior = BLOCK_BEHAVIORS.get_behavior(state.get_block());
 
-        // Paper parity: the experience is sampled before the break, from the
-        // standing block and the tool as it is, so `BlockBreakEvent` can offer
-        // it; it only drops for a break that would drop the block's loot.
-        let expected_exp = {
-            let game_mode = player.game_mode();
-            let tool = {
-                let inv = player.inventory.lock();
-                let main_hand = inv.get_item_in_hand(InteractionHand::MainHand);
-                main_hand.copy_with_count(main_hand.count)
-            };
-            let harvests = tool.is_correct_tool_for_drops(state) || !requires_correct_tool(state);
-            if game_mode != GameType::Creative && game_mode != GameType::Spectator && harvests {
-                behavior.experience_drop(state, world, pos, &tool)
-            } else {
-                0
-            }
-        };
-
         // Before anything touches the block, so cancelling leaves the world as
         // it was rather than having to put it back.
-        let (event_drop_items, exp_to_drop) = if let Some(shared) = player.shared() {
-            let mut event = BlockBreakEvent::new(shared, pos, state).with_exp_to_drop(expected_exp);
-            player.fire_event(&mut event);
-            if event.is_cancelled() {
-                return false;
-            }
-            (event.drop_items(), event.exp_to_drop())
-        } else {
-            (true, expected_exp)
+        let Some((event_drop_items, exp_to_drop)) =
+            fire_block_break(player, world, pos, state, behavior)
+        else {
+            return false;
         };
 
         // TODO: Check for GameMasterBlock (command blocks, etc.)

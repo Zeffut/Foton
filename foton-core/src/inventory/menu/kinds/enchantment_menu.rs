@@ -5,6 +5,7 @@
 //! from, and a clue for each offer so the client can show one enchantment name
 //! before the player commits.
 
+use std::array;
 use std::sync::Arc;
 
 use foton_registry::blocks::block_state_ext::BlockStateExt as _;
@@ -21,10 +22,10 @@ use foton_utils::{
 
 use crate::behavior::blocks::count_enchanting_power;
 use crate::enchantment_selection::{EnchantmentInstance, apply_enchantments};
-use crate::event::{EnchantOffer, Event as _, PrepareItemEnchantEvent};
 use crate::enchantment_selection::{
     OFFER_COUNT, enchanting_table_candidates, enchantment_cost, select_enchantment,
 };
+use crate::event::{EnchantOffer, Event as _, PrepareItemEnchantEvent};
 use crate::inventory::container::SimpleContainer;
 use crate::inventory::prelude::*;
 use crate::player::player_inventory::PlayerInventory;
@@ -222,7 +223,7 @@ impl EnchantmentKind {
         bookshelves: i32,
     ) {
         let view: &MenuBehavior = behavior;
-        let offers: [Option<EnchantOffer>; OFFER_COUNT] = std::array::from_fn(|slot| {
+        let offers: [Option<EnchantOffer>; OFFER_COUNT] = array::from_fn(|slot| {
             let id = usize::try_from(self.enchant_clues[slot].get(view)).ok()?;
             let enchantment = REGISTRY.enchantments.by_id(id)?;
             Some(EnchantOffer {

@@ -10,30 +10,31 @@
 
 use std::sync::Arc;
 
+use foton_core::event::Event as _;
 use foton_core::event::{
-    BlockBreakEvent, BlockDropItemEvent, BrewEvent, EnchantOffer, FurnaceBurnEvent,
-    FurnaceSmeltEvent, FurnaceStartSmeltEvent, PlayerPurchaseEvent, PrepareItemEnchantEvent,
-    PrepareSmithingEvent, EntitiesLoadEvent, EntityDamageEvent,
-    PlayerHarvestBlockEvent, EntitiesUnloadEvent, EntityDismountEvent, EntityPlaceEvent,
-    PlayerArmorChangeEvent, PlayerFailMoveEvent, PlayerItemConsumeEvent, ServerListPingEvent,
-    PlayerToggleFlightEvent, PlayerVelocityEvent,
+    BlockBreakEvent, BlockDropItemEvent, BrewEvent, EnchantOffer, EntitiesLoadEvent,
+    EntitiesUnloadEvent, EntityDamageEvent, EntityDismountEvent, EntityPlaceEvent,
+    FurnaceBurnEvent, FurnaceSmeltEvent, FurnaceStartSmeltEvent, PlayerArmorChangeEvent,
+    PlayerFailMoveEvent, PlayerHarvestBlockEvent, PlayerItemConsumeEvent, PlayerPurchaseEvent,
+    PlayerTeleportEvent, PlayerToggleFlightEvent, PlayerVelocityEvent, PrepareItemEnchantEvent,
+    PrepareSmithingEvent, ServerListPingEvent,
 };
+use foton_core::server::Server;
 use foton_registry::REGISTRY;
 use foton_registry::equipment::EquipmentSlot;
 use foton_registry::item_stack::ItemStack;
 use foton_registry::recipe::{CookingKind, SmeltingRecipe};
 use foton_registry::trading::MerchantOffer;
 use foton_utils::Identifier;
+use foton_utils::text::json;
 use foton_utils::types::InteractionHand;
 use foton_utils::{BlockPos, ChunkPos};
-use uuid::Uuid;
-use foton_core::event::Event as _;
-use foton_core::server::Server;
 use glam::DVec3;
-use text_components::TextComponent;
-use foton_utils::text::json;
 use jni::JavaVM;
+use jni::errors::Error as JniError;
 use jni::objects::{JObject, JString, JValue};
+use text_components::TextComponent;
+use uuid::Uuid;
 
 use crate::forward::{BridgeEnv, owner};
 use crate::natives::{describe_slot, describe_state, parse_slot};
@@ -53,21 +54,31 @@ const ITEM: &str = "\u{1e}";
 /// thread -- the tick thread is one -- does not keep a reference per call.
 fn text_call(vm: &JavaVM, method: &str, args: &[&str]) -> Option<String> {
     let mut env = BridgeEnv::attach(vm)?;
-    let signature = format!("({})Ljava/lang/String;", "Ljava/lang/String;".repeat(args.len()));
-    env.with_local_frame(i32::try_from(args.len()).unwrap_or(i32::MAX).saturating_add(4), |env| {
-        let mut strings: Vec<JObject<'_>> = Vec::with_capacity(args.len());
-        for arg in args {
-            strings.push(env.new_string(arg)?.into());
-        }
-        let values: Vec<JValue<'_, '_>> = strings.iter().map(JValue::Object).collect();
-        let answer = env.call_static_method(RELAY, method, &signature, &values)?.l()?;
-        if answer.is_null() {
-            return Ok(None);
-        }
-        let answer = JString::from(answer);
-        let text: String = env.get_string(&answer)?.into();
-        Ok::<_, jni::errors::Error>(Some(text))
-    })
+    let signature = format!(
+        "({})Ljava/lang/String;",
+        "Ljava/lang/String;".repeat(args.len())
+    );
+    env.with_local_frame(
+        i32::try_from(args.len())
+            .unwrap_or(i32::MAX)
+            .saturating_add(4),
+        |env| {
+            let mut strings: Vec<JObject<'_>> = Vec::with_capacity(args.len());
+            for arg in args {
+                strings.push(env.new_string(arg)?.into());
+            }
+            let values: Vec<JValue<'_, '_>> = strings.iter().map(JValue::Object).collect();
+            let answer = env
+                .call_static_method(RELAY, method, &signature, &values)?
+                .l()?;
+            if answer.is_null() {
+                return Ok(None);
+            }
+            let answer = JString::from(answer);
+            let text: String = env.get_string(&answer)?.into();
+            Ok::<_, JniError>(Some(text))
+        },
+    )
     .ok()
     .flatten()
 }
@@ -118,6 +129,17 @@ pub(crate) fn component(text: &str) -> TextComponent {
 
 /// Subscribes the relay to the events it carries.
 pub(crate) fn subscribe(server: &Arc<Server>, vm: &Arc<JavaVM>) {
+    subscribe_movement(server, vm);
+    subscribe_player_items(server, vm);
+    subscribe_entities(server, vm);
+    subscribe_blocks(server, vm);
+    subscribe_cooking(server, vm);
+    subscribe_server(server, vm);
+    subscribe_menus(server, vm);
+}
+
+/// How players move, and being moved.
+fn subscribe_movement(server: &Arc<Server>, vm: &Arc<JavaVM>) {
     let events = server.events();
 
     let jvm = Arc::clone(vm);
@@ -185,6 +207,35 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: &Arc<JavaVM>) {
     });
 
     let jvm = Arc::clone(vm);
+    events.on::<PlayerTeleportEvent, _>(owner(), move |event| {
+        let Some(answer) = text_call(
+            &jvm,
+            "fireTeleport",
+            &[
+                &event.player().to_string(),
+                &location(event.from(), (0.0, 0.0)),
+                &location(event.to(), (0.0, 0.0)),
+                event.cause().bukkit_name(),
+            ],
+        ) else {
+            return;
+        };
+        let answer = fields(&answer);
+        if flag(answer.first()) == Some(true) {
+            event.set_cancelled(true);
+            return;
+        }
+        if let Some(to) = vector(answer.get(1)) {
+            event.set_to(to);
+        }
+    });
+}
+
+/// What a player wears, finishes using and harvests.
+fn subscribe_player_items(server: &Arc<Server>, vm: &Arc<JavaVM>) {
+    let events = server.events();
+
+    let jvm = Arc::clone(vm);
     events.on::<PlayerArmorChangeEvent, _>(owner(), move |event| {
         let Some(slot) = armor_slot_name(event.slot()) else {
             return;
@@ -226,6 +277,50 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: &Arc<JavaVM>) {
             event.set_replacement(answer.get(3).and_then(|text| parse_slot(text)));
         }
     });
+
+    let jvm = Arc::clone(vm);
+    events.on::<PlayerHarvestBlockEvent, _>(owner(), move |event| {
+        let items = event
+            .items()
+            .iter()
+            .map(describe_slot)
+            .collect::<Vec<_>>()
+            .join(ITEM);
+        let Some(answer) = text_call(
+            &jvm,
+            "fireHarvest",
+            &[
+                &event.player().to_string(),
+                event.world(),
+                &block_position(event.position()),
+                hand_name(event.hand()),
+                &items,
+            ],
+        ) else {
+            return;
+        };
+        let answer = fields(&answer);
+        if flag(answer.first()) == Some(true) {
+            event.set_cancelled(true);
+            return;
+        }
+        let harvested = answer
+            .get(1)
+            .map(|list| {
+                list.split(ITEM)
+                    .filter(|one| !one.is_empty())
+                    .filter_map(parse_slot)
+                    .filter(|stack| !stack.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+        event.set_items(harvested);
+    });
+}
+
+/// Entities arriving, leaving their vehicles, and being hurt by the world.
+fn subscribe_entities(server: &Arc<Server>, vm: &Arc<JavaVM>) {
+    let events = server.events();
 
     let jvm = Arc::clone(vm);
     events.on::<EntityPlaceEvent, _>(owner(), move |event| {
@@ -318,6 +413,11 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: &Arc<JavaVM>) {
             event.set_damage(damage);
         }
     });
+}
+
+/// Blocks broken, and what they and brewing stands give.
+fn subscribe_blocks(server: &Arc<Server>, vm: &Arc<JavaVM>) {
+    let events = server.events();
 
     let jvm = Arc::clone(vm);
     events.on::<BlockBreakEvent, _>(owner(), move |event| {
@@ -382,22 +482,15 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: &Arc<JavaVM>) {
     });
 
     let jvm = Arc::clone(vm);
-    events.on::<PlayerHarvestBlockEvent, _>(owner(), move |event| {
-        let items = event
-            .items()
-            .iter()
-            .map(describe_slot)
-            .collect::<Vec<_>>()
-            .join(ITEM);
+    events.on::<BrewEvent, _>(owner(), move |event| {
         let Some(answer) = text_call(
             &jvm,
-            "fireHarvest",
+            "fireBrew",
             &[
-                &event.player().to_string(),
                 event.world(),
                 &block_position(event.position()),
-                hand_name(event.hand()),
-                &items,
+                &slot_list(event.results()),
+                &event.fuel_level().to_string(),
             ],
         ) else {
             return;
@@ -407,21 +500,102 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: &Arc<JavaVM>) {
             event.set_cancelled(true);
             return;
         }
-        let harvested = answer
-            .get(1)
-            .map(|list| {
-                list.split(ITEM)
-                    .filter(|one| !one.is_empty())
-                    .filter_map(parse_slot)
-                    .filter(|stack| !stack.is_empty())
-                    .collect()
-            })
-            .unwrap_or_default();
-        event.set_items(harvested);
+        let Some(list) = answer.get(1) else {
+            return;
+        };
+        let results: Option<Vec<ItemStack>> = list.split(ITEM).map(parse_slot).collect();
+        if let Some(results) = results {
+            event.set_results(results);
+        }
+    });
+}
+
+/// The furnace events.
+fn subscribe_cooking(server: &Arc<Server>, vm: &Arc<JavaVM>) {
+    let events = server.events();
+
+    let jvm = Arc::clone(vm);
+    events.on::<FurnaceBurnEvent, _>(owner(), move |event| {
+        let Some(answer) = text_call(
+            &jvm,
+            "fireFurnaceBurn",
+            &[
+                event.world(),
+                &block_position(event.position()),
+                &describe_slot(event.fuel()),
+                &event.burn_time().to_string(),
+            ],
+        ) else {
+            return;
+        };
+        let answer = fields(&answer);
+        if flag(answer.first()) == Some(true) {
+            event.set_cancelled(true);
+            return;
+        }
+        if let Some(burn_time) = answer.get(1).and_then(|text| text.parse::<i32>().ok()) {
+            event.set_burn_time(burn_time);
+        }
+        if let Some(burning) = flag(answer.get(2)) {
+            event.set_burning(burning);
+        }
+        if let Some(consume) = flag(answer.get(3)) {
+            event.set_consume_fuel(consume);
+        }
     });
 
-    subscribe_cooking(server, vm);
-    subscribe_menus(server, vm);
+    let jvm = Arc::clone(vm);
+    events.on::<FurnaceStartSmeltEvent, _>(owner(), move |event| {
+        let Some(answer) = text_call(
+            &jvm,
+            "fireFurnaceStartSmelt",
+            &[
+                event.world(),
+                &block_position(event.position()),
+                &describe_slot(event.source()),
+                &describe_cooking_id(event.recipe()),
+                &event.total_cook_time().to_string(),
+            ],
+        ) else {
+            return;
+        };
+        if let Some(total) = fields(&answer)
+            .first()
+            .and_then(|text| text.parse::<i32>().ok())
+        {
+            event.set_total_cook_time(total);
+        }
+    });
+
+    let jvm = Arc::clone(vm);
+    events.on::<FurnaceSmeltEvent, _>(owner(), move |event| {
+        let Some(answer) = text_call(
+            &jvm,
+            "fireFurnaceSmelt",
+            &[
+                event.world(),
+                &block_position(event.position()),
+                &describe_slot(event.source()),
+                &describe_slot(event.result()),
+                &describe_cooking_id(event.recipe()),
+            ],
+        ) else {
+            return;
+        };
+        let answer = fields(&answer);
+        if flag(answer.first()) == Some(true) {
+            event.set_cancelled(true);
+            return;
+        }
+        if let Some(result) = answer.get(1).and_then(|text| parse_slot(text)) {
+            event.set_result(result);
+        }
+    });
+}
+
+/// The server-list ping.
+fn subscribe_server(server: &Arc<Server>, vm: &Arc<JavaVM>) {
+    let events = server.events();
 
     let jvm = Arc::clone(vm);
     events.on::<ServerListPingEvent, _>(owner(), move |event| {
@@ -580,117 +754,6 @@ fn subscribe_menus(server: &Arc<Server>, vm: &Arc<JavaVM>) {
     });
 }
 
-/// The furnace and brewing stand events.
-fn subscribe_cooking(server: &Arc<Server>, vm: &Arc<JavaVM>) {
-    let events = server.events();
-
-    let jvm = Arc::clone(vm);
-    events.on::<FurnaceBurnEvent, _>(owner(), move |event| {
-        let Some(answer) = text_call(
-            &jvm,
-            "fireFurnaceBurn",
-            &[
-                event.world(),
-                &block_position(event.position()),
-                &describe_slot(event.fuel()),
-                &event.burn_time().to_string(),
-            ],
-        ) else {
-            return;
-        };
-        let answer = fields(&answer);
-        if flag(answer.first()) == Some(true) {
-            event.set_cancelled(true);
-            return;
-        }
-        if let Some(burn_time) = answer.get(1).and_then(|text| text.parse::<i32>().ok()) {
-            event.set_burn_time(burn_time);
-        }
-        if let Some(burning) = flag(answer.get(2)) {
-            event.set_burning(burning);
-        }
-        if let Some(consume) = flag(answer.get(3)) {
-            event.set_consume_fuel(consume);
-        }
-    });
-
-    let jvm = Arc::clone(vm);
-    events.on::<FurnaceStartSmeltEvent, _>(owner(), move |event| {
-        let Some(answer) = text_call(
-            &jvm,
-            "fireFurnaceStartSmelt",
-            &[
-                event.world(),
-                &block_position(event.position()),
-                &describe_slot(event.source()),
-                &describe_cooking_id(event.recipe()),
-                &event.total_cook_time().to_string(),
-            ],
-        ) else {
-            return;
-        };
-        if let Some(total) = fields(&answer)
-            .first()
-            .and_then(|text| text.parse::<i32>().ok())
-        {
-            event.set_total_cook_time(total);
-        }
-    });
-
-    let jvm = Arc::clone(vm);
-    events.on::<FurnaceSmeltEvent, _>(owner(), move |event| {
-        let Some(answer) = text_call(
-            &jvm,
-            "fireFurnaceSmelt",
-            &[
-                event.world(),
-                &block_position(event.position()),
-                &describe_slot(event.source()),
-                &describe_slot(event.result()),
-                &describe_cooking_id(event.recipe()),
-            ],
-        ) else {
-            return;
-        };
-        let answer = fields(&answer);
-        if flag(answer.first()) == Some(true) {
-            event.set_cancelled(true);
-            return;
-        }
-        if let Some(result) = answer.get(1).and_then(|text| parse_slot(text)) {
-            event.set_result(result);
-        }
-    });
-
-    let jvm = Arc::clone(vm);
-    events.on::<BrewEvent, _>(owner(), move |event| {
-        let Some(answer) = text_call(
-            &jvm,
-            "fireBrew",
-            &[
-                event.world(),
-                &block_position(event.position()),
-                &slot_list(event.results()),
-                &event.fuel_level().to_string(),
-            ],
-        ) else {
-            return;
-        };
-        let answer = fields(&answer);
-        if flag(answer.first()) == Some(true) {
-            event.set_cancelled(true);
-            return;
-        }
-        let Some(list) = answer.get(1) else {
-            return;
-        };
-        let results: Option<Vec<ItemStack>> = list.split(ITEM).map(parse_slot).collect();
-        if let Some(results) = results {
-            event.set_results(results);
-        }
-    });
-}
-
 /// The cooking family of a furnace-like block, by the block's key.
 pub(crate) fn cooking_kind(block: &str) -> Option<CookingKind> {
     match block {
@@ -732,7 +795,11 @@ fn describe_cooking_id(id: &Identifier) -> String {
 
 /// Writes stacks slot by slot, an empty slot as an empty entry.
 fn slot_list(stacks: &[ItemStack]) -> String {
-    stacks.iter().map(describe_slot).collect::<Vec<_>>().join(ITEM)
+    stacks
+        .iter()
+        .map(describe_slot)
+        .collect::<Vec<_>>()
+        .join(ITEM)
 }
 
 /// The Bukkit `SlotType` name of an armor slot.
@@ -771,4 +838,3 @@ fn uuid_list(ids: &[Uuid]) -> String {
         .collect::<Vec<_>>()
         .join(",")
 }
-

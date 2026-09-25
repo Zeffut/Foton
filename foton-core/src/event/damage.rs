@@ -1,5 +1,6 @@
 //! Damage with no entity behind it: falling, burning, freezing, drowning.
 
+use foton_registry::damage_type::DamageType;
 use foton_registry::vanilla_damage_types;
 use foton_utils::downcast::{DowncastType, DowncastTypeKey};
 use uuid::Uuid;
@@ -86,9 +87,7 @@ impl EntityDamageEvent {
             return None;
         }
         let key = &source.damage_type.key;
-        let is = |damage_type: &foton_registry::damage_type::DamageType| {
-            &damage_type.key == key
-        };
+        let is = |damage_type: &DamageType| &damage_type.key == key;
         Some(if is(&vanilla_damage_types::GENERIC_KILL) {
             "KILL"
         } else if is(&vanilla_damage_types::OUTSIDE_BORDER) {
@@ -154,7 +153,10 @@ mod tests {
     fn an_entity_behind_the_damage_leaves_it_to_the_by_entity_event() {
         init_vanilla_registry();
         let freezing = DamageSource::environment(&vanilla_damage_types::FREEZE);
-        assert_eq!(EntityDamageEvent::environmental_cause(&freezing), Some("FREEZE"));
+        assert_eq!(
+            EntityDamageEvent::environmental_cause(&freezing),
+            Some("FREEZE")
+        );
         let pushed = DamageSource::environment(&vanilla_damage_types::FALL).with_causing_entity(7);
         assert_eq!(EntityDamageEvent::environmental_cause(&pushed), None);
     }

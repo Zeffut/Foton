@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use foton_registry::item_stack::ItemStack;
 use foton_utils::BlockPos;
-use foton_utils::types::InteractionHand;
 use foton_utils::downcast::{DowncastType, DowncastTypeKey};
+use foton_utils::types::InteractionHand;
 use glam::DVec3;
 use uuid::Uuid;
 

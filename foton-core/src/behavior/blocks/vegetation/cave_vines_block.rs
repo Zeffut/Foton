@@ -13,11 +13,11 @@ use foton_utils::{BlockPos, BlockStateId, Direction};
 use rand::{Rng, RngExt};
 use std::sync::Arc;
 
+use crate::behavior::block::offer_harvest;
 use crate::behavior::blocks::vegetation::bonemealable::BonemealAction;
 use crate::behavior::blocks::vegetation::growing_plant_head_block::{
     GrowingPlantHead, GrowingPlantHeadBlock,
 };
-use crate::behavior::block::offer_harvest;
 use crate::behavior::context::BlockPlaceContext;
 use crate::behavior::{InteractionResult, InventoryAccess};
 use crate::behavior::{block::BlockBehavior, blocks::vegetation::bonemealable::Bonemealable};
