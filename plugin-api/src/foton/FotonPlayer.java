@@ -22,6 +22,30 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
         try { return uuid == null ? null : new FotonPlayer(UUID.fromString(uuid)); }
         catch (IllegalArgumentException ignored) { return null; }
     }
+    @Override public int discoverRecipes(java.util.Collection<org.bukkit.NamespacedKey> recipes) {
+        return Native.discoverRecipes(id.toString(), recipeKeys(recipes));
+    }
+    @Override public int undiscoverRecipes(java.util.Collection<org.bukkit.NamespacedKey> recipes) {
+        return Native.undiscoverRecipes(id.toString(), recipeKeys(recipes));
+    }
+    @Override public boolean hasDiscoveredRecipe(org.bukkit.NamespacedKey recipe) {
+        return recipe != null && Native.hasDiscoveredRecipe(id.toString(), recipe.toString());
+    }
+    @Override public Set<org.bukkit.NamespacedKey> getDiscoveredRecipes() {
+        String[] keys = Native.discoveredRecipes(id.toString());
+        java.util.Set<org.bukkit.NamespacedKey> known = new java.util.HashSet<>();
+        if (keys != null) for (String key : keys) {
+            org.bukkit.NamespacedKey parsed = org.bukkit.NamespacedKey.fromString(key);
+            if (parsed != null) known.add(parsed);
+        }
+        return java.util.Collections.unmodifiableSet(known);
+    }
+    /** Paper throws on a null collection, as a {@code Collection} parameter does. */
+    private static String[] recipeKeys(java.util.Collection<org.bukkit.NamespacedKey> recipes) {
+        java.util.ArrayList<String> keys = new java.util.ArrayList<>(recipes.size());
+        for (org.bukkit.NamespacedKey key : recipes) if (key != null) keys.add(key.toString());
+        return keys.toArray(new String[0]);
+    }
     @Override public boolean isSprinting() { return Native.entitySprinting(id.toString()); }
     @Override public boolean isSwimming() { return Native.entitySwimming(id.toString()); }
     @Override public void hideEntity(Plugin plugin, org.bukkit.entity.Entity entity) {
