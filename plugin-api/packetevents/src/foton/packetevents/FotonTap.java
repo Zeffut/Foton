@@ -31,10 +31,35 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 final class FotonTap implements PacketBridge.Handler {
     private final Map<Long, FotonChannel> channels = new ConcurrentHashMap<>();
+    /** Each player's channel, kept past the connection until Bukkit lets the
+     * player go too.
+     *
+     * PacketEvents forgets a channel the moment its connection closes, but the
+     * player stays in {@code getOnlinePlayers()} until the server processes
+     * the quit. On Paper the channel belongs to the player object, so a lookup
+     * in between finds a closed channel and no user; without this it finds
+     * nothing, and {@code getUser(player)} throws on the null key.
+     */
+    private final Map<UUID, FotonChannel> retained = new ConcurrentHashMap<>();
 
     FotonChannel channel(UUID player) {
         Object channel = PacketEvents.getAPI().getProtocolManager().getChannel(player);
         return channel instanceof FotonChannel foton ? foton : null;
+    }
+
+    /** The channel a player object stands for, open or not, or null for one
+     * that never had a connection. */
+    FotonChannel retained(UUID player) {
+        FotonChannel channel = channel(player);
+        return channel != null ? channel : retained.get(player);
+    }
+
+    /** Bukkit let the player go; a connection already closed is forgotten. */
+    void quit(UUID player) {
+        FotonChannel channel = retained.get(player);
+        if (channel == null) return;
+        channel.quit = true;
+        if (channel.closed) retained.remove(player, channel);
     }
 
     @Override
@@ -44,6 +69,7 @@ final class FotonTap implements PacketBridge.Handler {
         ClientVersion version = ClientVersion.getById(PacketEvents.getAPI().getServerManager().getVersion().getProtocolVersion());
         User user = new User(channel, ConnectionState.CONFIGURATION, version, new UserProfile(profile, name));
         channels.put(connection, channel);
+        retained.put(profile, channel);
         protocol.setUser(channel, user);
         protocol.setChannel(profile, channel);
 
@@ -73,6 +99,10 @@ final class FotonTap implements PacketBridge.Handler {
         channel.open = false;
         channel.afterSend.clear();
         PacketEventsImplHelper.handleDisconnection(channel, channel.uuid);
+        // Flag first, then read the other side's: whichever of close and quit
+        // comes second sees both, so the entry never outlives them.
+        channel.closed = true;
+        if (channel.quit || channel.player == null) retained.remove(channel.uuid, channel);
     }
 
     @Override

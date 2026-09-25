@@ -29,7 +29,7 @@ final class FotonPacketEvents {
         return new PacketEventsAPI<Plugin>() {
             private final ProtocolManager protocolManager = new FotonManagers.Protocol();
             private final ServerManager serverManager = new FotonManagers.Server();
-            private final PlayerManager playerManager = new FotonManagers.Players();
+            private final PlayerManager playerManager = new FotonManagers.Players(tap);
             private final NettyManager nettyManager = new FotonManagers.Netty();
             private final ChannelInjector injector = new Injector(tap);
             private boolean loaded;

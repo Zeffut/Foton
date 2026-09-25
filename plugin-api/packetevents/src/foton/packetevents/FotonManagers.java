@@ -76,12 +76,16 @@ final class FotonManagers {
     }
 
     static final class Players extends PlayerManagerAbstract {
+        private final FotonTap tap;
+
+        Players(FotonTap tap) { this.tap = tap; }
+
         @Override public int getPing(Object player) {
             return ((Player) player).getPing();
         }
 
         @Override public Object getChannel(Object player) {
-            return PacketEvents.getAPI().getProtocolManager().getChannel(((Player) player).getUniqueId());
+            return tap.retained(((Player) player).getUniqueId());
         }
     }
 }

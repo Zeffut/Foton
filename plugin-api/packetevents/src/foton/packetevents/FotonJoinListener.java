@@ -7,6 +7,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 
 /** Gives a user its Bukkit player the moment one exists.
  *
@@ -23,6 +24,12 @@ final class FotonJoinListener implements Listener {
     public void bind(PlayerJoinEvent event) {
         FotonChannel channel = tap.channel(event.getPlayer().getUniqueId());
         if (channel != null) channel.player = event.getPlayer();
+    }
+
+    /** Last, so every other quit handler still finds the player's channel. */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void release(PlayerQuitEvent event) {
+        tap.quit(event.getPlayer().getUniqueId());
     }
 
     @EventHandler

@@ -21,6 +21,10 @@ final class FotonChannel {
     final InetSocketAddress address;
     volatile Player player;
     volatile boolean open = true;
+    /** Foton reported the connection gone. */
+    volatile boolean closed;
+    /** Bukkit let the player go. */
+    volatile boolean quit;
     /** Work waiting for a written packet, one entry per packet, in write order. */
     final Queue<List<Runnable>> afterSend = new ConcurrentLinkedQueue<>();
 
