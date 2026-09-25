@@ -34,7 +34,7 @@ use crate::block_entity::entities::{SignBlockEntity, SignText};
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::ItemEntity;
 use crate::entity::{Entity, LivingEntity, MobEffectInstance};
-use crate::event::{Event as _, PlayerTeleportEvent, TeleportCause};
+use crate::event::{Event as _, PlayerTeleportEvent, TeleportCause, TeleportPoint};
 use crate::inventory::click::MouseButton;
 use crate::inventory::lock::ContainerLockGuard;
 use crate::inventory::slots::slot::Slot;
@@ -229,7 +229,7 @@ fn teleport_randomly<T: LivingEntity + ?Sized>(world: &World, user: &T, diameter
             continue;
         }
         if let Some(player) = user.as_player()
-            && !player_teleport_allowed(player, origin)
+            && !player_teleport_allowed(world, player, origin)
         {
             continue;
         }
@@ -255,24 +255,33 @@ fn teleport_randomly<T: LivingEntity + ?Sized>(world: &World, user: &T, diameter
 /// `randomTeleport` moves a player -- the client has to be told. Paper
 /// parity: `PlayerTeleportEvent` with `TeleportCause.CONSUMABLE_EFFECT`,
 /// whose refusal makes the attempt fail and the next one be tried.
-fn player_teleport_allowed(player: &Player, origin: DVec3) -> bool {
+fn player_teleport_allowed(world: &World, player: &Player, origin: DVec3) -> bool {
+    let rotation = player.rotation();
+    let key = world.key.to_string();
     let mut event = PlayerTeleportEvent::new(
         player.gameprofile.id,
-        origin,
-        player.position(),
+        TeleportPoint {
+            world: key.clone(),
+            position: origin,
+            rotation,
+        },
+        TeleportPoint {
+            world: key,
+            position: player.position(),
+            rotation,
+        },
         TeleportCause::ConsumableEffect,
     );
     player.fire_event(&mut event);
-    let (yaw, pitch) = player.rotation();
-    if event.is_cancelled() {
+    let moved = !event.is_cancelled()
+        && world
+            .players
+            .get_by_entity_id(player.id())
+            .is_some_and(|player| player.teleport_announced(event.to()));
+    if !moved {
         let _ = player.try_set_position(origin);
-        return false;
     }
-    if player.teleport(event.to(), yaw, pitch).is_err() {
-        let _ = player.try_set_position(origin);
-        return false;
-    }
-    true
+    moved
 }
 
 /// Yields every effect a potion bottle carries.

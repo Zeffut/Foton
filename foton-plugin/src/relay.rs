@@ -17,7 +17,7 @@ use foton_core::event::{
     FurnaceBurnEvent, FurnaceSmeltEvent, FurnaceStartSmeltEvent, PlayerArmorChangeEvent,
     PlayerFailMoveEvent, PlayerHarvestBlockEvent, PlayerItemConsumeEvent, PlayerPurchaseEvent,
     PlayerTeleportEvent, PlayerToggleFlightEvent, PlayerVelocityEvent, PrepareItemEnchantEvent,
-    PrepareSmithingEvent, ServerListPingEvent,
+    PrepareSmithingEvent, ServerListPingEvent, TeleportPoint,
 };
 use foton_core::server::Server;
 use foton_registry::REGISTRY;
@@ -121,6 +121,18 @@ fn location(position: DVec3, rotation: (f32, f32)) -> String {
     )
 }
 
+/// Reads what [`location`] writes.
+fn placed(field: Option<&&str>) -> Option<(DVec3, (f32, f32))> {
+    let parts = field?.split(' ').collect::<Vec<_>>();
+    let [x, y, z, yaw, pitch] = parts.as_slice() else {
+        return None;
+    };
+    let position = DVec3::new(x.parse().ok()?, y.parse().ok()?, z.parse().ok()?);
+    let rotation: (f32, f32) = (yaw.parse().ok()?, pitch.parse().ok()?);
+    (position.is_finite() && rotation.0.is_finite() && rotation.1.is_finite())
+        .then_some((position, rotation))
+}
+
 /// Reads a component the Java side wrote as JSON text; anything that is not
 /// JSON text is taken as plain text, which is what a legacy string is.
 pub(crate) fn component(text: &str) -> TextComponent {
@@ -208,13 +220,16 @@ fn subscribe_movement(server: &Arc<Server>, vm: &Arc<JavaVM>) {
 
     let jvm = Arc::clone(vm);
     events.on::<PlayerTeleportEvent, _>(owner(), move |event| {
+        let (from, to) = (event.from(), event.to());
         let Some(answer) = text_call(
             &jvm,
             "fireTeleport",
             &[
                 &event.player().to_string(),
-                &location(event.from(), (0.0, 0.0)),
-                &location(event.to(), (0.0, 0.0)),
+                &from.world,
+                &location(from.position, from.rotation),
+                &to.world,
+                &location(to.position, to.rotation),
                 event.cause().bukkit_name(),
             ],
         ) else {
@@ -225,8 +240,12 @@ fn subscribe_movement(server: &Arc<Server>, vm: &Arc<JavaVM>) {
             event.set_cancelled(true);
             return;
         }
-        if let Some(to) = vector(answer.get(1)) {
-            event.set_to(to);
+        if let (Some(world), Some((position, rotation))) = (answer.get(1), placed(answer.get(2))) {
+            event.set_to(TeleportPoint {
+                world: (*world).to_owned(),
+                position,
+                rotation,
+            });
         }
     });
 }

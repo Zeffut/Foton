@@ -441,22 +441,17 @@ public final class EventRelay {
         return answer(FotonText.json(event.motd()), event.getMaxPlayers());
     }
 
-    /** Answers `cancelled, x y z`. The player keeps their own rotation. */
-    public static String fireTeleport(String uuid, String from, String to, String cause) {
-        Player player = player(uuid);
-        World world = player.getWorld();
-        Location origin = location(world, from);
-        Location destination = location(world, to);
-        Location look = player.getLocation();
-        origin.setYaw(look.getYaw());
-        origin.setPitch(look.getPitch());
-        destination.setYaw(look.getYaw());
-        destination.setPitch(look.getPitch());
+    /** Answers `cancelled, world, x y z yaw pitch`. */
+    public static String fireTeleport(String uuid, String fromWorld, String from, String toWorld,
+            String to, String cause) {
+        Location origin = location(new FotonWorld(fromWorld), from);
+        Location destination = location(new FotonWorld(toWorld), to);
         org.bukkit.event.player.PlayerTeleportEvent event = new org.bukkit.event.player.PlayerTeleportEvent(
-            player, origin, destination, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.valueOf(cause));
+            player(uuid), origin, destination, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.valueOf(cause));
         EventBridge.dispatch(event);
-        Location target = event.getTo() == null ? destination : event.getTo();
-        return answer(event.isCancelled(), target.getX() + " " + target.getY() + " " + target.getZ());
+        Location target = event.getTo() == null || event.getTo().getWorld() == null ? destination : event.getTo();
+        return answer(event.isCancelled(), target.getWorld().getName(), target.getX() + " " + target.getY()
+            + " " + target.getZ() + " " + target.getYaw() + " " + target.getPitch());
     }
 
     /** Answers `cancelled, stacks`. */

@@ -241,12 +241,18 @@ impl PlayerVelocityEvent {
 /// Why a player is being moved somewhere else.
 ///
 /// Bukkit parity: the `PlayerTeleportEvent.TeleportCause` values Foton
-/// raises.
+/// raises. Portals are not here: they raise `PlayerPortalEvent` instead.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TeleportCause {
     /// Something consumed teleported them: a chorus fruit, or any item with a
     /// `teleport_randomly` consume effect.
     ConsumableEffect,
+    /// Their thrown ender pearl landed.
+    EnderPearl,
+    /// `/tp` or `/teleport`.
+    Command,
+    /// A move nothing classified.
+    Unknown,
 }
 
 impl TeleportCause {
@@ -255,8 +261,22 @@ impl TeleportCause {
     pub const fn bukkit_name(self) -> &'static str {
         match self {
             Self::ConsumableEffect => "CONSUMABLE_EFFECT",
+            Self::EnderPearl => "ENDER_PEARL",
+            Self::Command => "COMMAND",
+            Self::Unknown => "UNKNOWN",
         }
     }
+}
+
+/// One end of a teleport: what a Bukkit `Location` holds.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TeleportPoint {
+    /// The world's key.
+    pub world: String,
+    /// Where in it.
+    pub position: DVec3,
+    /// Yaw and pitch.
+    pub rotation: (f32, f32),
 }
 
 /// A player is about to be teleported.
@@ -265,8 +285,8 @@ impl TeleportCause {
 /// were; a changed destination is where they go.
 pub struct PlayerTeleportEvent {
     player: Uuid,
-    from: DVec3,
-    to: DVec3,
+    from: TeleportPoint,
+    to: TeleportPoint,
     cause: TeleportCause,
     cancelled: bool,
 }
@@ -285,7 +305,12 @@ impl Event for PlayerTeleportEvent {
 impl PlayerTeleportEvent {
     /// Creates the event for a move from `from` to `to`.
     #[must_use]
-    pub const fn new(player: Uuid, from: DVec3, to: DVec3, cause: TeleportCause) -> Self {
+    pub const fn new(
+        player: Uuid,
+        from: TeleportPoint,
+        to: TeleportPoint,
+        cause: TeleportCause,
+    ) -> Self {
         Self {
             player,
             from,
@@ -303,18 +328,18 @@ impl PlayerTeleportEvent {
 
     /// Where they are.
     #[must_use]
-    pub const fn from(&self) -> DVec3 {
-        self.from
+    pub const fn from(&self) -> &TeleportPoint {
+        &self.from
     }
 
     /// Where they are going.
     #[must_use]
-    pub const fn to(&self) -> DVec3 {
-        self.to
+    pub const fn to(&self) -> &TeleportPoint {
+        &self.to
     }
 
     /// Sends them somewhere else.
-    pub const fn set_to(&mut self, to: DVec3) {
+    pub fn set_to(&mut self, to: TeleportPoint) {
         self.to = to;
     }
 

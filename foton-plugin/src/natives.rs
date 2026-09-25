@@ -89,6 +89,7 @@ use foton_core::entity::{
     Entity, EntitySpawnReason, LlamaVariant, MobEffectInstance, is_tamed, owner_uuid,
     set_owner_uuid, set_tamed, start_riding_entities,
 };
+use foton_core::event::TeleportPoint;
 use foton_core::inventory::container::Container;
 use foton_core::inventory::equipment::EquipmentSlot;
 use foton_core::inventory::lock::{ContainerLockGuard, ContainerRef};
@@ -11341,10 +11342,12 @@ extern "system" fn teleport(
     let Ok(world_name) = env.get_string(&world_name) else {
         return 0;
     };
-    if player.get_world().key.to_string() != String::from(world_name) {
-        return 0;
-    }
-    u8::from(player.teleport(DVec3::new(x, y, z), yaw, pitch).is_ok())
+    // `FotonPlayer.teleport` has already asked `PlayerTeleportEvent`.
+    u8::from(player.teleport_announced(&TeleportPoint {
+        world: world_name.into(),
+        position: DVec3::new(x, y, z),
+        rotation: (yaw, pitch),
+    }))
 }
 
 /// Every native, with the descriptor the JVM matches it by.

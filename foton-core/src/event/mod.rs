@@ -86,7 +86,7 @@ pub use lectern::PlayerTakeLecternBookEvent;
 pub use menus::{EnchantOffer, PlayerPurchaseEvent, PrepareItemEnchantEvent, PrepareSmithingEvent};
 pub use movement::{
     FailMoveReason, PlayerFailMoveEvent, PlayerTeleportEvent, PlayerToggleFlightEvent,
-    PlayerVelocityEvent, TeleportCause,
+    PlayerVelocityEvent, TeleportCause, TeleportPoint,
 };
 pub use player::{
     AsyncPlayerPreLoginEvent, AsyncPlayerPreLoginResult, FoodLevelChangeEvent,
