@@ -10,6 +10,9 @@
 #
 # Usage: bash dev/plugin-compat-test.sh [plugin.jar ...]
 #
+# PLUGIN_SEED_DIR   copied into plugins/ before the first start (configs)
+# WAIT_FOR_LOG      a server.log pattern to wait for before the client joins
+#
 # Needs dev/build-plugin-api.sh and dev/build-packetevents.sh to have run, and
 # a JDK 21+ at $FOTON_JAVA_HOME (default: the one `javac` belongs to).
 
@@ -47,6 +50,9 @@ rm -rf plugins saves server.log
 mkdir -p plugins
 cp "$PROBE_OUT/PacketProbe.jar" plugins/
 for jar in "$@"; do cp "$jar" plugins/ || exit 1; done
+# Plugin data written before the first start: a plugin that phones home, or
+# that must be told to stay quiet, is configured here rather than trusted.
+if [ -n "${PLUGIN_SEED_DIR:-}" ]; then cp -r "$PLUGIN_SEED_DIR"/. plugins/ || exit 1; fi
 
 if [ ! -f config/config.toml ]; then
   nohup "$BIN" > /dev/null 2>&1 < /dev/null &
@@ -73,6 +79,13 @@ for _ in $(seq 1 180); do
   sleep 1
 done
 [ $UP -eq 0 ] || { echo "SERVER NEVER LISTENED"; kill "$PID"; tail -60 server.log; exit 1; }
+
+# A plugin may hold the door shut while the server settles; wait for the line
+# that says it opened rather than guessing a delay.
+if [ -n "${WAIT_FOR_LOG:-}" ]; then
+  for _ in $(seq 1 300); do grep -q "$WAIT_FOR_LOG" server.log && break; sleep 1; done
+  grep -q "$WAIT_FOR_LOG" server.log || echo "(never saw: $WAIT_FOR_LOG)"
+fi
 
 echo "=== Joining ==="
 JOIN_WATCH_SECONDS=${JOIN_WATCH_SECONDS:-5} \
