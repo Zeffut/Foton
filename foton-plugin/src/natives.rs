@@ -176,6 +176,7 @@ use jni::sys::{
 };
 use rustc_hash::FxHashMap;
 use sha2::{Digest as _, Sha256};
+use simdnbt::Mutf8Str;
 use simdnbt::owned::NbtTag;
 use simdnbt::owned::{NbtCompound, read_tag};
 use text_components::{TextComponent, content::Content as TextContent};
@@ -7642,45 +7643,53 @@ const MAX_PDC_RAW_BYTES: usize = 2_097_152;
 const MAX_SLOT_BRIDGE_BYTES: usize = 8_388_608;
 const MAX_SLOT_METADATA_FIELDS: usize = 4_096;
 const PDC_IDENTITY_FIELD_BYTES: usize = 77;
+// An error in the item bridge, never an empty or writable item description.
+const SLOT_METADATA_LIMIT_ERROR: &str = "!foton:item-metadata-limit";
 
-fn push_pdc_fields(value: &mut String, stack: &ItemStack) {
+fn push_pdc_fields(value: &mut String, stack: &ItemStack) -> bool {
     let Some(custom_data) = stack.get(CUSTOM_DATA) else {
-        return;
+        return true;
     };
     if vanilla_nbt_compound_heap_size(custom_data.as_compound())
         .is_none_or(|size| size > MAX_PDC_RAW_BYTES as u64)
     {
-        return;
+        return false;
     }
     let custom_data = NbtTag::Compound(custom_data.copy_tag());
     let mut raw = Vec::new();
     custom_data.write(&mut raw);
     if raw.len() > MAX_PDC_RAW_BYTES || raw.len() * 2 + value.len() + 11 > MAX_SLOT_BRIDGE_BYTES {
-        return;
+        return false;
     }
     value.push('\u{1d}');
     value.push_str("pdcrawhex=");
     value.push_str(&hex_encode(&raw));
     let Some(custom_data_compound) = custom_data.compound() else {
-        return;
+        return false;
     };
     let Some(values) = custom_data_compound.compound(BUKKIT_PDC_TAG) else {
-        push_custom_data_identity(value, custom_data, &[]);
-        return;
+        return push_custom_data_identity(value, custom_data, &[]);
     };
     let mut exposed_keys = Vec::new();
     for (key, tag) in values.iter().take(MAX_PDC_ENTRIES) {
         let key = key.to_string();
-        if key.len() > MAX_PDC_KEY_BYTES {
+        // Java NamespacedKey parsing must retain this exact key. Bare names
+        // acquire a namespace there; rejected or normalized keys stay opaque.
+        if key.len() > MAX_PDC_KEY_BYTES
+            || !key.split_once(':').is_some_and(|(namespace, path)| {
+                !namespace.is_empty() && !path.is_empty() && Identifier::validate(namespace, path)
+            })
+        {
             continue;
         }
         let encoded_key = hex_encode(key.as_bytes());
         let field = match tag {
             NbtTag::String(string) if string.len() <= MAX_PDC_STRING_BYTES => {
-                format!(
-                    "pdcstrhex={encoded_key}:{}",
-                    hex_encode(string.to_string().as_bytes())
-                )
+                let decoded = string.to_string();
+                if Mutf8Str::from_str(&decoded).as_bytes() != string.as_bytes() {
+                    continue;
+                }
+                format!("pdcstrhex={encoded_key}:{}", hex_encode(decoded.as_bytes()))
             }
             NbtTag::Byte(byte) => format!("pdcbyte={encoded_key}:{byte}"),
             NbtTag::Int(integer) => format!("pdcint={encoded_key}:{integer}"),
@@ -7693,12 +7702,16 @@ fn push_pdc_fields(value: &mut String, stack: &ItemStack) {
         value.push_str(&field);
         exposed_keys.push(key);
     }
-    push_custom_data_identity(value, custom_data, &exposed_keys);
+    push_custom_data_identity(value, custom_data, &exposed_keys)
 }
 
-fn push_custom_data_identity(value: &mut String, custom_data: NbtTag, exposed_keys: &[String]) {
+fn push_custom_data_identity(
+    value: &mut String,
+    custom_data: NbtTag,
+    exposed_keys: &[String],
+) -> bool {
     let NbtTag::Compound(mut identity_data) = custom_data else {
-        return;
+        return false;
     };
     match identity_data.remove(BUKKIT_PDC_TAG) {
         Some(NbtTag::Compound(mut persistent_data)) => {
@@ -7715,18 +7728,19 @@ fn push_custom_data_identity(value: &mut String, custom_data: NbtTag, exposed_ke
         None => {}
     }
     if identity_data.is_empty() {
-        return;
+        return true;
     }
     let Some(canonical) = to_canonical_snbt(&NbtTag::Compound(identity_data)) else {
-        return;
+        return false;
     };
     let identity = hex_encode(&Sha256::digest(canonical.as_bytes()));
     if value.len() + PDC_IDENTITY_FIELD_BYTES > MAX_SLOT_BRIDGE_BYTES {
-        return;
+        return false;
     }
     value.push('\u{1d}');
     value.push_str("pdcidentity=");
     value.push_str(&identity);
+    true
 }
 
 fn decode_hex_utf8(value: &str, maximum_bytes: usize) -> Option<String> {
@@ -7839,11 +7853,16 @@ pub(crate) fn describe_slot(stack: &ItemStack) -> String {
     }
     let mut value = format!("{} {}", stack.item().key, stack.count());
     if let Some(opaque) = stack.opaque_nbt() {
+        if opaque.len() > (MAX_SLOT_BRIDGE_BYTES - value.len() - 8) / 2 {
+            return SLOT_METADATA_LIMIT_ERROR.to_owned();
+        }
         value.push('\u{1d}');
         value.push_str("nbthex=");
         value.push_str(&hex_encode(opaque.as_bytes()));
     }
-    push_pdc_fields(&mut value, stack);
+    if !push_pdc_fields(&mut value, stack) {
+        return SLOT_METADATA_LIMIT_ERROR.to_owned();
+    }
     if let Some(name) = stack.get(CUSTOM_NAME) {
         value.push('\u{1d}');
         value.push_str("namehex=");
@@ -7926,6 +7945,15 @@ pub(crate) fn describe_slot(stack: &ItemStack) -> String {
             );
         }
     }
+    checked_slot_description(value)
+}
+
+fn checked_slot_description(value: String) -> String {
+    if value.len() > MAX_SLOT_BRIDGE_BYTES
+        || value.split('\u{1d}').count() > MAX_SLOT_METADATA_FIELDS + 1
+    {
+        return SLOT_METADATA_LIMIT_ERROR.to_owned();
+    }
     value
 }
 
@@ -7954,7 +7982,7 @@ extern "system" fn item_translation_key(
               several functions"
 )]
 pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
-    if text.len() > MAX_SLOT_BRIDGE_BYTES {
+    if text == SLOT_METADATA_LIMIT_ERROR || text.len() > MAX_SLOT_BRIDGE_BYTES {
         return None;
     }
     let mut encoded = text.trim().split('\u{1d}');
@@ -10447,7 +10475,9 @@ extern "system" fn jukebox_set_record(
     let Some(jukebox) = entity.downcast_ref::<JukeboxBlockEntity>() else {
         return;
     };
-    let item = parse_slot(&encoded).unwrap_or_else(ItemStack::empty);
+    let Some(item) = parse_slot(&encoded) else {
+        return;
+    };
     jukebox.insert(&world, item);
 }
 
@@ -14463,6 +14493,98 @@ mod slot_bridge_tests {
         Mutf8Str,
         owned::{NbtCompound, NbtTag},
     };
+    use std::{
+        env::join_paths,
+        io::Write as _,
+        path::Path,
+        process::{Command, Stdio},
+        sync::OnceLock,
+    };
+
+    fn java_round_trip(mode: &str, descriptions: &[String]) -> Vec<String> {
+        static JAVA_API_BUILT: OnceLock<()> = OnceLock::new();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("workspace root");
+        // CI runs Rust tests before the Java check; always exercise current
+        // sources, including on a clean checkout with no prebuilt API JAR.
+        JAVA_API_BUILT.get_or_init(|| {
+            let build = Command::new("bash")
+                .arg(root.join("dev/build-plugin-api.sh"))
+                .current_dir(root)
+                .output()
+                .expect("build the Java API for native bridge regressions");
+            assert!(
+                build.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&build.stdout),
+                String::from_utf8_lossy(&build.stderr)
+            );
+        });
+        let classpath = join_paths([
+            root.join("plugin-api/build/foton-plugin-api.jar"),
+            root.join("plugin-api/lib/*"),
+        ])
+        .expect("Java classpath");
+        let mut child = Command::new("java")
+            .arg("--class-path")
+            .arg(classpath)
+            .arg(root.join("plugin-api/check/NativeItemBridgeCheck.java"))
+            .arg(mode)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("Java is required for the native item bridge regression");
+        {
+            let mut input = child.stdin.take().expect("Java stdin");
+            for description in descriptions {
+                writeln!(input, "{description}").expect("write native item description");
+            }
+        }
+        let output = child.wait_with_output().expect("Java bridge check");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout)
+            .expect("Java UTF-8 output")
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    #[test]
+    fn opaque_keys_keep_identity_through_the_actual_java_bridge() {
+        init_vanilla_registry();
+        for key in [":bad", "bare_key"] {
+            let stacks: Vec<_> = ["one", "two"]
+                .into_iter()
+                .map(|value| {
+                    let mut values = NbtCompound::new();
+                    values.insert(key, value);
+                    if key == "bare_key" {
+                        values.insert("minecraft:bare_key", "common");
+                    }
+                    let mut data = NbtCompound::new();
+                    data.insert("PublicBukkitValues", values);
+                    let mut stack = ItemStack::new(&vanilla_items::PAPER);
+                    stack.set(
+                        CUSTOM_DATA,
+                        CustomData::try_from_compound(data).expect("valid data"),
+                    );
+                    stack
+                })
+                .collect();
+            let descriptions: Vec<_> = stacks.iter().map(describe_slot).collect();
+            let restored = java_round_trip("distinct", &descriptions);
+            assert_eq!(restored.len(), stacks.len());
+            for (encoded, original) in restored.iter().zip(stacks) {
+                assert_eq!(parse_slot(encoded).expect("round trip item"), original);
+            }
+        }
+    }
 
     #[test]
     fn opaque_non_compound_bukkit_value_survives_an_unmodified_bridge() {
@@ -14710,9 +14832,37 @@ mod slot_bridge_tests {
         let mut stack = ItemStack::new(&vanilla_items::PAPER);
         stack.set(CUSTOM_DATA, custom_data);
 
-        let described = describe_slot(&stack);
-        assert!(!described.contains("pdcrawhex="));
-        assert!(!described.contains("pdcidentity="));
+        assert_java_rejects_without_replacing_slot(stack);
+    }
+
+    fn assert_java_rejects_without_replacing_slot(mut slot: ItemStack) {
+        let original = slot.to_nbt_tag_ref();
+        let described = describe_slot(&slot);
+        let returned = java_round_trip("reject", &[described]);
+        assert_eq!(returned.len(), 1);
+        let parsed = parse_slot(&returned[0]);
+        assert!(
+            parsed.is_none(),
+            "a rejected read must not become a writable empty item"
+        );
+        if let Some(replacement) = parsed {
+            slot = replacement;
+        }
+        assert_eq!(slot.to_nbt_tag_ref(), original);
+    }
+
+    #[test]
+    fn total_bridge_budget_failure_is_not_a_metadata_free_item() {
+        init_vanilla_registry();
+        let mut data = NbtCompound::new();
+        data.insert("preserved", 42);
+        let mut stack = ItemStack::new(&vanilla_items::PAPER);
+        stack.set(
+            CUSTOM_DATA,
+            CustomData::try_from_compound(data).expect("valid data"),
+        );
+        stack.set_opaque_nbt(Some("x".repeat(MAX_SLOT_BRIDGE_BYTES / 2 - 16)));
+        assert_java_rejects_without_replacing_slot(stack);
     }
 
     #[test]

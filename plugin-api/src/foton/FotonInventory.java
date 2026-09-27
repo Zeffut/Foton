@@ -218,6 +218,9 @@ public final class FotonInventory implements PlayerInventory {
 
     /** Reads `minecraft:diamond_sword 3`. Anything else is an empty slot. */
     public static ItemStack decode(String text) {
+        if ("!foton:item-metadata-limit".equals(text)) {
+            throw new IllegalStateException("Native item metadata exceeds the item bridge limit");
+        }
         if (text == null || text.isEmpty() || text.length() > MAX_SLOT_BRIDGE_CHARS) {
             return null;
         }
