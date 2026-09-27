@@ -182,6 +182,11 @@ function Test-RuntimeComplete {
         'adventure-key-5.2.0.jar',
         'adventure-text-logger-slf4j-5.2.0.jar',
         'adventure-text-serializer-plain-5.2.0.jar',
+        'adventure-text-serializer-json-5.2.0.jar',
+        'adventure-text-serializer-gson-5.2.0.jar',
+        'adventure-text-serializer-commons-5.2.0.jar',
+        'option-1.1.0.jar',
+        'auto-service-annotations-1.1.1.jar',
         'annotations-26.1.0.jar',
         'brigadier-1.3.10.jar',
         'error_prone_annotations-2.47.0.jar',
@@ -251,8 +256,8 @@ function Test-RuntimeComplete {
     foreach ($licenseName in $expectedLicenses) {
         if (-not (Test-RegularFile (Join-Path $licenses $licenseName))) { return $false }
     }
-    return $apiSeen -eq 1 -and $librariesSeen -eq 24 -and
-        $jarFiles.Count -eq 24 -and $libraryFiles.Count -eq 24 -and
+    return $apiSeen -eq 1 -and $librariesSeen -eq 29 -and
+        $jarFiles.Count -eq 29 -and $libraryFiles.Count -eq 29 -and
         $licensesSeen -eq 6 -and $manifestEntries -eq $actualFiles.Count
 }
 

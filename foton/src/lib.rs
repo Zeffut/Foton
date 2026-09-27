@@ -652,11 +652,16 @@ fn installed_plugin_runtime_directory() -> Result<Option<PathBuf>, String> {
     Ok(None)
 }
 
-const PLUGIN_RUNTIME_JARS: [&str; 24] = [
+const PLUGIN_RUNTIME_JARS: [&str; 29] = [
     "adventure-api-5.2.0.jar",
     "adventure-key-5.2.0.jar",
     "adventure-text-logger-slf4j-5.2.0.jar",
     "adventure-text-serializer-plain-5.2.0.jar",
+    "adventure-text-serializer-json-5.2.0.jar",
+    "adventure-text-serializer-gson-5.2.0.jar",
+    "adventure-text-serializer-commons-5.2.0.jar",
+    "option-1.1.0.jar",
+    "auto-service-annotations-1.1.1.jar",
     "annotations-26.1.0.jar",
     "brigadier-1.3.10.jar",
     "error_prone_annotations-2.47.0.jar",

@@ -73,7 +73,10 @@ runtime_library_is_expected() {
   case "$1" in
     adventure-api-5.2.0.jar|adventure-key-5.2.0.jar|\
     adventure-text-logger-slf4j-5.2.0.jar|adventure-text-serializer-plain-5.2.0.jar|\
-    annotations-26.1.0.jar|brigadier-1.3.10.jar|error_prone_annotations-2.47.0.jar|\
+    adventure-text-serializer-json-5.2.0.jar|adventure-text-serializer-gson-5.2.0.jar|\
+    adventure-text-serializer-commons-5.2.0.jar|option-1.1.0.jar|\
+    auto-service-annotations-1.1.1.jar|annotations-26.1.0.jar|brigadier-1.3.10.jar|\
+    error_prone_annotations-2.47.0.jar|\
     failureaccess-1.0.3.jar|gson-2.14.0.jar|guava-33.6.0-jre.jar|\
     j2objc-annotations-3.1.jar|joml-1.10.8.jar|jspecify-1.0.0.jar|\
     kotlin-stdlib-1.8.20.jar|kotlin-stdlib-common-1.8.20.jar|\
@@ -145,7 +148,7 @@ runtime_archive_is_safe() {
       *) return 1 ;;
     esac
   done < "$runtime_archive_list"
-  [ "$runtime_archive_files" -eq 32 ] && [ "$runtime_archive_directories" -eq 3 ]
+  [ "$runtime_archive_files" -eq 37 ] && [ "$runtime_archive_directories" -eq 3 ]
 }
 
 runtime_is_complete() {
@@ -208,9 +211,9 @@ runtime_is_complete() {
       && [ ! -L "$runtime_dir/licenses/$runtime_license" ] || return 1
   done
   [ "$runtime_api_seen" -eq 1 ] \
-    && [ "$runtime_libs_seen" -eq 24 ] \
-    && [ "$runtime_actual_libs" -eq 24 ] \
-    && [ "$runtime_all_lib_files" -eq 24 ] \
+    && [ "$runtime_libs_seen" -eq 29 ] \
+    && [ "$runtime_actual_libs" -eq 29 ] \
+    && [ "$runtime_all_lib_files" -eq 29 ] \
     && [ "$runtime_licenses_seen" -eq 6 ] \
     && [ "$runtime_license_files" -eq 6 ] \
     && [ "$runtime_manifest_entries" -eq "$runtime_actual_entries" ]

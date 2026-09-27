@@ -113,7 +113,7 @@ A full release has five platform binaries and two plugin-runtime archives:
 | `foton-plugin-runtime.tar.gz` | Plugin API/runtime, POSIX installer | laptop or CI |
 | `foton-plugin-runtime.zip` | Plugin API/runtime, PowerShell installer | laptop or CI |
 
-Each plugin-runtime archive contains the API JAR, exactly 24 pinned dependency
+Each plugin-runtime archive contains the API JAR, exactly 29 pinned dependency
 JARs (including the five Netty 4.2.15.Final modules used by the direct Via
 transport bridge), six license/notice texts and an internal SHA-256 manifest.
 ViaVersion and ViaBackwards are opt-in operator plugins and are not bundled.

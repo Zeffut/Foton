@@ -36,6 +36,9 @@ function New-Runtime {
     $libraries = @(
         'adventure-api-5.2.0.jar', 'adventure-key-5.2.0.jar',
         'adventure-text-logger-slf4j-5.2.0.jar', 'adventure-text-serializer-plain-5.2.0.jar',
+        'adventure-text-serializer-json-5.2.0.jar', 'adventure-text-serializer-gson-5.2.0.jar',
+        'adventure-text-serializer-commons-5.2.0.jar', 'option-1.1.0.jar',
+        'auto-service-annotations-1.1.1.jar',
         'annotations-26.1.0.jar', 'brigadier-1.3.10.jar',
         'error_prone_annotations-2.47.0.jar', 'failureaccess-1.0.3.jar',
         'gson-2.14.0.jar', 'guava-33.6.0-jre.jar', 'j2objc-annotations-3.1.jar',
@@ -259,7 +262,7 @@ try {
     if ($truncatedCode -eq 0) { throw 'installer accepted a truncated runtime manifest' }
     if ((Get-Content -Raw (Join-Path $Install 'plugin-runtime\lib\adventure-api-5.2.0.jar')).Trim() -ne 'library old adventure-api-5.2.0.jar') { throw 'truncated runtime changed the installed pair' }
 
-    # A manifest that honestly describes only twenty-three jars still cannot redefine
+    # A manifest that honestly describes only twenty-eight jars still cannot redefine
     # the supported runtime set.
     New-Runtime $RuntimeFixture 'v9.8.7' 'shortened'
     Remove-Item (Join-Path $RuntimeFixture 'lib\netty-codec-base-4.2.15.Final.jar')
@@ -268,7 +271,7 @@ try {
     New-ReleaseAssets $newGood
     Push-Location $Install
     try { $shortenedCode = Invoke-Installer (Join-Path $Scratch 'shortened.log') } finally { Pop-Location }
-    if ($shortenedCode -eq 0) { throw 'installer accepted only twenty-three dependency jars' }
+    if ($shortenedCode -eq 0) { throw 'installer accepted only twenty-eight dependency jars' }
     if ((Get-Content -Raw (Join-Path $Install 'plugin-runtime\lib\adventure-api-5.2.0.jar')).Trim() -ne 'library old adventure-api-5.2.0.jar') { throw 'shortened runtime changed the installed pair' }
 
     # Exact license names are mandatory even when the shortened manifest is

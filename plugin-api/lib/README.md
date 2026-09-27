@@ -14,9 +14,11 @@ fails for reasons that are not the code.
 
 ## Which versions, and why these
 
-Every version below is the one `io.papermc.paper:paper-api:26.2.build.121-stable`
-declares, read from its published POM and -- for the Adventure artifacts, whose
-versions the POM leaves to a BOM -- from `net.kyori:adventure-bom:5.2.0`.
+API dependency versions below are the ones
+`io.papermc.paper:paper-api:26.2.build.121-stable` declares, read from its
+published POM and -- for the Adventure artifacts, whose versions the POM
+leaves to a BOM -- from `net.kyori:adventure-bom:5.2.0`. The Gson serializer
+and its implementation-only closure come from that serializer's published POM.
 
 That matters more than it looks. A plugin is compiled against real Paper, so
 the signatures it references are Paper's. Compiling our `org.bukkit` against a
@@ -69,6 +71,11 @@ POM, not from memory and not carried over from the previous version.
 | adventure-key | 5.2.0 | MIT | Maven Central POM |
 | adventure-text-logger-slf4j | 5.2.0 | MIT | Maven Central POM |
 | adventure-text-serializer-plain | 5.2.0 | MIT | Maven Central POM |
+| adventure-text-serializer-json | 5.2.0 | MIT | Maven Central POM |
+| adventure-text-serializer-gson | 5.2.0 | MIT | Maven Central POM |
+| adventure-text-serializer-commons | 5.2.0 | MIT | Maven Central POM |
+| option | 1.1.0 | MIT | Maven Central POM |
+| auto-service-annotations | 1.1.1 | Apache-2.0 | Maven Central POM |
 | annotations (JetBrains) | 26.1.0 | Apache-2.0 | Maven Central POM |
 | brigadier | 1.3.10 | MIT | `LICENSE` in Mojang/brigadier |
 | gson | 2.14.0 | Apache-2.0 | POM inside the jar |

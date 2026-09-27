@@ -41,6 +41,11 @@ adventure-api-5.2.0.jar
 adventure-key-5.2.0.jar
 adventure-text-logger-slf4j-5.2.0.jar
 adventure-text-serializer-plain-5.2.0.jar
+adventure-text-serializer-json-5.2.0.jar
+adventure-text-serializer-gson-5.2.0.jar
+adventure-text-serializer-commons-5.2.0.jar
+option-1.1.0.jar
+auto-service-annotations-1.1.1.jar
 annotations-26.1.0.jar
 brigadier-1.3.10.jar
 error_prone_annotations-2.47.0.jar
@@ -307,7 +312,7 @@ grep -q 'incomplete or invalid runtime manifest' "$SCRATCH/truncated.log"
 grep -q '^library old adventure-api-5.2.0.jar$' "$INSTALL/plugin-runtime/lib/adventure-api-5.2.0.jar"
 
 # A self-consistent but shortened bundle is also invalid: the supported host
-# runtime is the API plus exactly twenty-four dependency jars.
+# runtime is the API plus exactly twenty-nine dependency jars.
 write_runtime "$ASSETS/runtime" v9.8.7 shortened
 rm "$ASSETS/runtime/lib/netty-codec-base-4.2.15.Final.jar"
 sed -i '/lib\/netty-codec-base-4\.2\.15\.Final\.jar$/d' "$ASSETS/runtime/SHA256SUMS"
@@ -316,7 +321,7 @@ if (
   cd "$INSTALL"
   bash "$REPO/site/static/install.sh" --update > "$SCRATCH/shortened.log" 2>&1
 ); then
-  echo 'installer accepted a runtime with only twenty-three dependency jars' >&2
+  echo 'installer accepted a runtime with only twenty-eight dependency jars' >&2
   exit 1
 fi
 grep -q 'unsafe or unexpected archive entry' "$SCRATCH/shortened.log"
@@ -351,7 +356,7 @@ if (
 fi
 
 # The count alone is not the runtime contract. A self-consistent archive with
-# twenty-four jars but one unexpected name must be rejected before replacement.
+# twenty-nine jars but one unexpected name must be rejected before replacement.
 write_runtime "$ASSETS/runtime" v9.8.7 renamed-jar
 mv "$ASSETS/runtime/lib/failureaccess-1.0.3.jar" "$ASSETS/runtime/lib/unexpected-1.0.jar"
 (
