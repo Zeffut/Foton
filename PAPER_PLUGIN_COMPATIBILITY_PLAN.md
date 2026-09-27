@@ -103,9 +103,9 @@ These are relative sizes, not calendar promises. Task 1 establishes the denomina
 
 **Interfaces:** `PluginLibraryResolver` accepts validated coordinates/repositories/local paths and returns ordered, verified `URL`s for one plugin loader. `MavenLibraryResolver` implements the exact Paper API signatures used by the corpus, backed by the real resolver dependency graph and repository policy.
 
-- [ ] Make fixtures fail for a transitive dependency, a Maven version conflict, a corrupt cached JAR, path traversal, an unreachable repository and library visibility leakage between two plugins. Include `paper-libraries.json`, legacy `libraries`, `JarLibrary`, and a loader-added Maven library.
+- [ ] Make fixtures fail for a transitive dependency, a Maven version conflict, a corrupt cached JAR, path traversal, an unreachable repository and library visibility leakage between two plugins. Include `paper-libraries.json` consumed by a plugin's own `PluginLoader` (not by the Paper host), legacy `libraries`, `JarLibrary`, and a loader-added Maven library.
 - [ ] Pin the Maven Resolver runtime closure, checksums and license notices. Resolve to a temp file, verify content and atomically publish it; apply time, size and repository bounds. Respect Paper's configured central mirror.
-- [ ] Remove the current regex-only `paper-libraries.json` handling once the resolver passes equivalent valid fixtures. Run Java API, runtime, installer and release packaging tests; compare startup with Paper.
+- [ ] Remove the current host-side regex-only `paper-libraries.json` handling: Paper does not process this generator-specific file automatically. Verify a plugin loader that parses it and adds a Maven resolver, then run Java API, runtime, installer and release packaging tests; compare startup with Paper.
 
 ### Task 6: Execute bootstrap, lifecycle, commands and registry phases
 
