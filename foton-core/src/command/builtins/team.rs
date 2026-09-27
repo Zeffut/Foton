@@ -2,16 +2,16 @@
 //!
 //! Vanilla parity: `net.minecraft.server.commands.TeamCommand`.
 //!
-//! Only the subcommands backed by state that something reads are here. Vanilla
-//! also carries `displayName`, `color`, `prefix`, `suffix`,
-//! `nametagVisibility`, `deathMessageVisibility` and `collisionRule`; every one
-//! of those exists to reach a client through `CSetPlayerTeam`, which Foton does
-//! not send yet. Storing them would be writing data nothing can observe, so
-//! they are left out until the packet exists rather than accepted and dropped.
+//! Only the subcommands backed by state that something reads are here. Team
+//! creation, removal, membership and the implemented options are synchronized
+//! to connected clients in the scoreboard's domain through `CSetPlayerTeam`.
+//! The remaining vanilla presentation fields stay unsupported until their
+//! state exists; accepting and dropping them would be misleading.
 //!
 //! What is here changes behavior: membership, which `@e[team=]` already reads,
 //! and the two options `Player.canHarmPlayer` and `Entity.isAlliedTo` consult.
 
+use foton_protocol::packets::game::CSetPlayerTeam;
 use foton_utils::{Identifier, translations};
 use text_components::TextComponent;
 
@@ -140,6 +140,13 @@ fn add_team(context: &FotonCommandContext<CommandSource>) -> Result<i32, Command
             &translations::COMMANDS_TEAM_ADD_DUPLICATE,
         )));
     };
+    let snapshot = scoreboard
+        .team_snapshot(&team)
+        .ok_or_else(|| CommandSyntaxError::dynamic("New team disappeared from its scoreboard"))?;
+    context
+        .source()
+        .server()
+        .broadcast_scoreboard_packet(context.source().world().domain(), snapshot.create_packet());
     let message = translations::COMMANDS_TEAM_ADD_SUCCESS
         .message([team.name().to_owned()])
         .component();
@@ -150,7 +157,16 @@ fn add_team(context: &FotonCommandContext<CommandSource>) -> Result<i32, Command
 /// Vanilla parity: `TeamCommand.deleteTeam`.
 fn remove_team(context: &FotonCommandContext<CommandSource>) -> Result<i32, CommandSyntaxError> {
     let team = team(context)?;
-    source_scoreboard(context)?.remove_team(&team);
+    if !source_scoreboard(context)?.remove_team(&team) {
+        return Err(CommandSyntaxError::dynamic(format!(
+            "Team '{}' disappeared before removal",
+            team.name()
+        )));
+    }
+    context.source().server().broadcast_scoreboard_packet(
+        context.source().world().domain(),
+        CSetPlayerTeam::remove(team.name()),
+    );
     let message = translations::COMMANDS_TEAM_REMOVE_SUCCESS
         .message([team.name().to_owned()])
         .component();
@@ -169,7 +185,17 @@ fn empty_team(context: &FotonCommandContext<CommandSource>) -> Result<i32, Comma
         )));
     }
     for entry in &entries {
-        scoreboard.remove_holder_from_team(&ScoreHolder::new(entry.clone()));
+        if scoreboard.remove_holder_from_team(&ScoreHolder::new(entry.clone())) {
+            context
+                .source()
+                .server()
+                .broadcast_scoreboard_membership_change(
+                    context.source().world().domain(),
+                    entry,
+                    Some(team.name()),
+                    None,
+                );
+        }
     }
     let message = translations::COMMANDS_TEAM_EMPTY_SUCCESS
         .message([entries.len().to_string(), team.name().to_owned()])
@@ -184,9 +210,19 @@ fn join_team(context: &FotonCommandContext<CommandSource>) -> Result<i32, Comman
     let members = context.score_holders("members", ScoreHolderWildcard::Empty)?;
     let scoreboard = source_scoreboard(context)?;
     for member in &members {
+        let previous = scoreboard.holder_team_name(member);
         scoreboard
             .add_holder_to_team(member, &team)
             .map_err(|error| CommandSyntaxError::dynamic(error.to_string()))?;
+        context
+            .source()
+            .server()
+            .broadcast_scoreboard_membership_change(
+                context.source().world().domain(),
+                member.name(),
+                previous.as_deref(),
+                Some(team.name()),
+            );
     }
 
     let message = if let [only] = members.as_slice() {
@@ -207,7 +243,18 @@ fn leave_team(context: &FotonCommandContext<CommandSource>) -> Result<i32, Comma
     let members = context.score_holders("members", ScoreHolderWildcard::Empty)?;
     let scoreboard = source_scoreboard(context)?;
     for member in &members {
-        scoreboard.remove_holder_from_team(member);
+        let previous = scoreboard.holder_team_name(member);
+        if scoreboard.remove_holder_from_team(member) {
+            context
+                .source()
+                .server()
+                .broadcast_scoreboard_membership_change(
+                    context.source().world().domain(),
+                    member.name(),
+                    previous.as_deref(),
+                    None,
+                );
+        }
     }
 
     let message = if let [only] = members.as_slice() {
@@ -243,6 +290,13 @@ fn set_friendly_fire(
 
     options.allow_friendly_fire = allowed;
     scoreboard.set_team_options(&team, options);
+    let snapshot = scoreboard.team_snapshot(&team).ok_or_else(|| {
+        CommandSyntaxError::dynamic("Modified team disappeared from its scoreboard")
+    })?;
+    context
+        .source()
+        .server()
+        .broadcast_scoreboard_packet(context.source().world().domain(), snapshot.update_packet());
     let message = if allowed {
         translations::COMMANDS_TEAM_OPTION_FRIENDLYFIRE_ENABLED
             .message([team.name().to_owned()])
@@ -276,6 +330,13 @@ fn set_see_friendly_invisibles(
 
     options.see_friendly_invisibles = allowed;
     scoreboard.set_team_options(&team, options);
+    let snapshot = scoreboard.team_snapshot(&team).ok_or_else(|| {
+        CommandSyntaxError::dynamic("Modified team disappeared from its scoreboard")
+    })?;
+    context
+        .source()
+        .server()
+        .broadcast_scoreboard_packet(context.source().world().domain(), snapshot.update_packet());
     let message = if allowed {
         translations::COMMANDS_TEAM_OPTION_SEE_FRIENDLY_INVISIBLES_ENABLED
             .message([team.name().to_owned()])

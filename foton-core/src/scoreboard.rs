@@ -2,8 +2,8 @@
 //!
 //! This module owns the scoreboard data needed by selectors and command
 //! execution: objective identity and mutability, score values and locks, and
-//! team membership. Display slots and client presentation are outside this
-//! command-system scope.
+//! team membership and the team presentation synchronized to clients. Display
+//! slots and objective presentation remain outside this command-system scope.
 
 use std::{
     collections::{BTreeMap, BTreeSet, btree_map::Entry},
@@ -13,6 +13,7 @@ use std::{
 
 use std::sync::Arc;
 
+use foton_protocol::packets::game::{CSetPlayerTeam, PlayerTeamParameters};
 use foton_utils::locks::{AsyncMutex, SyncRwLock};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -123,13 +124,14 @@ struct ObjectiveState {
 
 /// The options a team carries beyond its name.
 ///
-/// Vanilla parity: the settable fields of `PlayerTeam`. Only the two that
-/// change behaviour rather than presentation are stored so far; both default
-/// the way vanilla's constructor does, so a team created and never modified
-/// behaves like `/team add` with no `modify`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// Vanilla parity: the settable fields of `PlayerTeam` currently used by
+/// Foton. They default the way vanilla's constructor does, so a team created
+/// and never modified behaves like `/team add` with no `modify`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct TeamOptions {
+    /// `PlayerTeam.playerPrefix`, vanilla default empty.
+    pub prefix: text_components::TextComponent,
     /// `PlayerTeam.allowFriendlyFire`, vanilla default `true`.
     pub allow_friendly_fire: bool,
     /// `PlayerTeam.seeFriendlyInvisibles`, vanilla default `true`.
@@ -139,9 +141,54 @@ pub struct TeamOptions {
 impl Default for TeamOptions {
     fn default() -> Self {
         Self {
+            prefix: text_components::TextComponent::new(),
             allow_friendly_fire: true,
             see_friendly_invisibles: true,
         }
+    }
+}
+
+/// Complete client-visible state for one scoreboard team.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScoreboardTeamSnapshot {
+    /// Unique scoreboard team name.
+    pub name: String,
+    /// Component rendered before every member's name.
+    pub prefix: text_components::TextComponent,
+    /// Whether members may damage each other.
+    pub allow_friendly_fire: bool,
+    /// Whether members can see invisible allies.
+    pub see_friendly_invisibles: bool,
+    /// Score-holder names currently assigned to the team.
+    pub entries: Vec<String>,
+}
+
+impl ScoreboardTeamSnapshot {
+    /// Vanilla's packed flags: friendly fire is bit 0 and seeing invisible
+    /// allies is bit 1.
+    #[must_use]
+    pub const fn option_flags(&self) -> u8 {
+        (self.allow_friendly_fire as u8) | ((self.see_friendly_invisibles as u8) << 1)
+    }
+
+    fn packet_parameters(&self) -> PlayerTeamParameters {
+        PlayerTeamParameters::vanilla_defaults(&self.name, self.prefix.clone(), self.option_flags())
+    }
+
+    /// Packet that creates this team and installs its complete membership.
+    #[must_use]
+    pub fn create_packet(&self) -> CSetPlayerTeam {
+        CSetPlayerTeam::create(
+            self.name.clone(),
+            self.packet_parameters(),
+            self.entries.clone(),
+        )
+    }
+
+    /// Packet that refreshes this team's presentation fields.
+    #[must_use]
+    pub fn update_packet(&self) -> CSetPlayerTeam {
+        CSetPlayerTeam::update(self.name.clone(), self.packet_parameters())
     }
 }
 
@@ -334,10 +381,51 @@ impl Scoreboard {
         self.state.read().teams.keys().cloned().collect()
     }
 
+    /// Returns one team's presentation and membership as one coherent read.
+    #[must_use]
+    pub fn team_snapshot(&self, team: &ScoreboardTeam) -> Option<ScoreboardTeamSnapshot> {
+        let state = self.state.read();
+        let options = state.teams.get(team.name())?;
+        Some(ScoreboardTeamSnapshot {
+            name: team.name().to_owned(),
+            prefix: options.prefix.clone(),
+            allow_friendly_fire: options.allow_friendly_fire,
+            see_friendly_invisibles: options.see_friendly_invisibles,
+            entries: state
+                .holder_teams
+                .iter()
+                .filter(|(_, assigned)| *assigned == team.name())
+                .map(|(holder, _)| holder.to_owned())
+                .collect(),
+        })
+    }
+
+    /// Returns all team snapshots in stable team-name order.
+    #[must_use]
+    pub fn team_snapshots(&self) -> Vec<ScoreboardTeamSnapshot> {
+        let state = self.state.read();
+        state
+            .teams
+            .iter()
+            .map(|(name, options)| ScoreboardTeamSnapshot {
+                name: name.clone(),
+                prefix: options.prefix.clone(),
+                allow_friendly_fire: options.allow_friendly_fire,
+                see_friendly_invisibles: options.see_friendly_invisibles,
+                entries: state
+                    .holder_teams
+                    .iter()
+                    .filter(|(_, assigned)| *assigned == name)
+                    .map(|(holder, _)| holder.to_owned())
+                    .collect(),
+            })
+            .collect()
+    }
+
     /// Removes a team and every membership pointing at it.
     ///
-    /// Vanilla parity: `Scoreboard.removeTeam`, which calls `removeTeam` for
-    /// each member first. Leaving the memberships behind would make
+    /// Vanilla parity: `Scoreboard.removePlayerTeam`, which clears every
+    /// player-to-team mapping before reporting the team removal. Leaving the memberships behind would make
     /// `@e[team=<gone>]` keep matching, and re-creating the name would silently
     /// inherit the old roster.
     pub fn remove_team(&self, team: &ScoreboardTeam) -> bool {
@@ -374,7 +462,7 @@ impl Scoreboard {
             .read()
             .teams
             .get(team.name())
-            .copied()
+            .cloned()
             .unwrap_or_default()
     }
 
@@ -398,6 +486,25 @@ impl Scoreboard {
         true
     }
 
+    /// Replaces a team's client-visible prefix and reports whether it existed.
+    pub fn set_team_prefix(
+        &self,
+        team: &ScoreboardTeam,
+        prefix: text_components::TextComponent,
+    ) -> bool {
+        let mut state = self.state.write();
+        let Some(options) = state.teams.get_mut(team.name()) else {
+            return false;
+        };
+        if options.prefix == prefix {
+            return true;
+        }
+        options.prefix = prefix;
+        drop(state);
+        self.mark_dirty();
+        true
+    }
+
     /// Returns whether two holders are on one team, and whether it lets them
     /// hurt each other.
     ///
@@ -415,7 +522,7 @@ impl Scoreboard {
         state
             .teams
             .get(attacker_team)
-            .copied()
+            .cloned()
             .unwrap_or_default()
             .allow_friendly_fire
     }
@@ -819,6 +926,63 @@ mod tests {
         assert_eq!(
             scoreboard.holder_team_name(&holder).as_deref(),
             Some("blue")
+        );
+    }
+
+    #[test]
+    fn team_prefix_and_membership_produce_complete_client_packets() {
+        use foton_protocol::packets::game::PlayerTeamOperation;
+
+        let scoreboard = Scoreboard::new();
+        let team = scoreboard
+            .add_team("zc_admin")
+            .expect("team should be added");
+        let prefix = text_components::TextComponent::plain("[Admin] ");
+        assert!(scoreboard.set_team_prefix(&team, prefix.clone()));
+        scoreboard
+            .add_holder_to_team(&ScoreHolder::new("Zeffut"), &team)
+            .expect("member should join");
+
+        let snapshot = scoreboard
+            .team_snapshot(&team)
+            .expect("team should have a snapshot");
+        assert_eq!(snapshot.prefix, prefix);
+        assert_eq!(snapshot.entries, ["Zeffut"]);
+        assert_eq!(snapshot.option_flags(), 3);
+        let packet = snapshot.create_packet();
+        let PlayerTeamOperation::Create {
+            parameters,
+            players,
+        } = packet.operation
+        else {
+            panic!("snapshot must create a team packet");
+        };
+        assert_eq!(parameters.prefix, prefix);
+        assert_eq!(players, ["Zeffut"]);
+    }
+
+    #[test]
+    fn team_prefix_persists_with_the_domain_scoreboard() {
+        let scoreboard = Scoreboard::new();
+        let team = scoreboard.add_team("red").expect("team should be added");
+        let prefix = text_components::TextComponent::plain("R ");
+        assert!(scoreboard.set_team_prefix(&team, prefix.clone()));
+
+        let snapshot = scoreboard
+            .pending_save()
+            .expect("prefix mutation should dirty the scoreboard");
+        let encoded = serde_json::to_string(&snapshot.state).expect("scoreboard should serialize");
+        let persistent: PersistentScoreboard =
+            serde_json::from_str(&encoded).expect("scoreboard should deserialize");
+        let restored =
+            Scoreboard::from_persistent(persistent).expect("restored scoreboard should validate");
+        let restored_team = restored.team("red").expect("team should survive");
+        assert_eq!(
+            restored
+                .team_snapshot(&restored_team)
+                .expect("snapshot should survive")
+                .prefix,
+            prefix
         );
     }
 

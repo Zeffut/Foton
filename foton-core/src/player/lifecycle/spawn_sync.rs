@@ -1,5 +1,5 @@
 use foton_protocol::packets::game::{
-    CEntityEvent, CPlayerInfoUpdate, CSetEntityData, CUpdateAttributes,
+    CEntityEvent, CPlayerInfoUpdate, CSetEntityData, CSetPlayerTeam, CUpdateAttributes,
 };
 use foton_registry::vanilla_game_rules::{IMMEDIATE_RESPAWN, LIMITED_CRAFTING, REDUCED_DEBUG_INFO};
 use foton_utils::entity_events::EntityStatus;
@@ -62,9 +62,13 @@ impl Player {
 
         let old_world = self.get_world();
         let switching_worlds = !Arc::ptr_eq(&old_world, &new_world);
+        let switching_domains = old_world.domain() != new_world.domain();
 
         if switching_worlds {
             self.send_packet(CContainerClose { container_id: 0 });
+            if switching_domains {
+                self.send_domain_scoreboard_removals(old_world.domain());
+            }
             if !source_world_detached {
                 old_world.remove_player_for_world_change(self);
             }
@@ -101,6 +105,9 @@ impl Player {
                 sea_level: new_world.sea_level,
                 data_kept,
             });
+            if switching_domains {
+                self.send_domain_scoreboard_creates(new_world.domain());
+            }
         }
     }
 
@@ -184,6 +191,9 @@ impl Player {
         self.reset_flying_ticks();
 
         self.send_spawn_state_packets(&world);
+        if reason == ResetReason::InitialJoin {
+            self.send_domain_scoreboard_creates(world.domain());
+        }
 
         // Force health/xp resync on next tick
         self.reset_sent_info();
@@ -238,6 +248,26 @@ impl Player {
         self.send_packet(world.initialize_border_packet());
         self.send_default_spawn_position(world);
         self.send_weather_sync(world);
+    }
+
+    fn send_domain_scoreboard_creates(&self, domain: &str) {
+        let server = self.server();
+        let Some(scoreboard) = server.scoreboards.get(domain) else {
+            return;
+        };
+        for team in scoreboard.team_snapshots() {
+            self.send_packet(team.create_packet());
+        }
+    }
+
+    fn send_domain_scoreboard_removals(&self, domain: &str) {
+        let server = self.server();
+        let Some(scoreboard) = server.scoreboards.get(domain) else {
+            return;
+        };
+        for team in scoreboard.team_names() {
+            self.send_packet(CSetPlayerTeam::remove(team));
+        }
     }
 
     /// Hands the player their whole attribute map again.
