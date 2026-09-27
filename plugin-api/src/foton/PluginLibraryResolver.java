@@ -96,10 +96,12 @@ public final class PluginLibraryResolver {
             }
         }
         Path temporary = Files.createTempDirectory(root, ".resolution-");
+        BoundedTransportFactory transport = null;
         try {
             var locator = MavenRepositorySystemUtils.newServiceLocator();
             locator.addService(RepositoryConnectorFactory.class, BasicRepositoryConnectorFactory.class);
-            locator.setServices(TransporterFactory.class, new BoundedTransportFactory(root));
+            transport = new BoundedTransportFactory(root);
+            locator.setServices(TransporterFactory.class, transport);
             locator.setErrorHandler(new org.eclipse.aether.impl.DefaultServiceLocator.ErrorHandler() {
                 @Override public void serviceCreationFailed(Class<?> type, Class<?> implementation, Throwable error) {
                     throw new IllegalStateException("Cannot initialize Maven resolver " + implementation.getName(), error);
@@ -108,6 +110,17 @@ public final class PluginLibraryResolver {
             RepositorySystem system = locator.getService(RepositorySystem.class);
             if (system == null) throw new IOException("Maven resolver runtime is incomplete");
             var session = MavenRepositorySystemUtils.newSession();
+            session.setSystemProperties(System.getProperties());
+            BoundedTransportFactory responseCache = transport;
+            session.setTransferListener(new org.eclipse.aether.transfer.AbstractTransferListener() {
+                @Override public void transferCorrupted(org.eclipse.aether.transfer.TransferEvent event)
+                        throws org.eclipse.aether.transfer.TransferCancelledException {
+                    try { responseCache.invalidate(); }
+                    catch (IOException error) {
+                        throw new org.eclipse.aether.transfer.TransferCancelledException("Cannot discard rejected Maven responses", error);
+                    }
+                }
+            });
             session.setChecksumPolicy(RepositoryPolicy.CHECKSUM_POLICY_FAIL);
             session.setArtifactDescriptorPolicy(new org.eclipse.aether.util.repository.SimpleArtifactDescriptorPolicy(false, false));
             session.setIgnoreArtifactDescriptorRepositories(true);
@@ -147,6 +160,14 @@ public final class PluginLibraryResolver {
                 urls.add(published.toUri().toURL());
             }
             return List.copyOf(urls);
+        } catch (Exception error) {
+            // Self-digests detect local corruption, not repository checksum validity.
+            // Discard this attempt's responses so a corrected mirror can be retried.
+            if (transport != null) {
+                try { transport.invalidate(); }
+                catch (IOException cleanup) { error.addSuppressed(cleanup); }
+            }
+            throw error;
         } finally {
             try (var paths = Files.walk(temporary)) {
                 for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(path);
@@ -256,6 +277,7 @@ public final class PluginLibraryResolver {
         private final long deadline = System.nanoTime() + TIME_LIMIT_NANOS;
         private final AtomicInteger requests = new AtomicInteger();
         private final java.util.concurrent.atomic.AtomicLong transferred = new java.util.concurrent.atomic.AtomicLong();
+        private final java.util.Set<Path> responses = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
         private BoundedTransportFactory(Path cache) throws IOException { this.cache = directory(cache.resolve("resources")); }
         @Override public float getPriority() { return 1; }
@@ -271,12 +293,18 @@ public final class PluginLibraryResolver {
             if (System.nanoTime() > deadline || Thread.currentThread().isInterrupted()) throw new IOException("Plugin library resolution deadline exceeded");
         }
 
+        private void invalidate() throws IOException {
+            for (Path response : responses) Files.deleteIfExists(response);
+        }
+
         private Path fetch(URI uri) throws IOException {
             check();
             if (requests.incrementAndGet() > MAX_REQUESTS) throw new IOException("Plugin library resolution request limit exceeded");
             String key = HexFormat.of().formatHex(sha256().digest(uri.toASCIIString().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
             Path target = cache.resolve(key);
             Path checksum = cache.resolve(key + ".sha256");
+            responses.add(target);
+            responses.add(checksum);
             boolean mutable = uri.getPath().contains("maven-metadata") || uri.getPath().contains("-SNAPSHOT/");
             if (!mutable && Files.isRegularFile(checksum, LinkOption.NOFOLLOW_LINKS) && Files.size(checksum) == 64
                     && verified(target, Files.readString(checksum))) return target;

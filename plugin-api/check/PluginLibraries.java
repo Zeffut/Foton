@@ -95,7 +95,7 @@ public final class PluginLibraries {
             artifact(work, repository, "badchecksum", "1", "");
             repository.put("/test/badchecksum/1/badchecksum-1.jar.sha1", "0000000000000000000000000000000000000000".getBytes(StandardCharsets.US_ASCII));
             rejects(() -> resolve(resolver, work, List.of(dep("badchecksum", "1")), repositories), "repository checksum mismatch");
-            PluginLibraryHostChecks.check(work, address, Path.of(repaired.getFirst().toURI()));
+            reviewRegressions(resolver, work, repository, repositories, address, Path.of(repaired.getFirst().toURI()));
             server.stop(0);
             rejects(() -> resolve(resolver, work, List.of(dep("unreachable", "1")), repositories), "unreachable repository");
         } finally {
@@ -103,6 +103,45 @@ public final class PluginLibraries {
             try (var paths = Files.walk(work)) {
                 for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(path);
             }
+        }
+    }
+
+    private static void reviewRegressions(Class<?> resolver, Path work, Map<String, byte[]> repository,
+            List<RemoteRepository> repositories, String address, Path localLibrary) throws Exception {
+        List<Throwable> failures = new ArrayList<>();
+        try {
+            artifact(work, repository, "profile", "1", "");
+            String pom = "<project><modelVersion>4.0.0</modelVersion><groupId>test</groupId><artifactId>profile</artifactId><version>1</version>"
+                + "<profiles><profile><id>java</id><activation><jdk>[21,)</jdk></activation><dependencies>"
+                + dependency("child", "${foton.maven.child}") + "</dependencies></profile>"
+                + "<profile><id>property</id><activation><property><name>foton.maven.child</name><value>2</value></property></activation>"
+                + "<dependencies>" + dependency("parent", "1") + "</dependencies></profile></profiles></project>";
+            publish(repository, "/test/profile/1/profile-1.pom", pom.getBytes(StandardCharsets.UTF_8));
+            String previous = System.getProperty("foton.maven.child");
+            System.setProperty("foton.maven.child", "2");
+            try {
+                List<URL> urls = resolve(resolver, work, List.of(dep("profile", "1")), repositories);
+                try (URLClassLoader loader = new URLClassLoader(urls.toArray(URL[]::new), null)) {
+                    expect(resource(loader, "child.txt").equals("2"), "JDK profile and JVM property interpolation must activate child 2");
+                    expect(resource(loader, "parent.txt").equals("1"), "JVM property must activate the parent dependency profile");
+                }
+            } finally {
+                if (previous == null) System.clearProperty("foton.maven.child");
+                else System.setProperty("foton.maven.child", previous);
+            }
+        } catch (Exception | AssertionError error) { failures.add(error); }
+        try {
+            String path = "/test/badchecksum/1/badchecksum-1.jar";
+            publish(repository, path, repository.get(path));
+            expect(resolve(resolver, work, List.of(dep("badchecksum", "1")), repositories).size() == 1,
+                "corrected mirror must succeed on the next resolution with the same cache");
+        } catch (Exception | AssertionError error) { failures.add(error); }
+        try { PluginLibraryHostChecks.check(work, address, localLibrary); }
+        catch (Exception | AssertionError error) { failures.add(error); }
+        if (!failures.isEmpty()) {
+            AssertionError error = new AssertionError("library review regressions: " + failures.size());
+            failures.forEach(error::addSuppressed);
+            throw error;
         }
     }
 

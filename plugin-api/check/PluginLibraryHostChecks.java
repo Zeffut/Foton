@@ -27,9 +27,10 @@ final class PluginLibraryHostChecks {
             fixture(plugins, "JsonLoader", true, "loader: fixture.Loader\n", repository, localLibrary);
             fixture(plugins, "LegacyLibraries", false, "libraries: [test:parent:1]\n", null, null);
             fixture(plugins, "LegacyLoader", false, "paper-plugin-loader: fixture.Loader\n", repository, localLibrary);
+            fixture(plugins, "CombinedLoader", false, "paper-plugin-loader: fixture.Loader\nlibraries: [test:child:2]\n", repository, localLibrary);
             fixture(plugins, "Isolated", false, "", null, null);
-            expect(PluginHost.loadAll(plugins.toString()) == 4, "Paper JSON loader, legacy libraries and legacy loader must load");
-            for (String name : java.util.List.of("JsonLoader", "LegacyLibraries", "LegacyLoader")) {
+            expect(PluginHost.loadAll(plugins.toString()) == 5, "Paper JSON loader, legacy libraries and legacy loader must load");
+            for (String name : java.util.List.of("JsonLoader", "LegacyLibraries", "LegacyLoader", "CombinedLoader")) {
                 ClassLoader loader = PluginHost.byName(name).getClass().getClassLoader();
                 Class<?> child = Class.forName("fixturelib.Child", true, loader);
                 expect(child.getMethod("value").invoke(null).equals("1"), name + " resolves transitive child");

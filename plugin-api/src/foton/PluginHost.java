@@ -396,6 +396,7 @@ public final class PluginHost {
         urls.add(jar.toURI().toURL());
         Path cache = jar.toPath().toAbsolutePath().getParent().resolve(".foton-libraries");
         List<io.papermc.paper.plugin.loader.library.ClassPathLibrary> libraries = new ArrayList<>();
+        io.papermc.paper.plugin.loader.library.ClassPathLibrary legacyLibraries = null;
         if (!(descriptor instanceof PaperPluginDescriptor) && !descriptor.isPaperSkipLibraries()
                 && !descriptor.getLibraries().isEmpty()) {
             var resolver = new io.papermc.paper.plugin.loader.library.impl.MavenLibraryResolver();
@@ -404,7 +405,7 @@ public final class PluginHost {
             for (String coordinate : descriptor.getLibraries()) {
                 resolver.addDependency(new org.eclipse.aether.graph.Dependency(new org.eclipse.aether.artifact.DefaultArtifact(coordinate), null));
             }
-            libraries.add(resolver);
+            legacyLibraries = resolver;
         }
         String loaderName = descriptor instanceof PaperPluginDescriptor paper ? paper.loader() : descriptor.getPaperPluginLoader();
         if (loaderName != null) {
@@ -428,10 +429,12 @@ public final class PluginHost {
                     }
                     @Override public io.papermc.paper.plugin.bootstrap.PluginProviderContext getContext() { return context; }
                 });
+                if (legacyLibraries != null) libraries.add(legacyLibraries);
                 // A custom ClassPathLibrary can reference classes from the loader's JAR.
                 urls.addAll(PluginLibraryResolver.registerLibraries(cache, libraries));
             }
         } else {
+            if (legacyLibraries != null) libraries.add(legacyLibraries);
             urls.addAll(PluginLibraryResolver.registerLibraries(cache, libraries));
         }
         return urls.toArray(new URL[0]);
