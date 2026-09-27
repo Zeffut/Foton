@@ -67,7 +67,14 @@ public final class CommandMap {
 
     /** Retains a plugin's lifecycle Brigadier registrar for command dispatch. */
     public static void registerBrigadier(Commands commands, Plugin plugin) {
-        brigadierByPlugin.put(plugin, commands);
+        Commands existing = brigadierByPlugin.get(plugin);
+        if (existing == null) {
+            brigadierByPlugin.put(plugin, commands);
+        } else {
+            for (var node : commands.getDispatcher().getRoot().getChildren()) {
+                existing.getDispatcher().getRoot().addChild(node);
+            }
+        }
     }
 
     public static void clear() {
@@ -131,8 +138,10 @@ public final class CommandMap {
         String[] parts = trimmed.split("\\s+");
         Command command = get(parts[0]);
         if (command == null) {
-            for (Commands brigadier : brigadierByPlugin.values()) {
-                if (brigadier.dispatch(sender, trimmed)) return true;
+            for (var entry : java.util.List.copyOf(brigadierByPlugin.entrySet())) {
+                try (PluginHost.Invocation invocation = PluginHost.beginInvocation(entry.getKey())) {
+                    if (invocation != null && entry.getValue().dispatch(sender, trimmed)) return true;
+                }
             }
             return false;
         }

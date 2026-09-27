@@ -1,0 +1,6 @@
+name: BootstrapProbe
+version: '1'
+api-version: '26.2'
+main: fixture.BootstrapProbe
+bootstrapper: fixture.BootstrapProbe$Bootstrap
+loader: fixture.BootstrapProbe$Loader

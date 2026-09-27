@@ -238,6 +238,7 @@ public class PluginDescriptionFile implements io.papermc.paper.plugin.configurat
     @Override public String getVersion() { return version; }
 
     public String getMain() { return main; }
+    @Override public String getMainClass() { return main; }
 
     public String getDescription() { return description; }
 

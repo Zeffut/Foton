@@ -1,6 +1,6 @@
 package org.bukkit.plugin;
 
-public interface Plugin {
+public interface Plugin extends io.papermc.paper.plugin.lifecycle.event.LifecycleEventOwner {
     default java.io.InputStream getResource(String filename) { return null; }
     /** Loads config.yml from this plugin data folder. JavaPlugin overrides with a cached instance. */
     default org.bukkit.configuration.file.FileConfiguration getConfig() {

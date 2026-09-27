@@ -114,12 +114,18 @@ public final class PluginHost {
     private static int loadAllOnLoadSerialized(String directory) {
         ensureServer();
         List<File> ordered = orderedJars(new File(directory));
+        Map<File, PreparedBootstrap> bootstraps = prepareBootstraps(ordered);
         List<JavaPlugin> constructed = new ArrayList<>();
         for (File jar : ordered) {
+            PreparedBootstrap prepared = bootstraps.remove(jar);
             try {
-                JavaPlugin plugin = constructAndRegister(jar);
+                PluginDescriptionFile descriptor = readDescriptor(jar);
+                if (descriptor instanceof PaperPluginDescriptor paper
+                        && paper.bootstrapper() != null && prepared == null) continue;
+                JavaPlugin plugin = constructAndRegister(jar, prepared);
                 if (plugin != null) constructed.add(plugin);
             } catch (Throwable error) {
+                if (prepared != null) closeUnpublished(prepared.loader());
                 System.out.println("[host] " + jar.getName() + " failed: " + error);
                 error.printStackTrace(System.out);
             }
@@ -169,6 +175,63 @@ public final class PluginHost {
             }
         }
         return loadedNow;
+    }
+
+    private record PreparedBootstrap(org.bukkit.plugin.java.PluginClassLoader loader,
+                                     PaperBootstrapRunner runner, DependencyClassLoader dependencies) {}
+
+    private static Map<File, PreparedBootstrap> prepareBootstraps(List<File> ordered) {
+        Map<File, PreparedBootstrap> prepared = new java.util.LinkedHashMap<>();
+        Map<String, File> candidates = new HashMap<>();
+        List<PluginDescriptionFile> descriptors = new ArrayList<>();
+        for (File jar : ordered) {
+            try {
+                PluginDescriptionFile descriptor = readDescriptor(jar);
+                candidates.put(pluginKey(descriptor.getName()), jar);
+                descriptors.add(descriptor);
+            } catch (Exception error) {
+                System.out.println("[host] " + jar.getName() + " bootstrap descriptor failed: " + error);
+            }
+        }
+        for (String key : new PluginDependencyGraph(descriptors).order(PaperPluginDescriptor.Phase.BOOTSTRAP)) {
+            File jar = candidates.get(key);
+            org.bukkit.plugin.java.PluginClassLoader loader = null;
+            try {
+                PluginDescriptionFile descriptor = readDescriptor(jar);
+                if (!(descriptor instanceof PaperPluginDescriptor paper) || paper.bootstrapper() == null) continue;
+                if (byName(descriptor.getName()) != null) continue;
+                DependencyClassLoader dependencies = new DependencyClassLoader(
+                    PluginDependencyGraph.visible(descriptor, PaperPluginDescriptor.Phase.SERVER));
+                dependencies.active = false;
+                loader = new org.bukkit.plugin.java.PluginClassLoader(pluginUrls(jar, descriptor), dependencies);
+                loader.describe(org.bukkit.Bukkit.getServer(), descriptor,
+                    new File(jar.getParentFile(), descriptor.getName()));
+                PaperBootstrapRunner runner = new PaperBootstrapRunner(jar, paper, loader);
+                runner.bootstrap();
+                prepared.put(jar, new PreparedBootstrap(loader, runner, dependencies));
+            } catch (Throwable error) {
+                System.out.println("[host] " + jar.getName() + " bootstrap failed: " + error);
+                if (loader != null) closeUnpublished(loader);
+            }
+        }
+        var entries = prepared.entrySet().iterator();
+        while (entries.hasNext()) {
+            var entry = entries.next();
+            try {
+                entry.getValue().runner().commands();
+            } catch (Throwable error) {
+                System.out.println("[host] " + entry.getKey().getName() + " bootstrap commands failed: " + error);
+                closeUnpublished(entry.getValue().loader());
+                entries.remove();
+            }
+        }
+        return prepared;
+    }
+
+    private static void closeUnpublished(org.bukkit.plugin.java.PluginClassLoader loader) {
+        if (loader.getPlugin() != null) cleanupUnpublished(loader.getPlugin());
+        try { loader.close(); }
+        catch (IOException error) { System.out.println("[host] bootstrap classloader failed to close: " + error); }
     }
 
     private static List<String> requiredDependencies(Plugin plugin) {
@@ -318,24 +381,27 @@ public final class PluginHost {
                 throw new UnsupportedOperationException(descriptor.getName()
                     + ": open Paper classloader visibility is not implemented");
             }
-            if (paper.bootstrapper() != null || paper.paperDependencies().stream()
+            if (paper.paperDependencies().stream()
                     .anyMatch(d -> d.phase() == PaperPluginDescriptor.Phase.BOOTSTRAP)) {
                 throw new UnsupportedOperationException(descriptor.getName()
-                    + ": Paper bootstrap execution is not implemented");
+                    + ": Paper bootstrap dependency classpaths are not implemented");
             }
         }
     }
 
-    private static JavaPlugin constructAndRegister(File jar) throws Exception {
+    private static JavaPlugin constructAndRegister(File jar, PreparedBootstrap prepared) throws Exception {
         PluginDescriptionFile descriptor = readDescriptor(jar);
         requireSupportedLoading(descriptor);
         synchronized (lifecycle) {
             if (findExactNameLocked(descriptor.getName()) != null) {
+                if (prepared != null) closeUnpublished(prepared.loader());
                 System.out.println("[host] " + descriptor.getName() + " is already loaded; skipping " + jar.getName());
                 return null;
             }
         }
-        org.bukkit.plugin.java.PluginClassLoader loader = new org.bukkit.plugin.java.PluginClassLoader(pluginUrls(jar, descriptor), dependencyParent(descriptor));
+        org.bukkit.plugin.java.PluginClassLoader loader = prepared == null
+            ? new org.bukkit.plugin.java.PluginClassLoader(pluginUrls(jar, descriptor), dependencyParent(descriptor))
+            : prepared.loader();
         boolean registered = false;
         JavaPlugin plugin = null;
         try {
@@ -343,12 +409,22 @@ public final class PluginHost {
             // Before the constructor, not after: a plugin may call getName()
             // or getLogger() from it, and several do.
             loader.describe(org.bukkit.Bukkit.getServer(), descriptor, dataFolder);
-            Class<?> type = Class.forName(descriptor.getMain(), true, loader);
-            Object instance = type.getDeclaredConstructor().newInstance();
+            PaperBootstrapRunner bootstrap = prepared == null ? null : prepared.runner();
+            Object instance;
+            if (bootstrap != null) {
+                prepared.dependencies().active = true;
+                instance = bootstrap.createPlugin();
+            } else {
+                Class<?> type = Class.forName(descriptor.getMain(), true, loader);
+                instance = type.getDeclaredConstructor().newInstance();
+            }
             if (!(instance instanceof JavaPlugin candidate)) {
                 System.out.println(
                     "[host] " + descriptor.getName() + ": main class is not a JavaPlugin");
                 return null;
+            }
+            if (bootstrap != null && (candidate.getClass().getClassLoader() != loader || loader.getPlugin() != candidate)) {
+                throw new IllegalStateException("createPlugin must return the JavaPlugin constructed by its own loader");
             }
             plugin = candidate;
 
@@ -368,6 +444,7 @@ public final class PluginHost {
                 pluginLoaders.put(pluginKey(descriptor.getName()), loader);
             }
             PermissionRegistry.register(plugin, descriptor.getPermissions());
+            if (bootstrap != null) bootstrap.publishCommands(plugin);
             registered = true;
             return plugin;
         } finally {
@@ -511,6 +588,7 @@ public final class PluginHost {
         private static final ThreadLocal<Set<DependencyClassLoader>> searching =
             ThreadLocal.withInitial(HashSet::new);
         private final List<String> dependencies;
+        private boolean active = true;
 
         private DependencyClassLoader(List<String> dependencies) {
             super(PluginHost.class.getClassLoader());
@@ -522,6 +600,7 @@ public final class PluginHost {
             try {
                 return super.loadClass(name, resolve);
             } catch (ClassNotFoundException missingFromServer) {
+                if (!this.active) throw missingFromServer;
                 Set<DependencyClassLoader> active = searching.get();
                 if (!active.add(this)) throw missingFromServer;
                 try {
