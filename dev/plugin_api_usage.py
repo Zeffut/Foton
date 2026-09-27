@@ -41,10 +41,8 @@ SHARED_BY = 2
 
 # Package prefixes worth counting, and what each one means for Foton.
 #
-# `api` is the surface a reimplementation can serve. `internal` is the part
-# that reaches for the Mojang server or a server implementation's guts, which
-# no reimplementation can ever provide -- counting it separately is the only
-# honest way to state the ceiling.
+# `api` is the public surface. `internal` is the versioned Mojang/CraftBukkit
+# surface, which needs separate implementation and certification.
 SURFACES = {
     "org/bukkit/": "api",
     "io/papermc/paper/": "api",
@@ -58,6 +56,7 @@ SURFACES = {
 # `org/bukkit/craftbukkit` starts with `org/bukkit`, so insertion order would
 # otherwise classify the implementation internals as API.
 SURFACE_PREFIXES = sorted(SURFACES.items(), key=lambda entry: len(entry[0]), reverse=True)
+CLASS_IN_DESCRIPTOR = re.compile(r"L([A-Za-z_$][\w$]*(?:/[A-Za-z_$][\w$]*)+);")
 
 # Constant pool tags, from the JVM specification, table 4.4-B.
 TAG_UTF8 = 1
@@ -152,6 +151,21 @@ def _class_name(pool, index):
     return _utf8(pool, struct.unpack(">H", entry[1])[0])
 
 
+def _member_name(pool, index):
+    entry = pool.get(index)
+    if not entry or entry[0] not in (TAG_FIELDREF, TAG_METHODREF, TAG_INTERFACE_METHODREF):
+        return None
+    owner_index, name_type_index = struct.unpack(">HH", entry[1])
+    owner = _class_name(pool, owner_index)
+    name_type = pool.get(name_type_index)
+    if not owner or not name_type or name_type[0] != TAG_NAME_AND_TYPE:
+        return None
+    name_index, descriptor_index = struct.unpack(">HH", name_type[1])
+    name = _utf8(pool, name_index)
+    descriptor = _utf8(pool, descriptor_index)
+    return f"{owner}#{name}{descriptor}" if name and descriptor else None
+
+
 def references(data):
     """Every member reference a class file makes into a watched package.
 
@@ -180,6 +194,104 @@ def references(data):
         descriptor = _utf8(pool, descriptor_index)
         if member and descriptor:
             yield surface, f"{owner}#{member}{descriptor}"
+
+
+def _watched_class(name):
+    return any(name.startswith(prefix) for prefix, _ in SURFACE_PREFIXES)
+
+
+def class_details(data):
+    """Class, descriptor, method-handle and reflection demands in one class file.
+
+    A constant string is only a candidate reflection target. Constructed names
+    cannot be inferred reliably from bytecode strings, so their call sites need
+    manual review rather than being presented as a complete static inventory.
+    """
+    pool = constant_pool(data)
+    classes = set()
+    handles = set()
+    indy = set()
+    reflection_names = set()
+    partial_names = set()
+    strings = set()
+    for tag, payload in pool.values():
+        if tag == TAG_CLASS:
+            name = _utf8(pool, struct.unpack(">H", payload)[0])
+            if name:
+                classes.update(candidate for candidate in CLASS_IN_DESCRIPTOR.findall(name)
+                               if _watched_class(candidate))
+                if _watched_class(name):
+                    classes.add(name)
+        elif tag == TAG_UTF8:
+            value = payload.decode("utf-8", errors="replace")
+            classes.update(candidate for candidate in CLASS_IN_DESCRIPTOR.findall(value)
+                           if _watched_class(candidate))
+        elif tag == 8:  # CONSTANT_String, unlike arbitrary UTF8, is loadable at runtime.
+            value = _utf8(pool, struct.unpack(">H", payload)[0])
+            if value:
+                strings.add(value)
+        elif tag == TAG_METHOD_HANDLE:
+            kind, target = struct.unpack(">BH", payload)
+            member = _member_name(pool, target)
+            if member:
+                handles.add(f"{kind}:{member}")
+        elif tag in (TAG_DYNAMIC, TAG_INVOKE_DYNAMIC):
+            _, name_and_type = struct.unpack(">HH", payload)
+            entry = pool.get(name_and_type)
+            if entry and entry[0] == TAG_NAME_AND_TYPE:
+                name, descriptor = struct.unpack(">HH", entry[1])
+                signature = f"{_utf8(pool, name)}{_utf8(pool, descriptor)}"
+                (indy if tag == TAG_INVOKE_DYNAMIC else handles).add(signature)
+    for value in strings:
+        normalized = value.replace(".", "/")
+        if _watched_class(normalized) and re.fullmatch(r"[\w$/]+", normalized):
+            reflection_names.add(normalized)
+        elif any(normalized.startswith(prefix) for prefix, _ in SURFACE_PREFIXES):
+            partial_names.add(value)
+    reflective_calls = False
+    for tag, payload in pool.values():
+        if tag not in (TAG_METHODREF, TAG_INTERFACE_METHODREF):
+            continue
+        owner_index, name_type_index = struct.unpack(">HH", payload)
+        owner = _class_name(pool, owner_index)
+        name_type = pool.get(name_type_index)
+        if owner not in ("java/lang/Class", "java/lang/ClassLoader") or not name_type:
+            continue
+        name_index = struct.unpack_from(">H", name_type[1])[0]
+        if _utf8(pool, name_index) in ("forName", "loadClass"):
+            reflective_calls = True
+    return classes, handles, indy, reflection_names, reflective_calls, partial_names
+
+
+def scan_details(jar):
+    """Inventory static members and non-member linkage with review flags."""
+    found = {kind: set() for kind in set(SURFACES.values())}
+    details = dict(classes=set(), services=set(), method_handles=set(),
+                   invokedynamic=set(), reflection_names=set(), manual_review=set(),
+                   unreadable=0)
+    with zipfile.ZipFile(jar) as archive:
+        for entry in archive.namelist():
+            if entry.startswith("META-INF/services/") and not entry.endswith("/"):
+                service = entry.removeprefix("META-INF/services/").replace(".", "/")
+                if _watched_class(service):
+                    details["services"].add(service)
+                continue
+            if not entry.endswith(".class"):
+                continue
+            try:
+                data = archive.read(entry)
+                for surface, member in references(data):
+                    found[surface].add(member)
+                classes, handles, indy, names, reflective, partial = class_details(data)
+                details["classes"].update(classes)
+                details["method_handles"].update(handles)
+                details["invokedynamic"].update(indy)
+                details["reflection_names"].update(names)
+                if reflective and (partial or not names):
+                    details["manual_review"].add(entry)
+            except (NotAClassFile, struct.error, KeyError, IndexError):
+                details["unreadable"] += 1
+    return found | details
 
 
 # What a class answers because a JDK supertype does. Those class files are not
@@ -319,19 +431,19 @@ def provided(api_jar):
     return resolved
 
 
-def gaps(corpus, api_jar):
+def gaps(corpus, api_jar, include_internal=False):
     """What each plugin still calls that the jar cannot answer.
 
-    Only the `api` surface. A plugin reaching into net.minecraft or CraftBukkit
-    is out of reach by construction and saying otherwise would be a lie about
-    the ceiling.
+    Only the `api` surface. Corpus ranking can exclude plugins that also need
+    internals; a single-JAR gap report includes their public demands.
     """
     have = provided(api_jar)
     per_plugin = {}
     missing_audience = collections.Counter()
-    for jar in sorted(corpus.glob("*.jar")):
+    jars = [corpus] if corpus.is_file() else sorted(corpus.glob("*.jar"))
+    for jar in jars:
         found, _ = scan(jar)
-        if found["internal"]:
+        if found["internal"] and not include_internal:
             continue
         wanted = found["api"]
         if not wanted:
@@ -354,18 +466,8 @@ def scan(jar):
     a corpus that quietly lost half its entries would produce a ranking that
     looks exactly as authoritative as a correct one.
     """
-    found = {kind: set() for kind in set(SURFACES.values())}
-    unreadable = 0
-    with zipfile.ZipFile(jar) as archive:
-        for entry in archive.namelist():
-            if not entry.endswith(".class"):
-                continue
-            try:
-                for surface, member in references(archive.read(entry)):
-                    found[surface].add(member)
-            except (NotAClassFile, struct.error, KeyError):
-                unreadable += 1
-    return found, unreadable
+    details = scan_details(jar)
+    return {kind: details[kind] for kind in set(SURFACES.values())}, details["unreadable"]
 
 
 def package_of(member):
@@ -439,7 +541,7 @@ def coverage_curve(reachable, ranked):
 
 def report_gap(corpus, api_jar, top):
     """Prints how far the built jar gets, and what is next by audience."""
-    per_plugin, missing_audience = gaps(corpus, api_jar)
+    per_plugin, missing_audience = gaps(corpus, api_jar, include_internal=corpus.is_file())
     if not per_plugin:
         raise SystemExit(f"no jars in {corpus}")
 
@@ -615,7 +717,20 @@ def main():
         type=pathlib.Path,
         help="measure a built API jar against the committed ledger, no corpus needed",
     )
+    parser.add_argument(
+        "--details",
+        action="store_true",
+        help="show class, handle, service and reflection evidence for one JAR",
+    )
     args = parser.parse_args()
+
+    if args.details:
+        if args.corpus is None or not args.corpus.is_file():
+            parser.error("--details needs a single JAR path")
+        details = scan_details(args.corpus)
+        print(json.dumps({key: sorted(value) if isinstance(value, set) else value
+                          for key, value in details.items()}, indent=2))
+        return
 
     if args.events:
         if not args.covered:
