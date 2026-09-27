@@ -93,7 +93,7 @@ These are relative sizes, not calendar promises. Task 1 establishes the denomina
 
 **Interfaces:** the graph resolves `bootstrap` and `server` phases separately; each edge carries `required`, `load` (`BEFORE`, `AFTER`, `OMIT`) and `joinClasspath`. Legacy `depend`, `softdepend`, `loadbefore`, `provides`, startup phase and `libraries` remain distinct from `paper-plugin.yml` semantics.
 
-- [ ] Add fixture JARs with both descriptors, required/optional edges, a provider alias, a mixed legacy/Paper graph, `join-classpath: false`, and a hard cycle. Assert construction/enable order and explicit failure before publication.
+- [ ] Add fixture JARs with both descriptors, required/optional edges, a provider alias colliding with a real plugin name, a mixed legacy/Paper graph, `join-classpath: false`, and hard/optional cycles. Assert construction/enable order and reproduce the pinned Paper build's cycle-edge recovery or rejection; only unrecoverable graphs may fail before publication.
 - [ ] Extract the graph from `PluginHost` into `PluginDependencyGraph`; parse and validate every descriptor field against the pinned Paper API and official descriptor documentation.
 - [ ] Execute `bash dev/build-plugin-api.sh --check`. Inspect fixture logs for exact ordering and confirm a rejected graph leaves no plugin, class loader, command or permission registered.
 
