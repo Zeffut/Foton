@@ -1,6 +1,29 @@
 {
   "schema_version": 1,
   "foton_target": "26.2",
+  "baseline_validation": {
+    "date": "2026-09-27",
+    "foton_commit": "f2461260a088b7cae7a26448ba4eef4933fb2aaa",
+    "scope": "Foton unit/integration fixtures and runtime packaging only; no corpus plugin is certified by these results",
+    "environment": "WSL Linux, nightly-2026-07-23, OpenJDK 25.0.4, isolated CARGO_TARGET_DIR",
+    "checks": [
+      {"command": "cargo test --workspace", "result": "pass"},
+      {"command": "cargo clippy -r --workspace --all-targets --all-features -- -D warnings", "result": "pass"},
+      {"command": "cargo fmt --all -- --check", "result": "pass"},
+      {"command": "bash dev/build-plugin-api.sh --check", "result": "pass", "note": "Built-in fixtures pass; optional external FOTON_PLUGIN_FIXTURE was not supplied"},
+      {"command": "bash dev/plugin-runtime-test.sh", "result": "pass"},
+      {"command": "bash dev/install-test.sh", "result": "pass"},
+      {"command": "bash dev/release-test.sh", "result": "pass"},
+      {"command": "python3 dev/check-natives.py --quiet", "result": "pass"},
+      {"command": "git diff --check", "result": "pass"}
+    ],
+    "initial_ci_failures": [
+      "Task2 compare.py regex triggers typos for ure; not repaired by the baseline batch",
+      "Native bridge clippy findings: repaired and full clippy rerun passed",
+      "New opaque PDC regression: repaired and full workspace test rerun passed",
+      "Test count snapshot was 5632 instead of measured 5649; refresh tracked separately"
+    ]
+  },
   "historical_corpus": {
     "expected_artifacts": 59,
     "available_artifacts": 0,
