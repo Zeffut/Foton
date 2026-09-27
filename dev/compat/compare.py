@@ -29,6 +29,83 @@ ROOT = Path(__file__).resolve().parents[2]
 BUILDS = Path(__file__).with_name("paper-builds.json")
 USER_AGENT = "Foton-paper-oracle/0.1 (https://github.com/zeffut/Foton)"
 MARKER = re.compile(r"ORACLE:([A-Za-z0-9_.:-]+)=(.+)")
+# Expected failures require a reviewed, exact scenario and code change. The
+# baseline has no allowed server/plugin errors; do not silently add patterns.
+ALLOWED_LOG_ERRORS = ()
+
+
+def validate_scenario(scenario):
+    for required in ("plugin", "server_version", "setup", "actions", "observations", "normalizers"):
+        if required not in scenario:
+            raise ValueError(f"scenario missing {required}")
+    uncollected = set(scenario["observations"]) - {"startup_order", "required_markers"}
+    if uncollected:
+        raise ValueError(f"uncollected observation surface: {', '.join(sorted(uncollected))}")
+    for action in scenario["actions"]:
+        if action["type"] == "status_ping":
+            continue
+        if action["type"] != "console_command":
+            raise ValueError(f"unsupported action {action['type']!r}; no behavioral observation can be made")
+        if not isinstance(action.get("expect_marker"), str) or not action["expect_marker"]:
+            raise ValueError("console_command requires expect_marker for an observed effect")
+        if not isinstance(action.get("expect_value"), str):
+            raise ValueError("console_command requires expect_value for an observed effect")
+
+
+def find_unexpected_errors(lines):
+    pattern = re.compile(
+        r"(?:Exception|Error)\b|\bJNI\b|\b(?:failed|failure|fatal)\b|"
+        r"\b(?:decoder|encoder|reference[- ]count|refcnt)\b.{0,80}\b(?:error|fail(?:ure|ed)?|exception)\b|"
+        r"\b(?:error|fail(?:ure|ed)?|exception)\b.{0,80}\b(?:decoder|encoder|reference[- ]count|refcnt)\b|"
+        r"\[(?:ERROR|SEVERE)\]",
+        re.IGNORECASE,
+    )
+    return [line for line in lines if pattern.search(line) and line not in ALLOWED_LOG_ERRORS]
+
+
+def collect_log_observations(lines):
+    collected = {"startup_order": [], "events": []}
+    for line in lines:
+        marker = MARKER.search(line)
+        if not marker:
+            continue
+        key, value = marker.group(1), marker.group(2).strip()
+        collected["events"].append({"key": key, "value": value})
+        if key == "lifecycle.enabled":
+            collected["startup_order"].append(value)
+    return collected
+
+
+def install_inputs(paths, plugins):
+    names = [path.name.casefold() for path in paths]
+    if len(names) != len(set(names)):
+        raise ValueError("duplicate plugin filename in pinned input set")
+    installed = []
+    for source in paths:
+        destination = plugins / source.name
+        if destination.exists():
+            raise ValueError(f"plugin destination already exists: {destination}")
+        checksum = _sha256(source)
+        shutil.copy2(source, destination)
+        actual = _sha256(destination)
+        if actual != checksum:
+            raise RuntimeError(f"installed checksum mismatch: {destination}")
+        installed.append({"name": destination.name, "sha256": actual})
+    return installed
+
+
+def marker_after(log, offset, key, value, timeout_seconds):
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        with open(log, "r", encoding="utf-8", errors="replace") as stream:
+            stream.seek(offset)
+            lines = stream.read().splitlines()
+        if any((match := MARKER.search(line)) and match.group(1) == key and
+               match.group(2).strip() == value for line in lines):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.1)
 
 
 def _pointer(data, path):
@@ -187,8 +264,8 @@ def _fixture_jar(work, api_jar, javac, release):
     src.write_text(
         "import org.bukkit.plugin.java.JavaPlugin;\n"
         "public final class OracleFixture extends JavaPlugin {\n"
-        "  @Override public void onEnable() { getLogger().info(\"ORACLE:fixture=enabled\"); }\n"
-        "  @Override public void onDisable() { getLogger().info(\"ORACLE:fixture=disabled\"); }\n"
+        "  @Override public void onEnable() { getLogger().info(\"ORACLE:lifecycle.enabled=OracleFixture\"); }\n"
+        "  @Override public void onDisable() { getLogger().info(\"ORACLE:lifecycle.disabled=OracleFixture\"); }\n"
         "}\n", encoding="utf-8")
     classes = work / "classes"
     classes.mkdir()
@@ -220,6 +297,7 @@ def _prepare_foton(world, port, seed):
         if name == "worlds.toml":
             data = re.sub(r'(?m)^seed = ""$', f'seed = "{seed}"', data)
         (config / name).write_text(data, encoding="utf-8")
+    shutil.copy2(ROOT / "package-content/favicon.png", config / "favicon.png")
 
 
 def _prepare_paper(world, port, seed):
@@ -241,8 +319,7 @@ def _observe(server, scenario, work, jar, java, foton_bin, api_jar, java_home, l
     inputs = _verify_inputs(scenario)
     if jar:
         inputs.append(jar)
-    for item in inputs:
-        shutil.copy2(item, plugins / item.name)
+    installed = install_inputs(inputs, plugins)
     with socket.socket() as reserved:
         reserved.bind(("127.0.0.1", 0))
         port = reserved.getsockname()[1]
@@ -258,7 +335,8 @@ def _observe(server, scenario, work, jar, java, foton_bin, api_jar, java_home, l
         environment.update({"FOTON_PLUGIN_DIRECTORY": str(plugins), "FOTON_JAVA_HOME": str(java_home),
                             "FOTON_PLUGIN_API_JAR": str(api_jar), "FOTON_PLUGIN_LIBRARY_DIRECTORY": str(libs)})
     log = world / "server.log"
-    observations = {"startup_order": [], "events": [], "items": [], "server": {}, "fixture_class_major": fixture_major}
+    observations = {"startup_order": [], "events": [], "server": {}, "fixture_class_major": fixture_major,
+                    "installed_inputs": installed, "command_results": []}
     forced_shutdown = False
     with open(log, "w", encoding="utf-8") as output:
         master, slave = pty.openpty()
@@ -290,8 +368,15 @@ def _observe(server, scenario, work, jar, java, foton_bin, api_jar, java_home, l
                     status = _status_ping(port, observations["server"]["protocol"])
                     observations["server"]["protocol"] = status["version"]["protocol"]
                 elif action["type"] == "console_command":
+                    offset = log.stat().st_size
                     os.write(master, (action["command"] + "\r").encode("utf-8"))
-                    time.sleep(action.get("settle_seconds", 2))
+                    if not marker_after(log, offset, action["expect_marker"], action["expect_value"],
+                                        action.get("timeout_seconds", 10)):
+                        raise RuntimeError(f"{server} command {action['command']!r} lacked expected effect "
+                                           f"{action['expect_marker']}={action['expect_value']}; see {log}")
+                    observations["command_results"].append({"command": action["command"],
+                                                            "marker": action["expect_marker"],
+                                                            "value": action["expect_value"]})
                 else:
                     raise RuntimeError(f"unsupported action {action['type']!r}; no behavioral observation was made")
         finally:
@@ -311,15 +396,10 @@ def _observe(server, scenario, work, jar, java, foton_bin, api_jar, java_home, l
     if forced_shutdown or process.returncode != 0:
         raise RuntimeError(f"{server} did not stop cleanly (exit {process.returncode}); see {log}")
     lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
-    if any(re.search(r"UnsupportedClassVersionError|NoClassDefFoundError|NoSuchMethodError|NoSuchFieldError|ClassCastException", line) for line in lines):
-        raise RuntimeError(f"{server} linkage/class-version failure; see {log}")
-    for line in lines:
-        match = re.search(r"(?:Enabling |enabled )([A-Za-z0-9_.-]+) v?[0-9]", line, re.IGNORECASE)
-        if match and match.group(1) not in observations["startup_order"]:
-            observations["startup_order"].append(match.group(1))
-        marker = MARKER.search(line)
-        if marker:
-            observations["events"].append({"key": marker.group(1), "value": marker.group(2)})
+    unexpected = find_unexpected_errors(lines)
+    if unexpected:
+        raise RuntimeError(f"{server} unexpected error/exception: {unexpected[0]}; see {log}")
+    observations.update(collect_log_observations(lines))
     expected = scenario["observations"]
     for plugin in expected.get("startup_order", []):
         if plugin not in observations["startup_order"]:
@@ -335,13 +415,11 @@ def run(args):
         scenario = {"plugin": "OracleFixture", "server_version": args.version or "26.2",
                     "setup": {"seed": 8675309, "jars": []},
                     "actions": [{"type": "status_ping"}],
-                    "observations": {"startup_order": ["OracleFixture"], "required_markers": ["fixture"]},
+                    "observations": {"startup_order": ["OracleFixture"],
+                                     "required_markers": ["lifecycle.enabled", "lifecycle.disabled"]},
                     "normalizers": [{"path": "/server/port", "kind": "port"}]}
     else:
         scenario = json.loads(Path(args.scenario).read_text(encoding="utf-8"))
-    for required in ("plugin", "server_version", "setup", "actions", "observations", "normalizers"):
-        if required not in scenario:
-            raise ValueError(f"scenario missing {required}")
     builds = json.loads(BUILDS.read_text(encoding="utf-8"))
     version = scenario["server_version"]
     if version not in builds:
@@ -373,6 +451,10 @@ def run(args):
         inputs = _verify_inputs(scenario)
         if fixture:
             inputs.append(fixture)
+        validate_scenario(scenario)
+        names = [path.name.casefold() for path in inputs]
+        if len(names) != len(set(names)):
+            raise ValueError("duplicate plugin filename in pinned input set")
         evidence = {
             "paper": {"version": version, **builds[version]},
             "java": release_line,
@@ -383,11 +465,15 @@ def run(args):
         }
         (work / "run.json").write_text(json.dumps(evidence, indent=2, sort_keys=True), encoding="utf-8")
         paper, paper_log = _observe("paper", scenario, work, fixture, java, foton_bin, api_jar, java_home, libs, major)
+        evidence["installed_inputs"] = {"paper": paper["installed_inputs"]}
+        (work / "run.json").write_text(json.dumps(evidence, indent=2, sort_keys=True), encoding="utf-8")
         (work / "paper.json").write_text(json.dumps(paper, indent=2, sort_keys=True), encoding="utf-8")
         if args.paper_only:
             print(f"Paper-only reference passed; build {builds[version]['build']}; evidence {work}")
             return 0
         foton, foton_log = _observe("foton", scenario, work, fixture, java, foton_bin, api_jar, java_home, libs, major)
+        evidence["installed_inputs"]["foton"] = foton["installed_inputs"]
+        (work / "run.json").write_text(json.dumps(evidence, indent=2, sort_keys=True), encoding="utf-8")
         (work / "foton.json").write_text(json.dumps(foton, indent=2, sort_keys=True), encoding="utf-8")
         differences = compare_observations(paper, foton, scenario["normalizers"])
         if differences:
@@ -424,6 +510,7 @@ def main():
     if args.command == "run":
         return run(args)
     scenario = json.loads(Path(args.scenario).read_text(encoding="utf-8"))
+    validate_scenario(scenario)
     paper = json.loads(Path(args.paper).read_text(encoding="utf-8"))
     foton = json.loads(Path(args.foton).read_text(encoding="utf-8"))
     differences = compare_observations(paper, foton, scenario["normalizers"])
