@@ -30,6 +30,7 @@ public final class Checks {
         foton.PaperLoading.check();
         foton.PluginLibraries.check();
         foton.PaperBootstrap.check();
+        foton.PaperBootstrapGraph.check();
         System.out.println(
             "plugin API checked: services, events, scheduler, lifecycle, network hooks, YAML,\n"
                 + "    configuration, geometry, items, colors, commands, scoreboards and permissions");

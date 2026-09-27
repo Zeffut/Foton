@@ -180,6 +180,10 @@ public final class PluginHost {
     private record PreparedBootstrap(org.bukkit.plugin.java.PluginClassLoader loader,
                                      PaperBootstrapRunner runner, DependencyClassLoader dependencies) {}
 
+    private record BootstrapCandidate(org.bukkit.plugin.java.PluginClassLoader loader,
+                                      DependencyClassLoader dependencies,
+                                      File jar, PaperPluginDescriptor descriptor) {}
+
     private static Map<File, PreparedBootstrap> prepareBootstraps(List<File> ordered) {
         Map<File, PreparedBootstrap> prepared = new java.util.LinkedHashMap<>();
         Map<String, File> candidates = new HashMap<>();
@@ -193,7 +197,12 @@ public final class PluginHost {
                 System.out.println("[host] " + jar.getName() + " bootstrap descriptor failed: " + error);
             }
         }
-        for (String key : new PluginDependencyGraph(descriptors).order(PaperPluginDescriptor.Phase.BOOTSTRAP)) {
+        List<String> bootstrapOrder = new PluginDependencyGraph(descriptors)
+            .order(PaperPluginDescriptor.Phase.BOOTSTRAP);
+        Map<String, org.bukkit.plugin.java.PluginClassLoader> bootstrapLoaders =
+            new java.util.concurrent.ConcurrentHashMap<>();
+        Map<String, BootstrapCandidate> ready = new java.util.LinkedHashMap<>();
+        for (String key : bootstrapOrder) {
             File jar = candidates.get(key);
             org.bukkit.plugin.java.PluginClassLoader loader = null;
             try {
@@ -201,17 +210,30 @@ public final class PluginHost {
                 if (!(descriptor instanceof PaperPluginDescriptor paper) || paper.bootstrapper() == null) continue;
                 if (byName(descriptor.getName()) != null) continue;
                 DependencyClassLoader dependencies = new DependencyClassLoader(
-                    PluginDependencyGraph.visible(descriptor, PaperPluginDescriptor.Phase.SERVER));
-                dependencies.active = false;
+                    bootstrapDependencies(paper), bootstrapLoaders);
                 loader = new org.bukkit.plugin.java.PluginClassLoader(pluginUrls(jar, descriptor), dependencies);
                 loader.describe(org.bukkit.Bukkit.getServer(), descriptor,
                     new File(jar.getParentFile(), descriptor.getName()));
-                PaperBootstrapRunner runner = new PaperBootstrapRunner(jar, paper, loader);
-                runner.bootstrap();
-                prepared.put(jar, new PreparedBootstrap(loader, runner, dependencies));
+                bootstrapLoaders.put(key, loader);
+                ready.put(key, new BootstrapCandidate(loader, dependencies, jar, paper));
             } catch (Throwable error) {
-                System.out.println("[host] " + jar.getName() + " bootstrap failed: " + error);
+                System.out.println("[host] " + jar.getName() + " bootstrap classloader failed: " + error);
                 if (loader != null) closeUnpublished(loader);
+            }
+        }
+        List<org.bukkit.plugin.java.PluginClassLoader> failed = new ArrayList<>();
+        for (String key : bootstrapOrder) {
+            BootstrapCandidate candidate = ready.get(key);
+            if (candidate == null) continue;
+            try {
+                PaperBootstrapRunner runner = new PaperBootstrapRunner(candidate.jar(),
+                    candidate.descriptor(), candidate.loader());
+                runner.bootstrap();
+                prepared.put(candidate.jar(), new PreparedBootstrap(candidate.loader(), runner,
+                    candidate.dependencies()));
+            } catch (Throwable error) {
+                System.out.println("[host] " + candidate.jar().getName() + " bootstrap failed: " + error);
+                failed.add(candidate.loader());
             }
         }
         var entries = prepared.entrySet().iterator();
@@ -221,11 +243,26 @@ public final class PluginHost {
                 entry.getValue().runner().commands();
             } catch (Throwable error) {
                 System.out.println("[host] " + entry.getKey().getName() + " bootstrap commands failed: " + error);
-                closeUnpublished(entry.getValue().loader());
+                failed.add(entry.getValue().loader());
                 entries.remove();
             }
         }
+        // A failed provider remains available to later bootstrap callbacks on
+        // Paper. Keep its loader through the command phase, then release it.
+        for (var loader : failed) closeUnpublished(loader);
+        // Bootstrap visibility ends here. A surviving plugin loader must not
+        // retain every sibling (including failed, closed loaders) for its lifetime.
+        bootstrapLoaders.clear();
         return prepared;
+    }
+
+    private static List<String> bootstrapDependencies(PaperPluginDescriptor descriptor) {
+        // Pinned Paper 26.2 build 129 exposes a declared bootstrap provider's
+        // classes even when that edge declares join-classpath: false. The same
+        // flag remains honored independently for the SERVER phase.
+        return descriptor.paperDependencies().stream()
+            .filter(dependency -> dependency.phase() == PaperPluginDescriptor.Phase.BOOTSTRAP)
+            .map(PaperPluginDescriptor.Dependency::name).toList();
     }
 
     private static void closeUnpublished(org.bukkit.plugin.java.PluginClassLoader loader) {
@@ -381,11 +418,6 @@ public final class PluginHost {
                 throw new UnsupportedOperationException(descriptor.getName()
                     + ": open Paper classloader visibility is not implemented");
             }
-            if (paper.paperDependencies().stream()
-                    .anyMatch(d -> d.phase() == PaperPluginDescriptor.Phase.BOOTSTRAP)) {
-                throw new UnsupportedOperationException(descriptor.getName()
-                    + ": Paper bootstrap dependency classpaths are not implemented");
-            }
         }
     }
 
@@ -412,7 +444,8 @@ public final class PluginHost {
             PaperBootstrapRunner bootstrap = prepared == null ? null : prepared.runner();
             Object instance;
             if (bootstrap != null) {
-                prepared.dependencies().active = true;
+                prepared.dependencies().useServerDependencies(
+                    PluginDependencyGraph.visible(descriptor, PaperPluginDescriptor.Phase.SERVER));
                 instance = bootstrap.createPlugin();
             } else {
                 Class<?> type = Class.forName(descriptor.getMain(), true, loader);
@@ -587,12 +620,31 @@ public final class PluginHost {
     private static final class DependencyClassLoader extends ClassLoader {
         private static final ThreadLocal<Set<DependencyClassLoader>> searching =
             ThreadLocal.withInitial(HashSet::new);
-        private final List<String> dependencies;
-        private boolean active = true;
+        private volatile List<String> dependencies;
+        private final Map<String, org.bukkit.plugin.java.PluginClassLoader> bootstrapLoaders;
+        private volatile boolean bootstrapPhase;
 
         private DependencyClassLoader(List<String> dependencies) {
+            this(dependencies, Map.of(), false);
+        }
+
+        private DependencyClassLoader(List<String> dependencies,
+                Map<String, org.bukkit.plugin.java.PluginClassLoader> bootstrapLoaders) {
+            this(dependencies, bootstrapLoaders, true);
+        }
+
+        private DependencyClassLoader(List<String> dependencies,
+                Map<String, org.bukkit.plugin.java.PluginClassLoader> bootstrapLoaders,
+                boolean bootstrapPhase) {
             super(PluginHost.class.getClassLoader());
             this.dependencies = List.copyOf(dependencies);
+            this.bootstrapLoaders = bootstrapLoaders;
+            this.bootstrapPhase = bootstrapPhase;
+        }
+
+        private void useServerDependencies(List<String> serverDependencies) {
+            this.dependencies = List.copyOf(serverDependencies);
+            this.bootstrapPhase = false;
         }
 
         @Override
@@ -600,15 +652,21 @@ public final class PluginHost {
             try {
                 return super.loadClass(name, resolve);
             } catch (ClassNotFoundException missingFromServer) {
-                if (!this.active) throw missingFromServer;
                 Set<DependencyClassLoader> active = searching.get();
                 if (!active.add(this)) throw missingFromServer;
                 try {
                     List<ClassLoader> available = new ArrayList<>();
                     synchronized (lifecycle) {
                         for (String dependency : dependencies) {
-                            Plugin plugin = findByNameLocked(dependency);
-                            ClassLoader loader = loadersByPlugin.get(plugin);
+                            ClassLoader loader;
+                            if (bootstrapPhase) {
+                                String alias = selectedProviders.getOrDefault(pluginKey(dependency),
+                                    pluginKey(dependency));
+                                loader = bootstrapLoaders.get(alias);
+                            } else {
+                                Plugin plugin = findByNameLocked(dependency);
+                                loader = loadersByPlugin.get(plugin);
+                            }
                             if (loader != null) available.add(loader);
                         }
                     }
