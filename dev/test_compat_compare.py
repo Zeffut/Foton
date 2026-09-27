@@ -62,6 +62,33 @@ class ComparisonTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "uncollected observation surface.*events"):
             validate_scenario(scenario)
 
+    def test_imaginary_plugin_cannot_pass_on_bare_status_ping(self):
+        scenario = {"plugin": "ImaginaryPlugin", "server_version": "26.2",
+                    "setup": {"jars": []}, "actions": [{"type": "status_ping"}],
+                    "observations": {}, "normalizers": [{"path": "/server/port", "kind": "port"}]}
+        with self.assertRaisesRegex(ValueError, "checksum-pinned plugin JAR"):
+            validate_scenario(scenario)
+
+    def test_real_plugin_requires_target_lifecycle_evidence(self):
+        scenario = {"plugin": "ImaginaryPlugin@1.0#release", "server_version": "26.2",
+                    "setup": {"jars": [{"path": "/tmp/fake.jar", "sha256": "a" * 64}]},
+                    "actions": [{"type": "status_ping"}], "observations": {}, "normalizers": []}
+        with self.assertRaisesRegex(ValueError, "target plugin lifecycle"):
+            validate_scenario(scenario)
+        scenario["observations"] = {"startup_order": ["OtherPlugin"]}
+        with self.assertRaisesRegex(ValueError, "target plugin lifecycle"):
+            validate_scenario(scenario)
+        scenario["observations"] = {"startup_order": ["ImaginaryPlugin"]}
+        validate_scenario(scenario)
+
+    def test_direct_plugin_input_needs_checksum(self):
+        scenario = {"plugin": "ImaginaryPlugin", "server_version": "26.2",
+                    "setup": {"jars": [{"path": "/tmp/fake.jar"}]},
+                    "actions": [{"type": "status_ping"}],
+                    "observations": {"startup_order": ["ImaginaryPlugin"]}, "normalizers": []}
+        with self.assertRaisesRegex(ValueError, "sha256"):
+            validate_scenario(scenario)
+
     def test_console_command_requires_post_command_effect(self):
         scenario = {"plugin": "Fixture", "server_version": "26.2", "setup": {"jars": []},
                     "actions": [{"type": "console_command", "command": "say hi"}],
@@ -82,10 +109,12 @@ class ComparisonTests(unittest.TestCase):
     def test_unexpected_errors_fail_closed(self):
         for message in ("IllegalStateException: bad state", "JNI invocation failed",
                         "decoder error", "encoder failure", "buffer reference-count error",
-                        "Plugin failed to enable"):
+                        "Plugin failed to enable", "LinkageError: ABI mismatch",
+                        "[ERROR] plugin load aborted", "[SEVERE] JNI crash"):
             with self.subTest(message=message):
                 self.assertEqual([message], find_unexpected_errors([message]))
         self.assertEqual([], find_unexpected_errors(["INFO: ORACLE:lifecycle.enabled=Fixture"]))
+        self.assertEqual([], find_unexpected_errors(["[INFO] Recovery from previous Error-free startup completed"]))
 
     def test_duplicate_basename_cannot_overwrite(self):
         with tempfile.TemporaryDirectory() as scratch:

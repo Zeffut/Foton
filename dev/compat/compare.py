@@ -34,7 +34,7 @@ MARKER = re.compile(r"ORACLE:([A-Za-z0-9_.:-]+)=(.+)")
 ALLOWED_LOG_ERRORS = ()
 
 
-def validate_scenario(scenario):
+def validate_scenario(scenario, generated_fixture=False):
     for required in ("plugin", "server_version", "setup", "actions", "observations", "normalizers"):
         if required not in scenario:
             raise ValueError(f"scenario missing {required}")
@@ -50,14 +50,35 @@ def validate_scenario(scenario):
             raise ValueError("console_command requires expect_marker for an observed effect")
         if not isinstance(action.get("expect_value"), str):
             raise ValueError("console_command requires expect_value for an observed effect")
+    if generated_fixture:
+        if scenario["plugin"] != "OracleFixture":
+            raise ValueError("generated fixture must be OracleFixture")
+        return
+    jars = scenario["setup"].get("jars", [])
+    if not isinstance(jars, list) or not jars:
+        raise ValueError("nonfixture scenario requires a checksum-pinned plugin JAR")
+    for jar in jars:
+        if "artifact" in jar:
+            if not isinstance(jar["artifact"], str) or not jar["artifact"]:
+                raise ValueError("artifact reference must be nonempty")
+        elif not (isinstance(jar.get("path"), str) and
+                  isinstance(jar.get("sha256"), str) and
+                  re.fullmatch(r"[0-9a-fA-F]{64}", jar["sha256"])):
+            raise ValueError("direct plugin JAR requires path and 64-character sha256")
+    target = scenario["plugin"].split("@", 1)[0]
+    if not target or target not in scenario["observations"].get("startup_order", []):
+        raise ValueError(f"scenario requires target plugin lifecycle marker for {target!r}")
 
 
 def find_unexpected_errors(lines):
     pattern = re.compile(
-        r"(?:Exception|Error)\b|\bJNI\b|\b(?:failed|failure|fatal)\b|"
-        r"\b(?:decoder|encoder|reference[- ]count|refcnt)\b.{0,80}\b(?:error|fail(?:ure|ed)?|exception)\b|"
-        r"\b(?:error|fail(?:ure|ed)?|exception)\b.{0,80}\b(?:decoder|encoder|reference[- ]count|refcnt)\b|"
-        r"\[(?:ERROR|SEVERE)\]",
+        r"\[(?:ERROR|SEVERE|FATAL)\]|\b(?:ERROR|SEVERE|FATAL):|"
+        r"\b[A-Za-z_$][\w.$]*(?:Exception|Error)\b(?![-\w])|\bException in thread\b|"
+        r"\b(?:plugin|server) failed to (?:load|enable|start|initialize)\b|"
+        r"\bJNI\b.{0,80}\b(?:error|fail(?:ed|ure)?|exception)\b|"
+        r"\b(?:error|fail(?:ed|ure)?|exception)\b.{0,80}\bJNI\b|"
+        r"\b(?:decoder|encoder|reference[- ]count|refcnt)\b.{0,80}\b(?:error|fail(?:ed|ure)?|exception)\b|"
+        r"\b(?:error|fail(?:ed|ure)?|exception)\b.{0,80}\b(?:decoder|encoder|reference[- ]count|refcnt)\b",
         re.IGNORECASE,
     )
     return [line for line in lines if pattern.search(line) and line not in ALLOWED_LOG_ERRORS]
@@ -451,7 +472,7 @@ def run(args):
         inputs = _verify_inputs(scenario)
         if fixture:
             inputs.append(fixture)
-        validate_scenario(scenario)
+        validate_scenario(scenario, generated_fixture=args.fixture)
         names = [path.name.casefold() for path in inputs]
         if len(names) != len(set(names)):
             raise ValueError("duplicate plugin filename in pinned input set")
