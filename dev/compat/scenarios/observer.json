@@ -1,0 +1,30 @@
+{
+  "plugin": "Observer@2.69.3#release",
+  "server_version": "26.2",
+  "setup": {
+    "seed": 8675309,
+    "startup_timeout_seconds": 180,
+    "jars": [
+      {"artifact": "packetevents@2.13.0#spigot"},
+      {"artifact": "Observer@2.69.3#release"}
+    ]
+  },
+  "actions": [
+    {"type": "status_ping"},
+    {"type": "client_login"},
+    {"type": "movement_sprint_climb_fluids_vehicle_elytra"},
+    {"type": "combat_inventory_protocol_replay"},
+    {"type": "controlled_violation_replay"},
+    {"type": "restart_and_coinstall_via"}
+  ],
+  "observations": {
+    "startup_order": ["packetevents", "Observer"],
+    "events": ["packet_callbacks", "violation_actions"],
+    "server_state": ["online_players", "listener_count", "handler_count"],
+    "protocol": ["login", "play", "disconnect"],
+    "required_markers": []
+  },
+  "normalizers": [
+    {"path": "/server/port", "kind": "port"}
+  ]
+}

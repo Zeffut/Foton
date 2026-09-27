@@ -1,0 +1,30 @@
+{
+  "plugin": "ZeldaCiv@0.1.0#release",
+  "server_version": "26.2",
+  "setup": {
+    "seed": 8675309,
+    "startup_timeout_seconds": 180,
+    "jars": [
+      {"artifact": "ZeldaCiv@0.1.0#release"}
+    ]
+  },
+  "actions": [
+    {"type": "status_ping"},
+    {"type": "start_game_and_team_scoreboard"},
+    {"type": "region_and_map_interaction"},
+    {"type": "item_pdc_inventory_recipe_merchant"},
+    {"type": "display_mount_and_entity_events"},
+    {"type": "restart_persistence"},
+    {"type": "optional_integrations"}
+  ],
+  "observations": {
+    "startup_order": ["ZeldaCiv"],
+    "events": ["player", "entity", "inventory"],
+    "items": ["components", "pdc", "merchant_result"],
+    "server_state": ["team", "scoreboard", "region", "displays", "mounts"],
+    "required_markers": []
+  },
+  "normalizers": [
+    {"path": "/server/port", "kind": "port"}
+  ]
+}
