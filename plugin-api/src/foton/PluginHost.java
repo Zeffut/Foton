@@ -113,10 +113,10 @@ public final class PluginHost {
 
     private static int loadAllOnLoadSerialized(String directory) {
         ensureServer();
-        List<File> ordered = orderedJars(new File(directory));
-        Map<File, PreparedBootstrap> bootstraps = prepareBootstraps(ordered);
+        PluginDiscovery discovery = discoverJars(new File(directory));
+        Map<File, PreparedBootstrap> bootstraps = prepareBootstraps(discovery.bootstrapCandidates());
         List<JavaPlugin> constructed = new ArrayList<>();
-        for (File jar : ordered) {
+        for (File jar : discovery.serverOrder()) {
             PreparedBootstrap prepared = bootstraps.remove(jar);
             try {
                 PluginDescriptionFile descriptor = readDescriptor(jar);
@@ -130,6 +130,9 @@ public final class PluginHost {
                 error.printStackTrace(System.out);
             }
         }
+        // Paper may bootstrap a plugin that its later SERVER dependency graph
+        // rejects. Its unpublished loader has no owner in the construction pass.
+        for (PreparedBootstrap unused : bootstraps.values()) closeUnpublished(unused.loader());
 
         int loadedNow = 0;
         for (JavaPlugin plugin : constructed) {
@@ -351,14 +354,17 @@ public final class PluginHost {
         }
     }
 
-    private static List<File> orderedJars(File dir) {
+    private record PluginDiscovery(List<File> serverOrder, List<File> bootstrapCandidates) {}
+
+    private static PluginDiscovery discoverJars(File dir) {
         File[] jars = dir.listFiles((d, name) -> name.endsWith(".jar"));
         if (jars == null) {
             System.out.println("[host] no plugin directory at " + dir);
-            return List.of();
+            return new PluginDiscovery(List.of(), List.of());
         }
         Map<String, File> jarsByName = new HashMap<>();
         Map<String, PluginDescriptionFile> descriptors = new HashMap<>();
+        List<File> bootstrapCandidates = new ArrayList<>();
         java.util.Arrays.sort(jars, java.util.Comparator.comparing(File::getName));
         for (File jar : jars) {
             try {
@@ -370,6 +376,7 @@ public final class PluginHost {
                     continue;
                 }
                 descriptors.put(key, descriptor);
+                bootstrapCandidates.add(jar);
             } catch (Throwable error) {
                 System.out.println("[host] " + jar.getName() + " failed: " + error);
                 error.printStackTrace(System.out);
@@ -382,14 +389,11 @@ public final class PluginHost {
             if (loaded.isEmpty()) selectedProviders.clear();
             selectedProviders.putAll(graph.providers());
         }
-        // Bootstrap has its own node set and ordering; it never contributes
-        // runtime classpath or enable-order edges.
-        graph.order(PaperPluginDescriptor.Phase.BOOTSTRAP);
         List<File> ordered = new ArrayList<>();
         for (String key : graph.order(PaperPluginDescriptor.Phase.SERVER)) {
             ordered.add(jarsByName.get(key));
         }
-        return ordered;
+        return new PluginDiscovery(ordered, bootstrapCandidates);
     }
 
     private static PluginDescriptionFile readDescriptor(File jar) throws Exception {

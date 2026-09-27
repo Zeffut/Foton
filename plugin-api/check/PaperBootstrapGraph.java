@@ -45,6 +45,7 @@ public final class PaperBootstrapGraph {
             serverField.set(null, previous);
             System.clearProperty("foton.bootstrap.graph.trace");
             System.getProperties().remove("foton.bootstrap.graph.failedLoader");
+            System.getProperties().remove("foton.bootstrap.graph.consumerLoader");
             try (var paths = Files.walk(root)) {
                 for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) Files.delete(path);
             }
@@ -70,6 +71,9 @@ public final class PaperBootstrapGraph {
                 "bootstrap:FailProvider;visible:AlphaConsumer:true;bootstrap:AlphaConsumer;",
                 "construct:AlphaConsumer;", 1);
         verify(root.resolve("no-bootstrapper"), 1, "", "construct:NoBootstrapConsumer;", 1);
+        verify(root.resolve("server-missing-bootstrap"), 0,
+                "visible:AlphaConsumer:false;bootstrap:AlphaConsumer;", "", 0);
+        verify(root.resolve("bootstrap-plain-provider"), 1, "", "construct:PlainProvider;", 1);
     }
 
     private static void verify(Path plugins, int loaded, String bootstrap, String construction,
@@ -77,8 +81,36 @@ public final class PaperBootstrapGraph {
         System.setProperty("foton.bootstrap.graph.trace", "");
         equal(PluginHost.loadAllOnLoad(plugins.toString()), loaded, plugins.getFileName() + " load count");
         String trace = System.getProperty("foton.bootstrap.graph.trace");
-        equal(trace.startsWith(bootstrap), true, plugins.getFileName() + " bootstrap order");
-        equal(trace.contains(construction), true, plugins.getFileName() + " server order");
+        if (bootstrap.isEmpty()) {
+            equal(trace.contains("bootstrap:") || trace.contains("visible:"), false,
+                plugins.getFileName() + " must not bootstrap");
+        } else {
+            equal(trace.startsWith(bootstrap), true, plugins.getFileName() + " bootstrap order");
+        }
+        if (construction.isEmpty()) {
+            equal(trace.contains("construct:") || trace.contains("load:") || trace.contains("enable:"),
+                false, plugins.getFileName() + " must not reach SERVER lifecycle");
+        } else {
+            equal(trace.contains(construction), true, plugins.getFileName() + " server order");
+        }
+        equal(PluginHost.all().length, loaded, plugins.getFileName() + " published plugins");
+        for (var plugin : PluginHost.all()) {
+            equal(plugin.isEnabled(), false, plugins.getFileName() + " has no early enable");
+        }
+        if (plugins.getFileName().toString().equals("failed-provider")) {
+            equal(trace.contains("construct:FailProvider"), false,
+                "failed bootstrap provider must not construct");
+        }
+        if (plugins.getFileName().toString().equals("bootstrap-plain-provider")) {
+            equal(trace.contains("AlphaConsumer"), false,
+                "missing bootstrap provider has no consumer lifecycle");
+        }
+        Object consumerLoader = System.getProperties().remove("foton.bootstrap.graph.consumerLoader");
+        if (plugins.getFileName().toString().equals("server-missing-bootstrap")) {
+            equal(consumerLoader instanceof ClassLoader, true, "server-rejected bootstrap loader captured");
+            equal(((ClassLoader) consumerLoader).getResource("paper-plugin.yml"), null,
+                "server-rejected bootstrap loader closed after discovery");
+        }
         if (plugins.getFileName().toString().equals("failed-provider")) {
             Object failed = System.getProperties().remove("foton.bootstrap.graph.failedLoader");
             equal(failed instanceof ClassLoader, true, "failed provider loader captured");
@@ -160,6 +192,7 @@ public final class PaperBootstrapGraph {
               public static final class Boot implements io.papermc.paper.plugin.bootstrap.PluginBootstrap {
                 public void bootstrap(io.papermc.paper.plugin.bootstrap.BootstrapContext context) {
                   String name = context.getConfiguration().getName();
+                  System.getProperties().put("foton.bootstrap.graph.consumerLoader", getClass().getClassLoader());
                   try {
                     Class.forName("fixturegraph.Provider$Marker", false, getClass().getClassLoader());
                     trace("visible:" + name + ":true");
@@ -192,6 +225,11 @@ public final class PaperBootstrapGraph {
             "dependencies:\n  bootstrap:\n    FailProvider:\n      load: BEFORE\n");
         caseJar(root, compiled, "no-bootstrapper", "NoBootstrapConsumer", false,
             "dependencies:\n  bootstrap:\n    MissingProvider: {}\n");
+        caseJar(root, compiled, "server-missing-bootstrap", "AlphaConsumer", false,
+            "dependencies:\n  server:\n    MissingProvider: {}\n");
+        caseJar(root, compiled, "bootstrap-plain-provider", "PlainProvider", true, "");
+        caseJar(root, compiled, "bootstrap-plain-provider", "AlphaConsumer", false,
+            "dependencies:\n  bootstrap:\n    PlainProvider:\n      load: BEFORE\n");
     }
 
     private static void writeOracleScenario(Path root) throws Exception {
@@ -240,7 +278,7 @@ public final class PaperBootstrapGraph {
                 }
             }
             jar.putNextEntry(new JarEntry("paper-plugin.yml"));
-            String bootstrapper = name.equals("NoBootstrapConsumer") ? ""
+            String bootstrapper = name.equals("NoBootstrapConsumer") || name.equals("PlainProvider") ? ""
                 : "bootstrapper: fixturegraph." + main + "$Boot\n";
             jar.write(("name: " + name + "\nversion: '1'\napi-version: '26.2'\nmain: fixturegraph."
                 + main + "\n" + bootstrapper + fields)
