@@ -116,6 +116,8 @@ These are relative sizes, not calendar promises. Task 1 establishes the denomina
 - [ ] Create a fixture whose bootstrapper adds a library and registers a Brigadier command, then constructs its `JavaPlugin` with `createPlugin`. A second fixture mutates a supported registry during bootstrap. Record expected order from a pinned Paper run.
 - [ ] Add failure fixtures for bootstrap throw, `createPlugin` throw, missing library and dependency failure; assert atomic cleanup, no early `onEnable`, and no leaked loader or registration.
 - [ ] Implement the phase runner and wire the native registry freeze point. Run `bash dev/build-plugin-api.sh --check`, a real Foton startup fixture, then the Paper comparison. Do not claim arbitrary plugin registry mutation until its Rust type and packet synchronization exist.
+- [ ] Before enabling registry lifecycle callbacks, replace the disconnected Java enchantment queue and ownerless Rust pending queue with an owner-scoped, reversible typed transaction transferred across JNI before freeze. Snapshot builder values, encode complete client-visible effects, and compare save/reload and registry packets with Paper/vanilla; reject unsupported entry types instead of accepting lossy registrations.
+- [ ] Complete bootstrap dependency classpaths and cross-plugin lifecycle ordering against the pinned Paper graph. A standalone bootstrap fixture is evidence for that slice only, not for the full phase contract.
 
 ## Phase C — complete public behavior, state and events
 
