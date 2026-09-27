@@ -75,10 +75,10 @@ def find_unexpected_errors(lines):
         r"\[(?:ERROR|SEVERE|FATAL)\]|\b(?:ERROR|SEVERE|FATAL):|"
         r"\b[A-Za-z_$][\w.$]*(?:Exception|Error)\b(?![-\w])|\bException in thread\b|"
         r"\b(?:plugin|server) failed to (?:load|enable|start|initialize)\b|"
-        r"\bJNI\b.{0,80}\b(?:error|fail(?:ed|ure)?|exception)\b|"
-        r"\b(?:error|fail(?:ed|ure)?|exception)\b.{0,80}\bJNI\b|"
-        r"\b(?:decoder|encoder|reference[- ]count|refcnt)\b.{0,80}\b(?:error|fail(?:ed|ure)?|exception)\b|"
-        r"\b(?:error|fail(?:ed|ure)?|exception)\b.{0,80}\b(?:decoder|encoder|reference[- ]count|refcnt)\b",
+        r"\bJNI\b.{0,80}\b(?:error|fail|failed|failure|exception)\b|"
+        r"\b(?:error|fail|failed|failure|exception)\b.{0,80}\bJNI\b|"
+        r"\b(?:decoder|encoder|reference[- ]count|refcnt)\b.{0,80}\b(?:error|fail|failed|failure|exception)\b|"
+        r"\b(?:error|fail|failed|failure|exception)\b.{0,80}\b(?:decoder|encoder|reference[- ]count|refcnt)\b",
         re.IGNORECASE,
     )
     return [line for line in lines if pattern.search(line) and line not in ALLOWED_LOG_ERRORS]
