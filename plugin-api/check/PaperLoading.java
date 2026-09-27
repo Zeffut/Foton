@@ -27,6 +27,21 @@ public final class PaperLoading {
                 catch (java.lang.reflect.InvocationTargetException error) { throw error.getCause(); }
             }));
         try {
+            Path original = root.resolve("original-alias");
+            fixture(original, "Retained", false, "provides: [Obsolete]\n", null);
+            equal(PluginHost.loadAll(original.toString()), 1, "original alias provider loads");
+            equal(PluginHost.byName("Obsolete").getName(), "Retained", "original alias resolves");
+            Path incremental = root.resolve("incremental");
+            fixture(incremental, "Independent", false, "", null);
+            equal(PluginHost.loadAll(incremental.toString()), 1, "incremental independent plugin loads");
+            equal(PluginHost.byName("Obsolete").getName(), "Retained", "incremental discovery preserves live alias");
+            PluginHost.disableAll();
+            Path replacement = root.resolve("replacement-without-alias");
+            fixture(replacement, "Retained", false, "", null);
+            equal(PluginHost.loadAll(replacement.toString()), 1, "replacement provider loads");
+            equal(PluginHost.byName("Obsolete"), null, "obsolete alias removed after complete teardown");
+            equal(PluginHost.byName("Retained").getName(), "Retained", "replacement real name resolves");
+            PluginHost.disableAll();
             Path collision = root.resolve("collision");
             fixture(collision, "Alpha", false, "provides: [Zulu, Shared]\n", null);
             fixture(collision, "Zulu", false, "provides: [Shared]\n", null);

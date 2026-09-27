@@ -277,6 +277,9 @@ public final class PluginHost {
         }
         PluginDependencyGraph graph = new PluginDependencyGraph(descriptors.values());
         synchronized (lifecycle) {
+            // A deferred teardown may have completed since disableAll returned.
+            // An empty host starts a fresh provider selection, including aliases.
+            if (loaded.isEmpty()) selectedProviders.clear();
             selectedProviders.putAll(graph.providers());
         }
         // Bootstrap has its own node set and ordering; it never contributes
@@ -893,6 +896,9 @@ public final class PluginHost {
             }
             for (int index = snapshot.size() - 1; index >= 0; index--) {
                 discardSerialized(snapshot.get(index));
+            }
+            synchronized (lifecycle) {
+                if (loaded.isEmpty()) selectedProviders.clear();
             }
         } finally {
             lifecycleOperation.unlock();
