@@ -24,6 +24,17 @@ public final class PaperBootstrap {
                 catch (java.lang.reflect.InvocationTargetException error) { throw error.getCause(); }
             }));
         try {
+            Path late = root.resolve("late");
+            fixture(late, "Late", "late", "");
+            equal(PluginHost.loadAll(late.toString()), 1, "retained bootstrap context rejects late registration");
+            PluginHost.disableAll();
+            if (System.getProperty("foton.bootstrap.late-oracle-jar") != null) {
+                Path external = root.resolve("late-external");
+                Files.createDirectories(external);
+                Files.copy(Path.of(System.getProperty("foton.bootstrap.late-oracle-jar")), external.resolve("probe.jar"));
+                equal(PluginHost.loadAll(external.toString()), 1, "Paper-compiled late registration boundary");
+                PluginHost.disableAll();
+            }
             if (System.getProperty("foton.bootstrap.oracle-jar") != null) {
                 Path external = root.resolve("external");
                 Files.createDirectories(external);
@@ -45,6 +56,7 @@ public final class PaperBootstrap {
             PluginHost.disableAll();
             equal(CommandMap.dispatch(org.bukkit.Bukkit.getConsoleSender(), "bootgood"), false, "bootstrap command released");
             for (String failure : List.of("bootstrap", "create", "commands", "load", "registry", "missing")) {
+                System.getProperties().remove("foton.bootstrap.context");
                 Path broken = root.resolve(failure);
                 fixture(broken, "Broken", failure, "permissions:\n  fixture.bootstrap: {}\n");
                 System.setProperty("foton.bootstrap.trace", "");
@@ -53,6 +65,10 @@ public final class PaperBootstrap {
                 equal(CommandMap.dispatch(org.bukkit.Bukkit.getConsoleSender(), "bootbroken"), false, failure + " leaves no command");
                 equal(org.bukkit.Bukkit.getPluginManager().getPermission("fixture.bootstrap"), null, failure + " leaves no permission");
                 equal(trace().contains("enable:"), false, failure + " never enables");
+                Object retained = System.getProperties().remove("foton.bootstrap.context");
+                if (retained instanceof io.papermc.paper.plugin.bootstrap.BootstrapContext context) {
+                    registrationClosed(context.getLifecycleManager());
+                }
                 equal(EventBridge.handlerTypeCount(), 0, failure + " leaves no event listener");
                 for (String field : List.of("pluginLoaders", "loadersByPlugin")) {
                     var loaders = PluginHost.class.getDeclaredField(field);
@@ -89,6 +105,7 @@ public final class PaperBootstrap {
             serverField.set(null, previous);
             System.clearProperty("foton.bootstrap.trace");
             System.getProperties().remove("foton.bootstrap.loader");
+            System.getProperties().remove("foton.bootstrap.context");
             try (var paths = Files.walk(root)) {
                 for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) Files.delete(path);
             }
@@ -96,6 +113,18 @@ public final class PaperBootstrap {
         System.out.println("Paper bootstrap checked: phase order, custom construction and failure rollback");
     }
     private static String trace() { return System.getProperty("foton.bootstrap.trace", ""); }
+    private static void registrationClosed(io.papermc.paper.plugin.lifecycle.event.LifecycleEventManager events) {
+        for (boolean configured : new boolean[] {false, true}) {
+            try {
+                if (configured) events.registerEventHandler(
+                    io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents.COMMANDS.newHandler(event -> {}));
+                else events.registerEventHandler(io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents.COMMANDS, event -> {});
+                throw new AssertionError("failed bootstrap retained an open lifecycle manager");
+            } catch (IllegalStateException expected) {
+                equal(expected.getMessage(), "Cannot register lifecycle event handlers", "late registration diagnostic");
+            }
+        }
+    }
     private static void configuredHandlers() {
         var events = new io.papermc.paper.plugin.lifecycle.event.FotonLifecycleEventManager();
         var order = new java.util.ArrayList<String>();
@@ -130,18 +159,36 @@ public final class PaperBootstrap {
             public final class Main extends org.bukkit.plugin.java.JavaPlugin {
               static void trace(String phase) { System.setProperty("foton.bootstrap.trace",
                 System.getProperty("foton.bootstrap.trace", "") + phase + ":NAME;"); }
+              static io.papermc.paper.plugin.bootstrap.BootstrapContext retained;
+              static void late() {
+                if (!"FAILURE".equals("late")) return;
+                for (boolean configured : new boolean[] {false, true}) {
+                  try {
+                    if (configured) retained.getLifecycleManager().registerEventHandler(
+                      io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents.COMMANDS.newHandler(event -> {}));
+                    else retained.getLifecycleManager().registerEventHandler(
+                      io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents.COMMANDS, event -> {});
+                    throw new AssertionError("late registration accepted");
+                  } catch (IllegalStateException expected) {
+                    if (!"Cannot register lifecycle event handlers".equals(expected.getMessage())) throw expected;
+                  }
+                }
+              }
               public Main(String value) { trace("construct"); }
               public Main() { trace("construct-default"); }
-              public void onLoad() { trace("load"); if ("FAILURE".equals("load")) throw new IllegalStateException("fixture load"); }
+              public void onLoad() { late(); trace("load"); if ("FAILURE".equals("load")) throw new IllegalStateException("fixture load"); }
               public void onEnable() { trace("enable"); }
               public void onDisable() { trace("disable"); }
               public static final class Boot implements io.papermc.paper.plugin.bootstrap.PluginBootstrap {
                 public void bootstrap(io.papermc.paper.plugin.bootstrap.BootstrapContext context) {
+                  retained = context;
+                  System.getProperties().put("foton.bootstrap.context", context);
                   System.getProperties().put("foton.bootstrap.loader", getClass().getClassLoader());
                   trace("bootstrap");
                   if ("FAILURE".equals("registry")) context.getLifecycleManager().registerEventHandler(
                     io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents.TAGS.postFlatten(io.papermc.paper.registry.RegistryKey.ENCHANTMENT), event -> {});
                   context.getLifecycleManager().registerEventHandler(io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents.COMMANDS, event -> {
+                    late();
                     trace("commands");
                     ((io.papermc.paper.command.brigadier.Commands)event.registrar()).register(
                       io.papermc.paper.command.brigadier.Commands.literal("bootLABEL").executes(c -> 1).build());
@@ -150,6 +197,7 @@ public final class PaperBootstrap {
                   if ("FAILURE".equals("bootstrap")) throw new IllegalStateException("fixture bootstrap");
                 }
                 public org.bukkit.plugin.java.JavaPlugin createPlugin(io.papermc.paper.plugin.bootstrap.PluginProviderContext context) {
+                  late();
                   trace("create");
                   if ("FAILURE".equals("default")) return io.papermc.paper.plugin.bootstrap.PluginBootstrap.super.createPlugin(context);
                   Main plugin = new Main("custom");

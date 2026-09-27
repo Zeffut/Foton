@@ -25,7 +25,13 @@ final class PaperBootstrapRunner {
             .asSubclass(PluginBootstrap.class).getDeclaredConstructor().newInstance();
     }
 
-    void bootstrap() { bootstrap.bootstrap(context); }
+    void bootstrap() {
+        try {
+            bootstrap.bootstrap(context);
+        } finally {
+            context.events.closeRegistration();
+        }
+    }
 
     void commands() {
         ReloadableRegistrarEvent<io.papermc.paper.command.brigadier.Commands> event = () -> commands;

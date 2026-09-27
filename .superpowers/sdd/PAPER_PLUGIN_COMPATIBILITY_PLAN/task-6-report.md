@@ -65,3 +65,15 @@ Consequently no registry mutation/freeze callback is dispatched. Bootstrap regis
 Bootstrap dependency classpaths, cross-plugin bootstrap priorities/monitors, reload lifecycle, general registrar generics/source compatibility, command alias/flag parity, and arbitrary registry mutation are not claimed. The descriptor guard explicitly rejects bootstrap dependency declarations; the lifecycle manager explicitly rejects non-default bootstrap priority/monitor configuration. Later work must establish these behaviors with their own Paper differentials before widening support.
 
 Disposable Java fixture directories clean themselves. Temporary orchestration scripts are removed before handoff; Paper/native evidence directories are retained outside the repository for independent review. No Desktop-root files were created.
+
+## Independent-review follow-up: registration boundary
+
+The review of `495c06dc4` found one P2: a retained BootstrapContext accepted handlers after bootstrap returned, although snapshot dispatch would never run them. The new regression first failed with `late registration accepted` during COMMANDS and `retained bootstrap context rejects late registration: 0 != 1`.
+
+The runner now closes registration in a `finally` block immediately after the bootstrap callback exits. Both registration overloads check that state before accepting anything and throw `IllegalStateException("Cannot register lifecycle event handlers")`. Closing and registration share the same monitor, so a racing registration cannot pass its state check after closure. Dispatch snapshots under that monitor and runs callbacks outside it. Failed bootstrap callbacks also close their retained manager before owner cleanup.
+
+`LateRegistrationProbe.java` was compiled with Java 25 against the actual build129 API, then its exact unchanged JAR ran on real Paper and Foton's Java host. In COMMANDS, createPlugin and onLoad, both the shorthand and configured overloads rejected registration with the exact exception class/message above. The seven normalized observations (six rejections followed by enabled) matched with `diff`. Fixture SHA-256: `2049ba67a3bdaca38dc27ca7f461cf1340d7d31fac1b6b136d2ca61b5fcc59a7`. Paper log: `/var/tmp/foton-task6-late-364z43v_/server.log`; Foton host log: `/var/tmp/foton-task6-late-foton.log`.
+
+The full Java harness passed again, including Task4 and Task5. Focused tests passed with both this new Paper-compiled JAR and the unchanged original bootstrap/library/command fixture. Retained contexts after bootstrap and other pre-enable failures reject both overloads as well. Focused typos and `git diff --check` passed. No Rust or native-boundary code changed; the earlier native startup differential remains the native evidence, not a claimed new native run. Ownership-absence assertions do not constitute exhaustive resource-acquisition/rollback certification.
+
+Task 6 remains incomplete for the registry/classpath foundations already listed. The temporary orchestration script was removed; external diagnostic logs and fixture JARs remain for review.

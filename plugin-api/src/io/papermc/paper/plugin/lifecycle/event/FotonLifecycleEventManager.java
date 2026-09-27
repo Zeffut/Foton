@@ -10,15 +10,22 @@ import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEventType;
 public final class FotonLifecycleEventManager implements LifecycleEventManager {
     private final List<Registration<?>> handlers = new ArrayList<>();
     private final boolean bootstrap;
+    private boolean registrationOpen = true;
     public FotonLifecycleEventManager() { this(false); }
     public FotonLifecycleEventManager(boolean bootstrap) { this.bootstrap = bootstrap; }
-    public <T extends LifecycleEvent> void registerEventHandler(LifecycleEventType<T> type, LifecycleEventHandler<T> handler) {
+    public synchronized void closeRegistration() { registrationOpen = false; }
+    private void requireRegistrationOpen() {
+        if (!registrationOpen) throw new IllegalStateException("Cannot register lifecycle event handlers");
+    }
+    public synchronized <T extends LifecycleEvent> void registerEventHandler(LifecycleEventType<T> type, LifecycleEventHandler<T> handler) {
+        requireRegistrationOpen();
         if (bootstrap && type != io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents.COMMANDS) {
             throw new UnsupportedOperationException("Foton has no transactional native bridge for this bootstrap lifecycle event");
         }
         handlers.add(new Registration<>(type, handler, 0, false));
     }
-    public <T extends LifecycleEvent> void registerEventHandler(LifecycleEventHandlerConfiguration<T> configuration) {
+    public synchronized <T extends LifecycleEvent> void registerEventHandler(LifecycleEventHandlerConfiguration<T> configuration) {
+        requireRegistrationOpen();
         if (!(configuration instanceof io.papermc.paper.plugin.lifecycle.event.handler.configuration.FotonHandlerConfiguration<T> configured)) {
             throw new IllegalArgumentException("Unknown lifecycle handler configuration");
         }
@@ -32,7 +39,8 @@ public final class FotonLifecycleEventManager implements LifecycleEventManager {
     }
     @SuppressWarnings("unchecked")
     public <T extends LifecycleEvent> void dispatch(LifecycleEventType<T> type, T event) {
-        List<Registration<?>> ordered = new ArrayList<>(handlers);
+        List<Registration<?>> ordered;
+        synchronized (this) { ordered = new ArrayList<>(handlers); }
         ordered.sort(java.util.Comparator.<Registration<?>, Boolean>comparing(Registration::monitor)
             .thenComparingInt(Registration::priority));
         for (Registration<?> registration : ordered) {
