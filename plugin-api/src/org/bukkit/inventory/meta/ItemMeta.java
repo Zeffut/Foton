@@ -64,6 +64,9 @@ public interface ItemMeta extends Cloneable, org.bukkit.persistence.PersistentDa
     default java.util.Map<org.bukkit.enchantments.Enchantment, Integer> getEnchants() {
         return java.util.Collections.emptyMap();
     }
+    default boolean hasEnchant(org.bukkit.enchantments.Enchantment enchantment) {
+        return getEnchants().containsKey(enchantment);
+    }
     default boolean hasEnchants() { return !getEnchants().isEmpty(); }
     default boolean hasItemFlag(org.bukkit.inventory.ItemFlag flag) { return false; }
     default void addItemFlags(org.bukkit.inventory.ItemFlag... flags) { }

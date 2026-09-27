@@ -26,6 +26,8 @@ public interface ConfigurationSection {
 
     boolean contains(String path);
 
+    boolean contains(String path, boolean ignoreDefault);
+
     boolean isSet(String path);
 
     String getCurrentPath();

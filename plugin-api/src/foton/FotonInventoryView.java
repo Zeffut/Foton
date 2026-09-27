@@ -19,6 +19,8 @@ public final class FotonInventoryView extends InventoryView {
     }
 
     private static Inventory liveTop(String owner) {
+        FotonCustomInventory custom = FotonCustomInventory.openForViewer(owner);
+        if (custom != null) return custom;
         String menuType = Native.openMenuType(owner);
         if ("minecraft:crafting".equals(menuType)) return new FotonCraftingInventory(owner);
         if ("minecraft:grindstone".equals(menuType)) return new FotonGrindstoneInventory(owner);

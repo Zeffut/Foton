@@ -17,6 +17,7 @@ public final class PotionEffectType {
     public static final PotionEffectType INSTANT_DAMAGE = HARM;
     public static final PotionEffectType MINING_FATIGUE = SLOW_DIGGING;
     public static final PotionEffectType JUMP = named("jump_boost");
+    public static final PotionEffectType JUMP_BOOST = JUMP;
     public static final PotionEffectType CONFUSION = named("nausea");
     public static final PotionEffectType NAUSEA = CONFUSION;
     public static final PotionEffectType REGENERATION = named("regeneration");

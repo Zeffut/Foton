@@ -10,6 +10,7 @@
 //! (such as runtime recipes) expose their own synchronized write path.
 
 use std::fmt::Write;
+use std::io::Cursor;
 use std::mem;
 use std::ptr::null_mut;
 use std::str::FromStr as _;
@@ -100,7 +101,7 @@ use foton_core::inventory::menu::kinds::stonecutter;
 use foton_core::permission::{PermissionExpr, PermissionKey, PermissionState};
 use foton_core::player::Player;
 use foton_core::player::connection::NetworkConnection;
-use foton_core::scoreboard::ScoreHolder;
+use foton_core::scoreboard::{ScoreHolder, Scoreboard};
 use foton_core::server::{Server, WorldCreationRequest, WorldCreationState};
 use foton_core::trading::Merchant;
 use foton_core::world::LevelReader as _;
@@ -112,17 +113,17 @@ use foton_core::worldgen::ChunkGenerator;
 use foton_protocol::packets::common::CCustomPayload;
 use foton_protocol::packets::game::{
     BossBarColor, BossBarOverlay, CBlockEntityData, CBlockUpdate, CClearTitles, COpenBook,
-    CSetDefaultSpawnPosition, CSetSubtitleText, CSetTitleText, CSetTitlesAnimation, CStopSound,
-    CSystemChat, CTabList, SoundSource,
+    CSetDefaultSpawnPosition, CSetPlayerTeam, CSetSubtitleText, CSetTitleText, CSetTitlesAnimation,
+    CStopSound, CSystemChat, CTabList, SoundSource,
 };
 use foton_registry::attribute::AttributeRef;
 use foton_registry::blocks::behavior::PushReaction;
 use foton_registry::blocks::block_state_ext::BlockStateExt;
 use foton_registry::data_components::components::{
-    CustomModelData, ItemEnchantments, ItemLore, TooltipDisplay,
+    CustomData, CustomModelData, ItemEnchantments, ItemLore, TooltipDisplay,
 };
 use foton_registry::data_components::vanilla_components::{
-    CUSTOM_MODEL_DATA, CUSTOM_NAME, ENCHANTMENTS, FIREWORKS, FireworkExplosion,
+    CUSTOM_DATA, CUSTOM_MODEL_DATA, CUSTOM_NAME, ENCHANTMENTS, FIREWORKS, FireworkExplosion,
     FireworkExplosionShape, Fireworks, ITEM_MODEL, ITEM_NAME, LORE, STORED_ENCHANTMENTS,
     TOOLTIP_DISPLAY, TOOLTIP_STYLE, UNBREAKABLE, WRITABLE_BOOK_CONTENT, WRITTEN_BOOK_CONTENT,
 };
@@ -149,7 +150,10 @@ use foton_registry::{
 use foton_registry::{stat::Stat, vanilla_custom_stats};
 use foton_utils::entity_events::EntityStatus;
 use foton_utils::locks::{SyncMutex, SyncRwLock};
-use foton_utils::nbt::{merge_nbt_compounds, parse_snbt_compound, to_canonical_snbt};
+use foton_utils::nbt::{
+    merge_nbt_compounds, parse_snbt_compound, to_canonical_snbt, vanilla_nbt_compound_heap_size,
+    vanilla_nbt_heap_size,
+};
 use foton_utils::serial::OptionalNbt;
 use foton_utils::text::DisplayResolutor;
 use foton_utils::translations::CONTAINER_CARTOGRAPHY_TABLE;
@@ -171,8 +175,9 @@ use jni::sys::{
     jboolean, jbyte, jdouble, jdoubleArray, jfloat, jint, jlong, jobjectArray, jstring,
 };
 use rustc_hash::FxHashMap;
-use simdnbt::owned::NbtCompound;
+use sha2::{Digest as _, Sha256};
 use simdnbt::owned::NbtTag;
+use simdnbt::owned::{NbtCompound, read_tag};
 use text_components::{TextComponent, content::Content as TextContent};
 use uuid::Uuid;
 
@@ -7629,6 +7634,205 @@ fn hex_decode(value: &str) -> Vec<u8> {
         .collect()
 }
 
+const BUKKIT_PDC_TAG: &str = "PublicBukkitValues";
+const MAX_PDC_ENTRIES: usize = 1_024;
+const MAX_PDC_KEY_BYTES: usize = 1_024;
+const MAX_PDC_STRING_BYTES: usize = 65_535;
+const MAX_PDC_RAW_BYTES: usize = 2_097_152;
+const MAX_SLOT_BRIDGE_BYTES: usize = 8_388_608;
+const MAX_SLOT_METADATA_FIELDS: usize = 4_096;
+const PDC_IDENTITY_FIELD_BYTES: usize = 77;
+
+fn push_pdc_fields(value: &mut String, stack: &ItemStack) {
+    let Some(custom_data) = stack.get(CUSTOM_DATA) else {
+        return;
+    };
+    if vanilla_nbt_compound_heap_size(custom_data.as_compound())
+        .is_none_or(|size| size > MAX_PDC_RAW_BYTES as u64)
+    {
+        return;
+    }
+    let custom_data = NbtTag::Compound(custom_data.copy_tag());
+    let mut raw = Vec::new();
+    custom_data.write(&mut raw);
+    if raw.len() > MAX_PDC_RAW_BYTES || raw.len() * 2 + value.len() + 11 > MAX_SLOT_BRIDGE_BYTES {
+        return;
+    }
+    value.push('\u{1d}');
+    value.push_str("pdcrawhex=");
+    value.push_str(&hex_encode(&raw));
+    let Some(custom_data_compound) = custom_data.compound() else {
+        return;
+    };
+    let Some(values) = custom_data_compound.compound(BUKKIT_PDC_TAG) else {
+        push_custom_data_identity(value, custom_data, &[]);
+        return;
+    };
+    let mut exposed_keys = Vec::new();
+    for (key, tag) in values.iter().take(MAX_PDC_ENTRIES) {
+        let key = key.to_string();
+        if key.len() > MAX_PDC_KEY_BYTES {
+            continue;
+        }
+        let encoded_key = hex_encode(key.as_bytes());
+        let field = match tag {
+            NbtTag::String(string) if string.len() <= MAX_PDC_STRING_BYTES => {
+                format!(
+                    "pdcstrhex={encoded_key}:{}",
+                    hex_encode(string.to_string().as_bytes())
+                )
+            }
+            NbtTag::Byte(byte) => format!("pdcbyte={encoded_key}:{byte}"),
+            NbtTag::Int(integer) => format!("pdcint={encoded_key}:{integer}"),
+            _ => continue,
+        };
+        if value.len() + field.len() + 1 + PDC_IDENTITY_FIELD_BYTES > MAX_SLOT_BRIDGE_BYTES {
+            break;
+        }
+        value.push('\u{1d}');
+        value.push_str(&field);
+        exposed_keys.push(key);
+    }
+    push_custom_data_identity(value, custom_data, &exposed_keys);
+}
+
+fn push_custom_data_identity(value: &mut String, custom_data: NbtTag, exposed_keys: &[String]) {
+    let NbtTag::Compound(mut identity_data) = custom_data else {
+        return;
+    };
+    match identity_data.remove(BUKKIT_PDC_TAG) {
+        Some(NbtTag::Compound(mut persistent_data)) => {
+            for key in exposed_keys {
+                persistent_data.remove(key);
+            }
+            if !persistent_data.is_empty() {
+                identity_data.insert(BUKKIT_PDC_TAG, persistent_data);
+            }
+        }
+        Some(other) => {
+            identity_data.insert(BUKKIT_PDC_TAG, other);
+        }
+        None => {}
+    }
+    if identity_data.is_empty() {
+        return;
+    }
+    let Some(canonical) = to_canonical_snbt(&NbtTag::Compound(identity_data)) else {
+        return;
+    };
+    let identity = hex_encode(&Sha256::digest(canonical.as_bytes()));
+    if value.len() + PDC_IDENTITY_FIELD_BYTES > MAX_SLOT_BRIDGE_BYTES {
+        return;
+    }
+    value.push('\u{1d}');
+    value.push_str("pdcidentity=");
+    value.push_str(&identity);
+}
+
+fn decode_hex_utf8(value: &str, maximum_bytes: usize) -> Option<String> {
+    String::from_utf8(decode_hex(value, maximum_bytes)?).ok()
+}
+
+fn decode_hex(value: &str, maximum_bytes: usize) -> Option<Vec<u8>> {
+    if !value.len().is_multiple_of(2) || value.len() / 2 > maximum_bytes {
+        return None;
+    }
+    (0..value.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(value.get(index..index + 2)?, 16).ok())
+        .collect()
+}
+
+fn decode_pdc_field(field: &str) -> Option<(String, NbtTag)> {
+    let (kind, payload) = if let Some(payload) = field.strip_prefix("pdcstrhex=") {
+        ("string", payload)
+    } else if let Some(payload) = field.strip_prefix("pdcbyte=") {
+        ("byte", payload)
+    } else {
+        ("int", field.strip_prefix("pdcint=")?)
+    };
+    let (encoded_key, value) = payload.split_once(':')?;
+    let key = decode_hex_utf8(encoded_key, MAX_PDC_KEY_BYTES)?;
+    let key: Identifier = key.parse().ok()?;
+    let tag = match kind {
+        "string" => {
+            let value: simdnbt::Mutf8String = decode_hex_utf8(value, MAX_PDC_STRING_BYTES)?.into();
+            if value.len() > MAX_PDC_STRING_BYTES {
+                return None;
+            }
+            NbtTag::String(value)
+        }
+        "byte" => NbtTag::Byte(value.parse().ok()?),
+        "int" => NbtTag::Int(value.parse().ok()?),
+        _ => return None,
+    };
+    Some((key.to_string(), tag))
+}
+
+fn apply_pdc_fields(stack: &mut ItemStack, metadata: &[&str]) -> Option<()> {
+    let raw = metadata
+        .iter()
+        .find_map(|field| field.strip_prefix("pdcrawhex="))
+        .and_then(|encoded| decode_hex(encoded, MAX_PDC_RAW_BYTES))
+        .and_then(|bytes| {
+            let mut cursor = Cursor::new(bytes.as_slice());
+            let tag = read_tag(&mut cursor).ok()?;
+            if cursor.position() != bytes.len() as u64
+                || vanilla_nbt_heap_size(&tag)? > MAX_PDC_RAW_BYTES as u64
+            {
+                return None;
+            }
+            tag.into_compound()
+        });
+    let has_raw = raw.is_some();
+    let mut custom_data = raw.unwrap_or_else(|| {
+        stack
+            .get(CUSTOM_DATA)
+            .map(CustomData::copy_tag)
+            .unwrap_or_default()
+    });
+    let mut persistent_data = match custom_data.remove(BUKKIT_PDC_TAG) {
+        Some(NbtTag::Compound(values)) => values,
+        Some(other) => {
+            custom_data.insert(BUKKIT_PDC_TAG, other);
+            NbtCompound::new()
+        }
+        None => NbtCompound::new(),
+    };
+    let mut decoded_fields = 0;
+    for key in metadata
+        .iter()
+        .filter_map(|field| field.strip_prefix("pdcremove="))
+        .filter_map(|key| decode_hex_utf8(key, MAX_PDC_KEY_BYTES))
+        .filter_map(|key| key.parse::<Identifier>().ok())
+        .take(MAX_PDC_ENTRIES)
+    {
+        persistent_data.remove(&key.to_string());
+        decoded_fields += 1;
+    }
+    for (key, tag) in metadata
+        .iter()
+        .filter_map(|field| decode_pdc_field(field))
+        .take(MAX_PDC_ENTRIES)
+    {
+        persistent_data.remove(&key);
+        persistent_data.insert(key, tag);
+        decoded_fields += 1;
+    }
+    if !has_raw && decoded_fields == 0 {
+        return Some(());
+    }
+
+    if !persistent_data.is_empty() {
+        custom_data.remove(BUKKIT_PDC_TAG);
+        custom_data.insert(BUKKIT_PDC_TAG, persistent_data);
+    }
+    if !custom_data.is_empty() {
+        stack.set(CUSTOM_DATA, CustomData::try_from_compound(custom_data)?);
+    }
+    Some(())
+}
+
 pub(crate) fn describe_slot(stack: &ItemStack) -> String {
     if stack.is_empty() {
         return String::new();
@@ -7639,6 +7843,7 @@ pub(crate) fn describe_slot(stack: &ItemStack) -> String {
         value.push_str("nbthex=");
         value.push_str(&hex_encode(opaque.as_bytes()));
     }
+    push_pdc_fields(&mut value, stack);
     if let Some(name) = stack.get(CUSTOM_NAME) {
         value.push('\u{1d}');
         value.push_str("namehex=");
@@ -7749,9 +7954,18 @@ extern "system" fn item_translation_key(
               several functions"
 )]
 pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
+    if text.len() > MAX_SLOT_BRIDGE_BYTES {
+        return None;
+    }
     let mut encoded = text.trim().split('\u{1d}');
     let text = encoded.next().unwrap_or_default();
-    let metadata = encoded.collect::<Vec<_>>();
+    let metadata = encoded
+        .by_ref()
+        .take(MAX_SLOT_METADATA_FIELDS + 1)
+        .collect::<Vec<_>>();
+    if metadata.len() > MAX_SLOT_METADATA_FIELDS || encoded.next().is_some() {
+        return None;
+    }
     if text.is_empty() {
         return Some(ItemStack::empty());
     }
@@ -7770,6 +7984,7 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
     {
         stack.set_opaque_nbt(Some(raw));
     }
+    apply_pdc_fields(&mut stack, &metadata)?;
     let damage = metadata
         .iter()
         .find_map(|value| value.strip_prefix("damage="))
@@ -10871,6 +11086,396 @@ extern "system" fn world_folder(
     value.into_raw()
 }
 
+fn adventure_component_from_json(encoded: &str) -> Option<TextComponent> {
+    let mut value = serde_json::from_str::<serde_json::Value>(encoded).ok()?;
+    normalize_adventure_component(&mut value)?;
+    normalize_adventure_colors(&mut value, true);
+    serde_json::from_value(value).ok()
+}
+
+fn adventure_component_to_json(component: &TextComponent) -> Option<String> {
+    let mut value = serde_json::to_value(component).ok()?;
+    normalize_adventure_colors(&mut value, false);
+    serde_json::to_string(&value).ok()
+}
+
+fn normalize_adventure_component(value: &mut serde_json::Value) -> Option<()> {
+    match value {
+        serde_json::Value::String(_) => {
+            let serde_json::Value::String(text) = value.take() else {
+                return None;
+            };
+            *value = serde_json::json!({ "text": text });
+        }
+        serde_json::Value::Array(_) => {
+            let serde_json::Value::Array(mut components) = value.take() else {
+                return None;
+            };
+            for component in &mut components {
+                normalize_adventure_component(component)?;
+            }
+            *value = serde_json::json!({ "text": "", "extra": components });
+        }
+        serde_json::Value::Object(fields) => {
+            normalize_component_list(fields.get_mut("extra"))?;
+            normalize_component_list(fields.get_mut("with"))?;
+            if let Some(separator) = fields.get_mut("separator") {
+                normalize_adventure_component(separator)?;
+            }
+            if (fields.contains_key("sprite") || fields.contains_key("player"))
+                && let Some(fallback) = fields.get_mut("fallback")
+            {
+                normalize_adventure_component(fallback)?;
+            }
+            normalize_adventure_hover(fields.get_mut("hover_event"))?;
+        }
+        _ => return None,
+    }
+    Some(())
+}
+
+fn normalize_component_list(value: Option<&mut serde_json::Value>) -> Option<()> {
+    let Some(value) = value else {
+        return Some(());
+    };
+    let serde_json::Value::Array(components) = value else {
+        return None;
+    };
+    for component in components {
+        normalize_adventure_component(component)?;
+    }
+    Some(())
+}
+
+fn normalize_adventure_hover(value: Option<&mut serde_json::Value>) -> Option<()> {
+    let Some(serde_json::Value::Object(hover)) = value else {
+        return Some(());
+    };
+    match hover.get("action").and_then(serde_json::Value::as_str) {
+        Some("show_text") => {
+            if !hover.contains_key("value")
+                && let Some(contents) = hover.remove("contents")
+            {
+                hover.insert("value".to_owned(), contents);
+            }
+            normalize_adventure_component(hover.get_mut("value")?)
+        }
+        Some("show_entity") => {
+            if let Some(name) = hover.get_mut("name") {
+                normalize_adventure_component(name)?;
+            }
+            Some(())
+        }
+        _ => Some(()),
+    }
+}
+
+fn normalize_adventure_colors(value: &mut serde_json::Value, decode: bool) {
+    match value {
+        serde_json::Value::Array(values) => {
+            for value in values {
+                normalize_adventure_colors(value, decode);
+            }
+        }
+        serde_json::Value::Object(fields) => {
+            for value in fields.values_mut() {
+                normalize_adventure_colors(value, decode);
+            }
+            let Some(color) = fields.get_mut("color") else {
+                return;
+            };
+            if decode {
+                let serde_json::Value::String(encoded) = color else {
+                    return;
+                };
+                let Some(hex) = encoded.strip_prefix('#') else {
+                    return;
+                };
+                if hex.len() != 6 {
+                    return;
+                }
+                let Ok(rgb) = u32::from_str_radix(hex, 16) else {
+                    return;
+                };
+                *color = serde_json::json!({
+                    "rgb": [rgb >> 16, (rgb >> 8) & 0xff, rgb & 0xff]
+                });
+            } else {
+                let serde_json::Value::Object(encoded) = color else {
+                    return;
+                };
+                let Some(serde_json::Value::Array(rgb)) = encoded.get("rgb") else {
+                    return;
+                };
+                if rgb.len() != 3 {
+                    return;
+                }
+                let Some(red) = rgb[0].as_u64().filter(|value| *value <= 255) else {
+                    return;
+                };
+                let Some(green) = rgb[1].as_u64().filter(|value| *value <= 255) else {
+                    return;
+                };
+                let Some(blue) = rgb[2].as_u64().filter(|value| *value <= 255) else {
+                    return;
+                };
+                *color = serde_json::Value::String(format!("#{red:02x}{green:02x}{blue:02x}"));
+            }
+        }
+        _ => {}
+    }
+}
+
+/// `foton.Native.scoreboardTeamNames`
+extern "system" fn scoreboard_team_names(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    world_name: JString<'_>,
+) -> jobjectArray {
+    let Ok(world_name): Result<String, _> = env.get_string(&world_name).map(Into::into) else {
+        return string_array(&mut env, &[]);
+    };
+    let names = server()
+        .and_then(|server| {
+            let key: Identifier = world_name.parse().ok()?;
+            let world = server.worlds.get_owned(&key)?;
+            server
+                .scoreboards
+                .get(world.domain())
+                .map(Scoreboard::team_names)
+        })
+        .unwrap_or_default();
+    string_array(&mut env, &names)
+}
+
+/// `foton.Native.scoreboardTeamPrefix`
+extern "system" fn scoreboard_team_prefix(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    world_name: JString<'_>,
+    team_name: JString<'_>,
+) -> jstring {
+    let Ok(world_name): Result<String, _> = env.get_string(&world_name).map(Into::into) else {
+        return null_mut();
+    };
+    let Ok(team_name): Result<String, _> = env.get_string(&team_name).map(Into::into) else {
+        return null_mut();
+    };
+    let prefix = server().and_then(|server| {
+        let key: Identifier = world_name.parse().ok()?;
+        let world = server.worlds.get_owned(&key)?;
+        let scoreboard = server.scoreboards.get(world.domain())?;
+        let team = scoreboard.team(&team_name)?;
+        let snapshot = scoreboard.team_snapshot(&team)?;
+        adventure_component_to_json(&snapshot.prefix)
+    });
+    to_java(&mut env, prefix)
+}
+
+/// `foton.Native.scoreboardSetTeamPrefix`
+extern "system" fn scoreboard_set_team_prefix(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    world_name: JString<'_>,
+    team_name: JString<'_>,
+    prefix: JString<'_>,
+) -> jboolean {
+    let Ok(world_name): Result<String, _> = env.get_string(&world_name).map(Into::into) else {
+        return 0;
+    };
+    let Ok(team_name): Result<String, _> = env.get_string(&team_name).map(Into::into) else {
+        return 0;
+    };
+    let Ok(prefix): Result<String, _> = env.get_string(&prefix).map(Into::into) else {
+        return 0;
+    };
+    let Some(prefix) = adventure_component_from_json(&prefix) else {
+        return 0;
+    };
+    jboolean::from(server().is_some_and(|server| {
+        let Ok(key) = world_name.parse::<Identifier>() else {
+            return false;
+        };
+        let Some(world) = server.worlds.get_owned(&key) else {
+            return false;
+        };
+        let domain = world.domain();
+        let Some(scoreboard) = server.scoreboards.get(domain) else {
+            return false;
+        };
+        let Some(team) = scoreboard.team(&team_name) else {
+            return false;
+        };
+        if !scoreboard.set_team_prefix(&team, prefix) {
+            return false;
+        }
+        let Some(snapshot) = scoreboard.team_snapshot(&team) else {
+            return false;
+        };
+        server.broadcast_scoreboard_packet(domain, snapshot.update_packet());
+        true
+    }))
+}
+
+/// `foton.Native.scoreboardAddTeam`
+extern "system" fn scoreboard_add_team(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    world_name: JString<'_>,
+    team_name: JString<'_>,
+) -> jboolean {
+    let Ok(world_name): Result<String, _> = env.get_string(&world_name).map(Into::into) else {
+        return 0;
+    };
+    let Ok(team_name): Result<String, _> = env.get_string(&team_name).map(Into::into) else {
+        return 0;
+    };
+    jboolean::from(server().is_some_and(|server| {
+        let Ok(key) = world_name.parse::<Identifier>() else {
+            return false;
+        };
+        let Some(world) = server.worlds.get_owned(&key) else {
+            return false;
+        };
+        let domain = world.domain();
+        let Some(scoreboard) = server.scoreboards.get(domain) else {
+            return false;
+        };
+        let Ok(team) = scoreboard.add_team(team_name) else {
+            return false;
+        };
+        let Some(snapshot) = scoreboard.team_snapshot(&team) else {
+            return false;
+        };
+        server.broadcast_scoreboard_packet(domain, snapshot.create_packet());
+        true
+    }))
+}
+
+/// `foton.Native.scoreboardRemoveTeam`
+extern "system" fn scoreboard_remove_team(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    world_name: JString<'_>,
+    team_name: JString<'_>,
+) -> jboolean {
+    let Ok(world_name): Result<String, _> = env.get_string(&world_name).map(Into::into) else {
+        return 0;
+    };
+    let Ok(team_name): Result<String, _> = env.get_string(&team_name).map(Into::into) else {
+        return 0;
+    };
+    jboolean::from(server().is_some_and(|server| {
+        let Ok(key) = world_name.parse::<Identifier>() else {
+            return false;
+        };
+        let Some(world) = server.worlds.get_owned(&key) else {
+            return false;
+        };
+        let domain = world.domain();
+        let Some(scoreboard) = server.scoreboards.get(domain) else {
+            return false;
+        };
+        let Some(team) = scoreboard.team(&team_name) else {
+            return false;
+        };
+        if !scoreboard.remove_team(&team) {
+            return false;
+        }
+        server.broadcast_scoreboard_packet(domain, CSetPlayerTeam::remove(team_name));
+        true
+    }))
+}
+
+/// `foton.Native.scoreboardAddEntry`
+extern "system" fn scoreboard_add_entry(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    world_name: JString<'_>,
+    team_name: JString<'_>,
+    entry: JString<'_>,
+) -> jboolean {
+    let Ok(world_name): Result<String, _> = env.get_string(&world_name).map(Into::into) else {
+        return 0;
+    };
+    let Ok(team_name): Result<String, _> = env.get_string(&team_name).map(Into::into) else {
+        return 0;
+    };
+    let Ok(entry): Result<String, _> = env.get_string(&entry).map(Into::into) else {
+        return 0;
+    };
+    jboolean::from(server().is_some_and(|server| {
+        let Ok(key) = world_name.parse::<Identifier>() else {
+            return false;
+        };
+        let Some(world) = server.worlds.get_owned(&key) else {
+            return false;
+        };
+        let domain = world.domain();
+        let Some(scoreboard) = server.scoreboards.get(domain) else {
+            return false;
+        };
+        let Some(team) = scoreboard.team(&team_name) else {
+            return false;
+        };
+        let holder = ScoreHolder::new(entry.clone());
+        let previous = scoreboard.holder_team_name(&holder);
+        if previous.as_deref() == Some(team.name()) {
+            return false;
+        }
+        if scoreboard.add_holder_to_team(&holder, &team).is_err() {
+            return false;
+        }
+        server.broadcast_scoreboard_membership_change(
+            domain,
+            &entry,
+            previous.as_deref(),
+            Some(&team_name),
+        );
+        true
+    }))
+}
+
+/// `foton.Native.scoreboardRemoveEntry`
+extern "system" fn scoreboard_remove_entry(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    world_name: JString<'_>,
+    team_name: JString<'_>,
+    entry: JString<'_>,
+) -> jboolean {
+    let Ok(world_name): Result<String, _> = env.get_string(&world_name).map(Into::into) else {
+        return 0;
+    };
+    let Ok(team_name): Result<String, _> = env.get_string(&team_name).map(Into::into) else {
+        return 0;
+    };
+    let Ok(entry): Result<String, _> = env.get_string(&entry).map(Into::into) else {
+        return 0;
+    };
+    jboolean::from(server().is_some_and(|server| {
+        let Ok(key) = world_name.parse::<Identifier>() else {
+            return false;
+        };
+        let Some(world) = server.worlds.get_owned(&key) else {
+            return false;
+        };
+        let domain = world.domain();
+        let Some(scoreboard) = server.scoreboards.get(domain) else {
+            return false;
+        };
+        let holder = ScoreHolder::new(entry.clone());
+        if scoreboard.holder_team_name(&holder).as_deref() != Some(team_name.as_str()) {
+            return false;
+        }
+        if !scoreboard.remove_holder_from_team(&holder) {
+            return false;
+        }
+        server.broadcast_scoreboard_membership_change(domain, &entry, Some(&team_name), None);
+        true
+    }))
+}
+
 /// `foton.Native.scoreboardTeamEntries`
 extern "system" fn scoreboard_team_entries(
     mut env: JNIEnv<'_>,
@@ -11740,6 +12345,41 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "worldDropItem",
             "(Ljava/lang/String;DDDLjava/lang/String;)Ljava/lang/String;",
             world_drop_item as *mut c_void,
+        ),
+        method(
+            "scoreboardTeamNames",
+            "(Ljava/lang/String;)[Ljava/lang/String;",
+            scoreboard_team_names as *mut c_void,
+        ),
+        method(
+            "scoreboardTeamPrefix",
+            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            scoreboard_team_prefix as *mut c_void,
+        ),
+        method(
+            "scoreboardSetTeamPrefix",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+            scoreboard_set_team_prefix as *mut c_void,
+        ),
+        method(
+            "scoreboardAddTeam",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            scoreboard_add_team as *mut c_void,
+        ),
+        method(
+            "scoreboardRemoveTeam",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            scoreboard_remove_team as *mut c_void,
+        ),
+        method(
+            "scoreboardAddEntry",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+            scoreboard_add_entry as *mut c_void,
+        ),
+        method(
+            "scoreboardRemoveEntry",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+            scoreboard_remove_entry as *mut c_void,
         ),
         method(
             "scoreboardTeamEntries",
@@ -13753,5 +14393,384 @@ mod snbt_tests {
     fn malformed_or_unknown_prefix_is_rejected() {
         assert!(parse_item_snbt_patch("not valid{foo:1}").is_none());
         assert!(parse_item_snbt_patch("minecraft:stone{foo:}").is_none());
+    }
+}
+
+#[cfg(test)]
+mod scoreboard_bridge_tests {
+    use text_components::TextComponent;
+
+    use super::{adventure_component_from_json, adventure_component_to_json};
+
+    #[test]
+    fn adventure_primitive_text_is_a_native_component() {
+        let component = adventure_component_from_json(r#""[staff] ""#)
+            .expect("Adventure's primitive text form should be accepted");
+        assert_eq!(component, TextComponent::plain("[staff] "));
+        assert_round_trip(r#""[staff] ""#);
+    }
+
+    #[test]
+    fn adventure_primitive_extra_and_hover_text_are_normalized_recursively() {
+        let tree = r#"{"text":"a","extra":["b"]}"#;
+        let component =
+            adventure_component_from_json(tree).expect("primitive children should be accepted");
+        assert_eq!(component, {
+            let mut expected = TextComponent::plain("a");
+            expected.children.push(TextComponent::plain("b"));
+            expected
+        });
+        assert_round_trip(tree);
+        assert_round_trip(r#"{"hover_event":{"action":"show_text","value":"tip"},"text":"a"}"#);
+    }
+
+    #[test]
+    fn adventure_hex_colors_round_trip_through_the_native_component() {
+        let encoded = r##"{"color":"#123456","bold":true,"text":"[staff] "}"##;
+        let component = adventure_component_from_json(encoded)
+            .expect("Adventure component JSON should be accepted");
+        let restored = adventure_component_to_json(&component)
+            .expect("native component should serialize for Adventure");
+        let expected: serde_json::Value =
+            serde_json::from_str(encoded).expect("fixture should be valid JSON");
+        let actual: serde_json::Value =
+            serde_json::from_str(&restored).expect("result should be valid JSON");
+        assert_eq!(actual, expected);
+    }
+
+    fn assert_round_trip(encoded: &str) {
+        let component = adventure_component_from_json(encoded)
+            .expect("Adventure component JSON should be accepted");
+        let restored_json = adventure_component_to_json(&component)
+            .expect("native component should serialize for Adventure");
+        let restored = adventure_component_from_json(&restored_json)
+            .expect("serialized native component should be accepted again");
+        assert_eq!(component, restored, "component changed during round-trip");
+    }
+}
+
+#[cfg(test)]
+mod slot_bridge_tests {
+    use super::{
+        MAX_SLOT_BRIDGE_BYTES, PDC_IDENTITY_FIELD_BYTES, describe_slot, hex_encode, parse_slot,
+        push_pdc_fields,
+    };
+    use foton_registry::data_components::{
+        components::CustomData, vanilla_components::CUSTOM_DATA,
+    };
+    use foton_registry::{init_vanilla_registry, item_stack::ItemStack, vanilla_items};
+    use simdnbt::{
+        Mutf8Str,
+        owned::{NbtCompound, NbtTag},
+    };
+
+    #[test]
+    fn opaque_non_compound_bukkit_value_survives_an_unmodified_bridge() {
+        init_vanilla_registry();
+        let mut data = NbtCompound::new();
+        data.insert("PublicBukkitValues", NbtTag::Long(42));
+        let mut stack = ItemStack::new(&vanilla_items::PAPER);
+        stack.set(
+            CUSTOM_DATA,
+            CustomData::try_from_compound(data).expect("valid data"),
+        );
+        let restored = parse_slot(&describe_slot(&stack)).expect("opaque data should parse");
+        assert_eq!(restored, stack);
+    }
+
+    #[test]
+    fn item_pdc_round_trips_without_replacing_opaque_nbt() {
+        init_vanilla_registry();
+        let key = |value: &str| hex_encode(value.as_bytes());
+        let value = |value: &str| hex_encode(value.as_bytes());
+        let encoded = format!(
+            "minecraft:paper 1\u{1d}nbthex={}\u{1d}pdcstrhex={}:{}\u{1d}pdcbyte={}:1\u{1d}pdcint={}:125",
+            hex_encode(b"{user:{untouched:1b}}"),
+            key("zeldaciv:action"),
+            value("tele\0port🚀\u{1d}\u{1e}\u{1f}"),
+            key("zeldaciv:marker"),
+            key("zeldaciv:amount"),
+        );
+
+        let stack = parse_slot(&encoded).expect("item bridge data should parse");
+        assert_eq!(stack.opaque_nbt(), Some("{user:{untouched:1b}}"));
+        let persistent_data = stack
+            .get(CUSTOM_DATA)
+            .and_then(|data| data.as_compound().compound("PublicBukkitValues"))
+            .expect("Bukkit item data should use vanilla custom_data");
+        assert_eq!(
+            persistent_data
+                .string("zeldaciv:action")
+                .map(ToString::to_string),
+            Some("tele\0port🚀\u{1d}\u{1e}\u{1f}".to_owned())
+        );
+        assert_eq!(persistent_data.byte("zeldaciv:marker"), Some(1));
+        assert_eq!(persistent_data.int("zeldaciv:amount"), Some(125));
+
+        let described = describe_slot(&stack);
+        let reparsed = parse_slot(&described).expect("described item should parse again");
+        assert_eq!(reparsed, stack);
+
+        let NbtTag::Compound(saved) = stack.to_nbt_tag_ref() else {
+            panic!("a non-empty item must persist as a compound");
+        };
+        let saved_pdc = saved
+            .compound("components")
+            .and_then(|components| components.compound("minecraft:custom_data"))
+            .and_then(|custom_data| custom_data.compound("PublicBukkitValues"))
+            .expect("persistent item encoding should retain Bukkit data");
+        assert_eq!(saved_pdc.int("zeldaciv:amount"), Some(125));
+    }
+
+    #[test]
+    fn malformed_pdc_fields_do_not_make_the_item_unreadable() {
+        init_vanilla_registry();
+        let stack = parse_slot(
+            "minecraft:paper 1\u{1d}nbthex=7b666f6f3a31627d\u{1d}pdcstrhex=7a656c64616369763a616374696f6e:ff",
+        )
+        .expect("optional malformed PDC should be ignored");
+
+        assert_eq!(stack.opaque_nbt(), Some("{foo:1b}"));
+        assert!(stack.get(CUSTOM_DATA).is_none());
+    }
+
+    #[test]
+    fn unknown_pdc_tags_survive_a_supported_entry_edit_and_removal() {
+        init_vanilla_registry();
+        let mut nested = NbtCompound::new();
+        nested.insert("kept", 7);
+        let mut original = NbtCompound::new();
+        original.insert("zeldaciv:action", "old");
+        original.insert("another:long", NbtTag::Long(9));
+        original.insert("another:compound", nested);
+        let mut custom_data = NbtCompound::new();
+        custom_data.insert("PublicBukkitValues", original);
+        custom_data.insert("unrelated_sibling", NbtTag::Long(41));
+        let mut raw = Vec::new();
+        NbtTag::Compound(custom_data).write(&mut raw);
+        let edited = format!(
+            "minecraft:paper 1\u{1d}pdcrawhex={}\u{1d}pdcstrhex={}:{}",
+            hex_encode(&raw),
+            hex_encode(b"zeldaciv:action"),
+            hex_encode(b"new"),
+        );
+
+        let stack = parse_slot(&edited).expect("opaque native PDC should parse");
+        let values = stack
+            .get(CUSTOM_DATA)
+            .and_then(|data| data.as_compound().compound("PublicBukkitValues"))
+            .expect("mixed PDC should remain present");
+        assert_eq!(
+            values.string("zeldaciv:action").map(ToString::to_string),
+            Some("new".to_owned())
+        );
+        assert_eq!(values.get("another:long"), Some(&NbtTag::Long(9)));
+        assert_eq!(
+            values
+                .compound("another:compound")
+                .and_then(|value| value.int("kept")),
+            Some(7)
+        );
+        assert_eq!(
+            stack
+                .get(CUSTOM_DATA)
+                .and_then(|data| data.as_compound().get("unrelated_sibling")),
+            Some(&NbtTag::Long(41))
+        );
+
+        let mut without_supported = describe_slot(&stack)
+            .split('\u{1d}')
+            .filter(|field| {
+                !field.starts_with("pdcstrhex=")
+                    && !field.starts_with("pdcbyte=")
+                    && !field.starts_with("pdcint=")
+            })
+            .collect::<Vec<_>>()
+            .join("\u{1d}");
+        without_supported.push('\u{1d}');
+        without_supported.push_str("pdcremove=");
+        without_supported.push_str(&hex_encode(b"zeldaciv:action"));
+        let removed = parse_slot(&without_supported).expect("supported PDC removal should parse");
+        let values = removed
+            .get(CUSTOM_DATA)
+            .and_then(|data| data.as_compound().compound("PublicBukkitValues"))
+            .expect("unknown PDC should survive supported removal");
+        assert!(values.get("zeldaciv:action").is_none());
+        assert_eq!(values.get("another:long"), Some(&NbtTag::Long(9)));
+        assert!(values.compound("another:compound").is_some());
+        assert_eq!(
+            removed
+                .get(CUSTOM_DATA)
+                .and_then(|data| data.as_compound().get("unrelated_sibling")),
+            Some(&NbtTag::Long(41))
+        );
+    }
+
+    #[test]
+    fn unknown_custom_data_has_a_canonical_bridge_identity() {
+        init_vanilla_registry();
+        let describe = |unknown: i64, visible: &str, reverse: bool| {
+            let mut persistent_data = NbtCompound::new();
+            if reverse {
+                persistent_data.insert("zeldaciv:unknown", NbtTag::Long(unknown));
+                persistent_data.insert("zeldaciv:visible", visible);
+            } else {
+                persistent_data.insert("zeldaciv:visible", visible);
+                persistent_data.insert("zeldaciv:unknown", NbtTag::Long(unknown));
+            }
+            let mut custom_data = NbtCompound::new();
+            if reverse {
+                custom_data.insert("sibling", 7);
+                custom_data.insert("PublicBukkitValues", persistent_data);
+            } else {
+                custom_data.insert("PublicBukkitValues", persistent_data);
+                custom_data.insert("sibling", 7);
+            }
+            let custom_data = CustomData::try_from_compound(custom_data)
+                .expect("test custom data should be valid");
+            let mut stack = ItemStack::new(&vanilla_items::PAPER);
+            stack.set(CUSTOM_DATA, custom_data);
+            describe_slot(&stack)
+        };
+        let identity = |description: &str| {
+            description
+                .split('\u{1d}')
+                .find_map(|field| field.strip_prefix("pdcidentity="))
+                .expect("unknown custom data should have an identity")
+                .to_owned()
+        };
+
+        let first = identity(&describe(1, "first", false));
+        let same_unknown = identity(&describe(1, "second", true));
+        let different_unknown = identity(&describe(2, "first", false));
+        assert_eq!(first, same_unknown);
+        assert_ne!(first, different_unknown);
+    }
+
+    #[test]
+    fn exposed_fields_reserve_identity_space_at_the_bridge_limit() {
+        init_vanilla_registry();
+        let encode = |unknown: i64| {
+            let key = "zeldaciv:visible";
+            let mut persistent_data = NbtCompound::new();
+            persistent_data.insert(key, "x");
+            persistent_data.insert("zeldaciv:unknown", NbtTag::Long(unknown));
+            let mut custom_data = NbtCompound::new();
+            custom_data.insert("PublicBukkitValues", persistent_data);
+            let tag = NbtTag::Compound(custom_data);
+            let mut raw = Vec::new();
+            tag.write(&mut raw);
+            let NbtTag::Compound(custom_data) = tag else {
+                panic!("test custom data must remain a compound");
+            };
+            let custom_data = CustomData::try_from_compound(custom_data)
+                .expect("test custom data should be valid");
+            let mut stack = ItemStack::new(&vanilla_items::PAPER);
+            stack.set(CUSTOM_DATA, custom_data);
+
+            let raw_field_bytes = 1 + "pdcrawhex=".len() + raw.len() * 2;
+            let exposed_field_bytes = 1
+                + "pdcstrhex=".len()
+                + hex_encode(key.as_bytes()).len()
+                + 1
+                + hex_encode(b"x").len();
+            let prefix_bytes = MAX_SLOT_BRIDGE_BYTES
+                - raw_field_bytes
+                - exposed_field_bytes
+                - PDC_IDENTITY_FIELD_BYTES;
+            let mut encoded = "x".repeat(prefix_bytes);
+            push_pdc_fields(&mut encoded, &stack);
+            assert_eq!(encoded.len(), MAX_SLOT_BRIDGE_BYTES);
+            assert!(encoded.contains("\u{1d}pdcstrhex="));
+            encoded
+        };
+        let identity = |encoded: &str| {
+            encoded
+                .split('\u{1d}')
+                .find_map(|field| field.strip_prefix("pdcidentity="))
+                .expect("the reserved identity field must be present")
+                .to_owned()
+        };
+
+        let first = encode(1);
+        let second = encode(2);
+        assert_ne!(identity(&first), identity(&second));
+    }
+
+    #[test]
+    fn oversized_custom_data_is_rejected_before_bridge_encoding() {
+        init_vanilla_registry();
+        let mut custom_data = NbtCompound::new();
+        custom_data.insert(
+            "oversized",
+            NbtTag::ByteArray(vec![0; super::MAX_PDC_RAW_BYTES]),
+        );
+        let custom_data = CustomData::try_from_compound(custom_data)
+            .expect("test custom data should be structurally valid");
+        let mut stack = ItemStack::new(&vanilla_items::PAPER);
+        stack.set(CUSTOM_DATA, custom_data);
+
+        let described = describe_slot(&stack);
+        assert!(!described.contains("pdcrawhex="));
+        assert!(!described.contains("pdcidentity="));
+    }
+
+    #[test]
+    fn raw_passthrough_keeps_supported_entries_that_were_not_exposed() {
+        init_vanilla_registry();
+        let mut values = NbtCompound::new();
+        for index in 0..1_026 {
+            values.insert(format!("bulk:key_{index}"), format!("value_{index}"));
+        }
+        let oversized_key = format!("bulk:{}", "x".repeat(1_025));
+        values.insert(oversized_key.clone(), "oversized-key-value");
+        let mut custom_data = NbtCompound::new();
+        custom_data.insert("PublicBukkitValues", values);
+        let custom_data =
+            CustomData::try_from_compound(custom_data).expect("test custom data should be valid");
+        let mut stack = ItemStack::new(&vanilla_items::PAPER);
+        stack.set(CUSTOM_DATA, custom_data);
+
+        let reparsed = parse_slot(&describe_slot(&stack)).expect("large PDC should round-trip");
+        let values = reparsed
+            .get(CUSTOM_DATA)
+            .and_then(|data| data.as_compound().compound("PublicBukkitValues"))
+            .expect("raw PDC should remain");
+        assert_eq!(values.len(), 1_027);
+        assert_eq!(
+            values.string("bulk:key_1025").map(ToString::to_string),
+            Some("value_1025".to_owned())
+        );
+        assert_eq!(
+            values.string(&oversized_key).map(ToString::to_string),
+            Some("oversized-key-value".to_owned())
+        );
+    }
+
+    #[test]
+    fn pdc_string_limit_matches_the_nbt_modified_utf_limit() {
+        init_vanilla_registry();
+        let key = hex_encode(b"zeldaciv:value");
+        let accepted_value = "\0".repeat(32_767) + "a";
+        let accepted = format!(
+            "minecraft:paper 1\u{1d}pdcstrhex={key}:{}",
+            hex_encode(accepted_value.as_bytes())
+        );
+        let accepted = parse_slot(&accepted).expect("65,535 modified UTF-8 bytes should fit");
+        assert_eq!(
+            accepted
+                .get(CUSTOM_DATA)
+                .and_then(|data| data.as_compound().compound("PublicBukkitValues"))
+                .and_then(|values| values.string("zeldaciv:value"))
+                .map(Mutf8Str::len),
+            Some(65_535)
+        );
+
+        let rejected = format!(
+            "minecraft:paper 1\u{1d}pdcstrhex={key}:{}",
+            hex_encode("\0".repeat(32_768).as_bytes())
+        );
+        let rejected = parse_slot(&rejected).expect("oversized optional PDC should be ignored");
+        assert!(rejected.get(CUSTOM_DATA).is_none());
     }
 }

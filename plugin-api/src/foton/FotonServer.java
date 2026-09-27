@@ -430,7 +430,6 @@ public final class FotonServer implements Server {
     }
 
     private static final class Plugins implements PluginManager {
-        private final java.util.Map<String, org.bukkit.permissions.Permission> permissions = new java.util.concurrent.ConcurrentHashMap<>();
         @Override public void registerEvents(Listener listener, Plugin plugin) {
             EventBridge.register(listener, plugin);
         }
@@ -443,13 +442,13 @@ public final class FotonServer implements Server {
             return PluginHost.all();
         }
         @Override public org.bukkit.permissions.Permission getPermission(String name) {
-            return name == null ? null : permissions.get(name.toLowerCase(java.util.Locale.ROOT));
+            return PermissionRegistry.get(name);
         }
         @Override public void addPermission(org.bukkit.permissions.Permission permission) {
-            if (permission != null) permissions.putIfAbsent(permission.getName().toLowerCase(java.util.Locale.ROOT), permission);
+            PermissionRegistry.add(permission);
         }
         @Override public void removePermission(String name) {
-            if (name != null) permissions.remove(name.toLowerCase(java.util.Locale.ROOT));
+            PermissionRegistry.remove(name);
         }
 
         @Override public void callEvent(org.bukkit.event.Event event) {

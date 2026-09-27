@@ -14,9 +14,11 @@ public final class Checks {
         Config.check();
         Geometry.check();
         InventoryViewCheck.check();
+        foton.CustomInventoryCheck.check();
         Items.check();
         Colors.check();
         Commands.check();
+        Scoreboards.check();
         Permissions.check();
         PluginLifecycle.concurrentDisableAllKeepsLoaderAlive();
         Checks.expect(foton.CommandMap.get("fixture") == null,
@@ -27,7 +29,7 @@ public final class Checks {
         YamlCheck.check();
         System.out.println(
             "plugin API checked: services, events, scheduler, lifecycle, network hooks, YAML,\n"
-                + "    configuration, geometry, items, colors, commands and permissions");
+                + "    configuration, geometry, items, colors, commands, scoreboards and permissions");
     }
 
     static void expect(boolean condition, String what) {

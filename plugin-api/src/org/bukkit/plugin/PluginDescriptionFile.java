@@ -145,11 +145,37 @@ public class PluginDescriptionFile implements io.papermc.paper.plugin.configurat
                 Object d = fields.get("description");
                 if (d != null) description = String.valueOf(d);
                 Object def = fields.get("default");
-                if (def != null) try { defaultValue = org.bukkit.permissions.PermissionDefault.valueOf(String.valueOf(def).toUpperCase(java.util.Locale.ROOT)); } catch (IllegalArgumentException ignored) { }
+                if (def != null) defaultValue = permissionDefault(def);
+                Map<String, Boolean> children = permissionChildren(fields.get("children"));
+                out.add(new org.bukkit.permissions.Permission(
+                    name, description, defaultValue, children));
+                continue;
             }
             out.add(new org.bukkit.permissions.Permission(name, description, defaultValue));
         }
         return Collections.unmodifiableList(out);
+    }
+
+    private static org.bukkit.permissions.PermissionDefault permissionDefault(Object value) {
+        String normalized = String.valueOf(value).trim().toUpperCase(java.util.Locale.ROOT)
+            .replace('-', '_').replace(' ', '_');
+        try {
+            return org.bukkit.permissions.PermissionDefault.valueOf(normalized);
+        } catch (IllegalArgumentException ignored) {
+            return org.bukkit.permissions.PermissionDefault.FALSE;
+        }
+    }
+
+    private static Map<String, Boolean> permissionChildren(Object value) {
+        if (!(value instanceof Map<?, ?> children)) return Map.of();
+        Map<String, Boolean> result = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> child : children.entrySet()) {
+            Object raw = child.getValue();
+            boolean enabled = raw instanceof Boolean bool
+                ? bool : Boolean.parseBoolean(String.valueOf(raw));
+            result.put(String.valueOf(child.getKey()), enabled);
+        }
+        return result;
     }
 
     public String getName() { return name; }

@@ -236,7 +236,7 @@ public final class FotonScheduler implements BukkitScheduler {
         java.util.Objects.requireNonNull(plugin, "plugin");
         java.util.Objects.requireNonNull(body, "task");
         if (!plugin.isEnabled()) {
-            throw new IllegalStateException(
+            throw new org.bukkit.plugin.IllegalPluginAccessException(
                 "Plugin attempted to register a task while disabled: " + plugin.getName());
         }
     }

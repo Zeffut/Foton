@@ -148,7 +148,20 @@ final class Events {
         // Five ticks, a period of two: runs on 1, 3 and 5.
         Checks.same(example.EventFixture.repeating, 3, "the repeat lost its period");
 
+        disabledPluginCannotSchedule();
         foliaTaskState(owner());
+    }
+
+    private static void disabledPluginCannotSchedule() {
+        org.bukkit.plugin.Plugin disabled = new DisabledPlugin("StoppedFixture");
+        try {
+            org.bukkit.Bukkit.getScheduler().runTask(disabled, () -> {});
+            throw new AssertionError("a disabled plugin was allowed to schedule a task");
+        } catch (org.bukkit.plugin.IllegalPluginAccessException expected) {
+            Checks.same(expected.getMessage(),
+                "Plugin attempted to register a task while disabled: StoppedFixture",
+                "the disabled scheduler rejection lost its diagnostic");
+        }
     }
 
     /** Folia exposes the lifecycle and the outcome of cancellation to plugins. */
@@ -254,5 +267,22 @@ final class Events {
 
     private static org.bukkit.plugin.Plugin owner() {
         return foton.PluginHost.all()[0];
+    }
+
+    private static final class DisabledPlugin implements org.bukkit.plugin.Plugin {
+        private final String name;
+
+        DisabledPlugin(String name) {
+            this.name = name;
+        }
+
+        @Override public java.io.File getDataFolder() { return null; }
+        @Override public org.bukkit.plugin.PluginDescriptionFile getDescription() { return null; }
+        @Override public org.bukkit.Server getServer() { return org.bukkit.Bukkit.getServer(); }
+        @Override public java.util.logging.Logger getLogger() { return null; }
+        @Override public String getName() { return name; }
+        @Override public boolean isEnabled() { return false; }
+        @Override public void onEnable() {}
+        @Override public void onDisable() {}
     }
 }

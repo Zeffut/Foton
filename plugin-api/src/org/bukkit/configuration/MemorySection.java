@@ -102,8 +102,13 @@ public class MemorySection implements ConfigurationSection {
     }
 
     @Override
+    public boolean contains(String path, boolean ignoreDefault) {
+        return (ignoreDefault ? getExplicit(path) : get(path)) != null;
+    }
+
+    @Override
     public boolean isSet(String path) {
-        return get(path) != null;
+        return getExplicit(path) != null;
     }
 
     @Override
@@ -133,6 +138,12 @@ public class MemorySection implements ConfigurationSection {
 
     @Override
     public Object get(String path, Object def) {
+        Object value = getExplicit(path);
+        return value == null ? fallback(path, def) : value;
+    }
+
+    /** Looks only at values set in this configuration, never its defaults. */
+    private Object getExplicit(String path) {
         if (path == null || path.isEmpty()) {
             return this;
         }
@@ -143,13 +154,12 @@ public class MemorySection implements ConfigurationSection {
         while ((next = path.indexOf(separator, start)) != -1) {
             Object child = section.map.get(path.substring(start, next));
             if (!(child instanceof MemorySection)) {
-                return fallback(path, def);
+                return null;
             }
             section = (MemorySection) child;
             start = next + 1;
         }
-        Object value = section.map.get(path.substring(start));
-        return value == null ? fallback(path, def) : value;
+        return section.map.get(path.substring(start));
     }
 
     /** What a missing path answers: the caller's default, else the root's. */

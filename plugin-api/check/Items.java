@@ -14,6 +14,7 @@ final class Items {
         slots();
         potionConstructors();
         skullMeta();
+        compatibilityAliases();
     }
 
     private static void potionConstructors() {
@@ -28,6 +29,21 @@ final class Items {
         Checks.expect(!meta.hasOwner(), "empty skull has no owner");
         meta.setOwner("example");
         Checks.expect(meta.hasOwner(), "named skull reports an owner");
+    }
+
+    private static void compatibilityAliases() {
+        Checks.expect(org.bukkit.attribute.Attribute.JUMP_STRENGTH
+                == org.bukkit.attribute.Attribute.GENERIC_JUMP_STRENGTH
+            && org.bukkit.attribute.Attribute.STEP_HEIGHT
+                == org.bukkit.attribute.Attribute.GENERIC_STEP_HEIGHT
+            && org.bukkit.attribute.Attribute.SNEAKING_SPEED
+                == org.bukkit.attribute.Attribute.PLAYER_SNEAKING_SPEED
+            && org.bukkit.attribute.Attribute.MOVEMENT_SPEED
+                == org.bukkit.attribute.Attribute.GENERIC_MOVEMENT_SPEED,
+            "modern attribute names alias the existing Bukkit constants");
+        Checks.expect(org.bukkit.potion.PotionEffectType.JUMP_BOOST
+            == org.bukkit.potion.PotionEffectType.JUMP,
+            "jump boost keeps the modern and legacy potion names identical");
     }
 
     private static void materials() {
@@ -69,6 +85,12 @@ final class Items {
         // mutates what it got and must call setItemMeta or nothing happens.
         // Behaving differently would make plugins written against it wrong.
         ItemMeta meta = sword.getItemMeta();
+        Checks.expect(!meta.hasEnchant(org.bukkit.enchantments.Enchantment.SHARPNESS),
+            "an empty metadata enchantment map reports no enchantment");
+        meta.addEnchant(org.bukkit.enchantments.Enchantment.SHARPNESS, 2, true);
+        Checks.expect(meta.hasEnchant(org.bukkit.enchantments.Enchantment.SHARPNESS),
+            "hasEnchant reads the metadata's actual enchantment map");
+        meta.removeEnchant(org.bukkit.enchantments.Enchantment.SHARPNESS);
         meta.setDisplayName("Excalibur");
         Checks.expect(!sword.getItemMeta().hasDisplayName(),
             "mutating the returned meta must not reach the item");
@@ -178,6 +200,96 @@ final class Items {
             && styledRead.getTooltipStyle().equals(org.bukkit.NamespacedKey.minecraft("rare"))
             && styledRead.isHideTooltip(),
             "slot item model and tooltip components survive");
+        ItemStack persistent = new ItemStack(Material.PAPER);
+        persistent.setOpaqueNbt("{user:{untouched:1b}}");
+        org.bukkit.NamespacedKey actionKey = new org.bukkit.NamespacedKey("zeldaciv", "action");
+        org.bukkit.NamespacedKey markerKey = new org.bukkit.NamespacedKey("zeldaciv", "marker");
+        org.bukkit.NamespacedKey amountKey = new org.bukkit.NamespacedKey("zeldaciv", "amount");
+        org.bukkit.inventory.meta.ItemMeta persistentMeta = persistent.getItemMeta();
+        persistentMeta.getPersistentDataContainer().set(actionKey,
+            org.bukkit.persistence.PersistentDataType.STRING, "télé\0port🚀\u001d\u001e\u001f");
+        persistentMeta.getPersistentDataContainer().set(markerKey,
+            org.bukkit.persistence.PersistentDataType.BYTE, (byte) 1);
+        persistentMeta.getPersistentDataContainer().set(amountKey,
+            org.bukkit.persistence.PersistentDataType.INTEGER, 125);
+        persistent.setItemMeta(persistentMeta);
+        ItemStack persistentRead = foton.FotonInventory.decode(foton.FotonInventory.encode(persistent));
+        org.bukkit.persistence.PersistentDataContainer persistentData =
+            persistentRead.getItemMeta().getPersistentDataContainer();
+        Checks.same(persistentData.get(actionKey, org.bukkit.persistence.PersistentDataType.STRING),
+            "télé\0port🚀\u001d\u001e\u001f", "slot string persistent data survives");
+        Checks.same(persistentData.get(markerKey, org.bukkit.persistence.PersistentDataType.BYTE),
+            (byte) 1, "slot byte persistent data survives");
+        Checks.same(persistentData.get(amountKey, org.bukkit.persistence.PersistentDataType.INTEGER),
+            125, "slot integer persistent data survives");
+        Checks.same(persistentData.get(amountKey, org.bukkit.persistence.PersistentDataType.STRING),
+            null, "persistent data keeps its primitive type");
+        Checks.same(persistentRead.getOpaqueNbt(), "{user:{untouched:1b}}",
+            "persistent data does not overwrite opaque item NBT");
+        Checks.expect(persistent.getItemMeta().equals(persistent.getItemMeta().clone()),
+            "cloned item metadata keeps equal persistent data");
+        ItemStack invalidUtf8 = foton.FotonInventory.decode(
+            "minecraft:paper 1\u001dpdcstrhex=7a656c64616369763a616374696f6e:ff");
+        Checks.same(invalidUtf8.getItemMeta().getPersistentDataContainer().get(actionKey,
+            org.bukkit.persistence.PersistentDataType.STRING), null,
+            "malformed UTF-8 persistent data is rejected rather than replaced");
+        String actionKeyHex = "7a656c64616369763a616374696f6e";
+        ItemStack nativePersistent = foton.FotonInventory.decode(
+            "minecraft:paper 1\u001dpdcrawhex=0a00\u001dpdcstrhex=" + actionKeyHex + ":73616d65");
+        ItemStack javaPersistent = new ItemStack(Material.PAPER);
+        org.bukkit.inventory.meta.ItemMeta javaPersistentMeta = javaPersistent.getItemMeta();
+        javaPersistentMeta.getPersistentDataContainer().set(actionKey,
+            org.bukkit.persistence.PersistentDataType.STRING, "same");
+        javaPersistent.setItemMeta(javaPersistentMeta);
+        Checks.expect(nativePersistent.getItemMeta().equals(javaPersistent.getItemMeta()),
+            "native passthrough does not change Bukkit metadata equality");
+        ItemStack unknownNativeOne = foton.FotonInventory.decode(
+            "minecraft:paper 1\u001dpdcrawhex=0a00\u001dpdcidentity=" + "00".repeat(32));
+        ItemStack unknownNativeTwo = foton.FotonInventory.decode(
+            "minecraft:paper 1\u001dpdcrawhex=0a00\u001dpdcidentity=" + "01".repeat(32));
+        Checks.expect(!unknownNativeOne.getItemMeta().equals(unknownNativeTwo.getItemMeta())
+            && !unknownNativeOne.isSimilar(unknownNativeTwo),
+            "different unknown native item data changes Bukkit metadata identity");
+        Checks.expect(foton.FotonInventory.encode(unknownNativeOne)
+            .contains("pdcidentity=" + "00".repeat(32)),
+            "unknown native item identity survives another Java bridge pass");
+        org.bukkit.inventory.meta.ItemMeta removedPersistentMeta = nativePersistent.getItemMeta();
+        removedPersistentMeta.getPersistentDataContainer().remove(actionKey);
+        nativePersistent.setItemMeta(removedPersistentMeta);
+        String removedPersistent = foton.FotonInventory.encode(nativePersistent);
+        Checks.expect(removedPersistent.contains("pdcremove=" + actionKeyHex)
+            && !removedPersistent.contains("pdcstrhex=" + actionKeyHex),
+            "removing native persistent data emits one explicit tombstone");
+
+        ItemStack malformedUtf16 = new ItemStack(Material.PAPER);
+        org.bukkit.inventory.meta.ItemMeta malformedUtf16Meta = malformedUtf16.getItemMeta();
+        malformedUtf16Meta.getPersistentDataContainer().set(actionKey,
+            org.bukkit.persistence.PersistentDataType.STRING, "\ud800");
+        malformedUtf16.setItemMeta(malformedUtf16Meta);
+        boolean malformedUtf16Rejected = false;
+        try { foton.FotonInventory.encode(malformedUtf16); }
+        catch (IllegalArgumentException expected) { malformedUtf16Rejected = true; }
+        Checks.expect(malformedUtf16Rejected,
+            "isolated UTF-16 surrogates are rejected by item persistent data");
+
+        ItemStack boundaryPersistent = new ItemStack(Material.PAPER);
+        org.bukkit.inventory.meta.ItemMeta boundaryMeta = boundaryPersistent.getItemMeta();
+        boundaryMeta.getPersistentDataContainer().set(actionKey,
+            org.bukkit.persistence.PersistentDataType.STRING, "\0".repeat(32_767) + "a");
+        boundaryPersistent.setItemMeta(boundaryMeta);
+        Checks.same(foton.FotonInventory.decode(foton.FotonInventory.encode(boundaryPersistent))
+            .getItemMeta().getPersistentDataContainer().get(actionKey,
+                org.bukkit.persistence.PersistentDataType.STRING).length(),
+            32_768, "65,535 modified UTF-8 bytes fit in item persistent data");
+        boundaryMeta = boundaryPersistent.getItemMeta();
+        boundaryMeta.getPersistentDataContainer().set(actionKey,
+            org.bukkit.persistence.PersistentDataType.STRING, "\0".repeat(32_768));
+        boundaryPersistent.setItemMeta(boundaryMeta);
+        boolean oversizedPersistentRejected = false;
+        try { foton.FotonInventory.encode(boundaryPersistent); }
+        catch (IllegalArgumentException expected) { oversizedPersistentRejected = true; }
+        Checks.expect(oversizedPersistentRejected,
+            "65,536 modified UTF-8 bytes are rejected before NBT encoding");
         ItemStack potion = new ItemStack(Material.POTION);
         org.bukkit.inventory.meta.ItemMeta potionMeta = potion.getItemMeta();
         potionMeta.setDisplayName("potion");

@@ -490,6 +490,7 @@ public final class PluginHost {
                 loadersByPlugin.put(plugin, loader);
                 pluginLoaders.put(pluginKey(descriptor.getName()), loader);
             }
+            PermissionRegistry.register(plugin, descriptor.getPermissions());
             registered = true;
             return plugin;
         } finally {
@@ -502,6 +503,7 @@ public final class PluginHost {
     }
 
     private static void cleanupUnpublished(JavaPlugin plugin) {
+        PermissionRegistry.removeOwnedBy(plugin);
         plugin.setEnabled(false);
         org.bukkit.Bukkit.getScheduler().cancelTasks(plugin);
         FotonPlayer.removeAttachments(plugin);
@@ -828,6 +830,7 @@ public final class PluginHost {
 
     private static void finishDiscard(Plugin plugin, InvocationState state,
             org.bukkit.plugin.java.PluginClassLoader loader) {
+        PermissionRegistry.removeOwnedBy(plugin);
         synchronized (lifecycle) {
             invocations.remove(plugin, state);
             if (loader != null) loadersByPlugin.remove(plugin, loader);

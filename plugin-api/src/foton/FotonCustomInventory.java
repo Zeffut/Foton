@@ -9,11 +9,29 @@ import org.bukkit.inventory.ItemStack;
 
 /** Mutable Bukkit inventory used before it is attached to an open menu. */
 public final class FotonCustomInventory implements Inventory {
-    private static final java.util.concurrent.ConcurrentHashMap<String, java.lang.ref.WeakReference<FotonCustomInventory>> OPEN = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.concurrent.ConcurrentHashMap<String, ViewerAttachment> OPEN =
+        new java.util.concurrent.ConcurrentHashMap<>();
     private final InventoryHolder holder;
     private final ItemStack[] contents;
     private final String title;
     private String viewer;
+    private long nextAttachment;
+    private long attachment;
+
+    static final class ViewerAttachment {
+        private final java.lang.ref.WeakReference<FotonCustomInventory> inventory;
+        private final long token;
+
+        private ViewerAttachment(FotonCustomInventory inventory, long token) {
+            this.inventory = new java.lang.ref.WeakReference<>(inventory);
+            this.token = token;
+        }
+
+        FotonCustomInventory inventory() { return inventory.get(); }
+        boolean matches(FotonCustomInventory expected, long expectedToken) {
+            return inventory.get() == expected && token == expectedToken;
+        }
+    }
     public FotonCustomInventory(InventoryHolder holder, int size, String title) {
         if (size < 1 || size > 54 || size % 9 != 0) throw new IllegalArgumentException("Inventory size must be a multiple of 9 between 1 and 54");
         this.holder = holder; this.contents = new ItemStack[size]; this.title = title == null ? "" : title;
@@ -46,8 +64,48 @@ public final class FotonCustomInventory implements Inventory {
     @Override public void clear() { for (int i = 0; i < contents.length; i++) clear(i); }
     @Override public void clear(int slot) { if (slot >= 0 && slot < contents.length) setItem(slot, null); }
     public String getTitle() { return title; }
-    void attachViewer(String uuid) { viewer = uuid; OPEN.put(uuid, new java.lang.ref.WeakReference<>(this)); }
-    void detachViewer() { if (viewer != null) OPEN.remove(viewer); viewer = null; }
-    static void detachViewer(String uuid) { if (uuid == null) return; java.lang.ref.WeakReference<FotonCustomInventory> ref = OPEN.remove(uuid); FotonCustomInventory inventory = ref == null ? null : ref.get(); if (inventory != null) inventory.viewer = null; }
+    synchronized void attachViewer(String uuid) {
+        if (uuid == null) throw new IllegalArgumentException("viewer cannot be null");
+        removeCurrentAttachment();
+        nextAttachment++;
+        if (nextAttachment == 0) nextAttachment++;
+        viewer = uuid;
+        attachment = nextAttachment;
+        OPEN.put(uuid, new ViewerAttachment(this, attachment));
+    }
+    synchronized void detachViewer() {
+        removeCurrentAttachment();
+        viewer = null;
+        attachment = 0;
+    }
+    private void removeCurrentAttachment() {
+        String attachedViewer = viewer;
+        if (attachedViewer != null) {
+            ViewerAttachment current = OPEN.get(attachedViewer);
+            if (current != null && current.matches(this, attachment)) {
+                OPEN.remove(attachedViewer, current);
+            }
+        }
+    }
+    synchronized void detachViewer(ViewerAttachment expected) {
+        if (expected == null || !expected.matches(this, attachment)) return;
+        String attachedViewer = viewer;
+        if (attachedViewer != null) OPEN.remove(attachedViewer, expected);
+        viewer = null;
+        attachment = 0;
+    }
+    static ViewerAttachment openAttachmentForViewer(String uuid) {
+        if (uuid == null) return null;
+        ViewerAttachment current = OPEN.get(uuid);
+        if (current != null && current.inventory() == null) {
+            OPEN.remove(uuid, current);
+            return null;
+        }
+        return current;
+    }
+    static FotonCustomInventory openForViewer(String uuid) {
+        ViewerAttachment current = openAttachmentForViewer(uuid);
+        return current == null ? null : current.inventory();
+    }
     String encodeContents() { StringBuilder result = new StringBuilder(); for (int i = 0; i < contents.length; i++) { if (i > 0) result.append('\u001e'); result.append(FotonInventory.encode(contents[i])); } return result.toString(); }
 }

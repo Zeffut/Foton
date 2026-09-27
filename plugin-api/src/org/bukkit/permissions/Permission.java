@@ -24,18 +24,33 @@ public class Permission {
     public PermissionDefault getDefault() { return defaultValue; }
     public void setDefault(PermissionDefault value) {
         defaultValue = value == null ? PermissionDefault.FALSE : value;
+        recalculatePermissibles();
     }
     public String getDescription() { return description; }
-    public java.util.Map<String, Boolean> getChildren() { return java.util.Collections.unmodifiableMap(children); }
+    public java.util.Map<String, Boolean> getChildren() { return children; }
 
-    /** Adds a parent permission as a child rule, matching Bukkit's descriptor semantics. */
+    /** Adds this permission to the parent's child rules, matching Bukkit. */
     public void addParent(Permission parent, boolean value) {
         if (parent == null) throw new IllegalArgumentException("parent");
-        children.put(parent.getName(), value);
+        parent.children.put(name, value);
+        parent.recalculatePermissibles();
     }
 
-    public void addParent(String name, boolean value) {
+    public Permission addParent(String name, boolean value) {
         if (name == null || name.isEmpty()) throw new IllegalArgumentException("name");
-        children.put(name, value);
+        String normalized = name.toLowerCase(java.util.Locale.ROOT);
+        org.bukkit.plugin.PluginManager manager = org.bukkit.Bukkit.getPluginManager();
+        Permission parent = manager.getPermission(normalized);
+        if (parent == null) {
+            parent = new Permission(normalized);
+            manager.addPermission(parent);
+        }
+        addParent(parent, value);
+        return parent;
+    }
+
+    /** Invalidates the cached effective permissions of every live permissible. */
+    public void recalculatePermissibles() {
+        foton.PermissionRegistry.changed();
     }
 }

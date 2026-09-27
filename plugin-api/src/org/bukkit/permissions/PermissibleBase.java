@@ -23,6 +23,7 @@ public class PermissibleBase implements Permissible {
     public PermissibleBase(ServerOperator opable) {
         this.opable = opable;
         recalculatePermissions();
+        foton.PermissionRegistry.track(this);
     }
 
     @Override public boolean isOp() { return opable != null && opable.isOp(); }
@@ -32,6 +33,7 @@ public class PermissibleBase implements Permissible {
             throw new UnsupportedOperationException("Cannot change op value as no ServerOperator is set");
         }
         opable.setOp(value);
+        recalculatePermissions();
     }
 
     @Override public boolean isPermissionSet(String permission) {
@@ -41,10 +43,11 @@ public class PermissibleBase implements Permissible {
     @Override public boolean hasPermission(String permission) {
         if (permission == null) return false;
         PermissionAttachmentInfo info = permissions.get(permission.toLowerCase(java.util.Locale.ROOT));
-        // An unset node falls back to op-ness, which is Bukkit's default for a
-        // permission no plugin has registered. Returning false instead would
-        // lock operators out of commands that never declared a node.
-        return info == null ? isOp() : info.getValue();
+        if (info != null) return info.getValue();
+        Boolean declared = foton.PermissionRegistry.resolveDefault(permission, isOp());
+        // An undeclared node falls back to op-ness, which is Bukkit's default
+        // for a permission no plugin registered.
+        return declared == null ? isOp() : declared;
     }
 
     @Override public PermissionAttachment addAttachment(Plugin plugin) {
@@ -69,12 +72,28 @@ public class PermissibleBase implements Permissible {
 
     @Override public void recalculatePermissions() {
         permissions.clear();
+        for (Map.Entry<String, Boolean> entry
+                : foton.PermissionRegistry.effectiveDefaults(isOp()).entrySet()) {
+            permissions.put(entry.getKey(), new PermissionAttachmentInfo(
+                this, entry.getKey(), null, entry.getValue()));
+        }
         for (PermissionAttachment attachment : attachments) {
             for (Map.Entry<String, Boolean> entry : attachment.getPermissions().entrySet()) {
-                String node = entry.getKey().toLowerCase(java.util.Locale.ROOT);
-                permissions.put(node, new PermissionAttachmentInfo(this, node, attachment, entry.getValue()));
+                apply(attachment, entry.getKey(), entry.getValue(), new LinkedHashSet<>());
             }
         }
+    }
+
+    private void apply(PermissionAttachment attachment, String permission, boolean value,
+            Set<String> path) {
+        String node = permission.toLowerCase(java.util.Locale.ROOT);
+        if (!path.add(node)) return;
+        permissions.put(node, new PermissionAttachmentInfo(this, node, attachment, value));
+        for (Map.Entry<String, Boolean> child
+                : foton.PermissionRegistry.children(node).entrySet()) {
+            apply(attachment, child.getKey(), value == child.getValue(), path);
+        }
+        path.remove(node);
     }
 
     @Override public Set<PermissionAttachmentInfo> getEffectivePermissions() {

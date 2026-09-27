@@ -22,6 +22,9 @@ public final class FotonInventory implements PlayerInventory {
     private static final int SIZE = 41;
     private static final int ARMOR = 36;
     private static final int OFFHAND = 40;
+    private static final int MAX_OPAQUE_PDC_HEX_LENGTH = 4_194_304;
+    private static final int MAX_SLOT_BRIDGE_CHARS = 8_388_608;
+    private static final int MAX_SLOT_METADATA_FIELDS = 4_096;
 
     private final String owner;
 
@@ -215,10 +218,12 @@ public final class FotonInventory implements PlayerInventory {
 
     /** Reads `minecraft:diamond_sword 3`. Anything else is an empty slot. */
     public static ItemStack decode(String text) {
-        if (text == null || text.isEmpty()) {
+        if (text == null || text.isEmpty() || text.length() > MAX_SLOT_BRIDGE_CHARS) {
             return null;
         }
-        String[] encoded = text.split("\\u001d", -1);
+        String[] encoded = text.split("\\u001d", MAX_SLOT_METADATA_FIELDS + 2);
+        if (encoded.length > MAX_SLOT_METADATA_FIELDS + 1
+                || encoded[encoded.length - 1].indexOf('\u001d') >= 0) return null;
         text = encoded[0];
         int space = text.lastIndexOf(' ');
         String name = space < 0 ? text : text.substring(0, space);
@@ -244,6 +249,20 @@ public final class FotonInventory implements PlayerInventory {
             if (raw.size() > 0) result.setOpaqueNbt(new String(raw.toByteArray(), java.nio.charset.StandardCharsets.UTF_8));
         }
         if (encoded.length > 1 && result.getItemMeta() instanceof org.bukkit.inventory.meta.ItemMeta meta) {
+            if (meta.getPersistentDataContainer() instanceof FotonPersistentDataContainer persistentData) {
+                for (String field : encoded) if (field.startsWith("pdcrawhex=")) {
+                    if (field.length() > 10 + MAX_OPAQUE_PDC_HEX_LENGTH) continue;
+                    String raw = field.substring(10);
+                    if (isHex(raw))
+                        persistentData.setNativePassthrough(raw);
+                }
+                for (String field : encoded) if (field.startsWith("pdcidentity=")) {
+                    String identity = field.substring(12);
+                    if (identity.length() == 64 && isHex(identity))
+                        persistentData.setNativePassthroughIdentity(identity);
+                }
+                for (String field : encoded) persistentData.decodeItemField(field);
+            }
             for (String field : encoded) if (field.equals("unbreakable")) meta.setUnbreakable(true);
             for (String field : encoded) if (field.equals("hidetooltip")) meta.setHideTooltip(true);
             for (String field : encoded) if (field.startsWith("tooltipstylehex=")) {
@@ -342,6 +361,13 @@ public final class FotonInventory implements PlayerInventory {
         return bytes.toByteArray();
     }
 
+    private static boolean isHex(String value) {
+        if ((value.length() & 1) != 0) return false;
+        for (int index = 0; index < value.length(); index++)
+            if (Character.digit(value.charAt(index), 16) < 0) return false;
+        return true;
+    }
+
     /** Writes what decode reads. An empty stack is an empty string. */
     public static String encode(ItemStack item) {
         if (item == null || item.getType().isAir() || item.getAmount() <= 0) {
@@ -350,6 +376,14 @@ public final class FotonInventory implements PlayerInventory {
         String value = "minecraft:" + item.getType().getKeyName() + " " + item.getAmount();
         if (item.getOpaqueNbt() != null && !item.getOpaqueNbt().isEmpty()) value += "\u001dnbthex=" + hexEncode(item.getOpaqueNbt());
         if (item.getDurability() != 0) value += "\u001ddamage=" + item.getDurability();
+        if (item.hasItemMeta()
+                && item.getItemMeta().getPersistentDataContainer() instanceof FotonPersistentDataContainer persistentData) {
+            if (persistentData.nativePassthrough() != null && !persistentData.nativePassthrough().isEmpty())
+                value += "\u001dpdcrawhex=" + persistentData.nativePassthrough();
+            if (persistentData.nativePassthroughIdentity() != null)
+                value += "\u001dpdcidentity=" + persistentData.nativePassthroughIdentity();
+            value += persistentData.encodeItemFields();
+        }
         if (item.hasItemMeta() && item.getItemMeta().isUnbreakable()) value += "\u001dunbreakable";
         if (item.hasItemMeta() && item.getItemMeta().isHideTooltip()) value += "\u001dhidetooltip";
         if (item.hasItemMeta() && item.getItemMeta().hasItemModel())
@@ -400,6 +434,8 @@ public final class FotonInventory implements PlayerInventory {
             for (org.bukkit.potion.PotionEffect effect : meta.getCustomEffects()) effects.append(effect.getType().getName()).append(',').append(effect.getDuration()).append(',').append(effect.getAmplifier()).append(';');
             value += effects;
         }
+        if (value.length() > MAX_SLOT_BRIDGE_CHARS)
+            throw new IllegalArgumentException("item metadata exceeds the native bridge limit");
         return value;
     }
 }

@@ -174,6 +174,13 @@ public final class Native {
     public static native void setWorldAutoSave(String world, boolean value);
     public static native void saveWorld(String world);
     public static native String worldDropItem(String world, double x, double y, double z, String item);
+    public static native String[] scoreboardTeamNames(String world);
+    public static native String scoreboardTeamPrefix(String world, String team);
+    public static native boolean scoreboardSetTeamPrefix(String world, String team, String prefix);
+    public static native boolean scoreboardAddTeam(String world, String team);
+    public static native boolean scoreboardRemoveTeam(String world, String team);
+    public static native boolean scoreboardAddEntry(String world, String team, String entry);
+    public static native boolean scoreboardRemoveEntry(String world, String team, String entry);
     public static native String[] scoreboardTeamEntries(String world, String team);
     public static native String scoreboardEntryTeam(String world, String entry);
 

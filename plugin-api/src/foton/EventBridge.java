@@ -999,8 +999,14 @@ public final class EventBridge {
     }
 
     public static void fireInventoryClose(String uuid) {
-        FotonCustomInventory.detachViewer(uuid);
-        dispatch(new org.bukkit.event.inventory.InventoryCloseEvent(player(uuid)));
+        FotonCustomInventory.ViewerAttachment attachment =
+            FotonCustomInventory.openAttachmentForViewer(uuid);
+        FotonCustomInventory closing = attachment == null ? null : attachment.inventory();
+        try {
+            dispatch(new org.bukkit.event.inventory.InventoryCloseEvent(player(uuid)));
+        } finally {
+            if (closing != null) closing.detachViewer(attachment);
+        }
     }
 
     public static boolean firePlayerOpenSign(String uuid, String world, int x, int y, int z, boolean front, String cause) {
