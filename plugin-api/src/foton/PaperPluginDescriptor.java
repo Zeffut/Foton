@@ -24,10 +24,15 @@ final class PaperPluginDescriptor extends PluginDescriptionFile {
     private final boolean openClassloader;
     private final List<String> authors;
     private final List<Dependency> dependencies;
+    private final ApiVersion apiVersion;
 
     private PaperPluginDescriptor(Map<String, Object> root, List<Dependency> dependencies)
             throws InvalidDescriptionException {
         super(commonFields(root));
+        this.apiVersion = ApiVersion.parse(requiredText(root, "api-version"));
+        if (apiVersion.compareTo(new ApiVersion(1, 19, 0)) < 0) {
+            throw new InvalidDescriptionException("Paper api-version must be at least 1.19");
+        }
         this.bootstrapper = text(root.get("bootstrapper"));
         this.loader = text(root.get("loader"));
         this.openClassloader = booleanValue(root.get("has-open-classloader"), false);
@@ -168,6 +173,42 @@ final class PaperPluginDescriptor extends PluginDescriptionFile {
     String loader() { return loader; }
     boolean hasOpenClassloader() { return openClassloader; }
     @Override public List<String> getAuthors() { return authors; }
+    @Override public String getAPIVersion() { return apiVersion.toString(); }
     List<Dependency> paperDependencies() { return dependencies; }
+
+    void validateTarget(String target) throws InvalidDescriptionException {
+        if (apiVersion.compareTo(ApiVersion.parse(target)) > 0) {
+            throw new InvalidDescriptionException("Unsupported API version " + apiVersion
+                + "; server target is " + target);
+        }
+    }
+
+    /** Mirrors Paper 26.2 ApiVersion parsing and normalization. */
+    private record ApiVersion(int major, int minor, int patch) implements Comparable<ApiVersion> {
+        static ApiVersion parse(String value) throws InvalidDescriptionException {
+            if (value == null || value.trim().isEmpty() || value.equalsIgnoreCase("none")) {
+                return new ApiVersion(Integer.MIN_VALUE, Integer.MIN_VALUE, Integer.MIN_VALUE);
+            }
+            String[] parts = value.split("\\.");
+            if (parts.length != 2 && parts.length != 3) {
+                throw new InvalidDescriptionException("invalid API version: " + value);
+            }
+            try {
+                return new ApiVersion(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]),
+                    parts.length == 3 ? Integer.parseInt(parts[2]) : 0);
+            } catch (NumberFormatException error) {
+                throw new InvalidDescriptionException(error, "invalid API version: " + value);
+            }
+        }
+
+        @Override public int compareTo(ApiVersion other) {
+            int order = Integer.compare(major, other.major);
+            if (order == 0) order = Integer.compare(minor, other.minor);
+            if (order == 0) order = Integer.compare(patch, other.patch);
+            return order;
+        }
+
+        @Override public String toString() { return major + "." + minor + "." + patch; }
+    }
 
 }

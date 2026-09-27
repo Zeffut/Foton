@@ -67,14 +67,12 @@ final class PluginDependencyGraph {
             }
             List<String> ordered = sort(eligible, edges);
             if (ordered.size() == eligible.size()) return ordered;
-            Set<String> resolved = new HashSet<>(ordered);
-            for (String key : eligible) {
-                if (!resolved.contains(key)) System.out.println("[host] " + phase
-                    + " dependency cycle or dependent involving " + plugins.get(key).getName());
+            removeCycles(edges);
+            ordered = sort(eligible, edges);
+            if (ordered.size() != eligible.size()) {
+                throw new IllegalStateException("unrecoverable " + phase + " plugin ordering cycle");
             }
-            eligible.retainAll(resolved);
-            // Required OMIT/AFTER edges do not impose dependency-first order, but
-            // their consumers must still be removed when the provider is rejected.
+            return ordered;
         }
     }
 
@@ -107,6 +105,7 @@ final class PluginDependencyGraph {
         return List.copyOf(names);
     }
 
+    Map<String, String> providers() { return Map.copyOf(providers); }
     private String provider(String name) { return providers.getOrDefault(key(name), key(name)); }
     private static String key(String name) { return name.toLowerCase(Locale.ROOT); }
 
@@ -124,6 +123,59 @@ final class PluginDependencyGraph {
             if (seen.add(current)) pending.addAll(edges.getOrDefault(current, Set.of()));
         }
         return false;
+    }
+
+    /** Paper's Johnson recovery removes the closing edge of each discovered
+     * cycle, then retries sorting. Work in Paper's consumer-to-dependency
+     * direction; our ordinary sort stores the opposite direction. */
+    private static void removeCycles(Map<String, Set<String>> edges) {
+        Map<String, Set<String>> dependencies = new TreeMap<>();
+        for (String node : edges.keySet()) dependencies.put(node, new TreeSet<>());
+        for (var edge : edges.entrySet()) {
+            for (String target : edge.getValue()) dependencies.get(target).add(edge.getKey());
+        }
+        Set<String> blocked = new HashSet<>();
+        for (String start : dependencies.keySet()) {
+            Map<String, Set<String>> induced = new TreeMap<>();
+            for (String node : dependencies.keySet()) {
+                if (node.compareTo(start) < 0) continue;
+                Set<String> successors = new TreeSet<>(dependencies.get(node));
+                successors.removeIf(next -> next.compareTo(start) < 0);
+                induced.put(node, successors);
+            }
+            Set<String> component = new TreeSet<>();
+            for (String node : induced.keySet()) {
+                if (reachable(induced, start, node) && reachable(induced, node, start)) component.add(node);
+            }
+            if (component.size() < 2 && !dependencies.get(start).contains(start)) continue;
+            Map<String, Set<String>> cycleGraph = new TreeMap<>();
+            for (String node : component) {
+                Set<String> successors = new TreeSet<>(dependencies.get(node));
+                successors.retainAll(component);
+                cycleGraph.put(node, successors);
+            }
+            blocked.removeAll(cycleGraph.get(start));
+            removeClosingEdges(start, start, cycleGraph, blocked, dependencies);
+        }
+        for (Set<String> outgoing : edges.values()) outgoing.clear();
+        for (var entry : dependencies.entrySet()) {
+            for (String dependency : entry.getValue()) edges.get(dependency).add(entry.getKey());
+        }
+    }
+
+    private static void removeClosingEdges(String start, String current,
+            Map<String, Set<String>> cycleGraph, Set<String> blocked,
+            Map<String, Set<String>> dependencies) {
+        blocked.add(current);
+        for (String successor : cycleGraph.get(current)) {
+            if (successor.equals(start)) {
+                dependencies.get(current).remove(successor);
+                System.out.println("[host] recovered plugin ordering cycle by removing "
+                    + current + " -> " + successor);
+            } else if (!blocked.contains(successor)) {
+                removeClosingEdges(start, successor, cycleGraph, blocked, dependencies);
+            }
+        }
     }
 
     private List<String> sort(Set<String> nodes, Map<String, Set<String>> edges) {

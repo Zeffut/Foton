@@ -15,7 +15,31 @@ public final class PaperLoading {
 
     public static void check() throws Exception {
         Path root = Files.createTempDirectory("foton-paper-loading-");
+        org.bukkit.Server previous = org.bukkit.Bukkit.getServer();
+        org.bukkit.Server delegate = previous == null ? new FotonServer() : previous;
+        var serverField = org.bukkit.Bukkit.class.getDeclaredField("server");
+        serverField.setAccessible(true);
+        serverField.set(null, (org.bukkit.Server) java.lang.reflect.Proxy.newProxyInstance(
+            PaperLoading.class.getClassLoader(), new Class<?>[] {org.bukkit.Server.class},
+            (proxy, method, arguments) -> {
+                if (method.getName().equals("getMinecraftVersion")) return "26.2";
+                try { return method.invoke(delegate, arguments); }
+                catch (java.lang.reflect.InvocationTargetException error) { throw error.getCause(); }
+            }));
         try {
+            Path collision = root.resolve("collision");
+            fixture(collision, "Alpha", false, "provides: [Zulu, Shared]\n", null);
+            fixture(collision, "Zulu", false, "provides: [Shared]\n", null);
+            equal(PluginHost.loadAll(collision.toString()), 2, "real name not suppressed by alias");
+            equal(PluginHost.byName("Zulu").getName(), "Zulu", "real name wins alias collision");
+            equal(PluginHost.byName("Shared").getName(), "Alpha", "selected alias independent of startup order");
+            PluginHost.disableAll();
+            Path competing = root.resolve("competing");
+            fixture(competing, "AliasAlpha", false, "provides: [Competing]\n", null);
+            fixture(competing, "AliasZulu", false, "load: STARTUP\nprovides: [Competing]\n", null);
+            equal(PluginHost.loadAll(competing.toString()), 2, "competing aliases both load");
+            equal(PluginHost.byName("Competing").getName(), "AliasAlpha", "graph alias selection survives startup ordering");
+            PluginHost.disableAll();
             descriptorsAndPhases();
             System.setProperty("foton.paper.order", "");
             Path mixed = root.resolve("mixed");
@@ -64,7 +88,11 @@ public final class PaperLoading {
             Path cycle = root.resolve("cycle");
             fixture(cycle, "CycleA", false, "depend: [CycleB]\ncommands:\n  rejected-command: {}\npermissions:\n  rejected.permission: {}\n", null);
             fixture(cycle, "CycleB", false, "depend: [CycleA]\n", null);
-            equal(PluginHost.loadAll(cycle.toString()), 0, "hard cycle rejected");
+            equal(PluginHost.loadAll(cycle.toString()), 2, "hard cycle ordering recovered");
+            PluginHost.disableAll();
+            Path rejected = root.resolve("rejected");
+            fixture(rejected, "Rejected", false, "depend: [Missing]\ncommands:\n  rejected-command: {}\npermissions:\n  rejected.permission: {}\n", null);
+            equal(PluginHost.loadAll(rejected.toString()), 0, "missing dependency rejected");
             equal(PluginHost.all().length, 0, "rejected graph has no plugins");
             var loaders = PluginHost.class.getDeclaredField("pluginLoaders");
             loaders.setAccessible(true);
@@ -83,10 +111,15 @@ public final class PaperLoading {
             fixture(unsupported, "NeedsBootstrap", true, "bootstrapper: fixture.Bootstrap\n", null);
             equal(PluginHost.loadAll(unsupported.toString()), 0, "bootstrap must not be silently skipped");
             equal(PluginHost.all().length, 0, "unsupported bootstrap not published");
+            Path future = root.resolve("future");
+            fixture(future, "Future", true, "", null, "99.99");
+            equal(PluginHost.loadAll(future.toString()), 0, "host rejects future API version before publication");
+            equal(PluginHost.all().length, 0, "future version has no published plugins");
             System.out.println("Paper loading checked: alias, mixed graph, AFTER, both descriptors, cycle, STARTUP, bootstrap rejection");
         } finally {
             System.clearProperty("foton.paper.order");
             PluginHost.disableAll();
+            serverField.set(null, previous);
             try (var paths = Files.walk(root)) {
                 for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) {
                     Files.deleteIfExists(path);
@@ -119,8 +152,18 @@ public final class PaperLoading {
         equal(new PluginDependencyGraph(List.of(broken)).order(PaperPluginDescriptor.Phase.SERVER), List.of(), "required defaults true");
         var optionalCycleA = paper("OptionalA", "dependencies:\n  server:\n    OptionalB:\n      load: BEFORE\n      required: false\n");
         var optionalCycleB = paper("OptionalB", "dependencies:\n  server:\n    OptionalA:\n      load: BEFORE\n      required: false\n");
-        equal(new PluginDependencyGraph(List.of(optionalCycleA, optionalCycleB)).order(PaperPluginDescriptor.Phase.SERVER),
-            List.of(), "Paper optional ordering cycles are rejected");
+        var downstream = paper("Downstream", "dependencies:\n  server:\n    OptionalA:\n      load: BEFORE\n      required: false\n");
+        equal(new PluginDependencyGraph(List.of(optionalCycleA, optionalCycleB, downstream)).order(PaperPluginDescriptor.Phase.SERVER),
+            List.of("optionalb", "optionala", "downstream"), "Paper cycle recovery retains downstream consumer");
+        for (String version : List.of("garbage", "1.18", "1", "1.2.3.4", "1.x", "none")) {
+            try {
+                paperVersion(version);
+                throw new AssertionError("invalid Paper API version accepted: " + version);
+            } catch (org.bukkit.plugin.InvalidDescriptionException expected) {
+                // Grammar/minimum are descriptor validation, independent of the host target.
+            }
+        }
+        equal(paperVersion("99.99").getAPIVersion(), "99.99.0", "parser accepts future API versions");
         for (String invalid : List.of("load: BAD\n", "depend: wrong\n", "libraries: wrong\n")) {
             try {
                 new org.bukkit.plugin.PluginDescriptionFile(new java.io.StringReader(
@@ -137,6 +180,11 @@ public final class PaperLoading {
             + "\nversion: 1\nmain: fixture.Main\napi-version: '26.2'\n" + fields).getBytes(StandardCharsets.UTF_8)));
     }
 
+    private static PaperPluginDescriptor paperVersion(String version) throws Exception {
+        return PaperPluginDescriptor.read(new java.io.ByteArrayInputStream(("name: Version\nversion: 1\nmain: fixture.Main\napi-version: '"
+            + version + "'\n").getBytes(StandardCharsets.UTF_8)));
+    }
+
     private static List<String> order() {
         return java.util.Arrays.stream(PluginHost.all()).map(org.bukkit.plugin.Plugin::getName).toList();
     }
@@ -149,6 +197,11 @@ public final class PaperLoading {
 
     private static void fixture(Path directory, String name, boolean paper, String fields,
             String legacy) throws Exception {
+        fixture(directory, name, paper, fields, legacy, "26.2");
+    }
+
+    private static void fixture(Path directory, String name, boolean paper, String fields,
+            String legacy, String apiVersion) throws Exception {
         Files.createDirectories(directory);
         Path classes = Files.createDirectory(directory.resolve(name + "-classes"));
         Path source = classes.resolve(name + ".java");
@@ -163,7 +216,7 @@ public final class PaperLoading {
         try (JarOutputStream jar = new JarOutputStream(Files.newOutputStream(directory.resolve(name + ".jar")))) {
             entry(jar, "fixture/" + name + ".class", Files.readAllBytes(classes.resolve("fixture/" + name + ".class")));
             entry(jar, paper ? "paper-plugin.yml" : "plugin.yml", ("name: " + name
-                + "\nversion: 1\nmain: fixture." + name + "\napi-version: '26.2'\n" + fields).getBytes(StandardCharsets.UTF_8));
+                + "\nversion: 1\nmain: fixture." + name + "\napi-version: '" + apiVersion + "'\n" + fields).getBytes(StandardCharsets.UTF_8));
             if (legacy != null) entry(jar, "plugin.yml", legacy.getBytes(StandardCharsets.UTF_8));
         }
     }

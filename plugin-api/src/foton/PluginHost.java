@@ -32,6 +32,7 @@ import org.bukkit.plugin.java.JavaPlugin;
  */
 public final class PluginHost {
     private static final List<Plugin> loaded = new ArrayList<>();
+    private static final Map<String, String> selectedProviders = new HashMap<>();
     private static final Map<String, org.bukkit.plugin.java.PluginClassLoader> pluginLoaders = new HashMap<>();
     private static final Map<Plugin, org.bukkit.plugin.java.PluginClassLoader> loadersByPlugin =
         new java.util.IdentityHashMap<>();
@@ -232,13 +233,12 @@ public final class PluginHost {
     private static String unavailableRequiredDependency(Plugin plugin) {
         for (String name : requiredDependencies(plugin)) {
             Plugin dependency = byName(name);
-            boolean needsEnabled = true;
-            if (plugin.getDescription() instanceof PaperPluginDescriptor paper) {
-                needsEnabled = paper.paperDependencies().stream().anyMatch(d ->
-                    d.phase() == PaperPluginDescriptor.Phase.SERVER && d.name().equals(name)
-                    && d.load() == PaperPluginDescriptor.LoadOrder.BEFORE);
+            boolean failed;
+            synchronized (lifecycle) {
+                InvocationState state = invocations.get(dependency);
+                failed = state != null && state.disableComplete && !dependency.isEnabled();
             }
-            if (dependency == null || (needsEnabled && !dependency.isEnabled())) {
+            if (dependency == null || failed) {
                 return name;
             }
         }
@@ -276,6 +276,9 @@ public final class PluginHost {
             }
         }
         PluginDependencyGraph graph = new PluginDependencyGraph(descriptors.values());
+        synchronized (lifecycle) {
+            selectedProviders.putAll(graph.providers());
+        }
         // Bootstrap has its own node set and ordering; it never contributes
         // runtime classpath or enable-order edges.
         graph.order(PaperPluginDescriptor.Phase.BOOTSTRAP);
@@ -304,8 +307,10 @@ public final class PluginHost {
         }
     }
 
-    private static void requireSupportedLoading(PluginDescriptionFile descriptor) {
+    private static void requireSupportedLoading(PluginDescriptionFile descriptor)
+            throws InvalidDescriptionException {
         if (descriptor instanceof PaperPluginDescriptor paper) {
+            paper.validateTarget(org.bukkit.Bukkit.getMinecraftVersion());
             if (paper.hasOpenClassloader()) {
                 throw new UnsupportedOperationException(descriptor.getName()
                     + ": open Paper classloader visibility is not implemented");
@@ -329,19 +334,9 @@ public final class PluginHost {
     private static JavaPlugin constructAndRegister(File jar) throws Exception {
         PluginDescriptionFile descriptor = readDescriptor(jar);
         requireSupportedLoading(descriptor);
-        if (byName(descriptor.getName()) != null) {
-            System.out.println("[host] " + descriptor.getName() + " is already loaded; skipping " + jar.getName());
-            return null;
-        }
-        for (String name : descriptor instanceof PaperPluginDescriptor paper
-                ? paper.paperDependencies().stream()
-                    .filter(d -> d.phase() == PaperPluginDescriptor.Phase.SERVER && d.required()
-                        && d.load() == PaperPluginDescriptor.LoadOrder.BEFORE)
-                    .map(PaperPluginDescriptor.Dependency::name).toList()
-                : descriptor.getDepend()) {
-            if (byName(name) == null) {
-                System.out.println("[host] " + descriptor.getName()
-                    + ": required dependency " + name + " failed to construct");
+        synchronized (lifecycle) {
+            if (findExactNameLocked(descriptor.getName()) != null) {
+                System.out.println("[host] " + descriptor.getName() + " is already loaded; skipping " + jar.getName());
                 return null;
             }
         }
@@ -365,7 +360,7 @@ public final class PluginHost {
             loader.setPlugin(plugin);
             plugin.init(org.bukkit.Bukkit.getServer(), descriptor, dataFolder);
             synchronized (lifecycle) {
-                if (findByNameLocked(descriptor.getName()) != null) {
+                if (findExactNameLocked(descriptor.getName()) != null) {
                     System.out.println("[host] " + descriptor.getName()
                         + " was published concurrently; skipping " + jar.getName());
                     return null;
@@ -855,11 +850,13 @@ public final class PluginHost {
     }
 
     private static Plugin findByNameLocked(String name) {
+        String selected = selectedProviders.get(pluginKey(name));
+        return findExactNameLocked(selected == null ? name : selected);
+    }
+
+    private static Plugin findExactNameLocked(String name) {
         for (Plugin plugin : loaded) {
             if (plugin.getName().equalsIgnoreCase(name)) return plugin;
-        }
-        for (Plugin plugin : loaded) {
-            if (plugin.getDescription().getProvides().stream().anyMatch(name::equalsIgnoreCase)) return plugin;
         }
         return null;
     }
