@@ -15,6 +15,11 @@ import sys
 
 AXES = ("linkage", "load", "events", "behavior", "coinstall")
 STATUSES = {"pass", "fail", "not_tested"}
+SHA256 = re.compile(r"[a-fA-F0-9]{64}\Z")
+PAPER_BUILD = re.compile(r"paper:[0-9]+(?:\.[0-9]+)*:[1-9][0-9]*\Z")
+FOTON_BUILD = re.compile(r"foton:[a-fA-F0-9]{40}\Z")
+UNKNOWN_METADATA = re.compile(r"\b(?:not[\s_-]*(?:verified|recorded|known|available)|"
+                              r"unresolved|unknown|missing)\b", re.IGNORECASE)
 REQUIRED = ("name", "version", "variant", "sha256", "source", "license",
             "api_version", "paper_build", "dependencies", "scenarios")
 
@@ -29,11 +34,15 @@ def product_count(rows):
 
 def validate_manifest(manifest):
     errors = []
+    target = manifest.get("foton_target")
+    if not isinstance(target, str) or not re.fullmatch(r"[0-9]+(?:\.[0-9]+)*", target):
+        errors.append("foton_target must be a Minecraft version")
     rows = manifest.get("artifacts")
     if not isinstance(rows, list):
         return ["artifacts must be a list"]
     identities = set()
-    names = {row.get("name") for row in rows if isinstance(row, dict)}
+    by_identity = {artifact_id(row): row for row in rows if isinstance(row, dict)
+                   and all(isinstance(row.get(key), str) for key in ("name", "version", "variant"))}
     for index, row in enumerate(rows):
         label = f"artifacts[{index}]"
         if not isinstance(row, dict):
@@ -55,13 +64,25 @@ def validate_manifest(manifest):
         identities.add(identity)
         if row.get("status", "not_tested") not in STATUSES:
             errors.append(f"{label}: invalid status")
-        for key in ("dependencies", "scenarios"):
-            if not isinstance(row[key], list) or not all(isinstance(v, str) and v for v in row[key]):
-                errors.append(f"{label}: {key} must be a list of names")
+        if not isinstance(row["scenarios"], list) or not all(
+                isinstance(v, str) and v.strip() for v in row["scenarios"]):
+            errors.append(f"{label}: scenarios must be a list of names")
+        elif not row["scenarios"]:
+            errors.append(f"{label}: scenarios must not be empty")
+        if not isinstance(row["dependencies"], list):
+            errors.append(f"{label}: dependencies must be a list")
         if isinstance(row["dependencies"], list):
             for dependency in row["dependencies"]:
-                if isinstance(dependency, str) and dependency not in names:
-                    errors.append(f"{label}: missing dependency row {dependency}")
+                if not isinstance(dependency, dict) or set(dependency) != {"artifact", "sha256", "required"}:
+                    errors.append(f"{label}: dependency needs artifact, sha256 and required")
+                    continue
+                selected = by_identity.get(dependency["artifact"]) if isinstance(dependency["artifact"], str) else None
+                if selected is None:
+                    errors.append(f"{label}: missing exact dependency artifact {dependency['artifact']}")
+                elif dependency["sha256"] != selected.get("sha256"):
+                    errors.append(f"{label}: dependency checksum does not match {dependency['artifact']}")
+                if not isinstance(dependency["required"], bool):
+                    errors.append(f"{label}: dependency required must be boolean")
         location = row.get("local_path")
         digest = row["sha256"]
         if location is None:
@@ -77,7 +98,7 @@ def validate_manifest(manifest):
         if not path.is_file():
             errors.append(f"{label}: local file does not exist: {location}")
             continue
-        if not isinstance(digest, str) or not re.fullmatch(r"[a-fA-F0-9]{64}", digest):
+        if not isinstance(digest, str) or not SHA256.fullmatch(digest):
             errors.append(f"{label}: invalid SHA-256")
             continue
         actual = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -86,13 +107,72 @@ def validate_manifest(manifest):
     return errors
 
 
+def _verified_evidence(reference, build, artifact_sha256, scenarios):
+    """Read a checksum-pinned comparison artifact; return its observations."""
+    if not isinstance(reference, dict) or set(reference) != {"path", "sha256"}:
+        return None
+    if not isinstance(reference["path"], str) or not isinstance(reference["sha256"], str):
+        return None
+    if not SHA256.fullmatch(reference["sha256"]):
+        return None
+    path = pathlib.Path(reference["path"])
+    if not path.is_file():
+        return None
+    try:
+        raw = path.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != reference["sha256"].lower():
+            return None
+        payload = json.loads(raw)
+    except (OSError, ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+        return None
+    if payload.get("build") != build or payload.get("artifact_sha256") != artifact_sha256:
+        return None
+    axes = payload.get("axes")
+    if not isinstance(axes, dict) or any(axes.get(axis) != "pass" for axis in AXES):
+        return None
+    observations = payload.get("observations")
+    if not isinstance(observations, dict) or any(
+            not isinstance(observations.get(scenario), str) or
+            not observations[scenario].strip() for scenario in scenarios):
+        return None
+    return {scenario: observations[scenario] for scenario in scenarios}
+
+
+def _base_passes(row, supplied, axes, target):
+    if row.get("local_path") is None or not row["scenarios"]:
+        return False
+    if not all(value == "pass" for value in axes.values()):
+        return False
+    if any(not isinstance(row[key], str) or UNKNOWN_METADATA.search(row[key])
+           for key in ("source", "license", "api_version", "version")):
+        return False
+    if not PAPER_BUILD.fullmatch(row["paper_build"]) or not row["paper_build"].startswith(f"paper:{target}:"):
+        return False
+    foton_build = supplied.get("foton_build")
+    if not isinstance(foton_build, str) or not FOTON_BUILD.fullmatch(foton_build):
+        return False
+    scenario_results = supplied.get("scenarios")
+    if not isinstance(scenario_results, dict) or any(
+            scenario_results.get(scenario) != "pass" for scenario in row["scenarios"]):
+        return False
+    if row.get("uses_internals") == "manual_review_required" and supplied.get("reflection_review") != "pass":
+        return False
+    paper = _verified_evidence(supplied.get("paper_evidence"), row["paper_build"],
+                               row["sha256"], row["scenarios"])
+    foton = _verified_evidence(supplied.get("foton_evidence"), foton_build,
+                               row["sha256"], row["scenarios"])
+    return paper is not None and paper == foton
+
+
 def certification_report(manifest, results):
     errors = validate_manifest(manifest)
     if errors:
         raise ValueError("; ".join(errors))
     rows = []
-    passing_products = set()
     products = {}
+    base = {}
     for row in manifest["artifacts"]:
         identity = artifact_id(row)
         supplied = results.get(identity, {})
@@ -101,29 +181,35 @@ def certification_report(manifest, results):
             raise ValueError(f"{identity}: invalid axis status")
         if row.get("local_path") is None and any(value != "not_tested" for value in axes.values()):
             raise ValueError(f"{identity}: unavailable artifact has test results")
-        scenario_results = supplied.get("scenarios", {})
-        scenario_pass = isinstance(scenario_results, dict) and all(
-            scenario_results.get(scenario) == "pass" for scenario in row["scenarios"])
-        evidence = supplied.get("evidence")
-        foton_build = supplied.get("foton_build")
-        oracle_pinned = not row["paper_build"].startswith("not_recorded")
-        reflection_reviewed = (row.get("uses_internals") != "manual_review_required"
-                               or supplied.get("reflection_review") == "pass")
-        passed = (all(value == "pass" for value in axes.values()) and scenario_pass
-                  and isinstance(evidence, str) and bool(evidence.strip())
-                  and isinstance(foton_build, str) and bool(foton_build.strip())
-                  and oracle_pinned and reflection_reviewed)
+        base[identity] = _base_passes(row, supplied, axes, manifest["foton_target"])
         product = (row["name"], row["version"])
-        products.setdefault(product, []).append(passed)
+        products.setdefault(product, []).append(identity)
         rows.append({"artifact": identity, "name": row["name"], "version": row["version"],
-                     "variant": row["variant"], **axes, "certified": passed,
-                     "evidence": evidence, "foton_build": foton_build,
-                     "scenarios": scenario_results})
-    for product, variants in products.items():
-        if all(variants):
-            passing_products.add(product)
+                     "variant": row["variant"], **axes, "certified": False,
+                     "paper_evidence": supplied.get("paper_evidence"),
+                     "foton_evidence": supplied.get("foton_evidence"),
+                     "foton_build": supplied.get("foton_build"),
+                     "scenarios": supplied.get("scenarios", {})})
+    certified = set()
+    # Start from proven leaves; a missing prerequisite or dependency cycle
+    # cannot become certified by merely marking each node pass in a JSON file.
+    changed = True
+    while changed:
+        changed = False
+        for row in manifest["artifacts"]:
+            identity = artifact_id(row)
+            if identity in certified or not base[identity]:
+                continue
+            if all(dependency["artifact"] in certified for dependency in row["dependencies"]
+                   if dependency["required"]):
+                certified.add(identity)
+                changed = True
+    for item in rows:
+        item["certified"] = item["artifact"] in certified
+    passing_products = sum(all(identity in certified for identity in variants)
+                           for variants in products.values())
     return {"artifacts": rows, "artifact_count": len(rows),
-            "product_count": len(products), "certified_products": len(passing_products),
+            "product_count": len(products), "certified_products": passing_products,
             "historical_corpus": manifest.get("historical_corpus", {}),
             "complete_market_corpus": False}
 

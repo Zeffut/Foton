@@ -282,12 +282,14 @@ def scan_details(jar):
                 data = archive.read(entry)
                 for surface, member in references(data):
                     found[surface].add(member)
-                classes, handles, indy, names, reflective, partial = class_details(data)
+                classes, handles, indy, names, reflective, _partial = class_details(data)
                 details["classes"].update(classes)
                 details["method_handles"].update(handles)
                 details["invokedynamic"].update(indy)
                 details["reflection_names"].update(names)
-                if reflective and (partial or not names):
+                # A constant-pool string does not identify which reflective
+                # call site uses it. A class may also build a second name.
+                if reflective:
                     details["manual_review"].add(entry)
             except (NotAClassFile, struct.error, KeyError, IndexError):
                 details["unreadable"] += 1

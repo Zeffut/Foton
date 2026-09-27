@@ -354,6 +354,22 @@ class ExtendedScanning(unittest.TestCase):
             details = plugin_api_usage.scan_details(jar)
             self.assertTrue(details["manual_review"])
 
+    def test_mixed_static_and_dynamic_reflection_requires_manual_review(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            jar = build_jar({"example/Mixed.java": """
+                package example;
+                public class Mixed {
+                    public void get(String name) throws Exception {
+                        Class.forName("org.bukkit.OnlyOne");
+                        Class.forName(name);
+                    }
+                }
+            """}, root / "fixture")
+            details = plugin_api_usage.scan_details(jar)
+            self.assertIn("org/bukkit/OnlyOne", details["reflection_names"])
+            self.assertIn("example/Mixed.class", details["manual_review"])
+
 
 if __name__ == "__main__":
     unittest.main()
