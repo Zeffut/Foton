@@ -54,6 +54,22 @@ io/netty netty-buffer 4.2.15.Final 1361fd9c9ba85b9831cf54a1b2e45ddc3ce34a7689317
 io/netty netty-transport 4.2.15.Final 9fb671e96651066cf1a28dad3f1382c7c99df5b8326d4a214d9a375b311f8dc1
 io/netty netty-resolver 4.2.15.Final 24318497f2a3a645964fed418f48879ba11365cab8e1f8d66c47fa7da15ef19a
 io/netty netty-codec-base 4.2.15.Final 2c6d39d7270628b8cfc3166fbd7a93d595958e59c461bc32ddb383c8c91bf811
+org/apache/maven/resolver maven-resolver-api 1.9.18 ebfb9e1dfeea3c2017905184581e007874b4eaac9d28bfffcfe5133d70ac6339
+org/apache/maven/resolver maven-resolver-spi 1.9.18 d364fce9a17b0e0b073c26efa92af95b29c00c42943dced4a1168a7923fd3fe1
+org/apache/maven/resolver maven-resolver-util 1.9.18 2eb0ea667bc489384478231dda7516407d4b5b22a138077229871de9362a7ae2
+org/apache/maven/resolver maven-resolver-impl 1.9.18 6bb9c90d007098004749c867da2eaf5785fc1139907718749c1097bdb2929bf8
+org/apache/maven/resolver maven-resolver-named-locks 1.9.18 098de7bbc5b0b26c3eff74ac30ffba6680fdab9bf4aebab95c3f5e2fe9eaeea8
+org/apache/maven/resolver maven-resolver-connector-basic 1.9.18 f88d97d0f18571a675e73b45d6a9384b00322c9fae514ad6761d65b729a4e82a
+org/apache/maven maven-resolver-provider 3.9.6 73b00b244b7b9e285654a45e765892bf5d369da77d42b5b4b5429122ed198a33
+org/apache/maven maven-model 3.9.6 4f8f07fdb6b8701fa89a23a2edf830808fd65892d90cce40c0e6df7c8f2fcb62
+org/apache/maven maven-model-builder 3.9.6 5f96dafbc411ee4b1e8426368d0d31d05ab5a4dace69808143142a0017598721
+org/apache/maven maven-repository-metadata 3.9.6 e047a67b204c434994253e2ab5bdff5fe8cb7ada9316ac3e754c39f900ea847b
+org/apache/maven maven-artifact 3.9.6 ad7a0fb408f8e47585ccc0d0011e0b501d93bfc9888d369bbd4a043d19475073
+org/apache/maven maven-builder-support 3.9.6 e1f4d2784459ce8a34b9dae1829a1999b569e483e21ee9faa7368691e729296e
+org/codehaus/plexus plexus-utils 3.5.1 86e0255d4c879c61b4833ed7f13124e8bb679df47debb127326e7db7dd49a07b
+org/codehaus/plexus plexus-interpolation 1.26 b3b5412ce17889103ea564bcdfcf9fb3dfa540344ffeac6b538a73c9d7182662
+javax/inject javax.inject 1 91c77044a50c481636c32d916fd89c9118a72195390452c81065080f957de7ff
+org/apache/commons commons-lang3 3.20.0 69e5c9fa35da7a51a5fd2099dfe56a2d8d32cf233e2f6d770e796146440263f4
 LIST
 )
 

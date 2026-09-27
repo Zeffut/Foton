@@ -62,6 +62,24 @@ missing or changed jar from Maven.
 
 ## Licenses
 
+Plugin Maven resolution uses the exact Maven Resolver 1.9.18 and Maven provider
+3.9.6 versions distributed by official Paper 26.2 build 129. Its 16 additional
+JARs are resolver `api`, `spi`, `util`, `impl`, `named-locks`, `connector-basic`;
+Maven `resolver-provider`, `model`, `model-builder`, `repository-metadata`,
+`artifact`, `builder-support`; `plexus-utils:3.5.1`,
+`plexus-interpolation:1.26`, `javax.inject:1`, and `commons-lang3:3.20.0`.
+Every coordinate, download path and SHA-256 is in `dev/fetch-plugin-api-libs.sh`.
+The initial bytes came from the pinned Paper runtime; the restoration source is
+Paper's Maven mirror. Their Apache-2.0 license and embedded notices are retained;
+Plexus Utils additionally retains its Indiana, Javolution and ThoughtWorks
+licenses inside the unmodified JAR, as recorded in `THIRD-PARTY-NOTICES.txt`.
+
+Foton supplies a bounded HTTP transport to the real Maven graph resolver, so
+Apache HTTP Client is not a runtime dependency. Guice module classes and Sisu
+annotations are optional integrations: the runtime checker excludes only those
+specific reference owners. All other Maven dependencies must resolve through
+`jdeps` and the local HTTP/POM/JAR fixture in the Java API harness.
+
 Every license was read from the artifact itself or from the project's published
 POM, not from memory and not carried over from the previous version.
 

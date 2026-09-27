@@ -89,7 +89,7 @@ What it does, in order, stopping at the first failure:
 6. **Packages the plugin API and its pinned runtime libraries** in `.tar.gz`
    and `.zip` forms, with the complete third-party license/notices and an
    exhaustive internal checksum manifest. The runtime is exactly the API jar
-   plus its twenty-four pinned dependency jars, including Guava's real
+   plus its forty-five pinned dependency jars, including Guava's real
    transitive runtime closure and the five Netty modules used by the direct
    Via transport bridge.
 7. **Writes `SHA256SUMS`** over every artifact.
@@ -113,7 +113,7 @@ A full release has five platform binaries and two plugin-runtime archives:
 | `foton-plugin-runtime.tar.gz` | Plugin API/runtime, POSIX installer | laptop or CI |
 | `foton-plugin-runtime.zip` | Plugin API/runtime, PowerShell installer | laptop or CI |
 
-Each plugin-runtime archive contains the API JAR, exactly 29 pinned dependency
+Each plugin-runtime archive contains the API JAR, exactly 45 pinned dependency
 JARs (including the five Netty 4.2.15.Final modules used by the direct Via
 transport bridge), six license/notice texts and an internal SHA-256 manifest.
 ViaVersion and ViaBackwards are opt-in operator plugins and are not bundled.

@@ -10,8 +10,8 @@ command -v jar >/dev/null 2>&1 || { echo 'jar is required' >&2; exit 1; }
 
 bash dev/fetch-plugin-api-libs.sh --check
 mapfile -t jars < <(find plugin-api/lib -maxdepth 1 -type f -name '*.jar' -print | LC_ALL=C sort)
-[ "${#jars[@]}" -eq 29 ] || {
-  echo "plugin runtime must contain exactly 29 dependency jars; found ${#jars[@]}" >&2
+[ "${#jars[@]}" -eq 45 ] || {
+  echo "plugin runtime must contain exactly 45 dependency jars; found ${#jars[@]}" >&2
   exit 1
 }
 
@@ -33,7 +33,16 @@ if grep -q -- '-> not found' "$scratch/jdeps.log"; then
   # Netty deliberately ships adapters for logging frameworks, BlockHound and
   # GraalVM native-image even when those optional tools are absent. Keep that
   # list narrow and visible; every other missing class still breaks the build.
-  while read -r missing; do
+  while read -r owner missing; do
+    # Maven's Guice modules and Sisu annotations are optional DI integrations;
+    # Foton uses the explicit service locator, as does the pinned Paper build.
+    case "$owner:$missing" in
+      org.apache.maven.repository.internal.MavenResolverModule:com.google.inject.*|\
+      org.eclipse.aether.impl.guice.AetherModule*:com.google.inject.*|\
+      org.apache.maven.model.building.DefaultModelBuilder:org.eclipse.sisu.Nullable|\
+      org.apache.maven.model.building.DefaultModelProcessor:org.eclipse.sisu.Typed|\
+      org.eclipse.aether.internal.impl.slf4j.Slf4jLoggerFactory:org.eclipse.sisu.Nullable) continue ;;
+    esac
     case "$missing" in
       com.oracle.svm.core.annotate.*|reactor.blockhound.*|\
       org.apache.commons.logging.*|org.apache.logging.log4j.*|org.apache.log4j.*) ;;
@@ -43,7 +52,7 @@ if grep -q -- '-> not found' "$scratch/jdeps.log"; then
         exit 1
         ;;
     esac
-  done < <(awk 'NF >= 5 && $2 == "->" && $(NF - 1) == "not" && $NF == "found" {print $3}' \
+  done < <(awk 'NF >= 5 && $2 == "->" && $(NF - 1) == "not" && $NF == "found" {print $1, $3}' \
     "$scratch/jdeps.log" | LC_ALL=C sort -u)
 fi
 

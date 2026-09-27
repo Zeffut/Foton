@@ -28,6 +28,7 @@ public final class Checks {
             "disabling a plugin should release its custom channels");
         YamlCheck.check();
         foton.PaperLoading.check();
+        foton.PluginLibraries.check();
         System.out.println(
             "plugin API checked: services, events, scheduler, lifecycle, network hooks, YAML,\n"
                 + "    configuration, geometry, items, colors, commands, scoreboards and permissions");

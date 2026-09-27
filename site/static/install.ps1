@@ -206,7 +206,15 @@ function Test-RuntimeComplete {
         'netty-resolver-4.2.15.Final.jar',
         'netty-transport-4.2.15.Final.jar',
         'slf4j-api-2.0.17.jar',
-        'snakeyaml-2.2.jar'
+        'snakeyaml-2.2.jar',
+        'maven-resolver-api-1.9.18.jar', 'maven-resolver-spi-1.9.18.jar',
+        'maven-resolver-util-1.9.18.jar', 'maven-resolver-impl-1.9.18.jar',
+        'maven-resolver-named-locks-1.9.18.jar', 'maven-resolver-connector-basic-1.9.18.jar',
+        'maven-resolver-provider-3.9.6.jar', 'maven-model-3.9.6.jar',
+        'maven-model-builder-3.9.6.jar', 'maven-repository-metadata-3.9.6.jar',
+        'maven-artifact-3.9.6.jar', 'maven-builder-support-3.9.6.jar',
+        'plexus-utils-3.5.1.jar', 'plexus-interpolation-1.26.jar',
+        'javax.inject-1.jar', 'commons-lang3-3.20.0.jar'
     )
 
     $apiSeen = 0
@@ -256,8 +264,8 @@ function Test-RuntimeComplete {
     foreach ($licenseName in $expectedLicenses) {
         if (-not (Test-RegularFile (Join-Path $licenses $licenseName))) { return $false }
     }
-    return $apiSeen -eq 1 -and $librariesSeen -eq 29 -and
-        $jarFiles.Count -eq 29 -and $libraryFiles.Count -eq 29 -and
+    return $apiSeen -eq 1 -and $librariesSeen -eq 45 -and
+        $jarFiles.Count -eq 45 -and $libraryFiles.Count -eq 45 -and
         $licensesSeen -eq 6 -and $manifestEntries -eq $actualFiles.Count
 }
 

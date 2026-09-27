@@ -323,14 +323,6 @@ public final class PluginHost {
                 throw new UnsupportedOperationException(descriptor.getName()
                     + ": Paper bootstrap execution is not implemented");
             }
-            if (paper.loader() != null) {
-                throw new UnsupportedOperationException(descriptor.getName()
-                    + ": Paper plugin loader execution is not implemented");
-            }
-        } else if (descriptor.getPaperPluginLoader() != null
-                || (!descriptor.isPaperSkipLibraries() && !descriptor.getLibraries().isEmpty())) {
-            throw new UnsupportedOperationException(descriptor.getName()
-                + ": legacy plugin library/loader resolution is not implemented");
         }
     }
 
@@ -343,7 +335,7 @@ public final class PluginHost {
                 return null;
             }
         }
-        org.bukkit.plugin.java.PluginClassLoader loader = new org.bukkit.plugin.java.PluginClassLoader(pluginUrls(jar), dependencyParent(descriptor));
+        org.bukkit.plugin.java.PluginClassLoader loader = new org.bukkit.plugin.java.PluginClassLoader(pluginUrls(jar, descriptor), dependencyParent(descriptor));
         boolean registered = false;
         JavaPlugin plugin = null;
         try {
@@ -399,40 +391,48 @@ public final class PluginHost {
         EventBridge.unregister(plugin);
     }
 
-    private static URL[] pluginUrls(File jar) throws Exception {
+    private static URL[] pluginUrls(File jar, PluginDescriptionFile descriptor) throws Exception {
         List<URL> urls = new ArrayList<>();
         urls.add(jar.toURI().toURL());
-        File libraries = new File(jar.getParentFile(), ".foton-libraries");
-        try (JarFile archive = new JarFile(jar)) {
-            var entry = archive.getEntry("paper-libraries.json");
-            if (entry == null) return urls.toArray(new URL[0]);
-            String json;
-            try (InputStream stream = archive.getInputStream(entry)) { json = new String(stream.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8); }
-            int serializationIndex = json.indexOf("kotlinx-serialization-json:");
-            if (serializationIndex >= 0) {
-                int versionStart = serializationIndex + "kotlinx-serialization-json:".length();
-                int versionEnd = json.indexOf("\"", versionStart);
-                if (versionEnd > versionStart) json += "\"org.jetbrains.kotlinx:kotlinx-serialization-core:" + json.substring(versionStart, versionEnd) + "\"";
+        Path cache = jar.toPath().toAbsolutePath().getParent().resolve(".foton-libraries");
+        List<io.papermc.paper.plugin.loader.library.ClassPathLibrary> libraries = new ArrayList<>();
+        if (!(descriptor instanceof PaperPluginDescriptor) && !descriptor.isPaperSkipLibraries()
+                && !descriptor.getLibraries().isEmpty()) {
+            var resolver = new io.papermc.paper.plugin.loader.library.impl.MavenLibraryResolver();
+            resolver.addRepository(new org.eclipse.aether.repository.RemoteRepository.Builder("central", "default",
+                io.papermc.paper.plugin.loader.library.impl.MavenLibraryResolver.MAVEN_CENTRAL_DEFAULT_MIRROR).build());
+            for (String coordinate : descriptor.getLibraries()) {
+                resolver.addDependency(new org.eclipse.aether.graph.Dependency(new org.eclipse.aether.artifact.DefaultArtifact(coordinate), null));
             }
-            java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\"([A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+)\"").matcher(json);
-            while (matcher.find()) {
-                String coordinate = matcher.group(1);
-                String[] parts = coordinate.split(":", 3);
-                String artifact = parts[1];
-                // Select the JVM variant for Kotlin Multiplatform artifacts.
-                if (parts[0].startsWith("org.jetbrains.kotlinx") && !artifact.endsWith("-jvm")) artifact += "-jvm";
-                String repositoryPath = parts[0].replace(".", "/") + "/" + artifact + "/"
-                    + parts[2] + "/" + artifact + "-" + parts[2] + ".jar";
-                Path libraryRoot = libraries.toPath().toAbsolutePath().normalize();
-                Path target = libraryRoot.resolve(repositoryPath).normalize();
-                if (!target.startsWith(libraryRoot)) {
-                    throw new IOException("Invalid runtime library coordinate: " + coordinate);
+            libraries.add(resolver);
+        }
+        String loaderName = descriptor instanceof PaperPluginDescriptor paper ? paper.loader() : descriptor.getPaperPluginLoader();
+        if (loaderName != null) {
+            var context = new io.papermc.paper.plugin.bootstrap.PluginProviderContext() {
+                @Override public io.papermc.paper.plugin.configuration.PluginMeta getConfiguration() { return descriptor; }
+                @Override public Path getDataDirectory() { return jar.toPath().toAbsolutePath().getParent().resolve(descriptor.getName()); }
+                @Override public net.kyori.adventure.text.logger.slf4j.ComponentLogger getLogger() {
+                    return net.kyori.adventure.text.logger.slf4j.ComponentLogger.logger(descriptor.getName());
                 }
-                URL source = java.net.URI.create(
-                    "https://repo.maven.apache.org/maven2/" + repositoryPath).toURL();
-                cacheLibrary(source, target);
-                urls.add(target.toUri().toURL());
+                @Override public Path getPluginSource() { return jar.toPath(); }
+            };
+            try (URLClassLoader loader = new URLClassLoader(new URL[] {jar.toURI().toURL()}, PluginHost.class.getClassLoader())) {
+                Object instance = Class.forName(loaderName, true, loader).getDeclaredConstructor().newInstance();
+                if (!(instance instanceof io.papermc.paper.plugin.loader.PluginLoader pluginLoader)) {
+                    throw new IOException("Plugin loader does not implement PluginLoader: " + loaderName);
+                }
+                pluginLoader.classloader(new io.papermc.paper.plugin.loader.PluginClasspathBuilder() {
+                    @Override public io.papermc.paper.plugin.loader.PluginClasspathBuilder addLibrary(io.papermc.paper.plugin.loader.library.ClassPathLibrary library) {
+                        libraries.add(java.util.Objects.requireNonNull(library));
+                        return this;
+                    }
+                    @Override public io.papermc.paper.plugin.bootstrap.PluginProviderContext getContext() { return context; }
+                });
+                // A custom ClassPathLibrary can reference classes from the loader's JAR.
+                urls.addAll(PluginLibraryResolver.registerLibraries(cache, libraries));
             }
+        } else {
+            urls.addAll(PluginLibraryResolver.registerLibraries(cache, libraries));
         }
         return urls.toArray(new URL[0]);
     }

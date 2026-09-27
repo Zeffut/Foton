@@ -104,8 +104,8 @@ PLUGIN_JARS=(plugin-api/lib/*.jar)
 if [ ! -e "${PLUGIN_JARS[0]}" ]; then
   die "plugin-api/lib contains no runtime dependency jars"
 fi
-if [ "${#PLUGIN_JARS[@]}" -ne 29 ]; then
-  die "the plugin runtime must contain exactly 29 pinned dependency jars; found ${#PLUGIN_JARS[@]}"
+if [ "${#PLUGIN_JARS[@]}" -ne 45 ]; then
+  die "the plugin runtime must contain exactly 45 pinned dependency jars; found ${#PLUGIN_JARS[@]}"
 fi
 for plugin_jar in "${PLUGIN_JARS[@]}"; do
   [ -f "$plugin_jar" ] && [ ! -L "$plugin_jar" ] \

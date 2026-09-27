@@ -17,6 +17,7 @@ public final class JarLibrary implements ClassPathLibrary {
 
     @Override public void register(LibraryStore store) throws LibraryLoadingException {
         try {
+            foton.PluginLibraryResolver.localLibrary(path);
             store.addLibrary(path.toRealPath());
         } catch (IOException error) {
             throw new LibraryLoadingException("Cannot read local plugin library " + path, error);
