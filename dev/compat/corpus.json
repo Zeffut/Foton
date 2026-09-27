@@ -23,8 +23,7 @@
       "scenarios": ["startup with PacketEvents", "login", "movement", "combat", "inventory", "violation", "restart", "coinstall with Via"],
       "uses_internals": "manual_review_required",
       "reflection_review": "not_tested",
-      "tested_foton_build": null,
-      "status": "not_tested"
+      "tested_foton_build": null
     },
     {
       "name": "ZeldaCiv",
@@ -41,8 +40,7 @@
       "scenarios": ["startup", "domain and team display", "item PDC restart", "custom inventory", "entity and player events", "merchant and recipe", "mounts", "region interaction", "optional integrations"],
       "uses_internals": "manual_review_required",
       "reflection_review": "not_tested",
-      "tested_foton_build": null,
-      "status": "not_tested"
+      "tested_foton_build": null
     },
     {
       "name": "ZeldaCiv",
@@ -59,8 +57,7 @@
       "scenarios": ["startup", "item PDC restart", "custom inventory", "coinstall"],
       "uses_internals": "manual_review_required",
       "reflection_review": "not_tested",
-      "tested_foton_build": null,
-      "status": "not_tested"
+      "tested_foton_build": null
     },
     {
       "name": "ZeldaCiv",
@@ -77,8 +74,7 @@
       "scenarios": ["startup", "dependency visibility"],
       "uses_internals": "manual_review_required",
       "reflection_review": "not_tested",
-      "tested_foton_build": null,
-      "status": "not_tested"
+      "tested_foton_build": null
     },
     {
       "name": "packetevents",
@@ -92,8 +88,7 @@
       "api_version": "not_verified",
       "paper_build": "not_recorded",
       "dependencies": [],
-      "scenarios": ["startup", "packet callbacks", "coinstall with Observer and Via"],
-      "status": "not_tested"
+      "scenarios": ["startup", "packet callbacks", "coinstall with Observer and Via"]
     },
     {
       "name": "LuckPerms",
@@ -106,8 +101,7 @@
       "api_version": "not_verified",
       "paper_build": "not_recorded",
       "dependencies": [],
-      "scenarios": ["optional integration"],
-      "status": "not_tested"
+      "scenarios": ["optional integration"]
     },
     {
       "name": "MythicMobs",
@@ -120,8 +114,7 @@
       "api_version": "not_verified",
       "paper_build": "not_recorded",
       "dependencies": [],
-      "scenarios": ["optional integration"],
-      "status": "not_tested"
+      "scenarios": ["optional integration"]
     },
     {
       "name": "voicechat",
@@ -134,8 +127,7 @@
       "api_version": "not_verified",
       "paper_build": "not_recorded",
       "dependencies": [],
-      "scenarios": ["optional integration"],
-      "status": "not_tested"
+      "scenarios": ["optional integration"]
     }
   ]
 }

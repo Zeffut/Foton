@@ -20,7 +20,7 @@ class Manifest(unittest.TestCase):
                    local_path=str(path) if path.exists() else None,
                    source="local build", license="proprietary",
                    api_version="1.21", paper_build="paper:26.2:123",
-                   dependencies=[], scenarios=["startup"], status="not_tested")
+                   dependencies=[], scenarios=["startup"])
         row.update(changes)
         return row
 
@@ -130,6 +130,23 @@ class Manifest(unittest.TestCase):
             paper_path.write_text(json.dumps(payload), encoding="utf-8")
             passing["paper_evidence"]["sha256"] = hashlib.sha256(paper_path.read_bytes()).hexdigest()
             self.assertEqual(plugin_compat.certification_report(self.manifest(row), {key: passing})["certified_products"], 0)
+
+    def test_report_status_is_derived_and_manifest_status_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            path = root / "fixture.jar"
+            path.write_bytes(b"jar")
+            row = self.row(path)
+            row["status"] = "not_tested"
+            self.assertTrue(plugin_compat.validate_manifest(self.manifest(row)))
+            row.pop("status")
+            key = plugin_compat.artifact_id(row)
+            untested = plugin_compat.certification_report(self.manifest(row), {})
+            self.assertEqual(untested["artifacts"][0]["status"], "not_tested")
+            tested = plugin_compat.certification_report(
+                self.manifest(row), {key: self.passing(root, row)})
+            self.assertEqual(tested["artifacts"][0]["status"], "pass")
+            self.assertTrue(tested["artifacts"][0]["certified"])
 
 
 if __name__ == "__main__":

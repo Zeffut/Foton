@@ -62,8 +62,8 @@ def validate_manifest(manifest):
         if identity in identities:
             errors.append(f"{label}: duplicate artifact identity {identity}")
         identities.add(identity)
-        if row.get("status", "not_tested") not in STATUSES:
-            errors.append(f"{label}: invalid status")
+        if "status" in row:
+            errors.append(f"{label}: status is derived from results; remove it from the manifest")
         if not isinstance(row["scenarios"], list) or not all(
                 isinstance(v, str) and v.strip() for v in row["scenarios"]):
             errors.append(f"{label}: scenarios must be a list of names")
@@ -88,8 +88,6 @@ def validate_manifest(manifest):
         if location is None:
             if digest is not None:
                 errors.append(f"{label}: SHA-256 has no local file to verify")
-            if row.get("status", "not_tested") != "not_tested":
-                errors.append(f"{label}: unavailable artifact must be not_tested")
             continue
         if not isinstance(location, str) or not location:
             errors.append(f"{label}: invalid local_path")
@@ -206,6 +204,9 @@ def certification_report(manifest, results):
                 changed = True
     for item in rows:
         item["certified"] = item["artifact"] in certified
+        item["status"] = ("pass" if item["certified"] else
+                          "fail" if any(item[axis] == "fail" for axis in AXES)
+                          else "not_tested")
     passing_products = sum(all(identity in certified for identity in variants)
                            for variants in products.values())
     return {"artifacts": rows, "artifact_count": len(rows),
