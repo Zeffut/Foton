@@ -27,6 +27,7 @@ public final class Checks {
             && org.bukkit.Bukkit.getMessenger().getOutgoingChannels().isEmpty(),
             "disabling a plugin should release its custom channels");
         YamlCheck.check();
+        foton.PaperLoading.check();
         System.out.println(
             "plugin API checked: services, events, scheduler, lifecycle, network hooks, YAML,\n"
                 + "    configuration, geometry, items, colors, commands, scoreboards and permissions");

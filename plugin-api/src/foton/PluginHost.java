@@ -177,14 +177,7 @@ public final class PluginHost {
     /** Dependencies without which the plugin must not load: Bukkit's
      * {@code depend}, or the {@code required} entries of paper-plugin.yml. */
     private static List<String> requiredDependencies(PluginDescriptionFile descriptor) {
-        if (!(descriptor instanceof PaperPluginDescriptor paper)) return descriptor.getDepend();
-        List<String> names = new ArrayList<>();
-        for (PaperPluginDescriptor.Dependency dependency : paper.paperDependencies()) {
-            if (dependency.required() && !names.contains(dependency.name())) {
-                names.add(dependency.name());
-            }
-        }
-        return names;
+        return PluginDependencyGraph.required(descriptor, PaperPluginDescriptor.Phase.SERVER);
     }
 
     private static String unavailableLoadedDependency(Plugin plugin) {
@@ -239,7 +232,13 @@ public final class PluginHost {
     private static String unavailableRequiredDependency(Plugin plugin) {
         for (String name : requiredDependencies(plugin)) {
             Plugin dependency = byName(name);
-            if (dependency == null || !dependency.isEnabled()) {
+            boolean needsEnabled = true;
+            if (plugin.getDescription() instanceof PaperPluginDescriptor paper) {
+                needsEnabled = paper.paperDependencies().stream().anyMatch(d ->
+                    d.phase() == PaperPluginDescriptor.Phase.SERVER && d.name().equals(name)
+                    && d.load() == PaperPluginDescriptor.LoadOrder.BEFORE);
+            }
+            if (dependency == null || (needsEnabled && !dependency.isEnabled())) {
                 return name;
             }
         }
@@ -260,9 +259,11 @@ public final class PluginHost {
         }
         Map<String, File> jarsByName = new HashMap<>();
         Map<String, PluginDescriptionFile> descriptors = new HashMap<>();
+        java.util.Arrays.sort(jars, java.util.Comparator.comparing(File::getName));
         for (File jar : jars) {
             try {
                 PluginDescriptionFile descriptor = readDescriptor(jar);
+                requireSupportedLoading(descriptor);
                 String key = descriptor.getName().toLowerCase(java.util.Locale.ROOT);
                 if (jarsByName.putIfAbsent(key, jar) != null) {
                     System.out.println("[host] duplicate plugin name " + descriptor.getName() + "; skipping " + jar.getName());
@@ -274,158 +275,16 @@ public final class PluginHost {
                 error.printStackTrace(System.out);
             }
         }
-        Set<String> valid = hardDependencyClosure(jarsByName, descriptors);
-        Map<String, Set<String>> edges = new HashMap<>();
-        for (String key : valid) edges.put(key, new java.util.TreeSet<>());
-        for (String key : valid) {
-            PluginDescriptionFile descriptor = descriptors.get(key);
-            if (descriptor instanceof PaperPluginDescriptor paper) {
-                for (PaperPluginDescriptor.Dependency dependency : paper.paperDependencies()) {
-                    if (dependency.load() == PaperPluginDescriptor.LoadOrder.BEFORE) {
-                        addEdge(edges, pluginKey(dependency.name()), key);
-                    } else if (dependency.load() == PaperPluginDescriptor.LoadOrder.AFTER) {
-                        addEdge(edges, key, pluginKey(dependency.name()));
-                    }
-                }
-            } else {
-                for (String dependency : descriptor.getDepend()) {
-                    addEdge(edges, pluginKey(dependency), key);
-                }
-            }
-        }
-
-        List<OrderingEdge> optional = new ArrayList<>();
-        for (String key : valid) {
-            PluginDescriptionFile descriptor = descriptors.get(key);
-            if (!(descriptor instanceof PaperPluginDescriptor)) {
-                for (String dependency : descriptor.getSoftDepend()) {
-                    optional.add(new OrderingEdge(pluginKey(dependency), key));
-                }
-                for (String target : descriptor.getLoadBefore()) {
-                    optional.add(new OrderingEdge(key, pluginKey(target)));
-                }
-            }
-        }
-        optional.sort(java.util.Comparator.comparing(OrderingEdge::from)
-            .thenComparing(OrderingEdge::to));
-        for (OrderingEdge edge : optional) {
-            if (!valid.contains(edge.from()) || !valid.contains(edge.to())
-                    || edge.from().equals(edge.to())) {
-                continue;
-            }
-            // Soft dependencies and load-before hints only influence order.
-            // Ignore the deterministic edge that would close a cycle; unlike
-            // a hard dependency cycle, it must never make a plugin unloadable.
-            if (!reachable(edges, edge.to(), edge.from())) {
-                addEdge(edges, edge.from(), edge.to());
-            }
-        }
-
+        PluginDependencyGraph graph = new PluginDependencyGraph(descriptors.values());
+        // Bootstrap has its own node set and ordering; it never contributes
+        // runtime classpath or enable-order edges.
+        graph.order(PaperPluginDescriptor.Phase.BOOTSTRAP);
         List<File> ordered = new ArrayList<>();
-        for (String key : topologicalOrder(valid, edges)) {
+        for (String key : graph.order(PaperPluginDescriptor.Phase.SERVER)) {
             ordered.add(jarsByName.get(key));
         }
         return ordered;
     }
-
-    private static Set<String> hardDependencyClosure(Map<String, File> jars,
-            Map<String, PluginDescriptionFile> descriptors) {
-        Set<String> eligible = new java.util.TreeSet<>(jars.keySet());
-        boolean changed;
-        do {
-            changed = false;
-            for (String key : new ArrayList<>(eligible)) {
-                PluginDescriptionFile descriptor = descriptors.get(key);
-                String unavailable = requiredDependencies(descriptor).stream()
-                    .filter(name -> !eligible.contains(pluginKey(name)))
-                    .findFirst().orElse(null);
-                if (unavailable == null) continue;
-                System.out.println("[host] " + descriptor.getName()
-                    + ": missing or unavailable required dependency " + unavailable);
-                eligible.remove(key);
-                changed = true;
-            }
-        } while (changed);
-
-        Map<String, Set<String>> hardEdges = new HashMap<>();
-        for (String key : eligible) hardEdges.put(key, new java.util.TreeSet<>());
-        for (String key : eligible) {
-            PluginDescriptionFile descriptor = descriptors.get(key);
-            if (descriptor instanceof PaperPluginDescriptor paper) {
-                for (PaperPluginDescriptor.Dependency dependency : paper.paperDependencies()) {
-                    if (dependency.required()
-                            && dependency.load() == PaperPluginDescriptor.LoadOrder.BEFORE) {
-                        addEdge(hardEdges, pluginKey(dependency.name()), key);
-                    } else if (dependency.required()
-                            && dependency.load() == PaperPluginDescriptor.LoadOrder.AFTER) {
-                        addEdge(hardEdges, key, pluginKey(dependency.name()));
-                    }
-                }
-            } else {
-                for (String dependency : descriptor.getDepend()) {
-                    addEdge(hardEdges, pluginKey(dependency), key);
-                }
-            }
-        }
-        List<String> ordered = topologicalOrder(eligible, hardEdges);
-        if (ordered.size() == eligible.size()) return new java.util.TreeSet<>(ordered);
-
-        Set<String> valid = new java.util.TreeSet<>(ordered);
-        for (String key : eligible) {
-            if (!valid.contains(key)) {
-                System.out.println("[host] hard dependency cycle or dependent involving "
-                    + descriptors.get(key).getName());
-            }
-        }
-        return valid;
-    }
-
-    private static void addEdge(Map<String, Set<String>> edges, String from, String to) {
-        Set<String> outgoing = edges.get(from);
-        if (outgoing != null && edges.containsKey(to)) outgoing.add(to);
-    }
-
-    private static boolean reachable(Map<String, Set<String>> edges, String start,
-            String target) {
-        if (start.equals(target)) return true;
-        Set<String> seen = new HashSet<>();
-        java.util.ArrayDeque<String> pending = new java.util.ArrayDeque<>();
-        pending.add(start);
-        while (!pending.isEmpty()) {
-            String current = pending.removeFirst();
-            if (!seen.add(current)) continue;
-            for (String next : edges.getOrDefault(current, Set.of())) {
-                if (next.equals(target)) return true;
-                pending.addLast(next);
-            }
-        }
-        return false;
-    }
-
-    private static List<String> topologicalOrder(Set<String> nodes,
-            Map<String, Set<String>> edges) {
-        Map<String, Integer> indegree = new HashMap<>();
-        for (String key : nodes) indegree.put(key, 0);
-        for (Set<String> outgoing : edges.values()) {
-            for (String target : outgoing) indegree.merge(target, 1, Integer::sum);
-        }
-        java.util.PriorityQueue<String> ready = new java.util.PriorityQueue<>();
-        for (Map.Entry<String, Integer> entry : indegree.entrySet()) {
-            if (entry.getValue() == 0) ready.add(entry.getKey());
-        }
-        List<String> ordered = new ArrayList<>();
-        while (!ready.isEmpty()) {
-            String current = ready.remove();
-            ordered.add(current);
-            for (String target : edges.getOrDefault(current, Set.of())) {
-                int remaining = indegree.merge(target, -1, Integer::sum);
-                if (remaining == 0) ready.add(target);
-            }
-        }
-        return ordered;
-    }
-
-    private record OrderingEdge(String from, String to) {}
 
     private static PluginDescriptionFile readDescriptor(File jar) throws Exception {
         try (JarFile archive = new JarFile(jar)) {
@@ -445,13 +304,41 @@ public final class PluginHost {
         }
     }
 
+    private static void requireSupportedLoading(PluginDescriptionFile descriptor) {
+        if (descriptor instanceof PaperPluginDescriptor paper) {
+            if (paper.hasOpenClassloader()) {
+                throw new UnsupportedOperationException(descriptor.getName()
+                    + ": open Paper classloader visibility is not implemented");
+            }
+            if (paper.bootstrapper() != null || paper.paperDependencies().stream()
+                    .anyMatch(d -> d.phase() == PaperPluginDescriptor.Phase.BOOTSTRAP)) {
+                throw new UnsupportedOperationException(descriptor.getName()
+                    + ": Paper bootstrap execution is not implemented");
+            }
+            if (paper.loader() != null) {
+                throw new UnsupportedOperationException(descriptor.getName()
+                    + ": Paper plugin loader execution is not implemented");
+            }
+        } else if (descriptor.getPaperPluginLoader() != null
+                || (!descriptor.isPaperSkipLibraries() && !descriptor.getLibraries().isEmpty())) {
+            throw new UnsupportedOperationException(descriptor.getName()
+                + ": legacy plugin library/loader resolution is not implemented");
+        }
+    }
+
     private static JavaPlugin constructAndRegister(File jar) throws Exception {
         PluginDescriptionFile descriptor = readDescriptor(jar);
+        requireSupportedLoading(descriptor);
         if (byName(descriptor.getName()) != null) {
             System.out.println("[host] " + descriptor.getName() + " is already loaded; skipping " + jar.getName());
             return null;
         }
-        for (String name : requiredDependencies(descriptor)) {
+        for (String name : descriptor instanceof PaperPluginDescriptor paper
+                ? paper.paperDependencies().stream()
+                    .filter(d -> d.phase() == PaperPluginDescriptor.Phase.SERVER && d.required()
+                        && d.load() == PaperPluginDescriptor.LoadOrder.BEFORE)
+                    .map(PaperPluginDescriptor.Dependency::name).toList()
+                : descriptor.getDepend()) {
             if (byName(name) == null) {
                 System.out.println("[host] " + descriptor.getName()
                     + ": required dependency " + name + " failed to construct");
@@ -615,33 +502,16 @@ public final class PluginHost {
     }
 
     private static ClassLoader dependencyParent(PluginDescriptionFile descriptor) {
-        List<ClassLoader> dependencies = new ArrayList<>();
-        List<String> visible = new ArrayList<>();
-        if (descriptor instanceof PaperPluginDescriptor paper) {
-            // Paper shares a dependency's classes only when it joins the classpath.
-            for (PaperPluginDescriptor.Dependency dependency : paper.paperDependencies()) {
-                if (dependency.joinClasspath()) visible.add(dependency.name());
-            }
-        } else {
-            visible.addAll(descriptor.getDepend());
-            visible.addAll(descriptor.getSoftDepend());
-        }
-        synchronized (lifecycle) {
-            for (String name : visible) {
-                org.bukkit.plugin.java.PluginClassLoader loader =
-                    pluginLoaders.get(pluginKey(name));
-                if (loader != null && !dependencies.contains(loader)) {
-                    dependencies.add(loader);
-                }
-            }
-        }
-        return dependencies.isEmpty() ? PluginHost.class.getClassLoader() : new DependencyClassLoader(dependencies);
+        List<String> visible = PluginDependencyGraph.visible(descriptor, PaperPluginDescriptor.Phase.SERVER);
+        return visible.isEmpty() ? PluginHost.class.getClassLoader() : new DependencyClassLoader(visible);
     }
 
     private static final class DependencyClassLoader extends ClassLoader {
-        private final List<ClassLoader> dependencies;
+        private static final ThreadLocal<Set<DependencyClassLoader>> searching =
+            ThreadLocal.withInitial(HashSet::new);
+        private final List<String> dependencies;
 
-        private DependencyClassLoader(List<ClassLoader> dependencies) {
+        private DependencyClassLoader(List<String> dependencies) {
             super(PluginHost.class.getClassLoader());
             this.dependencies = List.copyOf(dependencies);
         }
@@ -651,12 +521,29 @@ public final class PluginHost {
             try {
                 return super.loadClass(name, resolve);
             } catch (ClassNotFoundException missingFromServer) {
-                for (ClassLoader dependency : dependencies) {
-                    try {
-                        return Class.forName(name, false, dependency);
-                    } catch (ClassNotFoundException ignored) {
-                        // Try the next declared dependency.
+                Set<DependencyClassLoader> active = searching.get();
+                if (!active.add(this)) throw missingFromServer;
+                try {
+                    List<ClassLoader> available = new ArrayList<>();
+                    synchronized (lifecycle) {
+                        for (String dependency : dependencies) {
+                            Plugin plugin = findByNameLocked(dependency);
+                            ClassLoader loader = loadersByPlugin.get(plugin);
+                            if (loader != null) available.add(loader);
+                        }
                     }
+                    // AFTER and OMIT providers may be published after this
+                    // loader was constructed. Visibility is not a load-order edge.
+                    for (ClassLoader dependency : available) {
+                        try {
+                            return Class.forName(name, false, dependency);
+                        } catch (ClassNotFoundException ignored) {
+                            // Try the next declared dependency.
+                        }
+                    }
+                } finally {
+                    active.remove(this);
+                    if (active.isEmpty()) searching.remove();
                 }
                 throw missingFromServer;
             }
@@ -970,6 +857,9 @@ public final class PluginHost {
     private static Plugin findByNameLocked(String name) {
         for (Plugin plugin : loaded) {
             if (plugin.getName().equalsIgnoreCase(name)) return plugin;
+        }
+        for (Plugin plugin : loaded) {
+            if (plugin.getDescription().getProvides().stream().anyMatch(name::equalsIgnoreCase)) return plugin;
         }
         return null;
     }
