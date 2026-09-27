@@ -14579,7 +14579,7 @@ mod slot_bridge_tests {
                 .collect();
             let descriptions: Vec<_> = stacks.iter().map(describe_slot).collect();
             let restored = java_round_trip("distinct", &descriptions);
-            assert_eq!(restored.len(), stacks.len());
+            assert_eq!(restored.len(), stacks.len(), "Java stdout: {restored:?}");
             for (encoded, original) in restored.iter().zip(stacks) {
                 assert_eq!(parse_slot(encoded).expect("round trip item"), original);
             }
