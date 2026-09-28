@@ -24,6 +24,10 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
+import org.bukkit.event.inventory.CraftItemEvent;
+import org.bukkit.event.inventory.PrepareItemCraftEvent;
+import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /** A plugin that uses PacketEvents the way real ones do, and writes down what it saw.
@@ -114,10 +118,54 @@ public final class PacketProbe extends JavaPlugin implements Listener {
                 + place(player.getLocation())), 2L);
     }
 
-    /** `/probetp`: a plugin moves the player into another loaded world. */
+    private final AtomicInteger prepares = new AtomicInteger();
+    private final AtomicInteger crafts = new AtomicInteger();
+
+    /** Records what a crafting grid looks like to a plugin. A result of
+     * sticks is refused, the way a plugin guarding an ingredient refuses one. */
+    @EventHandler
+    public void onPrepareCraft(PrepareItemCraftEvent event) {
+        int n = prepares.incrementAndGet();
+        ItemStack result = event.getInventory().getResult();
+        facts.put("prepare craft " + n, event.getInventory().getType() + " recipe "
+            + (event.getRecipe() instanceof org.bukkit.Keyed keyed ? keyed.getKey() : "none") + " matrix "
+            + items(event.getInventory().getMatrix()) + " result " + item(result));
+        if (result != null && result.getType() == org.bukkit.Material.STICK) {
+            event.getInventory().setResult(null);
+        }
+    }
+
+    @EventHandler
+    public void onCraft(CraftItemEvent event) {
+        facts.put("craft item " + crafts.incrementAndGet(), event.getInventory().getType() + " "
+            + items(event.getInventory().getMatrix()) + " makes " + event.getRecipe().getResult().getType() + " via "
+            + (event.getRecipe() instanceof org.bukkit.Keyed keyed ? keyed.getKey() : "?")
+            + " current " + item(event.getCurrentItem()));
+    }
+
+    private static String item(ItemStack stack) {
+        return stack == null || stack.getType().isAir() ? "-" : stack.getType() + "x" + stack.getAmount();
+    }
+
+    private static String items(ItemStack[] stacks) {
+        StringBuilder out = new StringBuilder("[");
+        for (int i = 0; i < stacks.length; i++) out.append(i == 0 ? "" : " ").append(item(stacks[i]));
+        return out.append("]").toString();
+    }
+
+    /** `/probetp`: a plugin moves the player into another loaded world.
+     * `/probecraft <label>`: writes down the top of the player's open view. */
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (!(sender instanceof Player player)) return true;
+        if (command.getName().equals("probecraft")) {
+            Inventory top = player.getOpenInventory().getTopInventory();
+            ItemStack[] contents = new ItemStack[top.getSize()];
+            for (int i = 0; i < contents.length; i++) contents[i] = top.getItem(i);
+            facts.put("view " + (args.length > 0 ? args[0] : "?"), top.getType() + " " + items(contents)
+                + " cursor " + item(player.getItemOnCursor()));
+            return true;
+        }
         World here = player.getWorld();
         World elsewhere = null;
         for (World world : getServer().getWorlds()) {

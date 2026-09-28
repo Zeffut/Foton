@@ -6,3 +6,5 @@ depend: [packetevents]
 commands:
   probetp:
     description: Moves the player into another loaded world.
+  probecraft:
+    description: Writes down the top of the open view.

@@ -1171,9 +1171,16 @@ def run_directive(connection, directive):
     elif parts[0] == "button":
         send_container_button_click(connection, int(parts[1]))
         print(f"  pressed button {parts[1]}")
+    elif parts[0] == "inventory":
+        # The player's own inventory is container 0 and is never opened by the
+        # server; clicking it needs no screen, only the id.
+        connection.open_container = 0
+        print("  aiming clicks at the player's inventory")
     elif parts[0] == "click":
-        send_container_click(connection, int(parts[1]), CLICK_PICKUP)
-        print(f"  clicked slot {parts[1]}")
+        # A right click (button 1) puts down one item of the carried stack.
+        button = int(parts[2]) if len(parts) > 2 else 0
+        send_container_click(connection, int(parts[1]), CLICK_PICKUP, button)
+        print(f"  clicked slot {parts[1]} with button {button}")
     elif parts[0] == "wear":
         send_wear(connection, int(parts[1]))
     elif parts[0] == "shiftclick":
