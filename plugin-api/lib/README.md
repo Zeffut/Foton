@@ -30,9 +30,9 @@ pinned by digest and checked rather than trusted for compiling.
 `adventure-text-minimessage` is not something the API itself compiles against:
 it is here because Paper puts it on every plugin's classpath and plugins rely on
 that rather than shading it. Observer and Zelda Civ both call
-`MiniMessage.miniMessage()` without carrying a copy. Paper also provides
-`-legacy`; neither of those two plugins references it, so it is not here until
-a plugin that does is tried.
+`MiniMessage.miniMessage()` without carrying a copy. `-legacy` is here for the
+same reason: Paper provides it, and a hand-written stand-in that ignored `§`
+codes and serialized a component as its `toString()` was worse than none.
 
 `adventure-text-serializer-gson` is here for Foton's own use, and paper-api
 declares it too. A component a plugin hands over -- a join or quit message, a
@@ -61,6 +61,7 @@ POM, not from memory and not carried over from the previous version.
 | adventure-text-logger-slf4j | 5.2.0 | MIT | Maven Central POM |
 | adventure-text-minimessage | 5.2.0 | MIT | PaperMC Maven POM |
 | adventure-text-serializer-plain | 5.2.0 | MIT | Maven Central POM |
+| adventure-text-serializer-legacy | 5.2.0 | MIT | Maven Central POM |
 | adventure-text-serializer-gson | 5.2.0 | MIT | PaperMC Maven POM |
 | adventure-text-serializer-json | 5.2.0 | MIT | PaperMC Maven POM |
 | adventure-text-serializer-commons | 5.2.0 | MIT | PaperMC Maven POM |
