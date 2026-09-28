@@ -15,6 +15,13 @@ public class CraftItemEvent extends InventoryClickEvent {
         super(whoClicked, currentItem, cursor, click, rawSlot);
         this.recipe = recipe;
     }
+    /** A craft whose grid the host copied into {@code view}'s top inventory. */
+    public CraftItemEvent(Recipe recipe, org.bukkit.inventory.InventoryView view, HumanEntity whoClicked,
+            ItemStack currentItem, ItemStack cursor, ClickType click, int rawSlot) {
+        super(view, whoClicked, currentItem, cursor, click, rawSlot, -1);
+        this.recipe = recipe;
+    }
     public Recipe getRecipe() { return recipe; }
+    @Override public InventoryType.SlotType getSlotType() { return InventoryType.SlotType.RESULT; }
     @Override public CraftingInventory getInventory() { return (CraftingInventory) super.getInventory(); }
 }

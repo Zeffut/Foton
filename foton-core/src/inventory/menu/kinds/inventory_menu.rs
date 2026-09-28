@@ -11,7 +11,8 @@
 use foton_registry::item_stack::ItemStack;
 use foton_utils::locks::{IntoShared, Shared};
 
-use crate::entity::WeakEntity;
+use crate::entity::{Entity as _, WeakEntity};
+use crate::event::{CraftingClick, PrepareItemCraftEvent};
 use crate::inventory::container::{CraftingContainer, ResultContainer};
 use crate::inventory::prelude::*;
 use crate::inventory::slots::{ArmorSlot, CraftingHandler};
@@ -163,6 +164,13 @@ impl InventoryKind {
 }
 
 impl MenuKind for InventoryKind {
+    fn crafting_click(&self, guard: &ContainerLockGuard, slot: usize) -> Option<CraftingClick> {
+        if !self.result.contains(slot) {
+            return None;
+        }
+        self.handler.crafting_click(guard)
+    }
+
     /// Handles shift-click for a slot, including armor/offhand auto-equip.
     ///
     /// Always returns `Some`: the item originally in the slot, or empty if
@@ -322,13 +330,26 @@ impl MenuKind for InventoryKind {
         self.result_container.lock().set_item(0, ItemStack::empty());
     }
 
+    /// Bukkit parity: the 2x2 grid raises `PrepareItemCraftEvent` as a
+    /// table's grid does, and what listeners leave is the preview.
     fn slots_changed(
         &mut self,
         _behavior: &mut MenuBehavior,
         guard: &mut ContainerLockGuard,
-        _player: &Player,
+        player: &Player,
     ) {
         self.handler.update_result(guard);
+        let Some(matrix) = self.handler.input_snapshot(guard) else {
+            return;
+        };
+        let result = self
+            .handler
+            .result_snapshot(guard)
+            .unwrap_or_else(ItemStack::empty);
+        let mut event = PrepareItemCraftEvent::new(player.uuid(), matrix, result, false);
+        player.fire_event(&mut event);
+        self.handler
+            .apply_snapshot(guard, event.matrix().to_vec(), event.result().clone());
     }
 }
 

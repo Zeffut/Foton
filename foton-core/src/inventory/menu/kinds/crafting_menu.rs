@@ -7,7 +7,7 @@
 //! - Slots 37-45: Hotbar (9)
 
 use crate::entity::Entity;
-use crate::event::PrepareItemCraftEvent;
+use crate::event::{CraftingClick, PrepareItemCraftEvent};
 use crate::inventory::container::CraftingContainer;
 use crate::inventory::container::ResultContainer;
 use crate::inventory::prelude::*;
@@ -75,6 +75,13 @@ unsafe impl foton_utils::DowncastType for CraftingKind {
 }
 
 impl MenuKind for CraftingKind {
+    fn crafting_click(&self, guard: &ContainerLockGuard, slot: usize) -> Option<CraftingClick> {
+        if !self.result.contains(slot) {
+            return None;
+        }
+        self.handler.crafting_click(guard)
+    }
+
     /// Prevents taking from the result slot during pickup-all.
     fn can_take_item_for_pick_all(&self, _carried: &ItemStack, slot_index: usize) -> bool {
         !self.result.contains(slot_index)

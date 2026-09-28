@@ -394,33 +394,30 @@ public final class EventRelay {
         return answer(event.isCancelled());
     }
 
-    /** The event a click in a menu raises: a crafting table's or a smithing
-     * table's result slot raises the event for crafting or forging, as Paper
-     * does, and every other click an {@code InventoryClickEvent}. */
+    /** The event a click in a menu raises: a click that takes a crafting
+     * result raises the event for crafting, from a table or from the
+     * inventory's own grid, a smithing table's result the event for forging,
+     * as Paper does, and every other click an {@code InventoryClickEvent}.
+     *
+     * A crafting click carries its recipe and grid from the server, and the
+     * event's inventory is a copy of them: the menu is busy with the click. */
     static org.bukkit.event.inventory.InventoryClickEvent clickEvent(Player player,
             org.bukkit.inventory.ItemStack current, org.bukkit.inventory.ItemStack cursor,
-            org.bukkit.event.inventory.ClickType click, int rawSlot) {
+            org.bukkit.event.inventory.ClickType click, int rawSlot, String recipe, String matrix) {
         if (player == null || current == null || current.getType().isAir()) {
             return new org.bukkit.event.inventory.InventoryClickEvent(player, current, cursor, click, rawSlot);
         }
-        String type = Native.openMenuType(player.getUniqueId().toString());
-        if ("minecraft:crafting".equals(type) && rawSlot == 0) {
-            org.bukkit.inventory.Inventory top = player.getOpenInventory().getTopInventory();
-            if (top instanceof org.bukkit.inventory.CraftingInventory crafting) {
-                StringBuilder grid = new StringBuilder();
-                org.bukkit.inventory.ItemStack[] matrix = crafting.getMatrix();
-                for (int index = 0; index < matrix.length; index++) {
-                    if (index > 0) grid.append(ITEM);
-                    grid.append(FotonInventory.encode(matrix[index]));
-                }
-                String key = Native.craftingRecipe(grid.toString(), 3);
-                org.bukkit.NamespacedKey recipe = key == null ? null : org.bukkit.NamespacedKey.fromString(key);
-                if (recipe != null) {
-                    return new org.bukkit.event.inventory.CraftItemEvent(new FotonCraftingRecipe(recipe, current),
-                        player, current, cursor, click, rawSlot);
-                }
-            }
+        org.bukkit.NamespacedKey key = recipe == null || recipe.isEmpty() ? null : org.bukkit.NamespacedKey.fromString(recipe);
+        if (key != null && player instanceof FotonPlayer foton) {
+            String[] encoded = matrix == null || matrix.isEmpty() ? new String[0] : matrix.split(ITEM, -1);
+            org.bukkit.inventory.ItemStack[] slots = new org.bukkit.inventory.ItemStack[encoded.length + 1];
+            slots[0] = current;
+            for (int i = 0; i < encoded.length; i++) slots[i + 1] = FotonInventory.decode(encoded[i]);
+            FotonCraftingInventory grid = new FotonCraftingInventory(player.getUniqueId().toString(), slots);
+            return new org.bukkit.event.inventory.CraftItemEvent(new FotonCraftingRecipe(key, current),
+                new FotonInventoryView(foton, grid), player, current, cursor, click, rawSlot);
         }
+        String type = Native.openMenuType(player.getUniqueId().toString());
         if ("minecraft:smithing".equals(type) && rawSlot == 3) {
             return new org.bukkit.event.inventory.SmithItemEvent(player, current, cursor, click, rawSlot);
         }

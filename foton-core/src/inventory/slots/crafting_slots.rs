@@ -1,6 +1,7 @@
 use foton_registry::item_stack::ItemStack;
 use foton_utils::locks::Shared;
 
+use crate::event::CraftingClick;
 use crate::inventory::container::{CraftingContainer, ResultContainer};
 use crate::{
     inventory::{
@@ -64,6 +65,18 @@ impl CraftingHandler {
     #[must_use]
     pub fn result_snapshot(&self, guard: &ContainerLockGuard) -> Option<ItemStack> {
         guard.get(self.result_id()).map(|c| c.get_item(0).clone())
+    }
+
+    /// What taking the result would craft now, or `None` when the grid makes
+    /// nothing.
+    #[must_use]
+    pub fn crafting_click(&self, guard: &ContainerLockGuard) -> Option<CraftingClick> {
+        let crafting = guard.get_typed::<CraftingContainer>(self.crafting_id())?;
+        let recipe = recipe_manager::find_recipe(crafting, self.is_2x2())?;
+        Some(CraftingClick {
+            recipe: recipe.id().clone(),
+            matrix: crafting.items().to_vec(),
+        })
     }
 
     /// Applies a plugin's preview changes under the existing menu lock.

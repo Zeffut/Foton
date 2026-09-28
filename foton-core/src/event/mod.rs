@@ -79,7 +79,7 @@ pub use entity_lifecycle::{
 pub use equipment::{PlayerArmorChangeEvent, PlayerItemConsumeEvent};
 pub use fertilize::BlockFertilizeEvent;
 pub use inventory::{
-    CrafterCraftEvent, InventoryClickEvent, InventoryCloseEvent, InventoryDragEvent,
+    CrafterCraftEvent, CraftingClick, InventoryClickEvent, InventoryCloseEvent, InventoryDragEvent,
     InventoryOpenEvent, PrepareGrindstoneEvent, PrepareItemCraftEvent,
 };
 pub use lectern::PlayerTakeLecternBookEvent;

@@ -7,6 +7,8 @@ public class PrepareItemCraftEvent extends InventoryEvent {
  private final CraftingInventory inventory; private final boolean repair; private static final HandlerList HANDLERS=new HandlerList();
  public PrepareItemCraftEvent(InventoryView view,CraftingInventory inventory,ItemStack result,boolean repair){super(view);this.inventory=inventory;this.repair=repair;if(result!=null)inventory.setResult(result);}
  @Override public CraftingInventory getInventory(){return inventory;} public boolean isRepair(){return repair;}
+ /** The recipe the grid makes, or null when it makes none. */
+ public org.bukkit.inventory.Recipe getRecipe(){return inventory instanceof foton.FotonCraftingInventory crafting ? crafting.recipe() : null;}
  public ItemStack getResult(){return inventory.getResult();} public void setResult(ItemStack result){inventory.setResult(result);}
  @Override public HandlerList getHandlers(){return HANDLERS;} public static HandlerList getHandlerList(){return HANDLERS;}
 }

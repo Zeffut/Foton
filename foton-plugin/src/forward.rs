@@ -168,6 +168,17 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
         let cursor = event.cursor_item().map_or(String::new(), |stack| {
             format!("{} {}", stack.item().key, stack.count())
         });
+        let (recipe, matrix) = event
+            .craft()
+            .map_or((String::new(), String::new()), |craft| {
+                let matrix = craft
+                    .matrix
+                    .iter()
+                    .map(natives::describe_slot)
+                    .collect::<Vec<_>>()
+                    .join("\u{001e}");
+                (craft.recipe.to_string(), matrix)
+            });
         if !inventory_click_call(
             &jvm,
             &event.player_id().to_string(),
@@ -175,6 +186,7 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
             &cursor,
             event.click(),
             event.slot().map_or(-1, |slot| slot as i32),
+            (&recipe, &matrix),
         ) {
             event.set_cancelled(true);
         }
@@ -1438,8 +1450,15 @@ fn inventory_click_call(
     cursor: &str,
     click: &str,
     raw_slot: i32,
+    (recipe, matrix): (&str, &str),
 ) -> bool {
     let Some(mut env) = BridgeEnv::attach(vm) else {
+        return true;
+    };
+    let Ok(recipe) = env.new_string(recipe) else {
+        return true;
+    };
+    let Ok(matrix) = env.new_string(matrix) else {
         return true;
     };
     let Ok(uuid) = env.new_string(player_uuid) else {
@@ -1457,13 +1476,15 @@ fn inventory_click_call(
     env.call_static_method(
         BRIDGE,
         "fireInventoryClick",
-        "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;I)Z",
+        "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;)Z",
         &[
             JValue::Object(&uuid),
             JValue::Object(&item),
             JValue::Object(&cursor),
             JValue::Object(&click),
             JValue::Int(raw_slot),
+            JValue::Object(&recipe),
+            JValue::Object(&matrix),
         ],
     )
     .and_then(JValueGen::z)

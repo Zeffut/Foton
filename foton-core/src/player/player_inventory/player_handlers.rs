@@ -528,12 +528,14 @@ impl Player {
                     return;
                 }
             }
-            let current_item = click.slot().and_then(|slot| {
+            let (current_item, craft) = click.slot().map_or((None, None), |slot| {
                 let guard = menu.behavior().lock_all_containers();
-                menu.behavior()
+                let current = menu
+                    .behavior()
                     .slots()
                     .get(slot)
-                    .map(|view| view.get_item(&guard).clone())
+                    .map(|view| view.get_item(&guard).clone());
+                (current, menu.kind().crafting_click(&guard, slot))
             });
             let click_name = match (packet.click_type, packet.button_num) {
                 (ClickType::Pickup | ClickType::QuickCraft, 0) => "LEFT",
@@ -554,7 +556,8 @@ impl Player {
                 Some(cursor_item),
                 click_name.to_owned(),
                 click.slot(),
-            );
+            )
+            .with_craft(craft);
             self.fire_event(&mut inventory_click);
             if inventory_click.is_cancelled() {
                 menu.behavior_mut().resume_remote_updates();

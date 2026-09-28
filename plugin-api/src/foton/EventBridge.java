@@ -238,13 +238,28 @@ public final class EventBridge {
         return !event.isCancelled();
     }
 
-    /** Gives plugins a snapshot-backed crafting preview and returns their changes. */
+    /** Gives plugins a crafting preview and returns what they left in it:
+     * the grid, a unit separator, then the result.
+     *
+     * The menu is mid-click while this runs, so a listener works on a copy --
+     * slot 0 the result, then the grid -- and the copy is what comes back.
+     * Reading the live menu here would read it as it was before the click. */
     public static String firePrepareCraft(String uuid, String matrix, String result, boolean repair) {
-        FotonPlayer player=(FotonPlayer) player(uuid); String[] encoded=matrix == null ? new String[0] : matrix.split("\\u001e", -1);
-        ItemStack[] slots=new ItemStack[encoded.length]; for(int i=0;i<encoded.length;i++) slots[i]=FotonInventory.decode(encoded[i]);
-        FotonCraftingInventory inventory=new FotonCraftingInventory(uuid); inventory.setMatrix(slots);
-        PrepareItemCraftEvent event=new PrepareItemCraftEvent(new FotonInventoryView(player, inventory), inventory, FotonInventory.decode(result), repair); dispatch(event);
-        StringBuilder out=new StringBuilder(); for(int i=0;i<slots.length;i++){if(i>0)out.append("\\u001e"); out.append(FotonInventory.encode(inventory.getItem(i)));} out.append("\\u001f").append(FotonInventory.encode(inventory.getResult())); return out.toString();
+        FotonPlayer player = (FotonPlayer) player(uuid);
+        String[] encoded = matrix == null || matrix.isEmpty() ? new String[0] : matrix.split(EventRelay.ITEM, -1);
+        ItemStack[] slots = new ItemStack[encoded.length + 1];
+        slots[0] = FotonInventory.decode(result);
+        for (int i = 0; i < encoded.length; i++) slots[i + 1] = FotonInventory.decode(encoded[i]);
+        FotonCraftingInventory inventory = new FotonCraftingInventory(uuid, slots);
+        PrepareItemCraftEvent event = new PrepareItemCraftEvent(
+            new FotonInventoryView(player, inventory), inventory, null, repair);
+        dispatch(event);
+        StringBuilder out = new StringBuilder();
+        for (int i = 1; i < slots.length; i++) {
+            if (i > 1) out.append(EventRelay.ITEM);
+            out.append(FotonInventory.encode(inventory.getItem(i)));
+        }
+        return out.append(EventRelay.FIELD).append(FotonInventory.encode(inventory.getResult())).toString();
     }
 
     /** Gives plugins a snapshot-backed grindstone preview and returns their changes. */
@@ -285,7 +300,7 @@ public final class EventBridge {
     }
 
     public static boolean fireInventoryClick(String uuid, String item, String click) {
-        return fireInventoryClick(uuid, item, "", click, -1);
+        return fireInventoryClick(uuid, item, "", click, -1, "", "");
     }
 
     public static boolean fireInventoryOpen(String uuid) {
@@ -332,9 +347,11 @@ public final class EventBridge {
         return !event.isCancelled();
     }
 
-    public static boolean fireInventoryClick(String uuid, String item, String cursor, String click, int rawSlot) {
+    /** `recipe` and `matrix` are empty unless the click takes a crafting result. */
+    public static boolean fireInventoryClick(String uuid, String item, String cursor, String click, int rawSlot,
+            String recipe, String matrix) {
         org.bukkit.event.inventory.InventoryClickEvent event = EventRelay.clickEvent(player(uuid),
-            FotonInventory.decode(item), FotonInventory.decode(cursor), clickType(click), rawSlot);
+            FotonInventory.decode(item), FotonInventory.decode(cursor), clickType(click), rawSlot, recipe, matrix);
         dispatch(event);
         return !event.isCancelled();
     }
