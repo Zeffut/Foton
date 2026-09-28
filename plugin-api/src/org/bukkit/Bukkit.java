@@ -169,8 +169,7 @@ public final class Bukkit {
         return new foton.FotonCustomInventory(holder, size, title);
     }
     public static org.bukkit.inventory.Inventory createInventory(org.bukkit.inventory.InventoryHolder holder, int size, net.kyori.adventure.text.Component title) {
-        String plain = title == null ? "" : net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(title);
-        return new foton.FotonCustomInventory(holder, size, plain);
+        return new foton.FotonCustomInventory(holder, size, title);
     }
     public static org.bukkit.inventory.Inventory createInventory(org.bukkit.inventory.InventoryHolder holder,
             org.bukkit.event.inventory.InventoryType type, String title) {

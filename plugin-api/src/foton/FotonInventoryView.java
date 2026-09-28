@@ -17,7 +17,8 @@ public final class FotonInventoryView implements InventoryView {
         this.player = player;
         String owner = player.getUniqueId().toString();
         String menuType = Native.openMenuType(owner);
-        this.top = suppliedTop != null ? suppliedTop : "minecraft:crafting".equals(menuType)
+        FotonCustomInventory custom = suppliedTop == null ? FotonCustomInventory.viewedBy(owner) : null;
+        this.top = suppliedTop != null ? suppliedTop : custom != null ? custom : "minecraft:crafting".equals(menuType)
             ? new FotonCraftingInventory(owner)
             : "minecraft:grindstone".equals(menuType)
                 ? new FotonGrindstoneInventory(owner)

@@ -19,7 +19,7 @@ use std::sync::{Arc, OnceLock, Weak};
 use std::thread::{self, ThreadId};
 use std::time::{Duration, Instant};
 
-use crate::relay::{cooking_kind, describe_cooking};
+use crate::relay::{self, cooking_kind, describe_cooking};
 use foton_core::advancement::ADVANCEMENT_TREE;
 use foton_core::behavior::blocks::vegetation::tree_grower::generate_tree as grow_tree;
 use foton_core::block_entity::entities::BannerBlockEntity;
@@ -8855,7 +8855,8 @@ extern "system" fn open_generic_inventory(
         .ok()
         .filter(|size| *size % 9 == 0)
         .map_or(1, |size| size / 9);
-    player.open_generic_inventory(title, rows, items);
+    // JSON text, so a plugin's coloured title reaches the client coloured.
+    player.open_generic_inventory(relay::component(&title), rows, items);
 }
 
 extern "system" fn open_smithing_table(

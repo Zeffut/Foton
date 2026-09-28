@@ -934,9 +934,13 @@ public final class EventBridge {
             + "\u001f" + drops;
     }
 
+    /** The view is taken before the plugin inventory lets go of its viewer,
+     * so a close handler still finds its own holder and what the player left
+     * inside; one that opens another menu keeps it. */
     public static void fireInventoryClose(String uuid) {
-        FotonCustomInventory.detachViewer(uuid);
+        FotonCustomInventory closing = FotonCustomInventory.viewedBy(uuid);
         dispatch(new org.bukkit.event.inventory.InventoryCloseEvent(player(uuid)));
+        if (closing != null) closing.detachViewer(uuid);
     }
 
     public static boolean firePlayerOpenSign(String uuid, String world, int x, int y, int z, boolean front, String cause) {

@@ -162,12 +162,14 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
 
     let jvm = Arc::clone(&vm);
     events.on::<InventoryClickEvent, _>(owner(), move |event| {
-        let item = event.current_item().map_or(String::new(), |stack| {
-            format!("{} {}", stack.item().key, stack.count())
-        });
-        let cursor = event.cursor_item().map_or(String::new(), |stack| {
-            format!("{} {}", stack.item().key, stack.count())
-        });
+        // Whole stacks, components and all: a plugin's menu tells its buttons
+        // apart by their name or their persistent data, not their material.
+        let item = event
+            .current_item()
+            .map_or(String::new(), natives::describe_slot);
+        let cursor = event
+            .cursor_item()
+            .map_or(String::new(), natives::describe_slot);
         let (recipe, matrix) = event
             .craft()
             .map_or((String::new(), String::new()), |craft| {
@@ -1967,9 +1969,9 @@ fn block_place_call(
     let Ok(world) = env.new_string(player.get_world().key.to_string()) else {
         return true;
     };
-    let item = env
-        .new_string(format!("{} {}", item.item().key, item.count()))
-        .ok();
+    // The whole stack: a plugin tells its own placeable items apart by their
+    // components, not their material.
+    let item = env.new_string(natives::describe_slot(item)).ok();
     let Some(item) = item else {
         return true;
     };

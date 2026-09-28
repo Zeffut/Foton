@@ -9,14 +9,28 @@ import org.bukkit.inventory.ItemStack;
 
 /** Mutable Bukkit inventory used before it is attached to an open menu. */
 public final class FotonCustomInventory implements Inventory {
-    private static final java.util.concurrent.ConcurrentHashMap<String, java.lang.ref.WeakReference<FotonCustomInventory>> OPEN = new java.util.concurrent.ConcurrentHashMap<>();
+    /** The plugin inventory each player has open. Held strongly, as the open
+     * container holds it on Paper: a plugin commonly keeps no reference to
+     * the inventory it opened. Released on close, and replaced by the next
+     * inventory the same player opens, so it never holds more than one each. */
+    private static final java.util.concurrent.ConcurrentHashMap<String, FotonCustomInventory> OPEN = new java.util.concurrent.ConcurrentHashMap<>();
     private final InventoryHolder holder;
     private final ItemStack[] contents;
     private final String title;
+    /** The title as the client is sent it: JSON text, colours and all. */
+    private final String titleJson;
     private String viewer;
+    /** A title given as a string, which Bukkit reads with section-sign colours. */
     public FotonCustomInventory(InventoryHolder holder, int size, String title) {
+        this(holder, size, net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacySection()
+            .deserialize(title == null ? "" : title));
+    }
+    public FotonCustomInventory(InventoryHolder holder, int size, net.kyori.adventure.text.Component title) {
         if (size < 1 || size > 54 || size % 9 != 0) throw new IllegalArgumentException("Inventory size must be a multiple of 9 between 1 and 54");
-        this.holder = holder; this.contents = new ItemStack[size]; this.title = title == null ? "" : title;
+        net.kyori.adventure.text.Component name = title == null ? net.kyori.adventure.text.Component.empty() : title;
+        this.holder = holder; this.contents = new ItemStack[size];
+        this.title = net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(name);
+        this.titleJson = FotonText.json(name);
     }
     @Override public InventoryHolder getHolder() { return holder; }
     @Override public int getSize() { return contents.length; }
@@ -46,8 +60,27 @@ public final class FotonCustomInventory implements Inventory {
     @Override public void clear() { for (int i = 0; i < contents.length; i++) clear(i); }
     @Override public void clear(int slot) { if (slot >= 0 && slot < contents.length) setItem(slot, null); }
     public String getTitle() { return title; }
-    void attachViewer(String uuid) { viewer = uuid; OPEN.put(uuid, new java.lang.ref.WeakReference<>(this)); }
+    String titleJson() { return titleJson; }
+    /** The plugin inventory `uuid` has open, while its menu is still the one
+     * opened for it; null otherwise. A view's top inventory is this object, so
+     * a plugin finds its own holder on it, as it does on Paper. */
+    static FotonCustomInventory viewedBy(String uuid) {
+        FotonCustomInventory inventory = uuid == null ? null : OPEN.get(uuid);
+        if (inventory == null || !uuid.equals(inventory.viewer)) return null;
+        return Native.openMenuTopSlotCount(uuid) == inventory.contents.length ? inventory : null;
+    }
+    void attachViewer(String uuid) { viewer = uuid; OPEN.put(uuid, this); }
     void detachViewer() { if (viewer != null) OPEN.remove(viewer); viewer = null; }
-    static void detachViewer(String uuid) { if (uuid == null) return; java.lang.ref.WeakReference<FotonCustomInventory> ref = OPEN.remove(uuid); FotonCustomInventory inventory = ref == null ? null : ref.get(); if (inventory != null) inventory.viewer = null; }
+    /** Lets go of `uuid` if it is still this inventory's viewer, keeping
+     * contents as they were last seen; another inventory opened since keeps it. */
+    void detachViewer(String uuid) {
+        if (uuid == null || !uuid.equals(viewer)) return;
+        for (int slot = 0; slot < contents.length; slot++) {
+            ItemStack seen = getItem(slot);
+            contents[slot] = seen == null ? null : seen.clone();
+        }
+        OPEN.remove(uuid, this);
+        viewer = null;
+    }
     String encodeContents() { StringBuilder result = new StringBuilder(); for (int i = 0; i < contents.length; i++) { if (i > 0) result.append('\u001e'); result.append(FotonInventory.encode(contents[i])); } return result.toString(); }
 }

@@ -219,12 +219,17 @@ impl Player {
             return Err(OpenMenuUnavailable::Unavailable);
         }
 
-        let overrides_player_slots = menu.overrides_player_slots();
         let Some(menu) = open_menu.menu.take() else {
             return Err(OpenMenuUnavailable::Unavailable);
         };
-        let top_slot_count = menu_top_slot_count(&menu).unwrap_or(0);
-        let menu_type = menu.menu_type().map(|menu_type| menu_type.key.to_string());
+        open_menu.dispatch = Some(Self::dispatch_for(&menu));
+        Ok(menu)
+    }
+
+    /// What a plugin reads of `menu` while a callback owns it: its top slots
+    /// as they stand now. Writes made meanwhile wait in the dispatch.
+    fn dispatch_for(menu: &Menu) -> OpenMenuDispatch {
+        let top_slot_count = menu_top_slot_count(menu).unwrap_or(0);
         let snapshot = {
             let guard = menu.behavior().lock_all_containers();
             (0..top_slot_count)
@@ -236,14 +241,13 @@ impl Player {
                 })
                 .collect()
         };
-        open_menu.dispatch = Some(OpenMenuDispatch {
-            overrides_player_slots,
+        OpenMenuDispatch {
+            overrides_player_slots: menu.overrides_player_slots(),
             top_slot_count,
-            menu_type,
+            menu_type: menu.menu_type().map(|menu_type| menu_type.key.to_string()),
             snapshot,
             actions: Vec::new(),
-        });
-        Ok(menu)
+        }
     }
 
     fn finish_open_menu_callback(&self, menu: Menu) {
@@ -1107,13 +1111,10 @@ impl Player {
                 return;
             };
             open_menu.title = None;
-            open_menu.dispatch = Some(OpenMenuDispatch {
-                overrides_player_slots: menu.overrides_player_slots(),
-                top_slot_count: 0,
-                menu_type: None,
-                snapshot: Vec::new(),
-                actions: Vec::new(),
-            });
+            // Bukkit parity: `InventoryCloseEvent` shows the inventory being
+            // closed, contents and all -- a plugin's menu hands back what the
+            // player left in it from there.
+            open_menu.dispatch = Some(Self::dispatch_for(&menu));
             menu
         };
 

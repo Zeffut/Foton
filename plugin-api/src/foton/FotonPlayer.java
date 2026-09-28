@@ -253,12 +253,11 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
     @Override public org.bukkit.inventory.InventoryView openInventory(org.bukkit.inventory.Inventory inventory) {
         if (!(inventory instanceof FotonCustomInventory custom)) return null;
         custom.attachViewer(id.toString());
-        Native.openGenericInventory(id.toString(), custom.getSize(), custom.getTitle(), custom.encodeContents());
-        if (Native.openMenuTopSlotCount(id.toString()) != custom.getSize()) {
-            custom.detachViewer();
-            return null;
-        }
-        return getOpenInventory();
+        Native.openGenericInventory(id.toString(), custom.getSize(), custom.titleJson(), custom.encodeContents());
+        // Opened from inside a click or a close -- how one plugin menu leads to
+        // the next -- the menu is only installed once that callback returns,
+        // so the view is the inventory itself rather than a read of the menu.
+        return new FotonInventoryView(this, custom);
     }
 
     @Override

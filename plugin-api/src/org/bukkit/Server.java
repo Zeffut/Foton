@@ -63,6 +63,18 @@ public interface Server {
     default org.bukkit.inventory.Inventory createInventory(org.bukkit.inventory.InventoryHolder owner, int size) {
         return createInventory(owner, size, "");
     }
+    default org.bukkit.inventory.Inventory createInventory(org.bukkit.inventory.InventoryHolder owner, int size,
+            net.kyori.adventure.text.Component title) {
+        return Bukkit.createInventory(owner, size, title);
+    }
+    default org.bukkit.inventory.Inventory createInventory(org.bukkit.inventory.InventoryHolder owner,
+            org.bukkit.event.inventory.InventoryType type) {
+        return Bukkit.createInventory(owner, type, "");
+    }
+    default org.bukkit.inventory.Inventory createInventory(org.bukkit.inventory.InventoryHolder owner,
+            org.bukkit.event.inventory.InventoryType type, String title) {
+        return Bukkit.createInventory(owner, type, title);
+    }
     default org.bukkit.block.data.BlockData createBlockData(String data) { return Bukkit.createBlockData(data); }
     default org.bukkit.command.PluginCommand getPluginCommand(String name) { return null; }
 
