@@ -3,3 +3,6 @@ version: '1'
 main: foton.probe.PacketProbe
 api-version: '1.21'
 depend: [packetevents]
+commands:
+  probetp:
+    description: Moves the player into another loaded world.

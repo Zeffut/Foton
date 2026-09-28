@@ -17,7 +17,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.Location;
+import org.bukkit.World;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandSender;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /** A plugin that uses PacketEvents the way real ones do, and writes down what it saw.
@@ -29,6 +35,7 @@ public final class PacketProbe extends JavaPlugin implements Listener {
     private final Map<String, AtomicInteger> seen = new ConcurrentHashMap<>();
     private final Map<String, String> facts = new ConcurrentHashMap<>();
     private PacketListenerCommon listener;
+    private final AtomicInteger teleports = new AtomicInteger();
 
     private void count(String what) { seen.computeIfAbsent(what, k -> new AtomicInteger()).incrementAndGet(); }
 
@@ -82,6 +89,55 @@ public final class PacketProbe extends JavaPlugin implements Listener {
         facts.put("server version", PacketEvents.getAPI().getServerManager().getVersion().getReleaseName());
         user.sendPacket(new WrapperPlayServerPing(424242));
         user.sendPacketSilently(new WrapperPlayServerPing(434343));
+    }
+
+    /** Writes down every teleport. `/tp @s 200 ...` is refused and
+     * `/tp @s 100 ...` is sent to x 50, so the report shows whether a
+     * listener's answer is obeyed and not only whether it was asked. */
+    @EventHandler(priority = EventPriority.HIGH)
+    public void onTeleport(PlayerTeleportEvent event) {
+        String cause = teleports.incrementAndGet() + " " + event.getCause().name();
+        Location to = event.getTo();
+        facts.put("teleport " + cause, place(event.getFrom()) + " -> " + place(to));
+        if (event.getCause() == PlayerTeleportEvent.TeleportCause.COMMAND && to != null) {
+            if (to.getBlockX() == 200) event.setCancelled(true);
+            if (to.getBlockX() == 100) {
+                Location redirected = to.clone();
+                redirected.setX(50.5);
+                event.setTo(redirected);
+            }
+        }
+        Player player = event.getPlayer();
+        boolean refused = event.isCancelled();
+        getServer().getScheduler().runTaskLater(this,
+            () -> facts.put("teleport " + cause + " then", (refused ? "refused, at " : "at ")
+                + place(player.getLocation())), 2L);
+    }
+
+    /** `/probetp`: a plugin moves the player into another loaded world. */
+    @Override
+    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (!(sender instanceof Player player)) return true;
+        World here = player.getWorld();
+        World elsewhere = null;
+        for (World world : getServer().getWorlds()) {
+            if (!world.getName().equals(here.getName())) { elsewhere = world; break; }
+        }
+        if (elsewhere == null) {
+            facts.put("plugin teleport", "no second world");
+            return true;
+        }
+        boolean moved = player.teleport(new Location(elsewhere, 0.5, 100, 0.5));
+        facts.put("plugin teleport answered", String.valueOf(moved));
+        getServer().getScheduler().runTaskLater(this,
+            () -> facts.put("world after plugin teleport", player.getWorld().getName()), 5L);
+        return true;
+    }
+
+    private static String place(Location location) {
+        if (location == null) return "null";
+        return (location.getWorld() == null ? "?" : location.getWorld().getName())
+            + " " + location.getBlockX() + " " + location.getBlockY() + " " + location.getBlockZ();
     }
 
     @Override

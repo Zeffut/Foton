@@ -12,6 +12,7 @@
 #
 # PLUGIN_SEED_DIR   copied into plugins/ before the first start (configs)
 # WAIT_FOR_LOG      a server.log pattern to wait for before the client joins
+# JOIN_AS_OP=1      the client joins in the op group, for vanilla commands
 #
 # Needs dev/build-plugin-api.sh and dev/build-packetevents.sh to have run, and
 # a JDK 21+ at $FOTON_JAVA_HOME (default: the one `javac` belongs to).
@@ -67,6 +68,8 @@ sed -i \
   -e 's/^enforce_secure_chat = .*/enforce_secure_chat = false/' \
   -e "s/^server_port = .*/server_port = $PORT/" \
   config/config.toml
+if [ "${JOIN_AS_OP:-0}" = 1 ]; then default_groups='["op"]'; else default_groups='["default"]'; fi
+sed -i "s/^default_groups = .*/default_groups = $default_groups/" config/groups.toml
 
 echo "=== Booting with $(ls plugins | tr '\n' ' ')==="
 FOTON_PLUGIN_DIRECTORY="$RUN_DIR/plugins" FOTON_JAVA_HOME="$JAVA_HOME_DIR" FOTON_PLUGIN_API_JAR="$API_JAR" \
