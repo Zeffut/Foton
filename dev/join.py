@@ -58,6 +58,7 @@ PLAY_C_KEEP_ALIVE = 44
 PLAY_C_LEVEL_CHUNK_WITH_LIGHT = 45
 PLAY_C_PLAYER_POSITION = 72
 PLAY_C_OPEN_SCREEN = 59
+PLAY_C_CONTAINER_CLOSE = 17
 PLAY_C_MOUNT_SCREEN_OPEN = 41
 PLAY_C_MAP_ITEM_DATA = 51
 PLAY_C_SET_EQUIPMENT = 102
@@ -609,6 +610,10 @@ def run_play(connection, watch_seconds=0):
             # it happen.
             connection.open_container, _ = read_varint(payload)
             print("  a screen opened")
+        elif packet_id == PLAY_C_CONTAINER_CLOSE:
+            # A plugin's menu closes itself once a choice is made.
+            connection.open_container = None
+            print("  the server closed the screen")
         elif packet_id == PLAY_C_MOUNT_SCREEN_OPEN:
             note_mount_screen(connection, payload)
         elif packet_id == PLAY_C_MAP_ITEM_DATA:
@@ -944,6 +949,10 @@ def pump(connection, seconds, spawned):
             # it happen.
             connection.open_container, _ = read_varint(payload)
             print("  a screen opened")
+        elif packet_id == PLAY_C_CONTAINER_CLOSE:
+            # A plugin's menu closes itself once a choice is made.
+            connection.open_container = None
+            print("  the server closed the screen")
         elif packet_id == PLAY_C_MOUNT_SCREEN_OPEN:
             note_mount_screen(connection, payload)
         elif packet_id == PLAY_C_MAP_ITEM_DATA:
@@ -2179,6 +2188,10 @@ def watch_for_spawns(connection, seconds, spawned):
             # it happen.
             connection.open_container, _ = read_varint(payload)
             print("  a screen opened")
+        elif packet_id == PLAY_C_CONTAINER_CLOSE:
+            # A plugin's menu closes itself once a choice is made.
+            connection.open_container = None
+            print("  the server closed the screen")
         elif packet_id == PLAY_C_MOUNT_SCREEN_OPEN:
             note_mount_screen(connection, payload)
         elif packet_id == PLAY_C_MAP_ITEM_DATA:

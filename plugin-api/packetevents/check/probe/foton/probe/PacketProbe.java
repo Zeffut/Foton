@@ -118,6 +118,36 @@ public final class PacketProbe extends JavaPlugin implements Listener {
                 + place(player.getLocation())), 2L);
     }
 
+    /** Marks a menu as the probe's own, the way plugins recognise their menus. */
+    private static final class MenuHolder implements org.bukkit.inventory.InventoryHolder {
+        @Override public Inventory getInventory() { return null; }
+    }
+    private final MenuHolder menuHolder = new MenuHolder();
+    private final AtomicInteger menuClicks = new AtomicInteger();
+
+    /** A click in the probe's menu is recognised by its holder and refused,
+     * as a plugin's menu refuses its items being taken. */
+    @EventHandler
+    public void onMenuClick(org.bukkit.event.inventory.InventoryClickEvent event) {
+        Inventory top = event.getView().getTopInventory();
+        boolean ours = event.getInventory().getHolder(false) instanceof MenuHolder;
+        facts.put("menu click " + menuClicks.incrementAndGet(), "slot " + event.getRawSlot()
+            + " ours " + ours + " top " + top.getType() + "/" + top.getSize()
+            + " current " + item(event.getCurrentItem())
+            + " clicked " + (event.getClickedInventory() == null ? "none" : event.getClickedInventory() == top ? "top" : "bottom"));
+        // Slot 10 is the menu's button; the rest of the menu takes items.
+        if (ours && event.getRawSlot() == 10) event.setCancelled(true);
+    }
+
+    /** What a plugin's menu sees as it closes: whether it is recognised,
+     * and what the player left in its first slot. */
+    @EventHandler
+    public void onMenuClose(org.bukkit.event.inventory.InventoryCloseEvent event) {
+        boolean ours = event.getInventory().getHolder(false) instanceof MenuHolder;
+        facts.put("menu close", "ours " + ours + " slot 0 " + item(event.getInventory().getItem(0))
+            + " slot 10 " + item(event.getInventory().getItem(10)));
+    }
+
     private final AtomicInteger prepares = new AtomicInteger();
     private final AtomicInteger crafts = new AtomicInteger();
 
@@ -158,6 +188,12 @@ public final class PacketProbe extends JavaPlugin implements Listener {
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (!(sender instanceof Player player)) return true;
+        if (command.getName().equals("probegui")) {
+            Inventory gui = getServer().createInventory(menuHolder, 27, net.kyori.adventure.text.Component.text("Probe"));
+            gui.setItem(10, new ItemStack(org.bukkit.Material.DIAMOND, 3));
+            facts.put("menu opened view", String.valueOf(player.openInventory(gui) != null));
+            return true;
+        }
         if (command.getName().equals("probecraft")) {
             Inventory top = player.getOpenInventory().getTopInventory();
             ItemStack[] contents = new ItemStack[top.getSize()];

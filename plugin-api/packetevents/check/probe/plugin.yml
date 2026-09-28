@@ -8,3 +8,5 @@ commands:
     description: Moves the player into another loaded world.
   probecraft:
     description: Writes down the top of the open view.
+  probegui:
+    description: Opens a menu of the probe's own.
