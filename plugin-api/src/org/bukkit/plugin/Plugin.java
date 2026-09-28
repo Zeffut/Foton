@@ -1,6 +1,9 @@
 package org.bukkit.plugin;
 
-public interface Plugin {
+/** A plugin. Paper parity: every plugin is its own commands' default
+ * executor and tab completer, which is why a main class can simply override
+ * {@code onCommand} without declaring an interface. */
+public interface Plugin extends org.bukkit.command.TabExecutor {
     default java.io.InputStream getResource(String filename) { return null; }
     /** Loads config.yml from this plugin data folder. JavaPlugin overrides with a cached instance. */
     default org.bukkit.configuration.file.FileConfiguration getConfig() {

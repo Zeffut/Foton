@@ -58,5 +58,9 @@ final class Services {
         @Override public boolean isEnabled() { return true; }
         @Override public void onEnable() {}
         @Override public void onDisable() {}
+        @Override public boolean onCommand(org.bukkit.command.CommandSender sender,
+                org.bukkit.command.Command command, String label, String[] args) { return false; }
+        @Override public java.util.List<String> onTabComplete(org.bukkit.command.CommandSender sender,
+                org.bukkit.command.Command command, String label, String[] args) { return null; }
     }
 }

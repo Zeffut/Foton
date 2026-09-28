@@ -12,10 +12,9 @@ public final class PluginCommand extends Command implements PluginIdentifiableCo
     public PluginCommand(String name, Plugin owner) {
         super(name);
         this.owner = owner;
-        // A plugin that implements CommandExecutor is its own default handler,
-        // which is how most plugins are written: they never call setExecutor.
-        this.executor = owner instanceof CommandExecutor ? (CommandExecutor) owner : null;
-        this.completer = owner instanceof TabCompleter ? (TabCompleter) owner : null;
+        // The plugin is its own default handler, which is how most plugins
+        // are written: they override onCommand and never call setExecutor.
+        this.executor = owner;
     }
 
     @Override
@@ -23,8 +22,9 @@ public final class PluginCommand extends Command implements PluginIdentifiableCo
         return owner;
     }
 
+    /** Null gives the command back to its plugin, as in Bukkit. */
     public void setExecutor(CommandExecutor value) {
-        this.executor = value;
+        this.executor = value == null ? owner : value;
     }
 
     public CommandExecutor getExecutor() {
@@ -79,18 +79,23 @@ public final class PluginCommand extends Command implements PluginIdentifiableCo
         return true;
     }
 
+    /** Bukkit's order: the completer, then the executor if it completes
+     * too, then player names when neither had an answer. */
     @Override
     public List<String> tabComplete(CommandSender sender, String label, String[] args) {
-        if (completer == null) {
-            return List.of();
-        }
+        List<String> answer = null;
         try {
-            List<String> answer = completer.onTabComplete(sender, this, label, args);
-            return answer == null ? List.of() : answer;
+            if (completer != null) {
+                answer = completer.onTabComplete(sender, this, label, args);
+            }
+            if (answer == null && executor instanceof TabCompleter tabs) {
+                answer = tabs.onTabComplete(sender, this, label, args);
+            }
         } catch (Throwable error) {
             System.out.println("[command] " + owner.getName() + " threw completing /" + label
                 + ": " + error);
             return List.of();
         }
+        return answer == null ? super.tabComplete(sender, label, args) : answer;
     }
 }
