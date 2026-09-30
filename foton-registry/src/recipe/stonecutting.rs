@@ -17,6 +17,7 @@ pub struct StonecuttingRecipe {
     pub id: Identifier,
     pub ingredient: Ingredient,
     pub result: RecipeResult,
+    pub show_notification: bool,
 }
 
 impl StonecuttingRecipe {
@@ -46,6 +47,7 @@ mod tests {
                 item: &vanilla_items::ANDESITE_SLAB,
                 count: 2,
             },
+            show_notification: true,
         };
 
         assert!(recipe.matches(&ItemStack::new(&vanilla_items::ANDESITE)));

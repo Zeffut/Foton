@@ -892,3 +892,28 @@ fn one_end_without_quad_support_keeps_the_single_unscaled_rope() {
         (horse.velocity() - axis_specific_leash_elasticity(horse_rope.force)).length() < 1.0e-12
     );
 }
+
+#[test]
+fn unawareness_survives_save_and_load_under_the_bukkit_key() {
+    use std::io::Cursor;
+
+    use simdnbt::borrow::read_compound as read_borrowed_compound;
+    use simdnbt::owned::NbtCompound;
+
+    init_vanilla_registry();
+    let pig = PigEntity::new(&vanilla_entities::PIG, 1, DVec3::ZERO, Weak::new());
+    assert!(pig.is_aware());
+    pig.set_aware(false);
+
+    let mut nbt = NbtCompound::new();
+    pig.save_additional(&mut nbt);
+    assert_eq!(nbt.byte("Bukkit.Aware"), Some(0));
+
+    let mut bytes = Vec::new();
+    nbt.write(&mut bytes);
+    let borrowed = read_borrowed_compound(&mut Cursor::new(&bytes))
+        .unwrap_or_else(|error| panic!("test nbt should reborrow: {error}"));
+    let reloaded = PigEntity::new(&vanilla_entities::PIG, 2, DVec3::ZERO, Weak::new());
+    reloaded.load_additional((&borrowed).into());
+    assert!(!reloaded.is_aware());
+}

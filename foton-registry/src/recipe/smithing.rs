@@ -27,6 +27,7 @@ pub struct SmithingTransformRecipe {
     /// What it is upgraded with, on the right.
     pub addition: Ingredient,
     pub result: RecipeResult,
+    pub show_notification: bool,
 }
 
 impl SmithingTransformRecipe {
@@ -69,6 +70,7 @@ mod tests {
                 item: &vanilla_items::NETHERITE_PICKAXE,
                 count: 1,
             },
+            show_notification: true,
         }
     }
 

@@ -248,7 +248,7 @@ impl Player {
     }
 
     /// Gives raw experience points to this player.
-    pub(crate) fn give_experience_points(&self, points: i32) {
+    pub fn give_experience_points(&self, points: i32) {
         if points == 0 {
             return;
         }

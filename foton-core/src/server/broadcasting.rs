@@ -258,4 +258,57 @@ impl Server {
             ),
         }
     }
+
+    /// Sends each domain's queued team packets to the players in that domain.
+    ///
+    /// Vanilla parity: `ServerScoreboard` broadcasting its team changes to
+    /// `PlayerList.broadcastAll`. Foton's scoreboards are per domain, so a
+    /// player sees the teams of the domain they are in.
+    pub(super) fn flush_team_updates(&self) {
+        for (domain, scoreboard) in self.scoreboards.iter() {
+            let updates = scoreboard.take_team_updates();
+            if updates.is_empty() {
+                continue;
+            }
+            self.online_players.iter_players(|_, player| {
+                if player.get_world().domain() == domain {
+                    for update in &updates {
+                        player.send_packet(update.clone());
+                    }
+                }
+                true
+            });
+        }
+    }
+
+    /// Hands a player what their client keeps of the domain they have just
+    /// entered: their recipe book, then the domain's teams.
+    ///
+    /// Vanilla parity: `sendInitialRecipeBook` followed by
+    /// `updateEntireScoreboard` in `PlayerList.placeNewPlayer`. Both are sent
+    /// again on a domain switch, because the book is saved per domain and the
+    /// client keeps its old copy across the respawn packet.
+    pub(super) fn send_domain_state(&self, player: &Player, left: Option<&str>, entered: &str) {
+        player.send_initial_recipe_book();
+        self.send_domain_teams(player, left, entered);
+    }
+
+    /// Sends a player every team of a domain they have just entered, after
+    /// taking off the teams of the one they left.
+    ///
+    /// Vanilla parity: the team half of `PlayerList.updateEntireScoreboard`,
+    /// sent on login; on a domain switch the client still holds the previous
+    /// domain's teams, which would otherwise keep colouring names there.
+    fn send_domain_teams(&self, player: &Player, left: Option<&str>, entered: &str) {
+        if let Some(scoreboard) = left.and_then(|domain| self.scoreboards.get(domain)) {
+            for removal in scoreboard.team_removals() {
+                player.send_packet(removal);
+            }
+        }
+        if let Some(scoreboard) = self.scoreboards.get(entered) {
+            for team in scoreboard.team_snapshot() {
+                player.send_packet(team);
+            }
+        }
+    }
 }

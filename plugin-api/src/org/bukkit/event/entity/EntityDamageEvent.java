@@ -7,7 +7,14 @@ import org.bukkit.event.HandlerList;
 
 /** Base event for damage applied to an entity. */
 public class EntityDamageEvent extends EntityEvent implements Cancellable {
-    public enum DamageCause { ENTITY_ATTACK, PROJECTILE, SUFFOCATION, FALL, FIRE, FIRE_TICK, LAVA, DROWNING, BLOCK_EXPLOSION, ENTITY_EXPLOSION, CONTACT, MAGIC, POISON, LIGHTNING, VOID, SUICIDE, WITHER, THORNS, KILL, FLY_INTO_WALL, CUSTOM }
+    /** Paper's causes, in Paper's order. */
+    public enum DamageCause {
+        KILL, WORLD_BORDER, CONTACT, ENTITY_ATTACK, ENTITY_SWEEP_ATTACK, PROJECTILE, SUFFOCATION,
+        FALL, FIRE, FIRE_TICK, MELTING, LAVA, DROWNING, BLOCK_EXPLOSION, ENTITY_EXPLOSION, VOID,
+        LIGHTNING, SUICIDE, STARVATION, POISON, MAGIC, WITHER, FALLING_BLOCK, THORNS,
+        DRAGON_BREATH, FLY_INTO_WALL, HOT_FLOOR, CAMPFIRE, CRAMMING, DRYOUT, FREEZE, SONIC_BOOM,
+        CUSTOM
+    }
     private boolean cancelled;
     private final DamageCause cause;
     private org.bukkit.damage.DamageSource damageSource;

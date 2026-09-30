@@ -74,6 +74,19 @@ public final class FotonScheduler implements BukkitScheduler {
         return offTick(plugin, task, Math.max(0, delayTicks), Math.max(1, periodTicks));
     }
 
+    /** CraftScheduler's check: a disabled plugin -- one inside its own
+     * `onDisable`, most often -- is refused rather than given a task nothing
+     * will ever cancel. Plugins catch this to do the work inline instead. */
+    static void validate(Plugin plugin) {
+        if (plugin == null) {
+            throw new IllegalArgumentException("Plugin cannot be null");
+        }
+        if (!plugin.isEnabled()) {
+            throw new org.bukkit.plugin.IllegalPluginAccessException(
+                "Plugin attempted to register task while disabled");
+        }
+    }
+
     private static BukkitTask offTick(Plugin plugin, Runnable body, long delay, long period) {
         synchronized (PluginHost.lifecycleLock()) {
             validate(plugin, body);
@@ -96,8 +109,9 @@ public final class FotonScheduler implements BukkitScheduler {
                 } catch (Throwable error) {
                     // Nothing above this catches: an exception on the executor
                     // thread would silently stop a repeating task forever.
-                    System.out.println("[scheduler] " + plugin.getName()
-                        + " threw in an async task: " + error);
+                    plugin.getLogger().log(java.util.logging.Level.WARNING, String.format(
+                        "Plugin %s generated an exception while executing task %s",
+                        plugin.getDescription().getFullName(), task.id), error);
                 } finally {
                     synchronized (PluginHost.lifecycleLock()) {
                         task.running = false;
@@ -233,12 +247,8 @@ public final class FotonScheduler implements BukkitScheduler {
     }
 
     private static void validate(Plugin plugin, Runnable body) {
-        java.util.Objects.requireNonNull(plugin, "plugin");
+        validate(plugin);
         java.util.Objects.requireNonNull(body, "task");
-        if (!plugin.isEnabled()) {
-            throw new IllegalStateException(
-                "Plugin attempted to register a task while disabled: " + plugin.getName());
-        }
     }
 
     /** Runs what this tick owes. Called by Foton, from the tick, once.
@@ -293,8 +303,10 @@ public final class FotonScheduler implements BukkitScheduler {
             } catch (Throwable error) {
                 // A plugin's task throwing must not stop the tick, and must not
                 // reach Foton: an exception crossing JNI is a crash.
-                System.out.println("[scheduler] " + ready.plugin.getName()
-                    + " threw in a task: " + error);
+                // CraftScheduler's wording, with the stack, as above.
+                ready.plugin.getLogger().log(java.util.logging.Level.WARNING, String.format(
+                    "Task #%s for %s generated an exception",
+                    ready.id, ready.plugin.getDescription().getFullName()), error);
             } finally {
                 synchronized (PluginHost.lifecycleLock()) {
                     ready.running = false;

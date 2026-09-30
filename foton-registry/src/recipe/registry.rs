@@ -1,13 +1,17 @@
 //! Recipe registry for looking up recipes.
 
+use std::sync::OnceLock;
+
 use foton_utils::Identifier;
 use foton_utils::locks::SyncRwLock;
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 
 use super::RecipeResult;
+use super::book::{BookRecipe, RecipeDisplayIndex};
 use super::cooking::{CookingKind, SmeltingRecipe};
 use super::crafting::{CraftingInput, CraftingRecipe, ShapedRecipe, ShapelessRecipe};
+use super::display::CookingStation;
 use super::smithing::SmithingTransformRecipe;
 use super::stonecutting::StonecuttingRecipe;
 use crate::item_stack::ItemStack;
@@ -50,6 +54,12 @@ pub struct RecipeRegistry {
     runtime_shaped: SyncRwLock<Vec<&'static ShapedRecipe>>,
     runtime_shapeless: SyncRwLock<Vec<&'static ShapelessRecipe>>,
     disabled: SyncRwLock<FxHashSet<Identifier>>,
+    /// The recipe book's numbering of every recipe display.
+    ///
+    /// Built on first use rather than at freeze: a display names the crafting
+    /// remainder of its ingredients, which reads the item registry, and that
+    /// is not reachable until the whole registry has been published.
+    display_index: OnceLock<SyncRwLock<RecipeDisplayIndex>>,
 }
 
 impl Default for RecipeRegistry {
@@ -77,6 +87,7 @@ impl RecipeRegistry {
             runtime_shaped: SyncRwLock::new(Vec::new()),
             runtime_shapeless: SyncRwLock::new(Vec::new()),
             disabled: SyncRwLock::new(FxHashSet::default()),
+            display_index: OnceLock::new(),
         }
     }
 
@@ -126,6 +137,97 @@ impl RecipeRegistry {
 
     fn is_disabled(&self, id: &Identifier) -> bool {
         self.disabled.read().contains(id)
+    }
+
+    fn display_index(&self) -> &SyncRwLock<RecipeDisplayIndex> {
+        self.display_index
+            .get_or_init(|| SyncRwLock::new(self.build_display_index()))
+    }
+
+    /// Indexes every vanilla recipe, then the plugin recipes registered so far.
+    ///
+    /// Vanilla parity: `RecipeManager.unpackRecipeInfo`.
+    fn build_display_index(&self) -> RecipeDisplayIndex {
+        let mut index = RecipeDisplayIndex::default();
+        for recipe in &self.recipes_by_id {
+            match recipe {
+                CraftingRecipe::Shaped(recipe) => index.insert(&recipe.id, recipe.display_source()),
+                CraftingRecipe::Shapeless(recipe) => {
+                    index.insert(&recipe.id, recipe.display_source());
+                }
+            }
+        }
+        let cooking = [
+            (&self.smelting_recipes, CookingStation::Furnace),
+            (&self.blasting_recipes, CookingStation::BlastFurnace),
+            (&self.smoking_recipes, CookingStation::Smoker),
+            (&self.campfire_recipes, CookingStation::Campfire),
+        ];
+        for (recipes, station) in cooking {
+            for recipe in recipes {
+                index.insert(&recipe.id, recipe.display_source(station));
+            }
+        }
+        for recipe in &self.stonecutting_recipes {
+            index.insert(&recipe.id, recipe.display_source());
+        }
+        for recipe in &self.smithing_recipes {
+            index.insert(&recipe.id, recipe.display_source());
+        }
+        for recipe in self.runtime_shaped.read().iter() {
+            index.insert(&recipe.id, recipe.display_source());
+        }
+        for recipe in self.runtime_shapeless.read().iter() {
+            index.insert(&recipe.id, recipe.display_source());
+        }
+        index
+    }
+
+    /// The recipe book's view of a recipe, or `None` if there is no enabled
+    /// recipe under `key`.
+    ///
+    /// Vanilla parity: `RecipeManager.byKey` feeding
+    /// `RecipeManager.listDisplaysForRecipe`. A plugin recipe registered after
+    /// the index was built is numbered here, on the first lookup that needs
+    /// it, which also closes the window where one registered while the index
+    /// was being built would otherwise be missed.
+    #[must_use]
+    pub fn book_recipe(&self, key: &Identifier) -> Option<BookRecipe> {
+        if self.is_disabled(key) {
+            return None;
+        }
+        let index = self.display_index();
+        if let Some(recipe) = index.read().recipe(key) {
+            return Some(recipe.clone());
+        }
+        let shaped = self
+            .runtime_shaped
+            .read()
+            .iter()
+            .find(|r| &r.id == key)
+            .copied();
+        let shapeless = self
+            .runtime_shapeless
+            .read()
+            .iter()
+            .find(|r| &r.id == key)
+            .copied();
+        let source = match (shaped, shapeless) {
+            (Some(recipe), _) => recipe.display_source(),
+            (None, Some(recipe)) => recipe.display_source(),
+            (None, None) => return None,
+        };
+        let mut index = index.write();
+        index.insert(key, source);
+        index.recipe(key).cloned()
+    }
+
+    /// The recipe a recipe book display id stands for.
+    ///
+    /// Vanilla parity: `RecipeManager.getRecipeFromDisplay(id).parent().id()`.
+    #[must_use]
+    pub fn recipe_for_display(&self, id: i32) -> Option<Identifier> {
+        self.display_index().read().recipe_for_display(id).cloned()
     }
 
     /// Registers a shaped recipe.

@@ -4,7 +4,6 @@ import java.util.List;
 import org.bukkit.DyeColor;
 import org.bukkit.block.Banner;
 import org.bukkit.block.banner.Pattern;
-import org.bukkit.block.banner.PatternType;
 
 /** Banner state whose base color is derived from the current block material. */
 public final class FotonBanner extends FotonTileState implements Banner {
@@ -27,7 +26,7 @@ public final class FotonBanner extends FotonTileState implements Banner {
         if (encoded != null) for (String value : encoded) {
             String[] parts = value == null ? new String[0] : value.split("\\|", 2);
             if (parts.length == 2) try {
-                result.add(new Pattern(DyeColor.getByWoolData((byte) Integer.parseInt(parts[1])), PatternType.of(parts[0])));
+                result.add(new Pattern(DyeColor.getByWoolData((byte) Integer.parseInt(parts[1])), org.bukkit.Registry.BANNER_PATTERN.get(org.bukkit.NamespacedKey.fromString(parts[0]))));
             } catch (NumberFormatException ignored) { }
         }
         return result;
@@ -36,8 +35,8 @@ public final class FotonBanner extends FotonTileState implements Banner {
         if (pattern == null || pattern.getPattern() == null || pattern.getColor() == null) return;
         java.util.ArrayList<String> encoded = new java.util.ArrayList<>();
         for (Pattern current : getPatterns())
-            encoded.add(current.getPattern().getIdentifier() + "|" + (current.getColor().getWoolData() & 255));
-        encoded.add(pattern.getPattern().getIdentifier() + "|" + (pattern.getColor().getWoolData() & 255));
+            encoded.add(current.getPattern().getKey() + "|" + (current.getColor().getWoolData() & 255));
+        encoded.add(pattern.getPattern().getKey() + "|" + (pattern.getColor().getWoolData() & 255));
         Native.setBannerPatterns(getWorld().getName(), getX(), getY(), getZ(), String.join(";", encoded));
     }
     @Override public boolean update() { return super.update(); }

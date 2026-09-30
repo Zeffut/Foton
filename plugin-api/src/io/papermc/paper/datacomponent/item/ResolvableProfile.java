@@ -1,45 +1,73 @@
 package io.papermc.paper.datacomponent.item;
 
+import com.destroystokyo.paper.profile.PlayerProfile;
 import com.destroystokyo.paper.profile.ProfileProperty;
-import java.util.ArrayList;
+import io.papermc.paper.datacomponent.DataComponentBuilder;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.UUID;
+import net.kyori.adventure.key.Key;
+import net.kyori.adventure.text.object.PlayerHeadObjectContents;
 
-/** Immutable modern Paper profile component. */
-public final class ResolvableProfile {
-    private final UUID uuid;
-    private final String name;
-    private final Collection<ProfileProperty> properties;
-    private final SkinPatch skinPatch;
-
-    private ResolvableProfile(UUID uuid, String name, Collection<ProfileProperty> properties, SkinPatch skinPatch) {
-        this.uuid = uuid; this.name = name;
-        this.properties = Collections.unmodifiableList(new ArrayList<>(properties));
-        this.skinPatch = skinPatch;
-    }
-    public UUID uuid() { return uuid; }
-    public String name() { return name; }
-    public Collection<ProfileProperty> properties() { return properties; }
-    public SkinPatch skinPatch() { return skinPatch; }
-
-    public static Builder resolvableProfile() { return new Builder(); }
-
-    public static final class Builder {
-        private UUID uuid; private String name;
-        private final Collection<ProfileProperty> properties = new ArrayList<>();
-        private SkinPatch skinPatch;
-        public Builder uuid(UUID value) { uuid = value; return this; }
-        public Builder name(String value) { name = value; return this; }
-        public Builder addProperty(ProfileProperty value) { if (value != null) properties.add(value); return this; }
-        public Builder skinPatch(SkinPatch value) { skinPatch = value; return this; }
-        public Object build() { return new ResolvableProfile(uuid, name, properties, skinPatch); }
+/** A game profile as an item or a mannequin carries it: a name, an id, and skin properties.
+ *
+ * <p>An interface, with a builder interface, as in Paper: plugins call
+ * {@code ResolvableProfile.resolvableProfile()} and the builder's methods with
+ * {@code invokeinterface}, which a class answers with
+ * {@code IncompatibleClassChangeError}.</p>
+ *
+ * <p>Paper's {@code dynamic()} and {@code resolve()} are absent: resolving a
+ * partial profile means asking Mojang's session servers, which Foton does not
+ * do for plugins. A plugin that calls them fails with {@code NoSuchMethodError}
+ * rather than receiving a profile nobody looked up.</p>
+ */
+public interface ResolvableProfile extends PlayerHeadObjectContents.SkinSource {
+    static ResolvableProfile resolvableProfile(PlayerProfile profile) {
+        Builder builder = resolvableProfile().uuid(profile.getId()).name(profile.getName());
+        return builder.addProperties(profile.getProperties()).build();
     }
 
-    /** Optional skin patch values carried by a profile component. */
-    public static final class SkinPatch {
-        private final String body;
-        public SkinPatch(String body) { this.body = body; }
-        public String body() { return body; }
+    static Builder resolvableProfile() {
+        return new foton.FotonResolvableProfile.Builder();
+    }
+
+    UUID uuid();
+
+    String name();
+
+    Collection<ProfileProperty> properties();
+
+    SkinPatch skinPatch();
+
+    /** Textures that override the profile's own, by asset key. */
+    interface SkinPatch {
+        static SkinPatch empty() {
+            return foton.FotonResolvableProfile.EMPTY_PATCH;
+        }
+
+        static SkinPatch skinPatch(Key body, Key cape, Key elytra) {
+            return new foton.FotonResolvableProfile.Patch(body, cape, elytra);
+        }
+
+        Key body();
+
+        Key cape();
+
+        Key elytra();
+
+        default boolean isEmpty() {
+            return body() == null && cape() == null && elytra() == null;
+        }
+    }
+
+    interface Builder extends DataComponentBuilder<ResolvableProfile> {
+        Builder name(String name);
+
+        Builder uuid(UUID uuid);
+
+        Builder addProperty(ProfileProperty property);
+
+        Builder addProperties(Collection<ProfileProperty> properties);
+
+        Builder skinPatch(SkinPatch patch);
     }
 }

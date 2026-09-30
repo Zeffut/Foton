@@ -27,6 +27,7 @@ use simdnbt::borrow::{BaseNbtCompound as BorrowedNbtCompound, NbtCompound as Nbt
 use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
 
 use crate::block_entity::{BlockEntity, BlockEntityBase, BlockEntityName, ImplicitComponentInput};
+use crate::event::{BrewEvent, Event as _};
 use crate::inventory::container::{Container, SlotsForFace};
 use crate::inventory::lock::{ContainerRef, SharedContainer};
 use crate::world::World;
@@ -141,10 +142,12 @@ impl BrewingStandContainer {
     /// Vanilla parity: `BrewingStandBlockEntity.doBrew`. Returns the remainder
     /// the caller has to drop when the ingredient slot could not hold it, which
     /// is how a dragon's breath leaves its empty bottle behind.
-    fn brew(&mut self) -> Option<ItemStack> {
-        let ingredient = self.items[SLOT_INGREDIENT].clone();
-        for slot in 0..BOTTLE_SLOTS {
-            self.items[slot] = potion_brewing::mix_with(&ingredient, &self.items[slot]);
+    ///
+    /// `results` are the three bottles to leave, as [`Self::brew_results`]
+    /// computed them and a `BrewEvent` listener may have changed them.
+    fn brew(&mut self, results: &[ItemStack]) -> Option<ItemStack> {
+        for (slot, result) in results.iter().take(BOTTLE_SLOTS).enumerate() {
+            self.items[slot] = result.clone();
         }
 
         let remainder = self.items[SLOT_INGREDIENT].item().get_crafting_remainder();
@@ -159,6 +162,18 @@ impl BrewingStandContainer {
             return None;
         }
         Some(remainder)
+    }
+
+    /// What each bottle becomes with the current ingredient.
+    ///
+    /// Vanilla parity: the `mix` loop of `BrewingStandBlockEntity.doBrew`,
+    /// taken out so Paper's `BrewEvent` can offer the results first.
+    fn brew_results(&self) -> Vec<ItemStack> {
+        let ingredient = &self.items[SLOT_INGREDIENT];
+        self.items[..BOTTLE_SLOTS]
+            .iter()
+            .map(|bottle| potion_brewing::mix_with(ingredient, bottle))
+            .collect()
     }
 
     /// Returns which bottle slots are occupied.
@@ -240,8 +255,18 @@ impl BlockEntity for BrewingStandBlockEntity {
                 .is_none_or(|started| !container.items[SLOT_INGREDIENT].is(started.item()));
 
             if container.brew_time == 0 && brewable {
-                remainder = container.brew();
-                world.level_event(SOUND_BREWING_STAND_BREW, pos, 0, None);
+                // Paper parity: `BrewEvent`, fired with the stand unlocked
+                // because its listener is handed the stand's inventory.
+                let results = container.brew_results();
+                let fuel = container.fuel;
+                drop(container);
+                let mut event = BrewEvent::new(world.key.to_string(), pos, results, fuel);
+                world.fire_event(&mut event);
+                container = self.container.lock();
+                if !event.is_cancelled() && container.is_brewable() {
+                    remainder = container.brew(event.results());
+                    world.level_event(SOUND_BREWING_STAND_BREW, pos, 0, None);
+                }
             } else if !brewable || ingredient_swapped {
                 container.brew_time = 0;
             }
@@ -480,7 +505,8 @@ mod tests {
         stand.items[SLOT_INGREDIENT] = ItemStack::new(&vanilla_items::NETHER_WART);
 
         assert!(stand.is_brewable());
-        assert!(stand.brew().is_none());
+        let results = stand.brew_results();
+        assert!(stand.brew(&results).is_none());
 
         // Both filled bottles converted; the ingredient was spent once.
         for slot in 0..2 {
@@ -505,7 +531,8 @@ mod tests {
         stand.items[SLOT_INGREDIENT] = ItemStack::new(&vanilla_items::NETHER_WART);
 
         assert!(stand.is_brewable());
-        stand.brew();
+        let results = stand.brew_results();
+        stand.brew(&results);
 
         let untouched = stand.items[1]
             .get(POTION_CONTENTS)
@@ -608,7 +635,8 @@ mod tests {
         stand.items[SLOT_INGREDIENT] = breath;
 
         assert!(stand.is_brewable());
-        let dropped = stand.brew();
+        let results = stand.brew_results();
+        let dropped = stand.brew(&results);
 
         assert!(stand.items[0].is(&vanilla_items::LINGERING_POTION));
         // The last dragon's breath leaves its empty bottle in the slot rather

@@ -1,8 +1,76 @@
 //! Events about the server itself.
 
+use std::net::IpAddr;
+
 use foton_utils::downcast::{DowncastType, DowncastTypeKey};
+use text_components::TextComponent;
 
 use super::Event;
+
+/// A client asked for the server-list entry.
+///
+/// Bukkit parity: `ServerListPingEvent`. What a listener leaves as the MOTD
+/// and the player limit is what the client is shown.
+pub struct ServerListPingEvent {
+    address: IpAddr,
+    motd: TextComponent,
+    online: i32,
+    max_players: i32,
+}
+
+// SAFETY: This Foton-owned key uniquely identifies the concrete Rust type.
+unsafe impl DowncastType for ServerListPingEvent {
+    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/server_list_ping");
+}
+
+impl Event for ServerListPingEvent {}
+
+impl ServerListPingEvent {
+    /// Creates the event with the configured entry.
+    #[must_use]
+    pub const fn new(address: IpAddr, motd: TextComponent, online: i32, max_players: i32) -> Self {
+        Self {
+            address,
+            motd,
+            online,
+            max_players,
+        }
+    }
+
+    /// Who is asking.
+    #[must_use]
+    pub const fn address(&self) -> IpAddr {
+        self.address
+    }
+
+    /// The message of the day.
+    #[must_use]
+    pub const fn motd(&self) -> &TextComponent {
+        &self.motd
+    }
+
+    /// Changes the message of the day.
+    pub fn set_motd(&mut self, motd: TextComponent) {
+        self.motd = motd;
+    }
+
+    /// How many players are online.
+    #[must_use]
+    pub const fn online(&self) -> i32 {
+        self.online
+    }
+
+    /// The player limit shown.
+    #[must_use]
+    pub const fn max_players(&self) -> i32 {
+        self.max_players
+    }
+
+    /// Changes the player limit shown.
+    pub const fn set_max_players(&mut self, max_players: i32) {
+        self.max_players = max_players;
+    }
+}
 
 /// One game tick happened.
 ///

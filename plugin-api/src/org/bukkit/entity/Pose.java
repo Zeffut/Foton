@@ -1,3 +1,23 @@
 package org.bukkit.entity;
 
-public enum Pose { STANDING, FALL_FLYING, SLEEPING, SWIMMING, SPIN_ATTACK, CROAKING, LONG_JUMPING, DYING, DIGGING, USING_TONGUE, SITTING, ROARING, SNIFFING, EMERGING, EAT, LAYING }
+/** An entity's pose, in vanilla's order: the ordinal is the network id. */
+public enum Pose {
+    STANDING,
+    FALL_FLYING,
+    SLEEPING,
+    SWIMMING,
+    SPIN_ATTACK,
+    SNEAKING,
+    LONG_JUMPING,
+    DYING,
+    CROAKING,
+    USING_TONGUE,
+    SITTING,
+    ROARING,
+    SNIFFING,
+    EMERGING,
+    DIGGING,
+    SLIDING,
+    SHOOTING,
+    INHALING
+}

@@ -34,6 +34,11 @@ final class FotonRegistryAccess implements RegistryAccess {
     @SuppressWarnings("unchecked")
     public <T extends Keyed> Registry<T> getRegistry(RegistryKey<T> key) {
         if (key == RegistryKey.ENCHANTMENT) return (Registry<T>) Registry.ENCHANTMENT;
+        if (key == RegistryKey.BIOME) return (Registry<T>) Registry.BIOME;
+        if (key == RegistryKey.TRIM_MATERIAL) return (Registry<T>) Registry.TRIM_MATERIAL;
+        if (key == RegistryKey.TRIM_PATTERN) return (Registry<T>) Registry.TRIM_PATTERN;
+        if (key == RegistryKey.BANNER_PATTERN) return (Registry<T>) Registry.BANNER_PATTERN;
+        if (key == RegistryKey.INSTRUMENT) return (Registry<T>) Registry.INSTRUMENT;
         return null;
     }
 }

@@ -6,7 +6,7 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryView;
 
 /** Live view facade for the menu currently installed on one player. */
-public final class FotonInventoryView extends InventoryView {
+public final class FotonInventoryView implements InventoryView {
     private final FotonPlayer player;
     private final Inventory top;
     private String title;
@@ -19,9 +19,15 @@ public final class FotonInventoryView extends InventoryView {
     }
 
     private static Inventory liveTop(String owner) {
+        FotonCustomInventory custom = FotonCustomInventory.viewedBy(owner);
+        if (custom != null) return custom;
         String menuType = Native.openMenuType(owner);
         if ("minecraft:crafting".equals(menuType)) return new FotonCraftingInventory(owner);
         if ("minecraft:grindstone".equals(menuType)) return new FotonGrindstoneInventory(owner);
+        if ("minecraft:furnace".equals(menuType)) return new FotonFurnaceMenuInventory(owner, org.bukkit.Material.FURNACE);
+        if ("minecraft:blast_furnace".equals(menuType)) return new FotonFurnaceMenuInventory(owner, org.bukkit.Material.BLAST_FURNACE);
+        if ("minecraft:smoker".equals(menuType)) return new FotonFurnaceMenuInventory(owner, org.bukkit.Material.SMOKER);
+        if ("minecraft:smithing".equals(menuType)) return new FotonSmithingInventory(owner);
         return new FotonMenuInventory(owner);
     }
 

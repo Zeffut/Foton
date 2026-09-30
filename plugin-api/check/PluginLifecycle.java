@@ -758,7 +758,7 @@ final class PluginLifecycle {
                 org.bukkit.event.player.AsyncPlayerChatEvent.class.getName()) - handlerBaseline;
             try {
                 getServer().getScheduler().runTask(this, () -> runs++);
-            } catch (IllegalStateException expected) {
+            } catch (org.bukkit.plugin.IllegalPluginAccessException expected) {
                 rejectedTaskDuringDisable = true;
             }
         }

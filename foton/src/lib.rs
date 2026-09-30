@@ -265,8 +265,7 @@ impl FotonServer {
                     )
                 })?;
                 let explicit_api = env::var_os("FOTON_PLUGIN_API_JAR").map(PathBuf::from);
-                let explicit_libraries =
-                    env::var_os("FOTON_PLUGIN_LIBRARY_DIRECTORY").map(PathBuf::from);
+                let explicit_libraries = env::var_os("FOTON_PLUGIN_LIBRARY_DIRECTORY");
                 // Explicit paths are the source-tree/operator fallback. Only
                 // the release layout is accepted as an installed runtime.
                 let installed_runtime = if explicit_api.is_none() && explicit_libraries.is_none() {
@@ -281,13 +280,28 @@ impl FotonServer {
                             .map(|directory| directory.join("foton-plugin-api.jar"))
                     })
                     .unwrap_or_else(|| PathBuf::from("plugin-api/build/foton-plugin-api.jar"));
-                let library_directory = explicit_libraries
-                    .or_else(|| installed_runtime.map(|directory| directory.join("lib")))
-                    .or_else(|| Some(PathBuf::from("plugin-api/lib")));
+                let library_directories = if let Some(paths) = explicit_libraries {
+                    env::split_paths(&paths).collect()
+                } else if let Some(directory) = installed_runtime {
+                    vec![directory.join("lib")]
+                } else {
+                    let built = api_jar.parent();
+                    let mut directories: Vec<_> = built
+                        .and_then(Path::parent)
+                        .map(|root| root.join("lib"))
+                        .into_iter()
+                        .collect();
+                    if let Some(runtime) = built.map(|build| build.join("runtime-libs"))
+                        && runtime.is_dir()
+                    {
+                        directories.push(runtime);
+                    }
+                    directories
+                };
                 let config = PluginHostConfig {
                     java_home: java_home.into(),
                     api_jar,
-                    library_directory,
+                    library_directories,
                     plugin_directory: plugin_directory.clone(),
                 };
                 Some(start_plugin_host(config, plugin_directory)?)

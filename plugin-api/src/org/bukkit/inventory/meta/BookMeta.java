@@ -2,7 +2,14 @@ package org.bukkit.inventory.meta;
 
 import java.util.List;
 
-/** Title, author and pages carried by a writable or written book. */
+/** Title, author and pages carried by a writable or written book.
+ *
+ * <p>Paper's BookMeta is also an Adventure {@code Book}. Adventure 5, which
+ * Foton ships, seals {@code Book}, so this one only declares the same
+ * methods with the same descriptors: {@code title(Component)} and
+ * {@code author(Component)} return the meta, and {@code pages(List)} returns
+ * a {@code Book} snapshot of it after setting the pages.</p>
+ */
 public interface BookMeta extends ItemMeta {
     boolean hasTitle();
 
@@ -58,6 +65,28 @@ public interface BookMeta extends ItemMeta {
     }
 
     int getPageCount();
+
+    net.kyori.adventure.text.Component title();
+
+    /** Sets the title, as section-sign text, and returns this meta. */
+    BookMeta title(net.kyori.adventure.text.Component title);
+
+    net.kyori.adventure.text.Component author();
+
+    BookMeta author(net.kyori.adventure.text.Component author);
+
+    java.util.List<net.kyori.adventure.text.Component> pages();
+
+    /** Sets the pages; answers the book as it now reads. */
+    net.kyori.adventure.inventory.Book pages(java.util.List<net.kyori.adventure.text.Component> pages);
+
+    default net.kyori.adventure.inventory.Book pages(net.kyori.adventure.text.Component... pages) {
+        return pages(java.util.Arrays.asList(pages));
+    }
+
+    net.kyori.adventure.text.Component page(int page);
+
+    void page(int page, net.kyori.adventure.text.Component data);
 
     Generation getGeneration();
 

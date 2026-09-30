@@ -27,13 +27,6 @@ final class SimpleBanList<T> implements BanList<T> {
     }
 
     @Override public boolean isBanned(T target) { return getBanEntry(target) != null; }
-    boolean isBannedIgnoreCase(String target) {
-        if (target == null) return false;
-        for (T candidate : entries.keySet()) {
-            if (candidate instanceof String value && value.equalsIgnoreCase(target) && isBanned(candidate)) return true;
-        }
-        return false;
-    }
     @Override public void pardon(T target) { if (target != null) entries.remove(target); }
 
     @Override public Set<BanEntry<T>> getBanEntries() {

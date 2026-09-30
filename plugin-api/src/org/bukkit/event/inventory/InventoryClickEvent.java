@@ -29,7 +29,14 @@ public class InventoryClickEvent extends InventoryEvent implements Cancellable {
         this(whoClicked, currentItem, cursor, click, rawSlot, -1);
     }
     public InventoryClickEvent(HumanEntity whoClicked, org.bukkit.inventory.ItemStack currentItem, org.bukkit.inventory.ItemStack cursor, ClickType click, int rawSlot, int hotbarButton) {
-        super(whoClicked instanceof org.bukkit.entity.Player ? ((org.bukkit.entity.Player) whoClicked).getOpenInventory() : null);
+        this(whoClicked instanceof org.bukkit.entity.Player ? ((org.bukkit.entity.Player) whoClicked).getOpenInventory() : null,
+            whoClicked, currentItem, cursor, click, rawSlot, hotbarButton);
+    }
+    /** A click on a view the host built, for a menu it cannot read while the click is running. */
+    public InventoryClickEvent(org.bukkit.inventory.InventoryView view, HumanEntity whoClicked,
+            org.bukkit.inventory.ItemStack currentItem, org.bukkit.inventory.ItemStack cursor,
+            ClickType click, int rawSlot, int hotbarButton) {
+        super(view);
         this.whoClicked = whoClicked;
         this.currentItem = currentItem == null ? null : currentItem.clone();
         this.cursor = cursor == null ? null : cursor.clone();

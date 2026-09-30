@@ -128,10 +128,16 @@ pub struct EncodedPacket {
     // This is optimized for reduces allocation
     /// The encoded data.
     pub encoded_data: Arc<FrontVec>,
+    /// The packet id, read before the frame was built.
+    ///
+    /// Kept beside the bytes because once the frame is compressed the id sits
+    /// inside the zlib stream: a caller routing on it would otherwise have to
+    /// inflate every packet just to learn which one it is.
+    id: i32,
 }
 
 impl EncodedPacket {
-    fn from_data_uncompressed(mut packet_data: FrontVec) -> Result<Self, PacketError> {
+    fn from_data_uncompressed(mut packet_data: FrontVec, id: i32) -> Result<Self, PacketError> {
         let data_len = packet_data.len();
         let varint_size = VarInt::written_size(data_len as i32);
 
@@ -144,12 +150,14 @@ impl EncodedPacket {
 
         Ok(Self {
             encoded_data: Arc::new(packet_data),
+            id,
         })
     }
 
     fn from_packet_data_front(
         mut packet_data: FrontVec,
         compression: CompressionInfo,
+        id: i32,
     ) -> Result<Self, PacketError> {
         let data_len = packet_data.len();
         // We dont need any more size check to convert to i32 as MAX_PACKET_DATA_SIZE < i32::MAX
@@ -182,6 +190,7 @@ impl EncodedPacket {
 
             Ok(Self {
                 encoded_data: Arc::new(buf),
+                id,
             })
         } else {
             // Pushed before data:
@@ -196,6 +205,7 @@ impl EncodedPacket {
 
             Ok(Self {
                 encoded_data: Arc::new(packet_data),
+                id,
             })
         }
     }
@@ -290,10 +300,88 @@ impl EncodedPacket {
     }
 
     fn from_data(buf: FrontVec, compression: Option<CompressionInfo>) -> Result<Self, PacketError> {
+        // Every buffer reaching here was written id first, by `write_packet`
+        // or by `from_id_and_payload`.
+        let id = VarInt::read(&mut Cursor::new(buf.as_slice()))?.0;
         if let Some(compression) = compression {
-            Self::from_packet_data_front(buf, compression)
+            Self::from_packet_data_front(buf, compression, id)
         } else {
-            Self::from_data_uncompressed(buf)
+            Self::from_data_uncompressed(buf, id)
+        }
+    }
+
+    /// The protocol id of the packet inside the frame.
+    #[must_use]
+    pub const fn id(&self) -> i32 {
+        self.id
+    }
+
+    /// Frames an id and a payload that were produced outside a `ClientPacket`.
+    ///
+    /// This is how a packet a plugin rewrote goes back on the wire: the bytes
+    /// are already in protocol form, only the framing is Foton's.
+    ///
+    /// # Errors
+    /// If the packet is too long or fails to compress.
+    pub fn from_id_and_payload(
+        id: i32,
+        payload: &[u8],
+        compression: Option<CompressionInfo>,
+    ) -> Result<Self, PacketError> {
+        let mut buf = FrontVec::capacity(6, payload.len() + VarInt::MAX_SIZE);
+        VarInt(id).write(&mut buf)?;
+        buf.extend_from_slice(payload);
+        Self::from_data(buf, compression)
+    }
+
+    /// The payload, without its id, as it was before framing and compression.
+    ///
+    /// `compression` must be the setting the packet was framed with; the frame
+    /// itself does not say whether a data-length field is present.
+    ///
+    /// # Errors
+    /// If the frame is malformed or fails to decompress.
+    pub fn payload(&self, compression: Option<CompressionInfo>) -> Result<Vec<u8>, PacketError> {
+        let body = self.to_packet_data(compression)?;
+        let mut body_cursor = Cursor::new(body.as_slice());
+        VarInt::read(&mut body_cursor)?;
+        Ok(body[body_cursor.position() as usize..].to_vec())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroU32;
+
+    use super::{CompressionInfo, EncodedPacket};
+
+    fn compression(threshold: u32) -> Option<CompressionInfo> {
+        NonZeroU32::new(threshold).map(|threshold| CompressionInfo {
+            threshold,
+            level: 4,
+        })
+    }
+
+    /// A packet a plugin rewrote is framed from raw bytes and read back the
+    /// same way; the three frame shapes must all survive that round trip, or
+    /// a rewrite silently corrupts whatever the client receives next.
+    #[test]
+    fn payload_survives_every_frame_shape() {
+        let small = vec![7_u8; 10];
+        let large: Vec<u8> = (0..4096_u32).map(|i| (i % 251) as u8).collect();
+        for (payload, setting) in [
+            (&small, None),
+            (&large, None),
+            (&small, compression(256)),
+            (&large, compression(256)),
+        ] {
+            let packet = EncodedPacket::from_id_and_payload(99, payload, setting)
+                .expect("a small packet frames");
+            assert_eq!(packet.id(), 99);
+            assert_eq!(
+                &packet.payload(setting).expect("the frame decodes"),
+                payload
+            );
         }
     }
 }
@@ -622,8 +710,10 @@ mod translation_packet_tests {
         stored.extend_from_slice(&corrupt);
         let corrupt = EncodedPacket {
             encoded_data: Arc::new(stored),
+            id: encoded.id(),
         };
         assert!(corrupt.to_packet_data(None).is_err());
+        assert!(corrupt.payload(None).is_err());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -1,7 +1,7 @@
 package org.bukkit.entity;
 
 /** Bukkit age state exposed by ageable mobs. */
-public interface Ageable extends LivingEntity {
+public interface Ageable extends Creature {
     default boolean canBreed() { return foton.Native.entityCanBreed(((foton.FotonEntity) this).getUniqueId().toString()); }
     default void setBreed(boolean breed) { foton.Native.setEntityBreed(((foton.FotonEntity) this).getUniqueId().toString(), breed); }
 

@@ -7,7 +7,10 @@ use super::{
     SectionPos, SharedEntity, SharedGameEventListener, SyncMutex, World, WorldAabb,
     WorldChangeRequest, block_entity_ticker, mem, next_entity_id, vanilla_entities,
 };
-use crate::event::{ChunkUnloadEvent, EntityRemoveFromWorldEvent, ItemSpawnEvent};
+use crate::event::{
+    ChunkUnloadEvent, EntitiesUnloadEvent, EntityRemoveFromWorldEvent, ItemSpawnEvent,
+};
+use uuid::Uuid;
 
 pub(super) struct NavigatingMobTracker {
     ids: SyncMutex<FxHashSet<i32>>,
@@ -147,6 +150,7 @@ impl World {
         persisted_status: ChunkStatus,
         entities: Vec<SharedEntity>,
     ) {
+        let mut registered = Vec::new();
         for tree in Self::loaded_entity_trees(entities) {
             let Some(root) = tree.first() else {
                 continue;
@@ -187,6 +191,23 @@ impl World {
             for chunk in dirty_chunks {
                 self.mark_chunk_dirty(chunk);
             }
+            registered.extend(tree.iter().map(|entity| entity.uuid()));
+        }
+        if !registered.is_empty() {
+            self.queue_loaded_entities(source_chunk, registered);
+        }
+    }
+
+    /// Holds entities that arrived with a chunk until the tick announces them.
+    ///
+    /// Paper parity: `EntitiesLoadEvent`. Only a chunk that brought entities
+    /// back is announced.
+    fn queue_loaded_entities(&self, pos: ChunkPos, entities: impl IntoIterator<Item = Uuid>) {
+        let mut batches = self.loaded_entity_batches.lock();
+        if let Some((_, batch)) = batches.iter_mut().find(|(chunk, _)| *chunk == pos) {
+            batch.extend(entities);
+        } else {
+            batches.push((pos, entities.into_iter().collect()));
         }
     }
 
@@ -311,6 +332,9 @@ impl World {
         if result.needs_save {
             self.mark_chunk_dirty(pos);
         }
+        if !result.restored.is_empty() {
+            self.queue_loaded_entities(pos, result.restored.iter().map(|entity| entity.uuid()));
+        }
         for entity in result.restored {
             self.attach_managed_entity_callback(&entity);
         }
@@ -336,6 +360,21 @@ impl World {
         // chunk. Bukkit's `ChunkUnloadEvent` is not cancellable and neither is
         // this: the unload is already under way.
         self.fire_event(&mut ChunkUnloadEvent::new(self.key.to_string(), pos));
+        // Paper parity: `EntitiesUnloadEvent`, while the entities can still be
+        // read. A chunk with none is not announced.
+        let leaving: Vec<Uuid> = self
+            .entity_manager
+            .live_entities_in_chunk(pos)
+            .iter()
+            .map(|entity| entity.uuid())
+            .collect();
+        if !leaving.is_empty() {
+            self.fire_event(&mut EntitiesUnloadEvent::new(
+                self.key.to_string(),
+                pos,
+                leaving,
+            ));
+        }
 
         let result = self.entity_manager.begin_chunk_unload(pos);
         self.apply_entity_lifecycle_changes(EntityLifecycleChanges {

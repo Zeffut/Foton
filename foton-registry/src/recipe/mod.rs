@@ -4,17 +4,23 @@
 //! Supports crafting (shaped and shapeless), cooking, stonecutting and
 //! smithing transformations.
 
+mod book;
 mod cooking;
 mod crafting;
+mod display;
 mod ingredient;
 mod registry;
 mod smithing;
 mod stonecutting;
 
-pub use cooking::{CookingKind, SmeltingRecipe};
+pub use book::{BookRecipe, RecipeDisplayIndex};
+pub use cooking::{CookingCategory, CookingKind, SmeltingRecipe};
 pub use crafting::{
     CraftingCategory, CraftingInput, CraftingRecipe, PositionedCraftingInput, RecipeResult,
     ShapedRecipe, ShapelessRecipe,
+};
+pub use display::{
+    CookingStation, RecipeBookCategory, RecipeDisplay, RecipeDisplayEntry, SlotDisplay,
 };
 pub use ingredient::Ingredient;
 pub use registry::RecipeRegistry;

@@ -9,6 +9,8 @@
 //! World mutations remain scheduler-owned; narrowly scoped plugin registries
 //! (such as runtime recipes) expose their own synchronized write path.
 
+use crate::packet_tap;
+use std::borrow::Cow;
 use std::fmt::Write;
 use std::mem;
 use std::ptr::null_mut;
@@ -17,8 +19,11 @@ use std::sync::{Arc, OnceLock, Weak};
 use std::thread::{self, ThreadId};
 use std::time::{Duration, Instant};
 
+use crate::relay::{self, cooking_kind, describe_cooking};
+use foton_core::advancement::ADVANCEMENT_TREE;
 use foton_core::behavior::blocks::vegetation::tree_grower::generate_tree as grow_tree;
 use foton_core::block_entity::entities::BannerBlockEntity;
+use foton_core::block_entity::entities::FurnaceBlockEntity;
 use foton_core::block_entity::entities::HopperBlockEntity;
 use foton_core::block_entity::entities::JukeboxBlockEntity;
 use foton_core::block_entity::entities::LecternBlockEntity;
@@ -38,12 +43,9 @@ use foton_core::entity::PatrollingMonster;
 use foton_core::entity::Projectile;
 use foton_core::entity::SharedEntity;
 use foton_core::entity::TamableAnimal;
-use foton_core::entity::attribute::AttributeModifier;
-use foton_core::entity::attribute::AttributeModifierOperation;
 use foton_core::entity::conversion::{
     ConversionParams, ConversionReason, convert_to, replace_entity,
 };
-use foton_core::entity::damage::DamageSource;
 use foton_core::entity::entities::TropicalFishPattern;
 use foton_core::entity::entities::decoration::ArmorStandEntity;
 use foton_core::entity::entities::mobs::hostile::PhantomEntity;
@@ -87,6 +89,7 @@ use foton_core::entity::{
     Entity, EntitySpawnReason, LlamaVariant, MobEffectInstance, is_tamed, owner_uuid,
     set_owner_uuid, set_tamed, start_riding_entities,
 };
+use foton_core::event::TeleportPoint;
 use foton_core::inventory::container::Container;
 use foton_core::inventory::equipment::EquipmentSlot;
 use foton_core::inventory::lock::{ContainerLockGuard, ContainerRef};
@@ -118,35 +121,35 @@ use foton_protocol::packets::game::{
 use foton_registry::attribute::AttributeRef;
 use foton_registry::blocks::behavior::PushReaction;
 use foton_registry::blocks::block_state_ext::BlockStateExt;
+use foton_registry::blocks::properties::BlockStateProperties;
 use foton_registry::data_components::components::{
     CustomModelData, ItemEnchantments, ItemLore, TooltipDisplay,
 };
 use foton_registry::data_components::vanilla_components::{
-    CUSTOM_MODEL_DATA, CUSTOM_NAME, ENCHANTMENTS, FIREWORKS, FireworkExplosion,
-    FireworkExplosionShape, Fireworks, ITEM_MODEL, ITEM_NAME, LORE, STORED_ENCHANTMENTS,
-    TOOLTIP_DISPLAY, TOOLTIP_STYLE, UNBREAKABLE, WRITABLE_BOOK_CONTENT, WRITTEN_BOOK_CONTENT,
+    CUSTOM_MODEL_DATA, ENCHANTMENTS, FIREWORKS, FireworkExplosion, FireworkExplosionShape,
+    Fireworks, ITEM_MODEL, ITEM_NAME, LORE, STORED_ENCHANTMENTS, TOOLTIP_DISPLAY, TOOLTIP_STYLE,
+    UNBREAKABLE, WRITABLE_BOOK_CONTENT, WRITTEN_BOOK_CONTENT,
 };
-use foton_registry::entity_data::{Quaternionf, Vector3f};
+use foton_registry::enchantment::{Enchantment, EnchantmentRef};
 use foton_registry::entity_type::EntityTypeRef;
 use foton_registry::entity_type::MobCategory;
 use foton_registry::entity_variant::AxolotlVariant;
+use foton_registry::fuel;
 use foton_registry::game_rules::GameRuleType;
 use foton_registry::game_rules::GameRuleValue;
 use foton_registry::item_stack::ItemStack;
-use foton_registry::particle_type::ParticleData;
 use foton_registry::recipe::{
-    CraftingCategory, Ingredient, RecipeResult, ShapedRecipe, ShapelessRecipe,
+    CraftingCategory, CraftingInput, Ingredient, RecipeResult, ShapedRecipe, ShapelessRecipe,
 };
+use foton_registry::stat::{CustomStatRef, Stat};
 use foton_registry::trading::ItemCost;
 use foton_registry::trading::MerchantOffer;
 use foton_registry::vanilla_block_entity_types::SIGN;
-use foton_registry::vanilla_damage_types::PLAYER_ATTACK;
 use foton_registry::vanilla_game_rules::TNT_EXPLOSION_DROP_DECAY;
 use foton_registry::{
     REGISTRY, RegistryEntry as _, RegistryExt as _, TaggedRegistryExt as _, vanilla_entities,
     vanilla_items,
 };
-use foton_registry::{stat::Stat, vanilla_custom_stats};
 use foton_utils::entity_events::EntityStatus;
 use foton_utils::locks::{SyncMutex, SyncRwLock};
 use foton_utils::nbt::{merge_nbt_compounds, parse_snbt_compound, to_canonical_snbt};
@@ -166,15 +169,27 @@ use foton_utils::{BlockPos, BlockStateId, WorldAabb};
 use foton_utils::{Downcast as _, Identifier};
 use glam::DVec3;
 use jni::JNIEnv;
-use jni::objects::{JByteArray, JClass, JDoubleArray, JObject, JObjectArray, JString};
+use jni::objects::{JByteArray, JClass, JDoubleArray, JIntArray, JObject, JObjectArray, JString};
 use jni::sys::{
-    jboolean, jbyte, jdouble, jdoubleArray, jfloat, jint, jlong, jobjectArray, jstring,
+    jboolean, jbyte, jdouble, jdoubleArray, jfloat, jint, jintArray, jlong, jobjectArray, jstring,
 };
 use rustc_hash::FxHashMap;
 use simdnbt::owned::NbtCompound;
 use simdnbt::owned::NbtTag;
 use text_components::{TextComponent, content::Content as TextContent};
 use uuid::Uuid;
+
+mod attributes;
+mod blocks;
+mod displays;
+mod entities;
+mod lifecycle;
+mod merchants;
+mod particles;
+mod players;
+mod support;
+use crate::item_components;
+use crate::scoreboard_natives;
 
 /// The server the natives answer about.
 ///
@@ -207,7 +222,8 @@ const ABANDONED_CHUNK_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 static BOSS_BARS: OnceLock<SyncRwLock<FxHashMap<Uuid, Arc<ServerBossEvent>>>> = OnceLock::new();
 
 /// Bukkit updates header and footer independently, while the protocol packet carries both.
-static PLAYER_TAB_LISTS: OnceLock<SyncRwLock<FxHashMap<Uuid, (String, String)>>> = OnceLock::new();
+static PLAYER_TAB_LISTS: OnceLock<SyncRwLock<FxHashMap<Uuid, (TextComponent, TextComponent)>>> =
+    OnceLock::new();
 
 /// Plugin world-creation requests. Requests are polled from JVM threads;
 /// actual construction and attachment remain owned by the server safe-point.
@@ -261,7 +277,7 @@ extern "system" fn set_compass_target(
 }
 
 /// The server, if there still is one.
-fn server() -> Option<Arc<Server>> {
+pub(crate) fn server() -> Option<Arc<Server>> {
     SERVER.get().and_then(|slot| slot.read().upgrade())
 }
 
@@ -290,7 +306,7 @@ fn boss_bars() -> &'static SyncRwLock<FxHashMap<Uuid, Arc<ServerBossEvent>>> {
     BOSS_BARS.get_or_init(|| SyncRwLock::new(FxHashMap::default()))
 }
 
-fn player_tab_lists() -> &'static SyncRwLock<FxHashMap<Uuid, (String, String)>> {
+fn player_tab_lists() -> &'static SyncRwLock<FxHashMap<Uuid, (TextComponent, TextComponent)>> {
     PLAYER_TAB_LISTS.get_or_init(|| SyncRwLock::new(FxHashMap::default()))
 }
 
@@ -305,21 +321,21 @@ fn boss_bar(env: &mut JNIEnv<'_>, id: &JString<'_>) -> Option<Arc<ServerBossEven
 }
 
 /// Resolves a Java-side handle back to a player who is still online.
-fn player(env: &mut JNIEnv<'_>, uuid: &JString<'_>) -> Option<Arc<Player>> {
+pub(crate) fn player(env: &mut JNIEnv<'_>, uuid: &JString<'_>) -> Option<Arc<Player>> {
     let text: String = env.get_string(uuid).ok()?.into();
     let uuid = Uuid::parse_str(&text).ok()?;
     server()?.online_players().get_by_uuid(&uuid)
 }
 
 /// Returns a Java string, or Java's null when there is nothing to say.
-fn to_java(env: &mut JNIEnv<'_>, value: Option<String>) -> jstring {
+pub(crate) fn to_java(env: &mut JNIEnv<'_>, value: Option<String>) -> jstring {
     value
         .and_then(|text| env.new_string(text).ok())
         .map_or_else(null_mut, JString::into_raw)
 }
 
 /// Returns a Java `String[]`, or null if the array could not be built.
-fn string_array(env: &mut JNIEnv<'_>, values: &[String]) -> jobjectArray {
+pub(crate) fn string_array(env: &mut JNIEnv<'_>, values: &[String]) -> jobjectArray {
     let Ok(empty) = env.new_string("") else {
         return null_mut();
     };
@@ -406,6 +422,104 @@ extern "system" fn enchantment_can_enchant(
     jboolean::from(enchantment.can_enchant(item))
 }
 
+fn enchantment_named(env: &mut JNIEnv<'_>, key: &JString<'_>) -> Option<EnchantmentRef> {
+    let key: Identifier = env.get_string(key).ok()?.to_str().ok()?.parse().ok()?;
+    REGISTRY.enchantments.by_key(&key)
+}
+
+/// `foton.Native.blockPropertyValues`
+extern "system" fn block_property_values(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    block: JString<'_>,
+    property: JString<'_>,
+) -> jobjectArray {
+    let Some(block) = env
+        .get_string(&block)
+        .ok()
+        .and_then(|text| text.to_str().ok()?.parse::<Identifier>().ok())
+        .and_then(|key| REGISTRY.blocks.by_key(&key))
+    else {
+        return null_mut();
+    };
+    let Ok(property) = env.get_string(&property) else {
+        return null_mut();
+    };
+    let property = String::from(property);
+    let Some(found) = block
+        .properties
+        .iter()
+        .find(|candidate| candidate.get_name() == property)
+    else {
+        return null_mut();
+    };
+    let values: Vec<String> = found
+        .get_possible_value_names()
+        .iter()
+        .map(|value| (*value).to_owned())
+        .collect();
+    string_array(&mut env, &values)
+}
+
+/// `foton.Native.enchantmentsConflict`
+extern "system" fn enchantments_conflict(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    enchantment: JString<'_>,
+    other: JString<'_>,
+) -> jboolean {
+    let (Some(enchantment), Some(other)) = (
+        enchantment_named(&mut env, &enchantment),
+        enchantment_named(&mut env, &other),
+    ) else {
+        return 0;
+    };
+    jboolean::from(!Enchantment::are_compatible(enchantment, other))
+}
+
+/// `foton.Native.enchantmentItems`: the item keys an enchantment's primary or
+/// supported holder set names, or null when it names none.
+extern "system" fn enchantment_items(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    enchantment: JString<'_>,
+    primary: jboolean,
+) -> jobjectArray {
+    let Some(enchantment) = enchantment_named(&mut env, &enchantment) else {
+        return null_mut();
+    };
+    let holders = if primary == 0 {
+        Some(enchantment.supported_items)
+    } else {
+        enchantment.primary_items
+    };
+    let Some(holders) = holders else {
+        return null_mut();
+    };
+    // The data pack writes these as a tag (`#minecraft:enchantable/sword`) or
+    // a single item, never inline lists, which is also all Foton parses.
+    let items: Vec<String> = match holders.strip_prefix('#') {
+        Some(tag) => {
+            let Ok(tag) = tag.parse::<Identifier>() else {
+                return null_mut();
+            };
+            REGISTRY
+                .items
+                .iter_tag(&tag)
+                .map(|item| item.key.to_string())
+                .collect()
+        }
+        None => holders
+            .parse::<Identifier>()
+            .ok()
+            .and_then(|key| REGISTRY.items.by_key(&key))
+            .map(|item| item.key.to_string())
+            .into_iter()
+            .collect(),
+    };
+    string_array(&mut env, &items)
+}
+
 fn parse_item_snbt_patch(input: &str) -> Option<NbtCompound> {
     let text = input.trim();
     let compound = if text.starts_with('{') {
@@ -459,6 +573,38 @@ extern "system" fn server_motd(mut env: JNIEnv<'_>, _class: JClass<'_>) -> jstri
     to_java(&mut env, server().map(|value| value.config.motd.clone()))
 }
 
+/// The members of `tag` in the registry a plugin names, or `None` when that
+/// registry has no such tag.
+///
+/// Registries are named as Paper's `RegistryKey`s are (`item`,
+/// `worldgen/biome`), and also as Bukkit's `Tag.REGISTRY_*` strings
+/// (`items`, `blocks`, `fluids`, `entity_types`, `game_events`).
+fn tag_members(registry: &str, tag: &Identifier) -> Option<Vec<String>> {
+    fn keys<T: foton_registry::RegistryEntry + 'static>(
+        entries: Option<Vec<&'static T>>,
+    ) -> Option<Vec<String>> {
+        entries.map(|entries| {
+            entries
+                .iter()
+                .map(|entry| entry.key().to_string())
+                .collect()
+        })
+    }
+    match registry.strip_prefix("minecraft:").unwrap_or(registry) {
+        "item" | "items" => keys(REGISTRY.items.get_tag(tag)),
+        "block" | "blocks" => keys(REGISTRY.blocks.get_tag(tag)),
+        "fluid" | "fluids" => keys(REGISTRY.fluids.get_tag(tag)),
+        "entity_type" | "entity_types" => keys(REGISTRY.entity_types.get_tag(tag)),
+        "game_event" | "game_events" => keys(REGISTRY.game_events.get_tag(tag)),
+        "enchantment" => keys(REGISTRY.enchantments.get_tag(tag)),
+        "banner_pattern" => keys(REGISTRY.banner_patterns.get_tag(tag)),
+        "instrument" => keys(REGISTRY.instruments.get_tag(tag)),
+        "worldgen/biome" => keys(REGISTRY.biomes.get_tag(tag)),
+        "potion" => keys(REGISTRY.potions.get_tag(tag)),
+        _ => None,
+    }
+}
+
 extern "system" fn is_tagged(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -483,19 +629,23 @@ extern "system" fn is_tagged(
     };
     let registry = String::from(registry);
     let answer = match registry.as_str() {
-        "minecraft:items" | "items" => REGISTRY
+        // The two a plugin asks about every tick keep their direct lookup.
+        "minecraft:items" | "items" | "item" => REGISTRY
             .items
             .by_key(&value)
             .is_some_and(|item| REGISTRY.items.is_in_tag(item, &tag)),
-        "minecraft:blocks" | "blocks" => REGISTRY
+        "minecraft:blocks" | "blocks" | "block" => REGISTRY
             .blocks
             .by_key(&value)
             .is_some_and(|block| REGISTRY.blocks.is_in_tag(block, &tag)),
-        _ => false,
+        other => tag_members(other, &tag)
+            .is_some_and(|members| members.iter().any(|member| *member == value.to_string())),
     };
     jboolean::from(answer)
 }
 
+/// `foton.Native.tagValues`: the tag's members, or null when the registry has
+/// no such tag -- which is how `Registry#hasTag` tells absent from empty.
 extern "system" fn tag_values(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -511,19 +661,8 @@ extern "system" fn tag_values(
     let Ok(tag) = String::from(tag).parse::<Identifier>() else {
         return null_mut();
     };
-    let registry = String::from(registry);
-    let values: Vec<String> = match registry.as_str() {
-        "minecraft:items" | "items" => REGISTRY
-            .items
-            .iter_tag(&tag)
-            .map(|entry| entry.key().to_string())
-            .collect(),
-        "minecraft:blocks" | "blocks" => REGISTRY
-            .blocks
-            .iter_tag(&tag)
-            .map(|entry| entry.key().to_string())
-            .collect(),
-        _ => Vec::new(),
+    let Some(values) = tag_members(&String::from(registry), &tag) else {
+        return null_mut();
     };
     string_array(&mut env, &values)
 }
@@ -1035,7 +1174,7 @@ fn entity_by_uuid(uuid: &Uuid) -> Option<(Arc<World>, SharedEntity)> {
             return Some((Arc::clone(world), entity));
         }
     }
-    None
+    lifecycle::pending_entity(uuid)
 }
 
 extern "system" fn set_entity_custom_name_visible(
@@ -1331,6 +1470,9 @@ extern "system" fn remove_entity(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: 
     else {
         return;
     };
+    if lifecycle::discard_pending(&id) {
+        return;
+    }
     let Some((world, entity)) = entity_by_uuid(&id) else {
         return;
     };
@@ -4821,47 +4963,6 @@ extern "system" fn mushroom_cow_variant<'a>(
     }
 }
 
-extern "system" fn spawn_particle(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    world_name: JString<'_>,
-    particle: JString<'_>,
-    x: jdouble,
-    y: jdouble,
-    z: jdouble,
-    count: jint,
-    ox: jdouble,
-    oy: jdouble,
-    oz: jdouble,
-    speed: jdouble,
-) {
-    let Ok(world_text): Result<String, _> = env.get_string(&world_name).map(Into::into) else {
-        return;
-    };
-    let Ok(particle_text): Result<String, _> = env.get_string(&particle).map(Into::into) else {
-        return;
-    };
-    let Ok(world_key) = world_text.parse::<Identifier>() else {
-        return;
-    };
-    let Ok(particle_key) = particle_text.parse::<Identifier>() else {
-        return;
-    };
-    let Some(world) = server().and_then(|server| server.worlds.get_owned(&world_key)) else {
-        return;
-    };
-    let Some(particle_type) = REGISTRY.particle_types.by_key(&particle_key) else {
-        return;
-    };
-    world.send_particles(
-        ParticleData::simple(particle_type),
-        DVec3::new(x, y, z),
-        count,
-        DVec3::new(ox, oy, oz),
-        speed,
-    );
-}
-
 extern "system" fn set_block_display_block(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -4960,108 +5061,6 @@ extern "system" fn set_boat_type(
             BoatEntity::new(target, new_id, pos, weak)
         });
     }
-}
-
-extern "system" fn set_block_display_brightness(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    block: jint,
-    sky: jint,
-) {
-    let Ok(text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
-        return;
-    };
-    let Ok(id) = text.parse() else {
-        return;
-    };
-    if let Some((_, entity)) = entity_by_uuid(&id)
-        && let Some(display) = entity.as_ref().downcast_ref::<BlockDisplayEntity>()
-    {
-        display.set_brightness(block, sky);
-    }
-}
-
-extern "system" fn set_block_display_view_range(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    value: jfloat,
-) {
-    let Ok(text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
-        return;
-    };
-    let Ok(id) = text.parse() else {
-        return;
-    };
-    if let Some((_, entity)) = entity_by_uuid(&id)
-        && let Some(display) = entity.as_ref().downcast_ref::<BlockDisplayEntity>()
-    {
-        display.set_view_range(value);
-    }
-}
-
-extern "system" fn set_block_display_shadow_radius(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    value: jfloat,
-) {
-    let Ok(text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
-        return;
-    };
-    let Ok(id) = text.parse() else {
-        return;
-    };
-    if let Some((_, entity)) = entity_by_uuid(&id)
-        && let Some(display) = entity.as_ref().downcast_ref::<BlockDisplayEntity>()
-    {
-        display.set_shadow_radius(value);
-    }
-}
-
-extern "system" fn set_block_display_transformation(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    tx: jfloat,
-    ty: jfloat,
-    tz: jfloat,
-    sx: jfloat,
-    sy: jfloat,
-    sz: jfloat,
-    lx: jfloat,
-    ly: jfloat,
-    lz: jfloat,
-    lw: jfloat,
-    rx: jfloat,
-    ry: jfloat,
-    rz: jfloat,
-    rw: jfloat,
-) {
-    let Ok(text) = env.get_string(&uuid) else {
-        return;
-    };
-    let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
-        return;
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return;
-    };
-    let Some(display) = entity.as_ref().downcast_ref::<BlockDisplayEntity>() else {
-        return;
-    };
-    let mut data = display.entity_data().lock();
-    data.display_mut()
-        .translation
-        .set(Vector3f::new(tx, ty, tz));
-    data.display_mut().scale.set(Vector3f::new(sx, sy, sz));
-    data.display_mut()
-        .left_rotation
-        .set(Quaternionf::new(lx, ly, lz, lw));
-    data.display_mut()
-        .right_rotation
-        .set(Quaternionf::new(rx, ry, rz, rw));
 }
 
 extern "system" fn entity_type(
@@ -6868,48 +6867,6 @@ extern "system" fn max_health(
     player(&mut env, &uuid).map_or(20.0, |player| f64::from(player.get_max_health()))
 }
 
-extern "system" fn player_attribute(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    attribute: JString<'_>,
-) -> jstring {
-    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
-        return null_mut();
-    };
-    let Ok(name): Result<String, _> = env.get_string(&attribute).map(Into::into) else {
-        return null_mut();
-    };
-    let Some(id) = Uuid::parse_str(&uuid_text).ok() else {
-        return null_mut();
-    };
-    let key_name = name
-        .strip_prefix("GENERIC_")
-        .or_else(|| name.strip_prefix("PLAYER_"))
-        .unwrap_or(&name)
-        .to_ascii_lowercase();
-    let Ok(key) = Identifier::from_str(&key_name) else {
-        return null_mut();
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return null_mut();
-    };
-    let Some(living) = entity.as_living_entity() else {
-        return null_mut();
-    };
-    let Some(attribute_ref) = foton_registry::REGISTRY.attributes.by_key(&key) else {
-        return null_mut();
-    };
-    let attrs = living.attributes().lock();
-    let Some(base) = attrs.get_base_value(attribute_ref) else {
-        return null_mut();
-    };
-    let Some(value) = attrs.get_value(attribute_ref) else {
-        return null_mut();
-    };
-    to_java(&mut env, Some(format!("{base}|{value}")))
-}
-
 fn attribute_ref_from_name(name: &str) -> Option<AttributeRef> {
     let key_name = name
         .strip_prefix("GENERIC_")
@@ -6946,150 +6903,6 @@ extern "system" fn set_attribute_base(
         return;
     };
     living.attributes().lock().set_base_value(attribute, value);
-}
-
-extern "system" fn add_attribute_modifier(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    attribute: JString<'_>,
-    modifier_id: JString<'_>,
-    amount: jdouble,
-    operation: JString<'_>,
-) -> jboolean {
-    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
-        return 0;
-    };
-    let Ok(attribute_name): Result<String, _> = env.get_string(&attribute).map(Into::into) else {
-        return 0;
-    };
-    let Ok(id_text): Result<String, _> = env.get_string(&modifier_id).map(Into::into) else {
-        return 0;
-    };
-    let Ok(operation): Result<String, _> = env.get_string(&operation).map(Into::into) else {
-        return 0;
-    };
-    let Some(id) = Uuid::parse_str(&uuid_text).ok() else {
-        return 0;
-    };
-    let Some(attribute) = attribute_ref_from_name(&attribute_name) else {
-        return 0;
-    };
-    let Ok(modifier_uuid) = Uuid::parse_str(&id_text) else {
-        return 0;
-    };
-    let Ok(modifier_id) = Identifier::from_str(&format!("plugin:{modifier_uuid}")) else {
-        return 0;
-    };
-    let operation = match operation.as_str() {
-        "ADD_NUMBER" => AttributeModifierOperation::AddValue,
-        "ADD_SCALAR" => AttributeModifierOperation::AddMultipliedBase,
-        "MULTIPLY_SCALAR_1" => AttributeModifierOperation::AddMultipliedTotal,
-        _ => return 0,
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return 0;
-    };
-    let Some(living) = entity.as_living_entity() else {
-        return 0;
-    };
-    jboolean::from(living.attributes().lock().add_modifier(
-        attribute,
-        AttributeModifier {
-            id: modifier_id,
-            amount,
-            operation,
-        },
-        true,
-    ))
-}
-
-extern "system" fn remove_attribute_modifier(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    attribute: JString<'_>,
-    modifier_id: JString<'_>,
-) -> jboolean {
-    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
-        return 0;
-    };
-    let Ok(attribute_name): Result<String, _> = env.get_string(&attribute).map(Into::into) else {
-        return 0;
-    };
-    let Ok(id_text): Result<String, _> = env.get_string(&modifier_id).map(Into::into) else {
-        return 0;
-    };
-    let Some(id) = Uuid::parse_str(&uuid_text).ok() else {
-        return 0;
-    };
-    let Some(attribute) = attribute_ref_from_name(&attribute_name) else {
-        return 0;
-    };
-    let Ok(modifier_uuid) = Uuid::parse_str(&id_text) else {
-        return 0;
-    };
-    let Ok(modifier_id) = Identifier::from_str(&format!("plugin:{modifier_uuid}")) else {
-        return 0;
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return 0;
-    };
-    let Some(living) = entity.as_living_entity() else {
-        return 0;
-    };
-    jboolean::from(
-        living
-            .attributes()
-            .lock()
-            .remove_modifier(attribute, &modifier_id),
-    )
-}
-
-extern "system" fn attribute_modifiers(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    attribute: JString<'_>,
-) -> jobjectArray {
-    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
-        return null_mut();
-    };
-    let Ok(attribute_name): Result<String, _> = env.get_string(&attribute).map(Into::into) else {
-        return null_mut();
-    };
-    let Some(id) = Uuid::parse_str(&uuid_text).ok() else {
-        return null_mut();
-    };
-    let Some(attribute) = attribute_ref_from_name(&attribute_name) else {
-        return null_mut();
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return null_mut();
-    };
-    let Some(living) = entity.as_living_entity() else {
-        return null_mut();
-    };
-    let attrs = living.attributes().lock();
-    let Some(instance) = attrs.get_instance(attribute) else {
-        return null_mut();
-    };
-    let values: Vec<String> = instance
-        .modifiers()
-        .iter()
-        .map(|modifier| {
-            let operation = match modifier.operation {
-                AttributeModifierOperation::AddValue => "ADD_NUMBER",
-                AttributeModifierOperation::AddMultipliedBase => "ADD_SCALAR",
-                AttributeModifierOperation::AddMultipliedTotal => "MULTIPLY_SCALAR_1",
-            };
-            format!(
-                "{}|{}|{}|{operation}",
-                modifier.id.path, modifier.id.path, modifier.amount
-            )
-        })
-        .collect();
-    string_array(&mut env, &values)
 }
 
 /// `foton.Native.playerRespawnWorld`
@@ -7241,6 +7054,96 @@ extern "system" fn advancement_criteria(
     string_array(&mut env, &values)
 }
 
+/// `foton.Native.advancementKeys`: every advancement the server knows.
+extern "system" fn advancement_keys(mut env: JNIEnv<'_>, _class: JClass<'_>) -> jobjectArray {
+    let keys = REGISTRY
+        .advancements
+        .iter()
+        .map(|advancement| advancement.key.to_string())
+        .collect::<Vec<_>>();
+    string_array(&mut env, &keys)
+}
+
+/// An online player and the tree node of an advancement, from their Java
+/// names.
+fn player_and_advancement(
+    env: &mut JNIEnv<'_>,
+    uuid: &JString<'_>,
+    key: &JString<'_>,
+) -> Option<(Arc<Player>, usize)> {
+    let player = player(env, uuid)?;
+    let key: String = env.get_string(key).ok()?.into();
+    let node = ADVANCEMENT_TREE.index_of(&key.parse::<Identifier>().ok()?)?;
+    Some((player, node))
+}
+
+/// `foton.Native.playerAdvancementProgress`: `1` or `0` for whether the
+/// player has the advancement, then one entry per criterion -- its name, and
+/// after a unit separator the epoch millisecond it was met, when it was.
+/// Null for a player not online or an unknown advancement.
+extern "system" fn player_advancement_progress(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    key: JString<'_>,
+) -> jobjectArray {
+    let Some((player, node)) = player_and_advancement(&mut env, &uuid, &key) else {
+        return null_mut();
+    };
+    let mut values = vec![
+        if player.has_advancement(node) {
+            "1"
+        } else {
+            "0"
+        }
+        .to_owned(),
+    ];
+    values.extend(
+        player
+            .advancement_criteria(node)
+            .into_iter()
+            .map(|(name, obtained)| match obtained {
+                Some(millis) => format!("{name}\u{1f}{millis}"),
+                None => name.to_owned(),
+            }),
+    );
+    string_array(&mut env, &values)
+}
+
+/// `foton.Native.playerAdvancementCriterion`: awards or revokes one
+/// criterion, answering whether that changed anything.
+///
+/// Awarding can finish the advancement and hand out its rewards, which
+/// touches the world, so it is done on the tick thread only.
+extern "system" fn player_advancement_criterion(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    key: JString<'_>,
+    criterion: JString<'_>,
+    award: jboolean,
+) -> jboolean {
+    let Some((player, node)) = player_and_advancement(&mut env, &uuid, &key) else {
+        return 0;
+    };
+    let Ok(criterion) = env.get_string(&criterion).map(String::from) else {
+        return 0;
+    };
+    if award == 0 {
+        return jboolean::from(player.revoke_advancement_criterion(node, &criterion));
+    }
+    if !on_tick() {
+        return 0;
+    }
+    jboolean::from(player.award_advancement_criterion(node, &criterion).granted)
+}
+
+/// `foton.Native.whitelistEnabled`: whether admission is limited to the
+/// whitelist.
+extern "system" fn whitelist_enabled(_env: JNIEnv<'_>, _class: JClass<'_>) -> jboolean {
+    jboolean::from(server().is_some_and(|server| server.config.whitelist_enabled))
+}
+
 extern "system" fn player_address(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -7318,22 +7221,20 @@ fn set_player_tab_list(
     let mut lists = player_tab_lists().write();
     let entry = lists
         .entry(id)
-        .or_insert_with(|| (String::new(), String::new()));
+        .or_insert_with(|| (TextComponent::plain(""), TextComponent::plain("")));
     if let Some(header) = header {
         let Ok(value) = env.get_string(&header) else {
             return;
         };
-        entry.0 = String::from(value);
+        entry.0 = String::from(value).into();
     }
     if let Some(footer) = footer {
         let Ok(value) = env.get_string(&footer) else {
             return;
         };
-        entry.1 = String::from(value);
+        entry.1 = String::from(value).into();
     }
-    let header: TextComponent = entry.0.clone().into();
-    let footer: TextComponent = entry.1.clone().into();
-    player.send_packet(CTabList::new(&header, &footer, player.as_ref()));
+    player.send_packet(CTabList::new(&entry.0, &entry.1, player.as_ref()));
 }
 
 /// `foton.Native.setPlayerListHeader`
@@ -7639,22 +7540,6 @@ pub(crate) fn describe_slot(stack: &ItemStack) -> String {
         value.push_str("nbthex=");
         value.push_str(&hex_encode(opaque.as_bytes()));
     }
-    if let Some(name) = stack.get(CUSTOM_NAME) {
-        value.push('\u{1d}');
-        value.push_str("namehex=");
-        for byte in name.to_string().as_bytes() {
-            let _ = write!(value, "{byte:02x}");
-        }
-    }
-    if let Some(lore) = stack.get(LORE) {
-        for line in lore.lines() {
-            value.push('\u{1d}');
-            value.push_str("lorehex=");
-            for byte in line.to_string().as_bytes() {
-                let _ = write!(value, "{byte:02x}");
-            }
-        }
-    }
     if stack.has(UNBREAKABLE) {
         value.push('\u{1d}');
         value.push_str("unbreakable");
@@ -7721,6 +7606,7 @@ pub(crate) fn describe_slot(stack: &ItemStack) -> String {
             );
         }
     }
+    item_components::describe(stack, &mut value);
     value
 }
 
@@ -7899,22 +7785,12 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
     if !stored.is_empty() {
         stack.set(STORED_ENCHANTMENTS, stored);
     }
-    if let Some(effects) = metadata.iter().find(|value| {
-        !value.starts_with("damage=")
-            && !value.starts_with("namehex=")
-            && !value.starts_with("lorehex=")
-            && !value.starts_with("enchhex=")
-            && !value.starts_with("storedenchhex=")
-            && !value.starts_with("model=")
-            && !value.starts_with("modelfloat=")
-            && !value.starts_with("modelflag=")
-            && !value.starts_with("modelstrhex=")
-            && !value.starts_with("modelcolor=")
-            && !value.starts_with("itemmodelhex=")
-            && !value.starts_with("tooltipstylehex=")
-            && **value != "hidetooltip"
-            && **value != "unbreakable"
-    }) {
+    item_components::parse(&mut stack, &metadata);
+    // Potion effects are the one field with no name.
+    if let Some(effects) = metadata
+        .iter()
+        .find(|value| !value.contains('=') && **value != "hidetooltip" && **value != "unbreakable")
+    {
         use foton_registry::data_components::components::PotionContents;
         use foton_registry::data_components::vanilla_components::POTION_CONTENTS;
         use foton_registry::mob_effect::instance::MobEffectInstance;
@@ -7948,7 +7824,7 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
 }
 
 /// A block state as `minecraft:name[facing=north]`, the way `/setblock` writes it.
-fn describe_state(state: BlockStateId) -> Option<String> {
+pub(crate) fn describe_state(state: BlockStateId) -> Option<String> {
     let block = REGISTRY.blocks.by_state_id(state)?;
     let properties = REGISTRY.blocks.get_properties(state);
     if properties.is_empty() {
@@ -7994,12 +7870,28 @@ extern "system" fn statistic_value(
     let Some(player) = player(&mut env, &uuid) else {
         return 0;
     };
-    let stat = match statistic.to_str().ok() {
-        Some("TIME_SINCE_REST") => Stat::custom(&vanilla_custom_stats::TIME_SINCE_REST),
-        Some("JUMP") => Stat::custom(&vanilla_custom_stats::JUMP),
-        _ => return 0,
+    let Some(stat) = statistic.to_str().ok().and_then(bukkit_custom_stat) else {
+        return 0;
     };
-    player.stat_value(stat)
+    player.stat_value(Stat::custom(stat))
+}
+
+/// The vanilla custom statistic an untyped Bukkit `Statistic` names.
+///
+/// Bukkit keys one `minecraft:<lowercase name>`, which is vanilla's own key
+/// except where vanilla renamed the statistic since; those go through the
+/// rename vanilla's `DataFixers` applies to old saves.
+fn bukkit_custom_stat(name: &str) -> Option<CustomStatRef> {
+    let legacy = name.to_ascii_lowercase();
+    let current = match legacy.as_str() {
+        // Vanilla `DataFixers`: the `StatsRenameFix` pair
+        // `minecraft:play_one_minute` -> `minecraft:play_time`.
+        "play_one_minute" => "play_time",
+        other => other,
+    };
+    REGISTRY
+        .custom_stats
+        .by_key(&Identifier::vanilla(current.to_owned()))
 }
 
 extern "system" fn offline_statistic(
@@ -8017,9 +7909,10 @@ extern "system" fn offline_statistic(
     let Ok(uuid) = Uuid::parse_str(uuid_text.to_str().unwrap_or_default()) else {
         return 0;
     };
-    server().map_or(0, |server| {
-        server.offline_statistic(uuid, statistic_text.to_str().unwrap_or_default())
-    })
+    let Some(stat) = bukkit_custom_stat(statistic_text.to_str().unwrap_or_default()) else {
+        return 0;
+    };
+    server().map_or(0, |server| server.offline_statistic(uuid, &stat.key))
 }
 
 extern "system" fn is_operator(
@@ -8294,6 +8187,10 @@ extern "system" fn recipe_add_shapeless(
                     item: result_item,
                     count,
                 },
+                // Bukkit's defaults: a recipe that sets neither is ungrouped
+                // and filed under misc, and it unlocks with a toast.
+                show_notification: true,
+                group: Cow::Borrowed(""),
             }),
     )
 }
@@ -8398,6 +8295,7 @@ extern "system" fn recipe_add_shaped(
             count,
         },
         true,
+        Cow::Borrowed(""),
     )))
 }
 
@@ -8957,7 +8855,8 @@ extern "system" fn open_generic_inventory(
         .ok()
         .filter(|size| *size % 9 == 0)
         .map_or(1, |size| size / 9);
-    player.open_generic_inventory(title, rows, items);
+    // JSON text, so a plugin's coloured title reaches the client coloured.
+    player.open_generic_inventory(relay::component(&title), rows, items);
 }
 
 extern "system" fn open_smithing_table(
@@ -8998,30 +8897,6 @@ extern "system" fn open_loom(
         move |context| loom(inventory, context.container_id, BlockPos::new(x, y, z)),
     );
     1
-}
-
-extern "system" fn damage_player(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    amount: jdouble,
-    source_uuid: JString<'_>,
-) {
-    let Some(player) = player(&mut env, &uuid) else {
-        return;
-    };
-    let source_id = env
-        .get_string(&source_uuid)
-        .ok()
-        .and_then(|value| value.to_str().ok().and_then(|text| text.parse().ok()));
-    let world = player.get_world();
-    let mut source = DamageSource::environment(&PLAYER_ATTACK);
-    if let Some(id) =
-        source_id.and_then(|id| world.get_entity_by_uuid(&id).map(|entity| entity.id()))
-    {
-        source = source.with_causing_entity(id).with_direct_entity(id);
-    }
-    let _ = player.hurt(&world, &source, amount as f32);
 }
 
 extern "system" fn open_cartography_table(
@@ -9501,9 +9376,7 @@ extern "system" fn server_tps(env: JNIEnv<'_>, _class: JClass<'_>) -> jdoubleArr
     let Some(server) = server() else {
         return null_mut();
     };
-    let manager = server.tick_rate_manager.read();
-    let tps = f64::from(manager.get_tps());
-    let values = [tps, tps, tps];
+    let values = server.tick_rate_manager.read().tps_averages();
     let Ok(array) = env.new_double_array(3) else {
         return null_mut();
     };
@@ -10255,6 +10128,130 @@ extern "system" fn hopper_inventory_slot(
         })
     });
     to_java(&mut env, value)
+}
+
+/// `foton.Native.craftingRecipe`: the key of the recipe a square crafting
+/// grid `width` wide makes, the stacks row by row, or null when none does.
+extern "system" fn crafting_recipe(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    items: JString<'_>,
+    width: jint,
+) -> jstring {
+    let items: Option<String> = env.get_string(&items).ok().map(Into::into);
+    let value = items.and_then(|items| {
+        let width = usize::try_from(width)
+            .ok()
+            .filter(|width| matches!(width, 2 | 3))?;
+        let stacks = items
+            .split('\u{1e}')
+            .map(parse_slot)
+            .collect::<Option<Vec<_>>>()?;
+        if stacks.len() != width * width {
+            return None;
+        }
+        let input = CraftingInput::positioned(width, width, stacks).input;
+        let recipe = if width == 2 {
+            REGISTRY.recipes.find_crafting_recipe_2x2(&input)
+        } else {
+            REGISTRY.recipes.find_crafting_recipe(&input)
+        }?;
+        Some(recipe.id().to_string())
+    });
+    to_java(&mut env, value)
+}
+
+/// `foton.Native.isFuel`: whether a furnace burns the encoded stack.
+extern "system" fn is_fuel(mut env: JNIEnv<'_>, _class: JClass<'_>, item: JString<'_>) -> jboolean {
+    let Ok(text) = env.get_string(&item) else {
+        return 0;
+    };
+    let text: String = text.into();
+    jboolean::from(parse_slot(&text).is_some_and(|stack| fuel::is_fuel(&stack)))
+}
+
+/// `foton.Native.cookingRecipe`: the recipe by which a furnace, blast furnace
+/// or smoker (`block`) cooks the encoded stack, described as
+/// [`describe_cooking`] does, or null when none does.
+extern "system" fn cooking_recipe(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    block: JString<'_>,
+    item: JString<'_>,
+) -> jstring {
+    let block: Option<String> = env.get_string(&block).ok().map(Into::into);
+    let item: Option<String> = env.get_string(&item).ok().map(Into::into);
+    let value = block.zip(item).and_then(|(block, item)| {
+        let kind = cooking_kind(&block)?;
+        let stack = parse_slot(&item).filter(|stack| !stack.is_empty())?;
+        let recipe = REGISTRY.recipes.find_cooking_recipe(kind, &stack)?;
+        Some(describe_cooking(recipe))
+    });
+    to_java(&mut env, value)
+}
+
+/// `foton.Native.furnaceTimes`: `{burn, cook, cookTotal}`, or null where no
+/// furnace, smoker or blast furnace stands.
+extern "system" fn furnace_times(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jint,
+    y: jint,
+    z: jint,
+) -> jintArray {
+    let Some(times) = world(&mut env, &name).and_then(|world| {
+        let entity = world.get_block_entity(BlockPos::new(x, y, z))?;
+        let furnace = entity.downcast_ref::<FurnaceBlockEntity>()?;
+        Some(furnace.times())
+    }) else {
+        return null_mut();
+    };
+    let Ok(array) = env.new_int_array(3) else {
+        return null_mut();
+    };
+    if env.set_int_array_region(&array, 0, &times).is_err() {
+        return null_mut();
+    }
+    array.into_raw()
+}
+
+/// `foton.Native.setFurnaceTimes`: writes a `Furnace` snapshot's times back,
+/// lighting or putting out the block to match the burn, as Bukkit does.
+extern "system" fn set_furnace_times(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jint,
+    y: jint,
+    z: jint,
+    times: JIntArray<'_>,
+) {
+    let mut values = [0; 3];
+    if env.get_int_array_region(&times, 0, &mut values).is_err() {
+        return;
+    }
+    let Some(world) = world(&mut env, &name) else {
+        return;
+    };
+    let pos = BlockPos::new(x, y, z);
+    let Some(entity) = world.get_block_entity(pos) else {
+        return;
+    };
+    let Some(furnace) = entity.downcast_ref::<FurnaceBlockEntity>() else {
+        return;
+    };
+    furnace.set_times(values);
+    let state = world.get_block_state(pos);
+    let lit = state.set_value(&BlockStateProperties::LIT, values[0] > 0);
+    if lit == state {
+        return;
+    }
+    if on_tick() {
+        world.set_block(pos, lit, UpdateFlags::UPDATE_ALL);
+    } else {
+        DEFERRED.lock().push((world.key.clone(), pos, lit));
+    }
 }
 
 extern "system" fn hopper_set_inventory_slot(
@@ -11187,6 +11184,84 @@ extern "system" fn is_sneaking(
     jboolean::from(player(&mut env, &uuid).is_some_and(|player| player.is_crouching()))
 }
 
+/// Parses the recipe keys a plugin handed over, dropping any that do not parse.
+///
+/// Paper drops them the same way: `bukkitKeysToMinecraftRecipes` keeps only
+/// the keys the recipe manager resolves, and a malformed key resolves to
+/// nothing.
+fn recipe_keys(env: &mut JNIEnv<'_>, keys: &JObjectArray<'_>) -> Vec<Identifier> {
+    read_string_array(env, keys)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|key| key.parse().ok())
+        .collect()
+}
+
+/// `foton.Native.discoverRecipes` -- Paper's `CraftHumanEntity.discoverRecipes`,
+/// which is `ServerPlayer.awardRecipes`.
+extern "system" fn discover_recipes(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    keys: JObjectArray<'_>,
+) -> jint {
+    let Some(player) = player(&mut env, &uuid) else {
+        return 0;
+    };
+    let keys = recipe_keys(&mut env, &keys);
+    i32::try_from(player.award_recipes(&keys)).unwrap_or(i32::MAX)
+}
+
+/// `foton.Native.undiscoverRecipes` -- `ServerPlayer.resetRecipes`.
+extern "system" fn undiscover_recipes(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    keys: JObjectArray<'_>,
+) -> jint {
+    let Some(player) = player(&mut env, &uuid) else {
+        return 0;
+    };
+    let keys = recipe_keys(&mut env, &keys);
+    i32::try_from(player.reset_recipes(&keys)).unwrap_or(i32::MAX)
+}
+
+/// `foton.Native.hasDiscoveredRecipe` -- `ServerRecipeBook.contains`.
+extern "system" fn has_discovered_recipe(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    key: JString<'_>,
+) -> jboolean {
+    let Some(player) = player(&mut env, &uuid) else {
+        return u8::from(false);
+    };
+    let known = env
+        .get_string(&key)
+        .ok()
+        .and_then(|key| key.to_str().ok()?.parse::<Identifier>().ok())
+        .is_some_and(|key| player.has_recipe(&key));
+    u8::from(known)
+}
+
+/// `foton.Native.discoveredRecipes` -- every key the book knows.
+extern "system" fn discovered_recipes(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jobjectArray {
+    let keys: Vec<String> = player(&mut env, &uuid)
+        .map(|player| {
+            player
+                .known_recipes()
+                .iter()
+                .map(ToString::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    string_array(&mut env, &keys)
+}
+
 extern "system" fn open_book(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) {
     let Some(player) = player(&mut env, &uuid) else {
         return;
@@ -11268,10 +11343,12 @@ extern "system" fn teleport(
     let Ok(world_name) = env.get_string(&world_name) else {
         return 0;
     };
-    if player.get_world().key.to_string() != String::from(world_name) {
-        return 0;
-    }
-    u8::from(player.teleport(DVec3::new(x, y, z), yaw, pitch).is_ok())
+    // `FotonPlayer.teleport` has already asked `PlayerTeleportEvent`.
+    u8::from(player.teleport_announced(&TeleportPoint {
+        world: world_name.into(),
+        position: DVec3::new(x, y, z),
+        rotation: (yaw, pitch),
+    }))
 }
 
 /// Every native, with the descriptor the JVM matches it by.
@@ -11294,7 +11371,7 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         }
     }
 
-    vec![
+    let mut bindings = vec![
         method(
             "mergeItemSnbt",
             "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
@@ -11304,6 +11381,21 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "enchantmentCanEnchant",
             "(Ljava/lang/String;Ljava/lang/String;)Z",
             enchantment_can_enchant as *mut c_void,
+        ),
+        method(
+            "blockPropertyValues",
+            "(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;",
+            block_property_values as *mut c_void,
+        ),
+        method(
+            "enchantmentsConflict",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            enchantments_conflict as *mut c_void,
+        ),
+        method(
+            "enchantmentItems",
+            "(Ljava/lang/String;Z)[Ljava/lang/String;",
+            enchantment_items as *mut c_void,
         ),
         method(
             "dyeFireworkColor",
@@ -11601,6 +11693,27 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "(Ljava/lang/String;IIII)Ljava/lang/String;",
             hopper_inventory_slot as *mut c_void,
         ),
+        method("isFuel", "(Ljava/lang/String;)Z", is_fuel as *mut c_void),
+        method(
+            "craftingRecipe",
+            "(Ljava/lang/String;I)Ljava/lang/String;",
+            crafting_recipe as *mut c_void,
+        ),
+        method(
+            "cookingRecipe",
+            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            cooking_recipe as *mut c_void,
+        ),
+        method(
+            "furnaceTimes",
+            "(Ljava/lang/String;III)[I",
+            furnace_times as *mut c_void,
+        ),
+        method(
+            "setFurnaceTimes",
+            "(Ljava/lang/String;III[I)V",
+            set_furnace_times as *mut c_void,
+        ),
         method(
             "hopperSetInventorySlot",
             "(Ljava/lang/String;IIIILjava/lang/String;)V",
@@ -11747,6 +11860,41 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             scoreboard_team_entries as *mut c_void,
         ),
         method(
+            "scoreboardTeamNames",
+            "(Ljava/lang/String;)[Ljava/lang/String;",
+            scoreboard_natives::team_names as *mut c_void,
+        ),
+        method(
+            "scoreboardRegisterTeam",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            scoreboard_natives::register_team as *mut c_void,
+        ),
+        method(
+            "scoreboardUnregisterTeam",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            scoreboard_natives::unregister_team as *mut c_void,
+        ),
+        method(
+            "scoreboardAddTeamEntry",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+            scoreboard_natives::add_team_entry as *mut c_void,
+        ),
+        method(
+            "scoreboardRemoveTeamEntry",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+            scoreboard_natives::remove_team_entry as *mut c_void,
+        ),
+        method(
+            "scoreboardTeamProperty",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            scoreboard_natives::team_property as *mut c_void,
+        ),
+        method(
+            "scoreboardSetTeamProperty",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+            scoreboard_natives::set_team_property as *mut c_void,
+        ),
+        method(
             "scoreboardEntryTeam",
             "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
             scoreboard_entry_team as *mut c_void,
@@ -11855,6 +12003,26 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "openBook",
             "(Ljava/lang/String;)V",
             open_book as *mut c_void,
+        ),
+        method(
+            "discoverRecipes",
+            "(Ljava/lang/String;[Ljava/lang/String;)I",
+            discover_recipes as *mut c_void,
+        ),
+        method(
+            "undiscoverRecipes",
+            "(Ljava/lang/String;[Ljava/lang/String;)I",
+            undiscover_recipes as *mut c_void,
+        ),
+        method(
+            "hasDiscoveredRecipe",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            has_discovered_recipe as *mut c_void,
+        ),
+        method(
+            "discoveredRecipes",
+            "(Ljava/lang/String;)[Ljava/lang/String;",
+            discovered_recipes as *mut c_void,
         ),
         method(
             "teleport",
@@ -12497,11 +12665,6 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             set_horse_inventory_slot as *mut c_void,
         ),
         method(
-            "spawnParticle",
-            "(Ljava/lang/String;Ljava/lang/String;DDDIDDDD)V",
-            spawn_particle as *mut c_void,
-        ),
-        method(
             "setBlockDisplayBlock",
             "(Ljava/lang/String;Ljava/lang/String;)V",
             set_block_display_block as *mut c_void,
@@ -12515,26 +12678,6 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "setBoatType",
             "(Ljava/lang/String;Ljava/lang/String;)V",
             set_boat_type as *mut c_void,
-        ),
-        method(
-            "setBlockDisplayBrightness",
-            "(Ljava/lang/String;II)V",
-            set_block_display_brightness as *mut c_void,
-        ),
-        method(
-            "setBlockDisplayViewRange",
-            "(Ljava/lang/String;F)V",
-            set_block_display_view_range as *mut c_void,
-        ),
-        method(
-            "setBlockDisplayShadowRadius",
-            "(Ljava/lang/String;F)V",
-            set_block_display_shadow_radius as *mut c_void,
-        ),
-        method(
-            "setBlockDisplayTransformation",
-            "(Ljava/lang/String;FFFFFFFFFFFFFF)V",
-            set_block_display_transformation as *mut c_void,
         ),
         method(
             "areaEffectCloudRadius",
@@ -13118,11 +13261,6 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             open_loom as *mut c_void,
         ),
         method(
-            "damagePlayer",
-            "(Ljava/lang/String;DLjava/lang/String;)V",
-            damage_player as *mut c_void,
-        ),
-        method(
             "openCartographyTable",
             "(Ljava/lang/String;Ljava/lang/String;III)Z",
             open_cartography_table as *mut c_void,
@@ -13599,29 +13737,9 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             max_health as *mut c_void,
         ),
         method(
-            "playerAttribute",
-            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
-            player_attribute as *mut c_void,
-        ),
-        method(
             "setAttributeBase",
             "(Ljava/lang/String;Ljava/lang/String;D)V",
             set_attribute_base as *mut c_void,
-        ),
-        method(
-            "addAttributeModifier",
-            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;DLjava/lang/String;)Z",
-            add_attribute_modifier as *mut c_void,
-        ),
-        method(
-            "removeAttributeModifier",
-            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
-            remove_attribute_modifier as *mut c_void,
-        ),
-        method(
-            "attributeModifiers",
-            "(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;",
-            attribute_modifiers as *mut c_void,
         ),
         method(
             "playerEntityEffect",
@@ -13648,6 +13766,22 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "(Ljava/lang/String;)[Ljava/lang/String;",
             advancement_criteria as *mut c_void,
         ),
+        method(
+            "advancementKeys",
+            "()[Ljava/lang/String;",
+            advancement_keys as *mut c_void,
+        ),
+        method(
+            "playerAdvancementProgress",
+            "(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;",
+            player_advancement_progress as *mut c_void,
+        ),
+        method(
+            "playerAdvancementCriterion",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z)Z",
+            player_advancement_criterion as *mut c_void,
+        ),
+        method("whitelistEnabled", "()Z", whitelist_enabled as *mut c_void),
         method(
             "playerRespawnWorld",
             "(Ljava/lang/String;)Ljava/lang/String;",
@@ -13738,7 +13872,19 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "(Ljava/lang/String;)[Ljava/lang/String;",
             effective_permissions as *mut c_void,
         ),
-    ]
+    ];
+    // Entities, players and world queries live in their own modules.
+    bindings.extend(attributes::bindings());
+    bindings.extend(blocks::bindings());
+    bindings.extend(particles::bindings());
+    bindings.extend(entities::bindings());
+    bindings.extend(displays::bindings());
+    bindings.extend(lifecycle::bindings());
+    bindings.extend(merchants::bindings());
+    bindings.extend(players::bindings());
+    // Beside the table rather than in it: the packet tap is its own module.
+    bindings.extend(packet_tap::bindings());
+    bindings
 }
 
 #[cfg(test)]
@@ -13753,5 +13899,37 @@ mod snbt_tests {
     fn malformed_or_unknown_prefix_is_rejected() {
         assert!(parse_item_snbt_patch("not valid{foo:1}").is_none());
         assert!(parse_item_snbt_patch("minecraft:stone{foo:}").is_none());
+    }
+}
+
+#[cfg(test)]
+mod tag_tests {
+    use super::tag_members;
+    use foton_utils::Identifier;
+
+    fn tag(path: &'static str) -> Identifier {
+        Identifier::vanilla_static(path)
+    }
+
+    /// `Registry#hasTag` reads absence from `None`, so an unknown tag must not
+    /// look like an empty one.
+    #[test]
+    fn an_unknown_tag_is_absent_rather_than_empty() {
+        foton_registry::init_vanilla_registry();
+        assert!(tag_members("enchantment", &tag("not_a_tag")).is_none());
+        assert!(tag_members("not_a_registry", &tag("in_enchanting_table")).is_none());
+    }
+
+    /// Paper's registry names and Bukkit's legacy ones reach the same tags.
+    #[test]
+    fn registries_are_named_either_way() {
+        foton_registry::init_vanilla_registry();
+        let table = tag_members("enchantment", &tag("in_enchanting_table")).unwrap_or_default();
+        assert!(table.iter().any(|key| key == "minecraft:sharpness"));
+        assert!(!table.iter().any(|key| key == "minecraft:mending"));
+        assert_eq!(
+            tag_members("items", &tag("trimmable_armor")),
+            tag_members("minecraft:item", &tag("trimmable_armor"))
+        );
     }
 }

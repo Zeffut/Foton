@@ -1,7 +1,13 @@
 use super::*;
 use crate::advancement::triggers;
-use crate::event::{PlayerChangedWorldEvent, PlayerPortalEvent};
-use crate::portal::TeleportTransitionCause::{EndGateway, EndPortal, NetherPortal};
+use crate::event::{
+    Event as _, PlayerChangedWorldEvent, PlayerPortalEvent, PlayerTeleportEvent, TeleportCause,
+    TeleportPoint,
+};
+use crate::portal::TeleportTransitionCause::{
+    Command, EndGateway, EndPortal, EnderPearl, NetherPortal, Unknown,
+};
+use crate::portal::{TeleportTransitionCause, WorldChangeRequest};
 
 impl Player {
     fn apply_post_teleport_transition(&self, post_transition: &TeleportPostTransition) {
@@ -24,6 +30,113 @@ impl Player {
                 }
             }
         }
+    }
+
+    /// Asks plugins about a teleport that is not a portal, and rewrites the
+    /// transition to wherever they sent the player. False when refused.
+    ///
+    /// Paper parity: `ServerPlayer.teleport(TeleportTransition)` raises
+    /// `PlayerTeleportEvent` for every cause but portals, which raise
+    /// `PlayerPortalEvent` above, and respawns, which raise none. A refused
+    /// pearl is spent without hurting its thrower; a refused `/tp` does not
+    /// count the player as moved.
+    fn ask_teleport(
+        &self,
+        transition: &mut TeleportTransition,
+        current_position: DVec3,
+        current_rotation: (f32, f32),
+    ) -> bool {
+        let cause = match transition.cause {
+            EnderPearl => TeleportCause::EnderPearl,
+            Command => TeleportCause::Command,
+            Unknown => TeleportCause::Unknown,
+            _ => return true,
+        };
+        let destination = TeleportPoint {
+            world: transition.target_world.key.to_string(),
+            position: transition.resolved_position(current_position),
+            rotation: transition.resolved_rotation(current_rotation),
+        };
+        let origin = TeleportPoint {
+            world: self.get_world().key.to_string(),
+            position: current_position,
+            rotation: current_rotation,
+        };
+        let mut event = PlayerTeleportEvent::new(self.uuid(), origin, destination.clone(), cause);
+        self.fire_event(&mut event);
+        if event.is_cancelled() {
+            return false;
+        }
+        let to = event.to();
+        if *to == destination {
+            return true;
+        }
+        let Some(target_world) = to
+            .world
+            .parse()
+            .ok()
+            .and_then(|key| self.server().worlds.get(&key))
+        else {
+            return false;
+        };
+        // What a listener hands back is a place, not an offset: the position
+        // and rotation stop being relative, the velocity keeps its meaning.
+        let absolute = RelativeMovement::X
+            | RelativeMovement::Y
+            | RelativeMovement::Z
+            | RelativeMovement::Y_ROT
+            | RelativeMovement::X_ROT;
+        transition.target_world = target_world;
+        transition.position = to.position;
+        transition.rotation = to.rotation;
+        transition.relatives = RelativeMovement::new(transition.relatives.0 & !absolute);
+        true
+    }
+
+    /// Sends the player to `to`, whose `PlayerTeleportEvent` has already been
+    /// asked. False when the destination is not a loaded world of this domain
+    /// or the move is refused.
+    ///
+    /// Within the world the move is made now. Into another world it is made
+    /// at the tick's world-change step, with the destination chunk held
+    /// loaded meanwhile as `/tp` holds it: moving a player between worlds
+    /// from inside a listener would re-enter the world being ticked.
+    pub fn teleport_announced(self: &Arc<Self>, to: &TeleportPoint) -> bool {
+        let Some(world) = to
+            .world
+            .parse()
+            .ok()
+            .and_then(|key| self.server().worlds.get(&key))
+        else {
+            return false;
+        };
+        let current = self.get_world();
+        if Arc::ptr_eq(&world, &current) {
+            return self
+                .teleport(to.position, to.rotation.0, to.rotation.1)
+                .is_ok();
+        }
+        if world.domain() != current.domain() {
+            return false;
+        }
+        world
+            .chunk_map
+            .place_teleport_ticket(ChunkPos::from_block_pos(BlockPos::from(to.position)));
+        let transition = TeleportTransition {
+            target_world: world,
+            cause: TeleportTransitionCause::Plugin,
+            position: to.position,
+            rotation: to.rotation,
+            velocity: DVec3::ZERO,
+            relatives: RelativeMovement::NONE,
+            portal_cooldown: self.portal_cooldown(),
+            as_passenger: false,
+            post_transition: TeleportPostTransition::do_nothing(),
+        };
+        let entity: SharedEntity = Arc::<Self>::clone(self);
+        self.server()
+            .queue_world_change(entity, WorldChangeRequest::Computed(transition));
+        true
     }
 
     /// Applies an ordinary player transition that has already passed server world-change checks.
@@ -64,6 +177,9 @@ impl Player {
             teleport_transition.target_world = target_world;
             teleport_transition.position = event.to_position();
             teleport_transition.rotation = event.to_rotation();
+        }
+        if !self.ask_teleport(&mut teleport_transition, current_position, current_rotation) {
+            return false;
         }
         let new_world = Arc::clone(&teleport_transition.target_world);
         let new_world_key = new_world.key.clone();

@@ -38,6 +38,7 @@ pub mod fluid;
 pub mod inventory;
 pub mod level_data;
 pub mod map;
+pub mod packet_tap;
 pub mod permission;
 pub mod physics;
 pub mod player;

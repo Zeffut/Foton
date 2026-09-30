@@ -38,6 +38,9 @@ mod c_player_combat_kill;
 mod c_player_info_update;
 mod c_player_look_at;
 mod c_player_position;
+mod c_recipe_book_add;
+mod c_recipe_book_remove;
+mod c_recipe_book_settings;
 mod c_remove_entities;
 mod c_remove_mob_effect;
 mod c_remove_player_info;
@@ -57,6 +60,7 @@ mod c_set_health;
 mod c_set_held_slot;
 mod c_set_passengers;
 mod c_set_player_inventory;
+mod c_set_player_team;
 mod c_set_time;
 mod c_sound;
 mod c_stop_sound;
@@ -93,6 +97,8 @@ mod s_player_action;
 mod s_player_command;
 mod s_player_input;
 mod s_player_load;
+mod s_recipe_book_change_settings;
+mod s_recipe_book_seen_recipe;
 mod s_rename_item;
 mod s_seen_advancements;
 mod s_select_bundle_item;
@@ -163,6 +169,11 @@ pub use c_player_info_update::{
 };
 pub use c_player_look_at::{CPlayerLookAt, LookAtAnchor};
 pub use c_player_position::{CPlayerPosition, RelativeMovement};
+pub use c_recipe_book_add::{CRecipeBookAdd, RecipeBookAddEntry};
+pub use c_recipe_book_remove::CRecipeBookRemove;
+pub use c_recipe_book_settings::{
+    CRecipeBookSettings, RecipeBookSettings, RecipeBookType, RecipeBookTypeSettings,
+};
 pub use c_remove_entities::CRemoveEntities;
 pub use c_remove_mob_effect::CRemoveMobEffect;
 pub use c_remove_player_info::CRemovePlayerInfo;
@@ -182,6 +193,9 @@ pub use c_set_health::CSetHealth;
 pub use c_set_held_slot::CSetHeldSlot;
 pub use c_set_passengers::CSetPassengers;
 pub use c_set_player_inventory::CSetPlayerInventory;
+pub use c_set_player_team::{
+    CSetPlayerTeam, TeamCollisionRule, TeamColor, TeamMethod, TeamParameters, TeamVisibility,
+};
 pub use c_set_time::CSetTime;
 pub use c_sound::{CSound, SoundSource};
 pub use c_stop_sound::CStopSound;
@@ -230,6 +244,8 @@ pub use s_player_action::{PlayerAction, SPlayerAction};
 pub use s_player_command::{PlayerCommandAction, SPlayerCommand};
 pub use s_player_input::SPlayerInput;
 pub use s_player_load::SPlayerLoad;
+pub use s_recipe_book_change_settings::SRecipeBookChangeSettings;
+pub use s_recipe_book_seen_recipe::SRecipeBookSeenRecipe;
 pub use s_rename_item::SRenameItem;
 pub use s_seen_advancements::{SSeenAdvancements, SeenAdvancementsAction};
 pub use s_select_bundle_item::SSelectBundleItem;

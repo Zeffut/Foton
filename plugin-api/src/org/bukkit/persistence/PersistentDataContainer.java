@@ -1,15 +1,17 @@
 package org.bukkit.persistence;
 
-import java.util.Set;
 import org.bukkit.NamespacedKey;
 
-public interface PersistentDataContainer {
+/** Typed custom data stored on an item, entity, chunk or block. */
+public interface PersistentDataContainer extends io.papermc.paper.persistence.PersistentDataContainerView {
     <P, C> void set(NamespacedKey key, PersistentDataType<P, C> type, C value);
-    <P, C> C get(NamespacedKey key, PersistentDataType<P, C> type);
-    <P, C> C getOrDefault(NamespacedKey key, PersistentDataType<P, C> type, C fallback);
-    <P, C> boolean has(NamespacedKey key, PersistentDataType<P, C> type);
-    /** Returns whether any value is stored under this key. */
-    default boolean has(NamespacedKey key) { return getKeys().contains(key); }
+
     void remove(NamespacedKey key);
-    Set<NamespacedKey> getKeys();
+
+    /** Replaces (or, when {@code clear} is false, adds to) this container's contents from binary NBT. */
+    void readFromBytes(byte[] bytes, boolean clear) throws java.io.IOException;
+
+    default void readFromBytes(byte[] bytes) throws java.io.IOException {
+        readFromBytes(bytes, true);
+    }
 }

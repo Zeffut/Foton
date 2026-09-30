@@ -49,6 +49,8 @@ final class Services {
         }
 
         @Override public java.io.File getDataFolder() { return null; }
+        @Override public void saveConfig() {}
+        @Override public void reloadConfig() {}
         @Override public org.bukkit.plugin.PluginDescriptionFile getDescription() { return null; }
         @Override public org.bukkit.Server getServer() { return null; }
         @Override public java.util.logging.Logger getLogger() { return null; }
@@ -56,5 +58,9 @@ final class Services {
         @Override public boolean isEnabled() { return true; }
         @Override public void onEnable() {}
         @Override public void onDisable() {}
+        @Override public boolean onCommand(org.bukkit.command.CommandSender sender,
+                org.bukkit.command.Command command, String label, String[] args) { return false; }
+        @Override public java.util.List<String> onTabComplete(org.bukkit.command.CommandSender sender,
+                org.bukkit.command.Command command, String label, String[] args) { return null; }
     }
 }

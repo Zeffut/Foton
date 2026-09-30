@@ -46,7 +46,11 @@ use tokio::{
 };
 
 mod forward;
+mod item_components;
 mod natives;
+mod packet_tap;
+mod relay;
+mod scoreboard_natives;
 mod via;
 
 /// The class the Java side exposes to this one.
@@ -105,7 +109,11 @@ pub struct PluginHostConfig {
     /// Not an afterthought: a plugin compiled against a Paper server assumes
     /// Gson and the rest are simply there, and the first real plugin tried
     /// against this failed on exactly that.
-    pub library_directory: Option<PathBuf>,
+    ///
+    /// Several, searched in order: the libraries Paper declares for its API,
+    /// and the ones its server jar carries at run time -- JDBC drivers among
+    /// them, which plugins use without shipping.
+    pub library_directories: Vec<PathBuf>,
     /// Where plugin jars are found.
     pub plugin_directory: PathBuf,
 }
@@ -123,6 +131,17 @@ impl PluginHostConfig {
         self.java_home.join(name)
     }
 
+    /// Plugins Foton ships because their upstream builds cannot run on it.
+    ///
+    /// Beside the API jar, because they are built with it and against it:
+    /// `dev/build-packetevents.sh` writes there. The host loads them before
+    /// the plugin directory, and one of theirs wins a name collision.
+    fn bundled_directory(&self) -> PathBuf {
+        self.api_jar
+            .parent()
+            .map_or_else(|| PathBuf::from("bundled"), |parent| parent.join("bundled"))
+    }
+
     /// Everything a plugin is allowed to see, in the order it is searched.
     ///
     /// Spelled out rather than globbed with `dir/*`: the invocation API does
@@ -133,7 +152,7 @@ impl PluginHostConfig {
             return Err(PluginHostError::NoApiJar(self.api_jar.clone()));
         }
         let mut entries = vec![jvm_path(&self.api_jar)];
-        if let Some(directory) = &self.library_directory {
+        for directory in &self.library_directories {
             entries.extend(jars_in(directory)?);
         }
         Ok(entries.join(if cfg!(target_os = "windows") {
@@ -221,6 +240,16 @@ impl PluginHost {
                 "-Dfoton.plugins-directory={}",
                 config.plugin_directory.display()
             ))?;
+            let bundled_plugins = CString::new(format!(
+                "-Dfoton.bundled-plugins={}",
+                config.bundled_directory().display()
+            ))?;
+            // The process belongs to Foton, and so do its signals. Without
+            // this, HotSpot installs its own SIGTERM and SIGINT handlers and
+            // answers them by exiting the process on the spot: no world is
+            // saved, no plugin is disabled, and the operator's `docker stop`
+            // loses whatever the last autosave missed.
+            let reduced_signals = CString::new("-Xrs")?;
             let mut options = [
                 JavaVMOption {
                     optionString: class_path.as_ptr().cast_mut(),
@@ -228,6 +257,14 @@ impl PluginHost {
                 },
                 JavaVMOption {
                     optionString: plugins_directory.as_ptr().cast_mut(),
+                    extraInfo: ptr::null_mut(),
+                },
+                JavaVMOption {
+                    optionString: bundled_plugins.as_ptr().cast_mut(),
+                    extraInfo: ptr::null_mut(),
+                },
+                JavaVMOption {
+                    optionString: reduced_signals.as_ptr().cast_mut(),
                     extraInfo: ptr::null_mut(),
                 },
             ];

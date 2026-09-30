@@ -1,5 +1,7 @@
 //! Cooking recipe types.
 
+use std::borrow::Cow;
+
 use foton_utils::Identifier;
 
 use crate::item_stack::ItemStack;
@@ -21,6 +23,18 @@ pub enum CookingKind {
     Smoking,
 }
 
+/// Which recipe book tab a cooking recipe is filed under.
+///
+/// Vanilla parity: `CookingBookCategory`. Each cooking family maps it onto its
+/// own `RecipeBookCategory`, so the same value means a different tab in a
+/// furnace and in a blast furnace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CookingCategory {
+    Food,
+    Blocks,
+    Misc,
+}
+
 /// A furnace smelting recipe.
 #[derive(Debug)]
 pub struct SmeltingRecipe {
@@ -29,6 +43,10 @@ pub struct SmeltingRecipe {
     pub result: RecipeResult,
     pub experience: f32,
     pub cooking_time: i32,
+    pub category: CookingCategory,
+    pub show_notification: bool,
+    /// The recipe book button this recipe shares with its siblings; empty for none.
+    pub group: Cow<'static, str>,
 }
 
 impl SmeltingRecipe {
@@ -73,6 +91,9 @@ mod tests {
             },
             experience: 0.0,
             cooking_time: 200,
+            category: CookingCategory::Misc,
+            show_notification: true,
+            group: Cow::Borrowed(""),
         };
 
         let result = recipe.assemble_result(3, true);
@@ -93,6 +114,9 @@ mod tests {
             },
             experience: 0.0,
             cooking_time: 200,
+            category: CookingCategory::Misc,
+            show_notification: true,
+            group: Cow::Borrowed(""),
         };
 
         let result = recipe.assemble_result(3, false);

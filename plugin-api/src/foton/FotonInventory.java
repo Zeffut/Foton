@@ -306,13 +306,15 @@ public final class FotonInventory implements PlayerInventory {
                     }
                 } catch (NumberFormatException ignored) { }
             }
+            if (meta instanceof org.bukkit.inventory.meta.SimpleItemMeta simple) {
+                ItemComponents.decode(simple, material, java.util.Arrays.asList(encoded).subList(1, encoded.length));
+            }
             result.setItemMeta(meta);
         }
         if (result.getItemMeta() instanceof org.bukkit.inventory.meta.PotionMeta meta) {
             for (String encodedField : encoded) {
-                if (encodedField.startsWith("damage=") || encodedField.startsWith("namehex=")
-                        || encodedField.startsWith("lorehex=") || encodedField.startsWith("enchhex=")
-                        || encodedField.startsWith("storedenchhex=")) continue;
+                // Effects are the one field with no name; every other has one.
+                if (encodedField.contains("=") || encodedField.equals(encoded[0])) continue;
                 for (String effect : encodedField.split(";")) {
                     String[] fields = effect.split(",", -1);
                     if (fields.length < 3) continue;
@@ -369,12 +371,6 @@ public final class FotonInventory implements PlayerInventory {
             }
             for (org.bukkit.Color valuePart : model.getColors()) value += "\u001dmodelcolor=" + valuePart.asRGB();
         }
-        if (item.hasItemMeta() && item.getItemMeta().hasDisplayName()) {
-            String name = item.getItemMeta().getDisplayName();
-            StringBuilder hex = new StringBuilder();
-            for (byte byteValue : name.getBytes(java.nio.charset.StandardCharsets.UTF_8)) hex.append(String.format("%02x", byteValue & 0xff));
-            value += "\u001dnamehex=" + hex;
-        }
         if (item.hasItemMeta()) {
             for (java.util.Map.Entry<org.bukkit.enchantments.Enchantment, Integer> entry : item.getItemMeta().getEnchants().entrySet()) {
                 StringBuilder hex = new StringBuilder();
@@ -388,12 +384,8 @@ public final class FotonInventory implements PlayerInventory {
                     value += "\u001dstoredenchhex=" + hex + ":" + entry.getValue();
                 }
         }
-        if (item.hasItemMeta() && item.getItemMeta().hasLore()) {
-            for (String line : item.getItemMeta().getLore()) {
-                StringBuilder hex = new StringBuilder();
-                for (byte byteValue : line.getBytes(java.nio.charset.StandardCharsets.UTF_8)) hex.append(String.format("%02x", byteValue & 0xff));
-                value += "\u001dlorehex=" + hex;
-            }
+        if (item.hasItemMeta() && item.getItemMeta() instanceof org.bukkit.inventory.meta.SimpleItemMeta simple) {
+            value += ItemComponents.encode(simple, item.getType());
         }
         if (item.getItemMeta() instanceof org.bukkit.inventory.meta.PotionMeta meta && !meta.getCustomEffects().isEmpty()) {
             StringBuilder effects = new StringBuilder("\u001d");

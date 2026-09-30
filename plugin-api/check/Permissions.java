@@ -288,7 +288,7 @@ final class Permissions {
         }
     }
 
-    private static final class Owner implements org.bukkit.plugin.Plugin {
+    private static final class Owner extends org.bukkit.plugin.java.JavaPlugin {
         private final String name;
 
         private Owner(String name) { this.name = name; }

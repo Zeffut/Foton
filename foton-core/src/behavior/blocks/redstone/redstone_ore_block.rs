@@ -14,7 +14,7 @@ use foton_utils::{BlockPos, BlockStateId};
 
 use crate::behavior::{
     BlockBehavior, BlockHitResult, BlockPlaceContext, InteractionResult, InventoryAccess,
-    PlacementSource, try_drop_experience,
+    PlacementSource, sample_block_experience,
 };
 use crate::entity::Entity;
 use crate::player::Player;
@@ -89,27 +89,20 @@ impl BlockBehavior for RedStoneOreBlock {
         }
     }
 
-    fn spawn_after_break(
+    fn experience_drop(
         &self,
         _state: BlockStateId,
-        world: &Arc<World>,
-        pos: BlockPos,
+        _world: &Arc<World>,
+        _pos: BlockPos,
         tool: &ItemStack,
-        drop_experience: bool,
-    ) {
-        if !drop_experience {
-            return;
-        }
-
-        try_drop_experience(
-            world,
-            pos,
+    ) -> i32 {
+        sample_block_experience(
             tool,
             &IntProvider::Uniform {
                 min_inclusive: 1,
                 max_inclusive: 5,
             },
-        );
+        )
     }
 
     // `animateTick` and interaction particles use client-local `Level.addParticle`.

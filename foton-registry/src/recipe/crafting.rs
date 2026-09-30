@@ -4,6 +4,8 @@
     reason = "crafting recipe tests unwrap known valid generated item stacks"
 )]
 
+use std::borrow::Cow;
+
 use foton_utils::Identifier;
 
 use crate::{item_stack::ItemStack, items::ItemRef};
@@ -45,6 +47,8 @@ pub struct ShapedRecipe {
     pub pattern: &'static [Ingredient],
     pub result: RecipeResult,
     pub show_notification: bool,
+    /// The recipe book button this recipe shares with its siblings; empty for none.
+    pub group: Cow<'static, str>,
     /// Pre-computed: whether the pattern is horizontally symmetric.
     pub symmetrical: bool,
 }
@@ -52,6 +56,10 @@ pub struct ShapedRecipe {
 impl ShapedRecipe {
     /// Creates a new shaped recipe, pre-computing symmetry.
     #[must_use]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one argument per field of vanilla's ShapedRecipe; a builder would only rename them"
+    )]
     pub fn new(
         id: Identifier,
         category: CraftingCategory,
@@ -60,6 +68,7 @@ impl ShapedRecipe {
         pattern: &'static [Ingredient],
         result: RecipeResult,
         show_notification: bool,
+        group: Cow<'static, str>,
     ) -> Self {
         let symmetrical = Self::compute_symmetrical(width, pattern);
         Self {
@@ -70,6 +79,7 @@ impl ShapedRecipe {
             pattern,
             result,
             show_notification,
+            group,
             symmetrical,
         }
     }
@@ -177,6 +187,9 @@ pub struct ShapelessRecipe {
     pub category: CraftingCategory,
     pub ingredients: &'static [Ingredient],
     pub result: RecipeResult,
+    pub show_notification: bool,
+    /// The recipe book button this recipe shares with its siblings; empty for none.
+    pub group: Cow<'static, str>,
 }
 
 impl ShapelessRecipe {

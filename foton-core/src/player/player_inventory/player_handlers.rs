@@ -219,12 +219,17 @@ impl Player {
             return Err(OpenMenuUnavailable::Unavailable);
         }
 
-        let overrides_player_slots = menu.overrides_player_slots();
         let Some(menu) = open_menu.menu.take() else {
             return Err(OpenMenuUnavailable::Unavailable);
         };
-        let top_slot_count = menu_top_slot_count(&menu).unwrap_or(0);
-        let menu_type = menu.menu_type().map(|menu_type| menu_type.key.to_string());
+        open_menu.dispatch = Some(Self::dispatch_for(&menu));
+        Ok(menu)
+    }
+
+    /// What a plugin reads of `menu` while a callback owns it: its top slots
+    /// as they stand now. Writes made meanwhile wait in the dispatch.
+    fn dispatch_for(menu: &Menu) -> OpenMenuDispatch {
+        let top_slot_count = menu_top_slot_count(menu).unwrap_or(0);
         let snapshot = {
             let guard = menu.behavior().lock_all_containers();
             (0..top_slot_count)
@@ -236,14 +241,13 @@ impl Player {
                 })
                 .collect()
         };
-        open_menu.dispatch = Some(OpenMenuDispatch {
-            overrides_player_slots,
+        OpenMenuDispatch {
+            overrides_player_slots: menu.overrides_player_slots(),
             top_slot_count,
-            menu_type,
+            menu_type: menu.menu_type().map(|menu_type| menu_type.key.to_string()),
             snapshot,
             actions: Vec::new(),
-        });
-        Ok(menu)
+        }
     }
 
     fn finish_open_menu_callback(&self, menu: Menu) {
@@ -528,12 +532,14 @@ impl Player {
                     return;
                 }
             }
-            let current_item = click.slot().and_then(|slot| {
+            let (current_item, craft) = click.slot().map_or((None, None), |slot| {
                 let guard = menu.behavior().lock_all_containers();
-                menu.behavior()
+                let current = menu
+                    .behavior()
                     .slots()
                     .get(slot)
-                    .map(|view| view.get_item(&guard).clone())
+                    .map(|view| view.get_item(&guard).clone());
+                (current, menu.kind().crafting_click(&guard, slot))
             });
             let click_name = match (packet.click_type, packet.button_num) {
                 (ClickType::Pickup | ClickType::QuickCraft, 0) => "LEFT",
@@ -554,7 +560,8 @@ impl Player {
                 Some(cursor_item),
                 click_name.to_owned(),
                 click.slot(),
-            );
+            )
+            .with_craft(craft);
             self.fire_event(&mut inventory_click);
             if inventory_click.is_cancelled() {
                 menu.behavior_mut().resume_remote_updates();
@@ -1104,13 +1111,10 @@ impl Player {
                 return;
             };
             open_menu.title = None;
-            open_menu.dispatch = Some(OpenMenuDispatch {
-                overrides_player_slots: menu.overrides_player_slots(),
-                top_slot_count: 0,
-                menu_type: None,
-                snapshot: Vec::new(),
-                actions: Vec::new(),
-            });
+            // Bukkit parity: `InventoryCloseEvent` shows the inventory being
+            // closed, contents and all -- a plugin's menu hands back what the
+            // player left in it from there.
+            open_menu.dispatch = Some(Self::dispatch_for(&menu));
             menu
         };
 
@@ -1348,7 +1352,7 @@ impl Player {
     /// whichever menu is open and falls back to the player's own inventory
     /// menu when none is, which is the same pair
     /// [`Self::clear_or_count_matching_items`] walks.
-    pub(crate) fn carried_item(&self) -> ItemStack {
+    pub fn carried_item(&self) -> ItemStack {
         let open_menu = self.open_menu.lock();
         if let Some(menu) = open_menu.menu.as_ref() {
             return menu.behavior().carried().clone();
@@ -1362,6 +1366,24 @@ impl Player {
         }
         drop(open_menu);
         self.inventory_menu.lock().behavior().carried().clone()
+    }
+
+    /// Puts `stack` on the cursor; the menu sends it with its next sync.
+    ///
+    /// Vanilla parity: `Player.containerMenu.setCarried`. Returns `false` when
+    /// the open menu has been handed to a callback and has no cursor to set.
+    pub fn set_carried_item(&self, stack: ItemStack) -> bool {
+        let mut open_menu = self.open_menu.lock();
+        if let Some(menu) = open_menu.menu.as_mut() {
+            *menu.behavior_mut().carried_mut() = stack;
+            return true;
+        }
+        if open_menu.dispatch.is_some() {
+            return false;
+        }
+        drop(open_menu);
+        *self.inventory_menu.lock().behavior_mut().carried_mut() = stack;
+        true
     }
 
     /// Removes or counts matching stacks across every location used by vanilla `/clear`.

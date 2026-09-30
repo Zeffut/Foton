@@ -28,7 +28,7 @@ use crate::behavior::block::{
     BlockBehavior, BlockEntityCreation, schedule_water_tick_if_waterlogged,
 };
 use crate::behavior::context::BlockPlaceContext;
-use crate::behavior::try_drop_experience;
+use crate::behavior::sample_block_experience;
 use crate::block_entity::entities::{SculkShriekerBlockEntity, with_shrieking_player};
 use crate::block_entity::{BLOCK_ENTITIES, BlockEntityTicker};
 use crate::entity::Entity;
@@ -140,17 +140,14 @@ impl BlockBehavior for SculkShriekerBlock {
         )
     }
 
-    fn spawn_after_break(
+    fn experience_drop(
         &self,
         _state: BlockStateId,
-        world: &Arc<World>,
-        pos: BlockPos,
+        _world: &Arc<World>,
+        _pos: BlockPos,
         tool: &ItemStack,
-        drop_experience: bool,
-    ) {
-        if drop_experience {
-            try_drop_experience(world, pos, tool, &SHRIEKER_EXPERIENCE);
-        }
+    ) -> i32 {
+        sample_block_experience(tool, &SHRIEKER_EXPERIENCE)
     }
 }
 

@@ -1,7 +1,7 @@
 package org.bukkit.entity;
 
 /** Vanilla zombie nautilus entity view. */
-public interface ZombieNautilus extends Animal {
+public interface ZombieNautilus extends Animals {
     enum Variant { TEMPERATE, WARM }
     default Variant getVariant() {
         String value = foton.Native.zombieNautilusVariant(((foton.FotonEntity) this).getUniqueId().toString());

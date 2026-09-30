@@ -54,6 +54,13 @@ impl ItemCooldowns {
     /// Vanilla parity: `ItemCooldowns.addCooldown(Identifier, int)`. Items whose
     /// cooldown is not a `minecraft:use_cooldown` component -- the goat horn
     /// takes it from its instrument -- go through here.
+    /// Ticks left on a cooldown group, zero when it is not cooling down.
+    fn remaining(&self, group: &Identifier) -> i32 {
+        self.cooldowns
+            .get(group)
+            .map_or(0, |cooldown| (cooldown.end_time - self.tick_count).max(0))
+    }
+
     pub(super) fn add(&mut self, group: Identifier, duration: i32) -> Identifier {
         self.cooldowns.insert(
             group.clone(),
@@ -98,6 +105,25 @@ impl Player {
             .item_cooldowns
             .lock()
             .add(cooldown_group(stack), duration);
+        self.send_packet(CCooldown {
+            cooldown_group,
+            duration,
+        });
+    }
+
+    /// Ticks left on a cooldown group.
+    ///
+    /// Vanilla parity: what `ItemCooldowns.getCooldownPercent` measures, in
+    /// ticks, for a group rather than a stack -- the value Paper's
+    /// `HumanEntity.getCooldown(Key)` answers.
+    #[must_use]
+    pub fn item_cooldown_remaining(&self, group: &Identifier) -> i32 {
+        self.item_cooldowns.lock().remaining(group)
+    }
+
+    /// Starts a cooldown on a group, as `ItemCooldowns.addCooldown(group, ticks)`.
+    pub fn add_item_cooldown_group(&self, group: Identifier, duration: i32) {
+        let cooldown_group = self.item_cooldowns.lock().add(group, duration);
         self.send_packet(CCooldown {
             cooldown_group,
             duration,

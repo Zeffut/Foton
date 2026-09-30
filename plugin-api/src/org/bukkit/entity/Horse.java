@@ -4,7 +4,7 @@ package org.bukkit.entity;
 public interface Horse extends AbstractHorse {
     default boolean isTamed() { return foton.Native.entityIsTamed(((foton.FotonEntity) this).getUniqueId().toString()); }
     default void setTamed(boolean tamed) { foton.Native.setEntityTamed(((foton.FotonEntity) this).getUniqueId().toString(), tamed); }
-    default org.bukkit.inventory.HorseInventory getInventory() { return null; }
+    @Override org.bukkit.inventory.HorseInventory getInventory();
     default boolean isCarryingChest() { return foton.Native.entityHasChest(((foton.FotonEntity) this).getUniqueId().toString()); }
     default void setCarryingChest(boolean carryingChest) { foton.Native.entitySetChest(((foton.FotonEntity) this).getUniqueId().toString(), carryingChest); }
     enum Color { WHITE, CREAMY, CHESTNUT, BROWN, BLACK, GRAY, DARK_BROWN }

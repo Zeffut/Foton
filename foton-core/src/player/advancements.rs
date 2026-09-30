@@ -120,6 +120,18 @@ impl Player {
         self.advancements.lock().revoke_all(node)
     }
 
+    /// Each criterion of one advancement, with when this player met it, if
+    /// they have.
+    #[must_use]
+    pub fn advancement_criteria(&self, node: usize) -> Vec<(&'static str, Option<i64>)> {
+        self.advancements
+            .lock()
+            .progress(node)
+            .criteria()
+            .map(|(name, progress)| (name, progress.obtained()))
+            .collect()
+    }
+
     /// Whether this player has finished an advancement.
     #[must_use]
     pub fn has_advancement(&self, node: usize) -> bool {
@@ -239,9 +251,10 @@ impl Player {
         if rewards.experience != 0 {
             self.give_experience_points(rewards.experience);
         }
-        // The recipe rewards are what unlock a recipe in the recipe book.
-        // Foton has no recipe book yet, so there is nothing to unlock into;
-        // the criterion itself is still awarded, so the progress is not lost.
+        // Vanilla parity: `player.awardRecipesByKey(this.recipes)`.
+        if !rewards.recipes.is_empty() {
+            self.award_recipes(rewards.recipes);
+        }
         if !rewards.loot.is_empty() || rewards.function.is_some() {
             log::warn!(
                 "advancement reward carries loot or a function, which Foton does not grant yet"

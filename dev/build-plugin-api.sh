@@ -62,6 +62,11 @@ python3 "$REPO/dev/gen-material.py" "$GENERATED"
 python3 "$REPO/dev/gen-entity-type.py" "$GENERATED"
 python3 "$REPO/dev/gen-enchantment.py" "$GENERATED"
 python3 "$REPO/dev/gen-potion-type.py" "$GENERATED"
+python3 "$REPO/dev/gen-attribute.py" "$GENERATED"
+python3 "$REPO/dev/gen-potion-effect-type.py" "$GENERATED"
+python3 "$REPO/dev/gen-particle.py" "$GENERATED"
+python3 "$REPO/dev/gen-registry-values.py" "$GENERATED"
+python3 "$REPO/dev/gen-game-rules.py" "$GENERATED"
 
 # The API compiles against Adventure, Brigadier, Guava and the rest, which are
 # committed in plugin-api/lib. Check them before use rather than trusting the

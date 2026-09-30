@@ -63,6 +63,18 @@ public interface Server {
     default org.bukkit.inventory.Inventory createInventory(org.bukkit.inventory.InventoryHolder owner, int size) {
         return createInventory(owner, size, "");
     }
+    default org.bukkit.inventory.Inventory createInventory(org.bukkit.inventory.InventoryHolder owner, int size,
+            net.kyori.adventure.text.Component title) {
+        return Bukkit.createInventory(owner, size, title);
+    }
+    default org.bukkit.inventory.Inventory createInventory(org.bukkit.inventory.InventoryHolder owner,
+            org.bukkit.event.inventory.InventoryType type) {
+        return Bukkit.createInventory(owner, type, "");
+    }
+    default org.bukkit.inventory.Inventory createInventory(org.bukkit.inventory.InventoryHolder owner,
+            org.bukkit.event.inventory.InventoryType type, String title) {
+        return Bukkit.createInventory(owner, type, title);
+    }
     default org.bukkit.block.data.BlockData createBlockData(String data) { return Bukkit.createBlockData(data); }
     default org.bukkit.command.PluginCommand getPluginCommand(String name) { return null; }
 
@@ -129,6 +141,13 @@ public interface Server {
     String getBukkitVersion();
     /** Average tick duration in milliseconds, measured by the server. */
     default double getAverageTickTime() { return foton.Native.serverAverageTickTime(); }
+    /** Ticks per second measured over the last 1, 5 and 15 minutes. */
+    double[] getTPS();
+    /** The name of the folder, under the plugins folder, whose jars replace
+     * same-named plugin jars at the next start. */
+    String getUpdateFolder();
+    /** The update folder itself. */
+    java.io.File getUpdateFolderFile();
 
     default String getMotd() { return ""; }
     default Warning.WarningState getWarningState() { return Warning.WarningState.DEFAULT; }
@@ -194,9 +213,18 @@ public interface Server {
     Logger getLogger();
 
     default BanList<?> getBanList(BanList.Type type) { return null; }
-    default BanList<?> getBanList(io.papermc.paper.ban.BanListType type) {
-        return getBanList(type == io.papermc.paper.ban.BanListType.IP ? BanList.Type.IP : BanList.Type.NAME);
+    /** The ban list of a Paper list type: the profile list, or the IP one. */
+    @SuppressWarnings("unchecked")
+    default <B extends BanList<E>, E> B getBanList(io.papermc.paper.ban.BanListType<B> type) {
+        return (B) getBanList((Object) type == io.papermc.paper.ban.BanListType.IP ? BanList.Type.IP : BanList.Type.PROFILE);
     }
+    /** Whether admission is limited to the whitelist. */
+    boolean hasWhitelist();
+    /** The player a name belongs to, if the server has seen them; null
+     * otherwise, and never a lookup. */
+    OfflinePlayer getOfflinePlayerIfCached(String name);
+    /** Every advancement the server knows. */
+    java.util.Iterator<org.bukkit.advancement.Advancement> advancementIterator();
     default java.util.Set<OfflinePlayer> getBannedPlayers() { return Bukkit.getBannedPlayers(); }
     /** Returns players currently permitted by the server whitelist. */
     default java.util.Set<OfflinePlayer> getWhitelistedPlayers() { return java.util.Collections.emptySet(); }
@@ -304,4 +332,13 @@ public interface Server {
     io.papermc.paper.threadedregions.scheduler.RegionScheduler getRegionScheduler();
 
     io.papermc.paper.threadedregions.scheduler.AsyncScheduler getAsyncScheduler();
+
+    /** A merchant with no villager behind it, titled {@code title} (null for the vanilla title). */
+    default org.bukkit.inventory.Merchant createMerchant(net.kyori.adventure.text.Component title) {
+        return new foton.FotonMerchant(title);
+    }
+    default org.bukkit.inventory.Merchant createMerchant(String title) {
+        return createMerchant(title == null ? null : net.kyori.adventure.text.Component.text(title));
+    }
+    default org.bukkit.inventory.Merchant createMerchant() { return createMerchant((net.kyori.adventure.text.Component) null); }
 }

@@ -274,6 +274,14 @@ impl MerchantOffer {
         self.reward_exp
     }
 
+    /// Whether completing the trade drops experience for the player.
+    ///
+    /// Vanilla parity: the `rewardExp` the codec restores; Bukkit's
+    /// `MerchantRecipe.setExperienceReward` sets it on an offer it builds.
+    pub const fn set_reward_exp(&mut self, reward_exp: bool) {
+        self.reward_exp = reward_exp;
+    }
+
     /// Returns `true` if these two stacks pay for this trade.
     ///
     /// Vanilla parity: `satisfiedBy`. The first price is compared against its

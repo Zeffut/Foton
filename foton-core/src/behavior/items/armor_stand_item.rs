@@ -15,9 +15,10 @@ use foton_utils::axis::Axis;
 use foton_utils::{BlockPos, WorldAabb};
 use glam::DVec3;
 
+use crate::behavior::items::entity_place::entity_place_allowed;
 use crate::behavior::{InteractionResult, ItemBehavior, UseOnContext};
 use crate::entity::entities::ArmorStandEntity;
-use crate::entity::{Entity as _, next_entity_id};
+use crate::entity::{Entity as _, SharedEntity, next_entity_id};
 use crate::physics::collision::CollisionWorld as _;
 use crate::physics::{WorldCollisionProvider, collide, has_collision};
 use crate::world::World;
@@ -118,7 +119,17 @@ impl ItemBehavior for ArmorStandItem {
         // stand item that carries a custom name or a command-written pose
         // places a plain stand.
         let position = stand.position();
+        let placed: SharedEntity = stand.clone();
         if context.world.try_add_entity(stand).is_err() {
+            return InteractionResult::Fail;
+        }
+        if !entity_place_allowed(
+            context.world,
+            &placed,
+            context.player,
+            (context.hit_result.block_pos, context.hit_result.direction),
+            context.hand,
+        ) {
             return InteractionResult::Fail;
         }
 

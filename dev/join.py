@@ -12,6 +12,7 @@ Used by dev/join-test.sh, which boots an offline-mode server for it.
 import os
 import re
 import io
+import json
 import socket
 import time
 import struct
@@ -57,6 +58,7 @@ PLAY_C_KEEP_ALIVE = 44
 PLAY_C_LEVEL_CHUNK_WITH_LIGHT = 45
 PLAY_C_PLAYER_POSITION = 72
 PLAY_C_OPEN_SCREEN = 59
+PLAY_C_CONTAINER_CLOSE = 17
 PLAY_C_MOUNT_SCREEN_OPEN = 41
 PLAY_C_MAP_ITEM_DATA = 51
 PLAY_C_SET_EQUIPMENT = 102
@@ -64,6 +66,9 @@ PLAY_C_UPDATE_MOB_EFFECT = 132
 PLAY_C_AWARD_STATS = 3
 PLAY_C_UPDATE_ADVANCEMENTS = 130
 PLAY_C_SELECT_ADVANCEMENTS_TAB = 85
+PLAY_C_RECIPE_BOOK_ADD = 74
+PLAY_C_RECIPE_BOOK_REMOVE = 75
+PLAY_C_RECIPE_BOOK_SETTINGS = 76
 PLAY_C_PLAYER_COMBAT_KILL = 68
 PLAY_C_RESPAWN = 82
 PLAY_C_SET_HEALTH = 104
@@ -605,6 +610,10 @@ def run_play(connection, watch_seconds=0):
             # it happen.
             connection.open_container, _ = read_varint(payload)
             print("  a screen opened")
+        elif packet_id == PLAY_C_CONTAINER_CLOSE:
+            # A plugin's menu closes itself once a choice is made.
+            connection.open_container = None
+            print("  the server closed the screen")
         elif packet_id == PLAY_C_MOUNT_SCREEN_OPEN:
             note_mount_screen(connection, payload)
         elif packet_id == PLAY_C_MAP_ITEM_DATA:
@@ -619,6 +628,8 @@ def run_play(connection, watch_seconds=0):
             note_advancements(payload)
         elif packet_id == PLAY_C_SELECT_ADVANCEMENTS_TAB:
             note_advancements_tab(payload)
+        elif packet_id in RECIPE_BOOK_PACKETS:
+            note_recipe_book(packet_id, payload)
         elif packet_id == PLAY_C_SET_PASSENGERS:
             # Who is riding what. Nothing else says a player actually boarded.
             report_passengers(payload)
@@ -939,6 +950,10 @@ def pump(connection, seconds, spawned):
             # it happen.
             connection.open_container, _ = read_varint(payload)
             print("  a screen opened")
+        elif packet_id == PLAY_C_CONTAINER_CLOSE:
+            # A plugin's menu closes itself once a choice is made.
+            connection.open_container = None
+            print("  the server closed the screen")
         elif packet_id == PLAY_C_MOUNT_SCREEN_OPEN:
             note_mount_screen(connection, payload)
         elif packet_id == PLAY_C_MAP_ITEM_DATA:
@@ -953,6 +968,8 @@ def pump(connection, seconds, spawned):
             note_advancements(payload)
         elif packet_id == PLAY_C_SELECT_ADVANCEMENTS_TAB:
             note_advancements_tab(payload)
+        elif packet_id in RECIPE_BOOK_PACKETS:
+            note_recipe_book(packet_id, payload)
         elif packet_id == PLAY_C_SET_PASSENGERS:
             # Who is riding what. Nothing else says a player actually boarded.
             report_passengers(payload)
@@ -1164,9 +1181,16 @@ def run_directive(connection, directive):
     elif parts[0] == "button":
         send_container_button_click(connection, int(parts[1]))
         print(f"  pressed button {parts[1]}")
+    elif parts[0] == "inventory":
+        # The player's own inventory is container 0 and is never opened by the
+        # server; clicking it needs no screen, only the id.
+        connection.open_container = 0
+        print("  aiming clicks at the player's inventory")
     elif parts[0] == "click":
-        send_container_click(connection, int(parts[1]), CLICK_PICKUP)
-        print(f"  clicked slot {parts[1]}")
+        # A right click (button 1) puts down one item of the carried stack.
+        button = int(parts[2]) if len(parts) > 2 else 0
+        send_container_click(connection, int(parts[1]), CLICK_PICKUP, button)
+        print(f"  clicked slot {parts[1]} with button {button}")
     elif parts[0] == "wear":
         send_wear(connection, int(parts[1]))
     elif parts[0] == "shiftclick":
@@ -1585,6 +1609,153 @@ def note_advancements(payload):
             f"  advancement {update['stopped']} icon carries a component patch, "
             f"so parsing stopped"
         )
+
+
+# Vanilla parity: the `slot_display` and `recipe_display` registries, in the
+# order foton-registry/build_assets/*_display_types.json records them.
+SLOT_DISPLAY_TYPES = [
+    "empty", "any_fuel", "with_any_potion", "only_with_component", "item",
+    "item_stack", "tag", "dyed", "smithing_trim", "with_remainder", "composite",
+]
+RECIPE_DISPLAY_TYPES = ["crafting_shapeless", "crafting_shaped", "furnace", "stonecutter", "smithing"]
+
+
+def item_names():
+    """Maps item ids to names from the extracted item registry."""
+    path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "foton-registry", "build_assets", "items.json"
+    )
+    try:
+        with io.open(path, encoding="utf-8") as handle:
+            return {item["id"]: item["name"] for item in json.load(handle)["items"]}
+    except (OSError, ValueError, KeyError):
+        return {}
+
+
+ITEM_NAMES = item_names()
+
+
+def read_slot_display(data):
+    """Reads one `SlotDisplay`; returns (the item ids it names, rest)."""
+    kind, data = read_varint(data)
+    name = SLOT_DISPLAY_TYPES[kind]
+    if name in ("empty", "any_fuel"):
+        return [], data
+    if name == "item":
+        item, data = read_varint(data)
+        return [item], data
+    if name == "item_stack":
+        item, data = read_varint(data)
+        _count, data = read_varint(data)
+        added, data = read_varint(data)
+        removed, data = read_varint(data)
+        if added or removed:
+            raise ValueError("a result with components is not read by this script")
+        return [item], data
+    if name == "tag":
+        tag, data = read_string(data)
+        return ["#" + tag], data
+    if name == "with_any_potion":
+        return read_slot_display(data)
+    if name in ("with_remainder", "dyed"):
+        first, data = read_slot_display(data)
+        _second, data = read_slot_display(data)
+        return first, data
+    if name == "composite":
+        count, data = read_varint(data)
+        items = []
+        for _ in range(count):
+            some, data = read_slot_display(data)
+            items.extend(some)
+        return items, data
+    raise ValueError(f"slot display {name} is not read by this script")
+
+
+def read_recipe_display(data):
+    """Reads one `RecipeDisplay`; returns (type name, result item ids, rest)."""
+    kind, data = read_varint(data)
+    name = RECIPE_DISPLAY_TYPES[kind]
+    slots_before_result = {"furnace": 2, "stonecutter": 1, "smithing": 3}.get(name, 0)
+    if name == "crafting_shaped":
+        _width, data = read_varint(data)
+        _height, data = read_varint(data)
+    if name.startswith("crafting"):
+        count, data = read_varint(data)
+        for _ in range(count):
+            _items, data = read_slot_display(data)
+    for _ in range(slots_before_result):
+        _items, data = read_slot_display(data)
+    result, data = read_slot_display(data)
+    _station, data = read_slot_display(data)
+    if name == "furnace":
+        _duration, data = read_varint(data)
+        data = data[4:]
+    return name, result, data
+
+
+def read_recipe_book_add(payload):
+    """Reads `ClientboundRecipeBookAddPacket` into (entries, replace)."""
+    count, data = read_varint(payload)
+    entries = []
+    for _ in range(count):
+        display_id, data = read_varint(data)
+        kind, result, data = read_recipe_display(data)
+        _group, data = read_varint(data)
+        _category, data = read_varint(data)
+        has_requirements, data = data[0], data[1:]
+        if has_requirements:
+            ingredients, data = read_varint(data)
+            for _ in range(ingredients):
+                size, data = read_varint(data)
+                if size == 0:
+                    _tag, data = read_string(data)
+                for _ in range(max(size - 1, 0)):
+                    _item, data = read_varint(data)
+        flags, data = data[0], data[1:]
+        entries.append({"id": display_id, "kind": kind, "result": result, "flags": flags})
+    if len(data) != 1:
+        raise ValueError("trailing bytes after the recipe book entries")
+    return entries, bool(data[0])
+
+
+def note_recipe_book(packet_id, payload):
+    """Prints what the recipe book was told.
+
+    The book is server state the client only learns through these packets, so
+    this is how a join shows which recipes a player was given -- by the result
+    each display crafts, since the display ids are the server's own numbering.
+    Every entry is parsed to the end, so a wrong length anywhere in the
+    encoding shows up as an unparsable packet rather than as a short count.
+    """
+    if packet_id == PLAY_C_RECIPE_BOOK_SETTINGS:
+        print(f"  recipe book settings: {' '.join(str(byte) for byte in payload[:8])}")
+        return
+    if packet_id == PLAY_C_RECIPE_BOOK_REMOVE:
+        count, _rest = read_varint(payload)
+        print(f"  recipe book removed {count} display(s)")
+        return
+    try:
+        entries, replace = read_recipe_book_add(payload)
+    except (IndexError, ValueError, UnicodeDecodeError):
+        print("  a recipe book add arrived that could not be parsed")
+        return
+    highlighted = sum(1 for entry in entries if entry["flags"] & 2)
+    toasts = sum(1 for entry in entries if entry["flags"] & 1)
+    print(
+        f"  recipe book add: replace={truth(replace)} entries={len(entries)} "
+        f"highlighted={highlighted} toasts={toasts}"
+    )
+    shown = [
+        f"{entry['kind']}->{ITEM_NAMES.get(item, item)}"
+        for entry in entries[:12]
+        for item in entry["result"][:1]
+    ]
+    if shown:
+        more = f" (+{len(entries) - 12} more)" if len(entries) > 12 else ""
+        print(f"  recipe book results: {', '.join(shown)}{more}")
+
+
+RECIPE_BOOK_PACKETS = (PLAY_C_RECIPE_BOOK_ADD, PLAY_C_RECIPE_BOOK_REMOVE, PLAY_C_RECIPE_BOOK_SETTINGS)
 
 
 def note_advancements_tab(payload):
@@ -2018,6 +2189,10 @@ def watch_for_spawns(connection, seconds, spawned):
             # it happen.
             connection.open_container, _ = read_varint(payload)
             print("  a screen opened")
+        elif packet_id == PLAY_C_CONTAINER_CLOSE:
+            # A plugin's menu closes itself once a choice is made.
+            connection.open_container = None
+            print("  the server closed the screen")
         elif packet_id == PLAY_C_MOUNT_SCREEN_OPEN:
             note_mount_screen(connection, payload)
         elif packet_id == PLAY_C_MAP_ITEM_DATA:
@@ -2032,6 +2207,8 @@ def watch_for_spawns(connection, seconds, spawned):
             note_advancements(payload)
         elif packet_id == PLAY_C_SELECT_ADVANCEMENTS_TAB:
             note_advancements_tab(payload)
+        elif packet_id in RECIPE_BOOK_PACKETS:
+            note_recipe_book(packet_id, payload)
         elif packet_id == PLAY_C_SET_PASSENGERS:
             # Who is riding what. Nothing else says a player actually boarded.
             report_passengers(payload)

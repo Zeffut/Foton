@@ -45,6 +45,7 @@ use crate::command::rcon::RconOutput;
 use crate::command::sender::{CommandExecutionOwner, CommandSender};
 use crate::config::{ResolvedDomainConfig, RuntimeConfig, StorageSelection};
 use crate::entity::{DEFAULT_MAX_AIR_SUPPLY, Entity, EntityBase, LivingEntity as _, SharedEntity};
+use crate::packet_tap::PacketTaps;
 use crate::permission::{
     OP_GROUP, PermissionEntry, PermissionExpr, PermissionGroupConfig, PermissionGroupManager,
     PermissionGroupsConfig, PermissionKey, PermissionMetadataSet, PermissionSet,
@@ -233,7 +234,7 @@ fn test_storage_root(name: &str) -> PathBuf {
     temp_dir().join(format!("foton-server-{name}-{unique}"))
 }
 
-async fn test_server(
+pub(crate) async fn test_server(
     world: Arc<World>,
     player_permission_states: PermissionSubjectIndex,
     storage_root: &Path,
@@ -262,6 +263,10 @@ fn single_thread_pool() -> Arc<rayon::ThreadPool> {
     )
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one struct literal naming every Server field; splitting it would hide which field a test server sets"
+)]
 async fn test_server_with_worlds(
     default_domain: String,
     domains: &[ResolvedDomainConfig],
@@ -359,6 +364,7 @@ async fn test_server_with_worlds(
         pending_world_additions: SyncMutex::new(Vec::new()),
         world_creation_closed: AtomicBool::new(false),
         events: EventBus::new(),
+        packet_taps: PacketTaps::new(),
         pending_domain_switches: SyncMutex::new(Vec::new()),
     }))
 }

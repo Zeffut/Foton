@@ -22,6 +22,30 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
         try { return uuid == null ? null : new FotonPlayer(UUID.fromString(uuid)); }
         catch (IllegalArgumentException ignored) { return null; }
     }
+    @Override public int discoverRecipes(java.util.Collection<org.bukkit.NamespacedKey> recipes) {
+        return Native.discoverRecipes(id.toString(), recipeKeys(recipes));
+    }
+    @Override public int undiscoverRecipes(java.util.Collection<org.bukkit.NamespacedKey> recipes) {
+        return Native.undiscoverRecipes(id.toString(), recipeKeys(recipes));
+    }
+    @Override public boolean hasDiscoveredRecipe(org.bukkit.NamespacedKey recipe) {
+        return recipe != null && Native.hasDiscoveredRecipe(id.toString(), recipe.toString());
+    }
+    @Override public Set<org.bukkit.NamespacedKey> getDiscoveredRecipes() {
+        String[] keys = Native.discoveredRecipes(id.toString());
+        java.util.Set<org.bukkit.NamespacedKey> known = new java.util.HashSet<>();
+        if (keys != null) for (String key : keys) {
+            org.bukkit.NamespacedKey parsed = org.bukkit.NamespacedKey.fromString(key);
+            if (parsed != null) known.add(parsed);
+        }
+        return java.util.Collections.unmodifiableSet(known);
+    }
+    /** Paper throws on a null collection, as a {@code Collection} parameter does. */
+    private static String[] recipeKeys(java.util.Collection<org.bukkit.NamespacedKey> recipes) {
+        java.util.ArrayList<String> keys = new java.util.ArrayList<>(recipes.size());
+        for (org.bukkit.NamespacedKey key : recipes) if (key != null) keys.add(key.toString());
+        return keys.toArray(new String[0]);
+    }
     @Override public boolean isSprinting() { return Native.entitySprinting(id.toString()); }
     @Override public boolean isSwimming() { return Native.entitySwimming(id.toString()); }
     @Override public void hideEntity(Plugin plugin, org.bukkit.entity.Entity entity) {
@@ -83,13 +107,7 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
     }
 
     @Override public org.bukkit.attribute.AttributeInstance getAttribute(org.bukkit.attribute.Attribute attribute) {
-        if (attribute == null) return null;
-        String value = Native.playerAttribute(id.toString(), attribute.name());
-        if (value == null) return null;
-        String[] fields = value.split("\\|", -1);
-        if (fields.length != 2) return null;
-        try { return new org.bukkit.attribute.AttributeInstance(attribute, Double.parseDouble(fields[0]), Double.parseDouble(fields[1])); }
-        catch (NumberFormatException ignored) { return null; }
+        return FotonAttributeInstance.of(id, attribute);
     }
 
     public FotonPlayer(UUID id) {
@@ -242,6 +260,12 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
     }
 
     @Override
+    public org.bukkit.advancement.AdvancementProgress getAdvancementProgress(org.bukkit.advancement.Advancement advancement) {
+        if (advancement == null) throw new IllegalArgumentException("advancement");
+        return new FotonAdvancementProgress(id.toString(), advancement);
+    }
+
+    @Override
     public org.bukkit.inventory.InventoryView getOpenInventory() {
         return new FotonInventoryView(this);
     }
@@ -288,12 +312,11 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
     @Override public org.bukkit.inventory.InventoryView openInventory(org.bukkit.inventory.Inventory inventory) {
         if (!(inventory instanceof FotonCustomInventory custom)) return null;
         custom.attachViewer(id.toString());
-        Native.openGenericInventory(id.toString(), custom.getSize(), custom.getTitle(), custom.encodeContents());
-        if (Native.openMenuTopSlotCount(id.toString()) != custom.getSize()) {
-            custom.detachViewer();
-            return null;
-        }
-        return getOpenInventory();
+        Native.openGenericInventory(id.toString(), custom.getSize(), custom.titleJson(), custom.encodeContents());
+        // Opened from inside a click or a close -- how one plugin menu leads to
+        // the next -- the menu is only installed once that callback returns,
+        // so the view is the inventory itself rather than a read of the menu.
+        return new FotonInventoryView(this, custom);
     }
 
     @Override
@@ -312,12 +335,6 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
         if (!Native.openLoom(id.toString(), location.getWorld().getName(),
                 location.getBlockX(), location.getBlockY(), location.getBlockZ())) return null;
         return getOpenInventory();
-    }
-
-    @Override
-    public void damage(double amount, org.bukkit.entity.Entity source) {
-        if (amount > 0.0 && Double.isFinite(amount))
-            Native.damagePlayer(id.toString(), amount, source == null ? null : source.getUniqueId().toString());
     }
 
     @Override
@@ -624,6 +641,18 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
     @Override
     public void sendActionBar(net.kyori.adventure.text.Component message) {
         Player.super.sendActionBar(message);
+    }
+
+    @Override public void clearTitle() { Player.super.clearTitle(); }
+
+    @Override
+    public void sendPlayerListHeaderAndFooter(net.kyori.adventure.text.Component header, net.kyori.adventure.text.Component footer) {
+        Player.super.sendPlayerListHeaderAndFooter(header, footer);
+    }
+
+    @Override
+    public void sendPlayerListHeader(net.kyori.adventure.text.Component header) {
+        Player.super.sendPlayerListHeader(header);
     }
 
     @Override

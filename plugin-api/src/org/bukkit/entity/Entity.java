@@ -6,7 +6,7 @@ import org.bukkit.World;
 import org.bukkit.command.CommandSender;
 
 /** Anything in a world that has a position. */
-public interface Entity extends CommandSender, org.bukkit.persistence.PersistentDataHolder, org.bukkit.metadata.Metadatable {
+public interface Entity extends CommandSender, org.bukkit.Nameable, org.bukkit.persistence.PersistentDataHolder, org.bukkit.metadata.Metadatable {
     /** Distance fallen since the entity was last on the ground.
      *
      * <p>Declared here rather than only on {@code LivingEntity} because
@@ -19,7 +19,11 @@ public interface Entity extends CommandSender, org.bukkit.persistence.Persistent
     default org.bukkit.event.entity.EntityDamageEvent getLastDamageCause() { return null; }
     default void setLastDamageCause(org.bukkit.event.entity.EntityDamageEvent event) { }
 
-    default org.bukkit.util.BoundingBox getBoundingBox() { return null; }
+    /** The entity's box in world coordinates, or null once it is gone. */
+    default org.bukkit.util.BoundingBox getBoundingBox() {
+        double[] b = foton.Native.entityBoundingBox(getUniqueId().toString());
+        return b == null || b.length < 6 ? null : new org.bukkit.util.BoundingBox(b[0], b[1], b[2], b[3], b[4], b[5]);
+    }
     default float getYaw() { return 0.0f; }
     default float getPitch() { return 0.0f; }
     default boolean isOnGround() { return false; }
@@ -41,6 +45,66 @@ public interface Entity extends CommandSender, org.bukkit.persistence.Persistent
     UUID getUniqueId();
 
     Location getLocation();
+
+    /** Copies this entity's position and rotation into {@code location}, and
+     * returns it -- the allocation-free form hot loops use. */
+    default Location getLocation(Location location) {
+        Location current = getLocation();
+        if (location == null || current == null) return location;
+        location.setWorld(current.getWorld());
+        location.setX(current.getX());
+        location.setY(current.getY());
+        location.setZ(current.getZ());
+        location.setYaw(current.getYaw());
+        location.setPitch(current.getPitch());
+        return location;
+    }
+
+    /** The height of the entity's current bounding box: its pose and scale included. */
+    default double getHeight() {
+        double[] box = foton.Native.entityBoundingBox(getUniqueId().toString());
+        return box == null || box.length < 6 ? 0.0 : box[4] - box[1];
+    }
+
+    /** The width of the entity's current bounding box. */
+    default double getWidth() {
+        double[] box = foton.Native.entityBoundingBox(getUniqueId().toString());
+        return box == null || box.length < 6 ? 0.0 : box[3] - box[0];
+    }
+
+    default boolean hasGravity() { return foton.Native.entityGravity(getUniqueId().toString()); }
+    default void setGravity(boolean gravity) { foton.Native.setEntityGravity(getUniqueId().toString(), gravity); }
+    default boolean isSilent() { return foton.Native.entitySilent(getUniqueId().toString()); }
+    default void setSilent(boolean silent) { foton.Native.setEntitySilent(getUniqueId().toString(), silent); }
+
+    /** Turns the entity, head included; the angles are wrapped and clamped first. */
+    default void setRotation(float yaw, float pitch) {
+        if (!Float.isFinite(yaw) || !Float.isFinite(pitch)) throw new IllegalArgumentException("yaw and pitch must be finite");
+        foton.Native.setEntityRotation(getUniqueId().toString(), Location.normalizeYaw(yaw), Location.normalizePitch(pitch));
+    }
+
+    default Pose getPose() {
+        int pose = foton.Native.entityPose(getUniqueId().toString());
+        Pose[] poses = Pose.values();
+        return pose >= 0 && pose < poses.length ? poses[pose] : Pose.STANDING;
+    }
+
+    /** The entity's scoreboard tags: live, so adding to the set tags the entity. */
+    default java.util.Set<String> getScoreboardTags() { return new foton.FotonScoreboardTags(getUniqueId().toString()); }
+    default boolean addScoreboardTag(String tag) { return tag != null && foton.Native.addEntityTag(getUniqueId().toString(), tag); }
+    default boolean removeScoreboardTag(String tag) { return tag != null && foton.Native.removeEntityTag(getUniqueId().toString(), tag); }
+
+    /** The custom name as a component. Foton keeps the name's text here; its
+     * formatting reaches players but is not read back. */
+    @Override default net.kyori.adventure.text.Component customName() {
+        String name = getCustomName();
+        return name == null ? null : net.kyori.adventure.text.Component.text(name);
+    }
+
+    /** Sets the custom name, colour and formatting included. */
+    @Override default void customName(net.kyori.adventure.text.Component customName) {
+        foton.Native.setEntityCustomNameComponent(getUniqueId().toString(), foton.FotonComponents.toJson(customName));
+    }
     default Location getOrigin() { return getLocation(); }
     default EntitySnapshot createSnapshot() { return new foton.FotonEntitySnapshot(getType(), getLocation()); }
     default org.bukkit.util.Vector getVelocity() { return new org.bukkit.util.Vector(); }
@@ -90,6 +154,14 @@ public interface Entity extends CommandSender, org.bukkit.persistence.Persistent
 
     default boolean teleport(Location location) { return false; }
     default boolean teleport(Location location, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause) { return teleport(location); }
+    default boolean teleport(Location location, io.papermc.paper.entity.TeleportFlag... flags) {
+        return teleport(location, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.PLUGIN, flags);
+    }
+    /** Paper's flagged teleport. The base form ignores the flags; Foton's
+     * entities apply them (see {@code FotonEntity}). */
+    default boolean teleport(Location location, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause, io.papermc.paper.entity.TeleportFlag... flags) {
+        return teleport(location, cause);
+    }
     default java.util.concurrent.CompletableFuture<Boolean> teleportAsync(Location location) {
         return java.util.concurrent.CompletableFuture.completedFuture(teleport(location));
     }
@@ -102,11 +174,34 @@ public interface Entity extends CommandSender, org.bukkit.persistence.Persistent
 
     default void remove() { }
 
+    /** Spawns an entity that is not in a world yet -- one from
+     * {@code UnsafeValues.deserializeEntity} -- at {@code location}, firing the
+     * spawn event with {@code reason}. False if it was already spawned, the
+     * event was cancelled, or the chunk is not loaded. */
+    default boolean spawnAt(Location location, org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason reason) {
+        if (location == null || location.getWorld() == null) throw new IllegalArgumentException("location");
+        return foton.Native.spawnPendingEntity(getUniqueId().toString(), location.getWorld().getName(),
+            location.getX(), location.getY(), location.getZ(), location.getYaw(), location.getPitch(),
+            reason == null ? "DEFAULT" : reason.name());
+    }
+    default boolean spawnAt(Location location) {
+        return spawnAt(location, org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.DEFAULT);
+    }
+
     boolean isDead();
-    String getCustomName();
+    @Override String getCustomName();
     default void setCustomNameVisible(boolean visible) { foton.Native.setEntityCustomNameVisible(getUniqueId().toString(), visible); }
-    void setCustomName(String name);
+    @Override void setCustomName(String name);
 
     /** The scheduler for work that follows this entity. */
     io.papermc.paper.threadedregions.scheduler.EntityScheduler getScheduler();
+
+    /** Whether the entity is touching lava. */
+    default boolean isInLava() { return (foton.Native.entitySurroundings(getUniqueId().toString()) & 2) != 0; }
+    /** Whether the entity is touching water; a bubble column is water. */
+    default boolean isInWaterOrBubbleColumn() { return (foton.Native.entitySurroundings(getUniqueId().toString()) & 4) != 0; }
+    /** Whether rain is falling on the entity's position. */
+    default boolean isInRain() { return (foton.Native.entitySurroundings(getUniqueId().toString()) & 16) != 0; }
+    default boolean isInWaterOrRain() { return (foton.Native.entitySurroundings(getUniqueId().toString()) & (4 | 16)) != 0; }
+    default boolean isInWaterOrRainOrBubbleColumn() { return isInWaterOrRain(); }
 }

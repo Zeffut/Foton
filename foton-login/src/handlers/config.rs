@@ -141,6 +141,10 @@ impl JavaTcpClient {
             )
         });
 
+        if let Some(tap) = self.server.packet_taps.current() {
+            tap.playing(self.id, player.gameprofile.id, entity_id);
+        }
+
         let connection = Arc::clone(&player.connection);
         if self
             .connection_updates
@@ -160,7 +164,7 @@ impl JavaTcpClient {
         self.server.events().fire(&mut login);
         if let Some(message) = login.kick_message() {
             self.server.abort_player_login(&player);
-            self.kick(message.to_owned().into()).await;
+            self.kick(message.clone()).await;
             return ConnectionAction::none();
         }
         self.server.queue_player_join(player);

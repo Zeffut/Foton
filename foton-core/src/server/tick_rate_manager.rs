@@ -1,5 +1,7 @@
 use std::time::Instant;
 
+use super::tps_average::TpsAverages;
+
 /// Number of tick samples to keep for averaging (matches vanilla).
 const TICK_STATS_SPAN: usize = 100;
 
@@ -58,6 +60,8 @@ pub struct TickRateManager {
     aggregated_tick_times_nanos: u64,
     /// Exponentially smoothed tick time in milliseconds.
     smoothed_tick_time_ms: f32,
+    /// Wall-clock ticks per second over 1, 5 and 15 minutes.
+    tps_averages: TpsAverages,
 }
 
 impl TickRateManager {
@@ -79,6 +83,7 @@ impl TickRateManager {
             tick_times_nanos: [0; TICK_STATS_SPAN],
             aggregated_tick_times_nanos: 0,
             smoothed_tick_time_ms: 0.0,
+            tps_averages: TpsAverages::new(20.0),
         }
     }
 
@@ -148,6 +153,17 @@ impl TickRateManager {
     /// Increments the server tick count.
     pub const fn increment_tick_count(&mut self) {
         self.tick_count += 1;
+    }
+
+    /// Records when the tick about to run started, for [`Self::tps_averages`].
+    pub fn record_tick_start(&mut self, started: Instant) {
+        self.tps_averages.tick_started(self.tick_count, started);
+    }
+
+    /// Measured ticks per second over the last 1, 5 and 15 minutes.
+    #[must_use]
+    pub fn tps_averages(&self) -> [f64; 3] {
+        self.tps_averages.averages()
     }
 
     // Stepping logic (for /tick step)

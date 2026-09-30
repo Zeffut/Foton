@@ -2,6 +2,7 @@
 
 use super::Event;
 use foton_registry::item_stack::ItemStack;
+use foton_utils::Identifier;
 use foton_utils::downcast::{DowncastType, DowncastTypeKey};
 use uuid::Uuid;
 
@@ -69,7 +70,22 @@ pub struct InventoryClickEvent {
     cursor_item: Option<ItemStack>,
     click: String,
     slot: Option<usize>,
+    craft: Option<CraftingClick>,
     cancelled: bool,
+}
+
+/// What a click on a crafting result crafts: the recipe, and the grid it
+/// takes from, row by row.
+///
+/// Bukkit parity: such a click is a `CraftItemEvent`, whose inventory is the
+/// grid. The grid travels with the event because the menu holding it is
+/// busy with the click while listeners run.
+#[derive(Clone, Debug)]
+pub struct CraftingClick {
+    /// The recipe the grid makes.
+    pub recipe: Identifier,
+    /// The grid: four stacks for the inventory's 2x2, nine for a table.
+    pub matrix: Vec<ItemStack>,
 }
 
 // SAFETY: This Foton-owned key uniquely identifies the concrete Rust type.
@@ -97,8 +113,20 @@ impl InventoryClickEvent {
             cursor_item,
             click,
             slot,
+            craft: None,
             cancelled: false,
         }
+    }
+    /// Marks the click as one that crafts.
+    #[must_use]
+    pub fn with_craft(mut self, craft: Option<CraftingClick>) -> Self {
+        self.craft = craft;
+        self
+    }
+    /// What the click crafts, when it is on a crafting result.
+    #[must_use]
+    pub const fn craft(&self) -> Option<&CraftingClick> {
+        self.craft.as_ref()
     }
     /// Returns the clicking player's UUID.
     #[must_use]

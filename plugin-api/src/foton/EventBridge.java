@@ -242,6 +242,9 @@ public final class EventBridge {
                 // error message.
                 System.out.println("[events] " + handler.plugin.getName() + " threw in "
                     + handler.name() + ": " + rootOf(error));
+                // The stack, as Paper logs it: the message alone names nothing
+                // a plugin author could act on.
+                rootOf(error).printStackTrace(System.out);
                 reportException(handler.plugin, handler.name(), error);
             }
         }
@@ -263,11 +266,12 @@ public final class EventBridge {
 
     public static String fireJoin(String uuid, int attemptId, String message) {
         PlayerJoinEvent event = new PlayerJoinEvent(
-            FotonPlayer.commitLoginAttempt(uuid, attemptId), message);
+            FotonPlayer.commitLoginAttempt(uuid, attemptId), FotonText.component(message));
         dispatch(event);
-        return event.getJoinMessage();
+        return FotonText.json(event.joinMessage());
     }
 
+    /** Answers the kick message as JSON text, or an empty string to admit. */
     public static String fireLogin(String uuid) {
         return fireLogin(uuid, 0);
     }
@@ -278,7 +282,8 @@ public final class EventBridge {
         dispatch(event);
         if (event.isCancelled()) {
             FotonPlayer.abortLoginAttempt(uuid, attemptId);
-            return event.getKickMessage();
+            net.kyori.adventure.text.Component reason = event.kickMessage();
+            return FotonText.json(reason == null ? net.kyori.adventure.text.Component.empty() : reason);
         }
         return "";
     }
@@ -291,9 +296,14 @@ public final class EventBridge {
         try {
             org.bukkit.event.player.AsyncPlayerPreLoginEvent event = new org.bukkit.event.player.AsyncPlayerPreLoginEvent(
                 name, UUID.fromString(uuid), java.net.InetAddress.getByName(address));
-            if (FotonServer.isNameBanned(name) || FotonServer.isIpBanned(address)) {
+            org.bukkit.BanEntry<?> ban = FotonServer.profileBan(UUID.fromString(uuid), name);
+            org.bukkit.BanEntry<?> ipBan = ban == null ? FotonServer.ipBan(address) : null;
+            if (ban != null) {
                 event.disallow(org.bukkit.event.player.AsyncPlayerPreLoginEvent.Result.KICK_BANNED,
-                    "You are banned from this server.");
+                    FotonProfileBanList.kickMessage(ban, false));
+            } else if (ipBan != null) {
+                event.disallow(org.bukkit.event.player.AsyncPlayerPreLoginEvent.Result.KICK_BANNED,
+                    FotonProfileBanList.kickMessage(ipBan, true));
             } else {
                 dispatch(event);
             }
@@ -320,13 +330,28 @@ public final class EventBridge {
         return !event.isCancelled();
     }
 
-    /** Gives plugins a snapshot-backed crafting preview and returns their changes. */
+    /** Gives plugins a crafting preview and returns what they left in it:
+     * the grid, a unit separator, then the result.
+     *
+     * The menu is mid-click while this runs, so a listener works on a copy --
+     * slot 0 the result, then the grid -- and the copy is what comes back.
+     * Reading the live menu here would read it as it was before the click. */
     public static String firePrepareCraft(String uuid, String matrix, String result, boolean repair) {
-        FotonPlayer player=(FotonPlayer) player(uuid); String[] encoded=matrix == null ? new String[0] : matrix.split("\\u001e", -1);
-        ItemStack[] slots=new ItemStack[encoded.length]; for(int i=0;i<encoded.length;i++) slots[i]=FotonInventory.decode(encoded[i]);
-        FotonCraftingInventory inventory=new FotonCraftingInventory(uuid); inventory.setMatrix(slots);
-        PrepareItemCraftEvent event=new PrepareItemCraftEvent(new FotonInventoryView(player, inventory), inventory, FotonInventory.decode(result), repair); dispatch(event);
-        StringBuilder out=new StringBuilder(); for(int i=0;i<slots.length;i++){if(i>0)out.append("\\u001e"); out.append(FotonInventory.encode(inventory.getItem(i)));} out.append("\\u001f").append(FotonInventory.encode(inventory.getResult())); return out.toString();
+        FotonPlayer player = (FotonPlayer) player(uuid);
+        String[] encoded = matrix == null || matrix.isEmpty() ? new String[0] : matrix.split(EventRelay.ITEM, -1);
+        ItemStack[] slots = new ItemStack[encoded.length + 1];
+        slots[0] = FotonInventory.decode(result);
+        for (int i = 0; i < encoded.length; i++) slots[i + 1] = FotonInventory.decode(encoded[i]);
+        FotonCraftingInventory inventory = new FotonCraftingInventory(uuid, slots);
+        PrepareItemCraftEvent event = new PrepareItemCraftEvent(
+            new FotonInventoryView(player, inventory), inventory, null, repair);
+        dispatch(event);
+        StringBuilder out = new StringBuilder();
+        for (int i = 1; i < slots.length; i++) {
+            if (i > 1) out.append(EventRelay.ITEM);
+            out.append(FotonInventory.encode(inventory.getItem(i)));
+        }
+        return out.append(EventRelay.FIELD).append(FotonInventory.encode(inventory.getResult())).toString();
     }
 
     /** Gives plugins a snapshot-backed grindstone preview and returns their changes. */
@@ -367,7 +392,7 @@ public final class EventBridge {
     }
 
     public static boolean fireInventoryClick(String uuid, String item, String click) {
-        return fireInventoryClick(uuid, item, "", click, -1);
+        return fireInventoryClick(uuid, item, "", click, -1, "", "");
     }
 
     public static boolean fireInventoryOpen(String uuid) {
@@ -414,9 +439,11 @@ public final class EventBridge {
         return !event.isCancelled();
     }
 
-    public static boolean fireInventoryClick(String uuid, String item, String cursor, String click, int rawSlot) {
-        org.bukkit.event.inventory.InventoryClickEvent event =
-            new org.bukkit.event.inventory.InventoryClickEvent(player(uuid), FotonInventory.decode(item), FotonInventory.decode(cursor), clickType(click), rawSlot);
+    /** `recipe` and `matrix` are empty unless the click takes a crafting result. */
+    public static boolean fireInventoryClick(String uuid, String item, String cursor, String click, int rawSlot,
+            String recipe, String matrix) {
+        org.bukkit.event.inventory.InventoryClickEvent event = EventRelay.clickEvent(player(uuid),
+            FotonInventory.decode(item), FotonInventory.decode(cursor), clickType(click), rawSlot, recipe, matrix);
         dispatch(event);
         return !event.isCancelled();
     }
@@ -538,12 +565,12 @@ public final class EventBridge {
         return record.event();
     }
 
-    public static boolean fireEntityDamage(String damager, String entity, String cause) {
+    public static boolean fireEntityDamage(String damager, String entity, String cause, boolean critical) {
         org.bukkit.entity.Entity target = FotonEntity.handle(Native.parse(entity));
         org.bukkit.event.entity.EntityDamageByEntityEvent event =
             new org.bukkit.event.entity.EntityDamageByEntityEvent(
                 FotonEntity.handle(Native.parse(damager)), target,
-                damageCause(cause));
+                damageCause(cause), critical);
         dispatch(event);
         if (target instanceof org.bukkit.entity.LivingEntity) {
             LAST_DAMAGE.put(target.getUniqueId(), new DamageRecord(event, Bukkit.getCurrentTick()));
@@ -597,11 +624,11 @@ public final class EventBridge {
     /** A player left. Returns what to announce, or null to announce nothing. */
     public static String fireQuit(String uuid, String message) {
         Player quittingPlayer = player(uuid);
-        PlayerQuitEvent event = new PlayerQuitEvent(quittingPlayer, message);
+        PlayerQuitEvent event = new PlayerQuitEvent(quittingPlayer, FotonText.component(message));
         dispatch(event);
         if (quittingPlayer instanceof FotonPlayer fotonPlayer) fotonPlayer.closeSession();
         FotonMessenger.forgetPlayer(uuid);
-        return event.getQuitMessage();
+        return FotonText.json(event.quitMessage());
     }
 
     /** Somebody asked for completions. Returns the list a listener claimed,
@@ -703,10 +730,7 @@ public final class EventBridge {
 
     /** A player is breaking a block. Returns false when a plugin stopped it. */
     public static boolean fireBlockBreak(String uuid, int x, int y, int z, String world) {
-        BlockBreakEvent event =
-            new BlockBreakEvent(new FotonBlock(new FotonWorld(world), x, y, z), player(uuid));
-        dispatch(event);
-        return !event.isCancelled();
+        return EventRelay.fireBlockBreak(uuid, world, x + " " + y + " " + z, "0").startsWith("0");
     }
 
     /** A player is placing a block. Returns false when a plugin stopped it. */
@@ -798,9 +822,15 @@ public final class EventBridge {
         dispatch(event);
         return !event.isCancelled();
     }
-    public static boolean fireEntityResurrect(String uuid) {
+    /** Returns whether the entity is saved. Without a totem the event starts
+     * cancelled, and a plugin that un-cancels it grants the life anyway. */
+    public static boolean fireEntityResurrect(String uuid, String hand, boolean cancelled) {
+        org.bukkit.entity.Entity entity = FotonEntity.handle(Native.parse(uuid));
+        org.bukkit.entity.LivingEntity living = entity instanceof org.bukkit.entity.LivingEntity alive
+            ? alive : new FotonLivingEntity(java.util.UUID.fromString(uuid));
         org.bukkit.event.entity.EntityResurrectEvent event = new org.bukkit.event.entity.EntityResurrectEvent(
-            new FotonLivingEntity(java.util.UUID.fromString(uuid)));
+            living, hand.isEmpty() ? null : org.bukkit.inventory.EquipmentSlot.valueOf(hand));
+        event.setCancelled(cancelled);
         dispatch(event);
         return !event.isCancelled();
     }
@@ -998,9 +1028,13 @@ public final class EventBridge {
             + "\u001f" + drops;
     }
 
+    /** The view is taken before the plugin inventory lets go of its viewer,
+     * so a close handler still finds its own holder and what the player left
+     * inside; one that opens another menu keeps it. */
     public static void fireInventoryClose(String uuid) {
-        FotonCustomInventory.detachViewer(uuid);
+        FotonCustomInventory closing = FotonCustomInventory.viewedBy(uuid);
         dispatch(new org.bukkit.event.inventory.InventoryCloseEvent(player(uuid)));
+        if (closing != null) closing.detachViewer(uuid);
     }
 
     public static boolean firePlayerOpenSign(String uuid, String world, int x, int y, int z, boolean front, String cause) {

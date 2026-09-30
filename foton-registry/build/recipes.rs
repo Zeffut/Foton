@@ -55,6 +55,9 @@ struct RecipeJson {
     result: Option<RecipeResult>,
     #[serde(default)]
     show_notification: Option<bool>,
+    /// The recipe book groups recipes sharing this string under one button.
+    #[serde(default)]
+    group: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -125,6 +128,7 @@ struct ShapedRecipeData {
     result_item_ident: Ident,
     result_count: i32,
     show_notification: bool,
+    group: String,
     symmetrical: bool,
 }
 
@@ -135,6 +139,8 @@ struct ShapelessRecipeData {
     ingredient_data: Vec<ParsedIngredient>,
     result_item_ident: Ident,
     result_count: i32,
+    show_notification: bool,
+    group: String,
 }
 
 struct SmithingRecipeData {
@@ -145,6 +151,7 @@ struct SmithingRecipeData {
     addition: ParsedIngredient,
     result_item_ident: Ident,
     result_count: i32,
+    show_notification: bool,
 }
 
 struct StonecuttingRecipeData {
@@ -153,6 +160,7 @@ struct StonecuttingRecipeData {
     ingredient: ParsedIngredient,
     result_item_ident: Ident,
     result_count: i32,
+    show_notification: bool,
 }
 
 struct SmeltingRecipeData {
@@ -163,6 +171,9 @@ struct SmeltingRecipeData {
     result_count: i32,
     experience: f32,
     cooking_time: i32,
+    category: TokenStream,
+    show_notification: bool,
+    group: String,
 }
 
 /// Parses a shaped recipe from JSON.
@@ -233,6 +244,7 @@ fn parse_shaped_recipe(recipe_name: &str, recipe: &RecipeJson) -> Option<ShapedR
         result_item_ident,
         result_count: result.count,
         show_notification: recipe.show_notification.unwrap_or(true),
+        group: recipe.group.clone().unwrap_or_default(),
         symmetrical,
     })
 }
@@ -284,6 +296,8 @@ fn parse_shapeless_recipe(recipe_name: &str, recipe: &RecipeJson) -> Option<Shap
         ingredient_data,
         result_item_ident,
         result_count: result.count,
+        show_notification: recipe.show_notification.unwrap_or(true),
+        group: recipe.group.clone().unwrap_or_default(),
     })
 }
 
@@ -312,6 +326,7 @@ fn parse_smithing_recipe(recipe_name: &str, recipe: &RecipeJson) -> Option<Smith
             .map_or(ParsedIngredient::Empty, parse_ingredient),
         result_item_ident: Ident::new(&result_item_id.to_shouty_snake_case(), Span::call_site()),
         result_count: result.count,
+        show_notification: recipe.show_notification.unwrap_or(true),
     })
 }
 
@@ -335,6 +350,7 @@ fn smithing_tokens(
             let addition = generate_ingredient_tokens(&r.addition);
             let result_item_ident = &r.result_item_ident;
             let result_count = r.result_count;
+            let show_notification = r.show_notification;
 
             quote! {
                 #[inline(never)]
@@ -348,6 +364,7 @@ fn smithing_tokens(
                             item: &*vanilla_items::#result_item_ident,
                             count: #result_count,
                         },
+                        show_notification: #show_notification,
                     }
                 }
             }
@@ -401,6 +418,7 @@ fn parse_stonecutting_recipe(
         ingredient: parse_ingredient(ingredient),
         result_item_ident: Ident::new(&result_item_id.to_shouty_snake_case(), Span::call_site()),
         result_count: result.count,
+        show_notification: recipe.show_notification.unwrap_or(true),
     })
 }
 
@@ -425,6 +443,7 @@ fn stonecutting_tokens(
             let ingredient = generate_ingredient_tokens(&r.ingredient);
             let result_item_ident = &r.result_item_ident;
             let result_count = r.result_count;
+            let show_notification = r.show_notification;
 
             quote! {
                 #[inline(never)]
@@ -436,6 +455,7 @@ fn stonecutting_tokens(
                             item: &*vanilla_items::#result_item_ident,
                             count: #result_count,
                         },
+                        show_notification: #show_notification,
                     }
                 }
             }
@@ -497,6 +517,15 @@ fn parse_smelting_recipe(
         result_count: result.count,
         experience: recipe.experience.unwrap_or(0.0),
         cooking_time: recipe.cookingtime.unwrap_or(default_cooking_time),
+        // Vanilla parity: `CookingBookInfo.MAP_CODEC`, whose default is `MISC`.
+        category: match recipe.category.as_deref() {
+            Some("food") => quote! { CookingCategory::Food },
+            Some("blocks") => quote! { CookingCategory::Blocks },
+            None | Some("misc") => quote! { CookingCategory::Misc },
+            Some(other) => panic!("{recipe_name}: unknown cooking category {other}"),
+        },
+        show_notification: recipe.show_notification.unwrap_or(true),
+        group: recipe.group.clone().unwrap_or_default(),
     })
 }
 
@@ -527,6 +556,9 @@ fn cooking_family_tokens(
             let result_count = r.result_count;
             let experience = r.experience;
             let cooking_time = r.cooking_time;
+            let category = &r.category;
+            let show_notification = r.show_notification;
+            let group = &r.group;
 
             quote! {
                 #[inline(never)]
@@ -540,6 +572,9 @@ fn cooking_family_tokens(
                         },
                         experience: #experience,
                         cooking_time: #cooking_time,
+                        category: #category,
+                        show_notification: #show_notification,
+                        group: Cow::Borrowed(#group),
                     }
                 }
             }
@@ -723,6 +758,7 @@ pub(crate) fn build() -> TokenStream {
             let result_item_ident = &r.result_item_ident;
             let result_count = r.result_count;
             let show_notification = r.show_notification;
+            let group = &r.group;
             let symmetrical = r.symmetrical;
 
             let pattern_tokens: Vec<TokenStream> = r
@@ -750,6 +786,7 @@ pub(crate) fn build() -> TokenStream {
                             count: #result_count,
                         },
                         show_notification: #show_notification,
+                        group: Cow::Borrowed(#group),
                         symmetrical: #symmetrical,
                     }
                 }
@@ -766,6 +803,8 @@ pub(crate) fn build() -> TokenStream {
             let category = &r.category;
             let result_item_ident = &r.result_item_ident;
             let result_count = r.result_count;
+            let show_notification = r.show_notification;
+            let group = &r.group;
 
             let ingredient_tokens: Vec<TokenStream> = r
                 .ingredient_data
@@ -789,6 +828,8 @@ pub(crate) fn build() -> TokenStream {
                             item: &*vanilla_items::#result_item_ident,
                             count: #result_count,
                         },
+                        show_notification: #show_notification,
+                        group: Cow::Borrowed(#group),
                     }
                 }
             }
@@ -868,13 +909,14 @@ pub(crate) fn build() -> TokenStream {
     quote! {
         use crate::{
             recipe::{
-                CraftingCategory, Ingredient, RecipeRegistry, RecipeResult,
+                CookingCategory, CraftingCategory, Ingredient, RecipeRegistry, RecipeResult,
                 ShapedRecipe, ShapelessRecipe, SmeltingRecipe, SmithingTransformRecipe,
                 StonecuttingRecipe,
             },
             vanilla_items,
         };
         use foton_utils::Identifier;
+        use std::borrow::Cow;
         use std::sync::LazyLock;
 
         /// Global vanilla recipes instance.

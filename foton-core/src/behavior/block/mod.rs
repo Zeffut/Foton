@@ -40,7 +40,7 @@ use crate::entity::projectile::Projectile;
 use crate::entity::{
     Entity, InsideBlockEffectCollector, MobEffectInstance, damage::DamageSource, entity_loot_ref,
 };
-use crate::event::{BlockExpEvent, Event};
+use crate::event::{BlockExpEvent, Event, PlayerHarvestBlockEvent};
 use crate::fluid::is_water_fluid;
 use crate::inventory::lock::{AttachedContainers, ContainerRef};
 use crate::physics::collide;
@@ -111,22 +111,51 @@ pub(crate) fn drop_from_block_interact_loot_table(
     key.get_random_items(&mut ctx)
 }
 
-/// Samples and applies enchantment effects to a block experience drop.
+/// Lets plugins change or refuse what a player picks from a block.
 ///
-/// Mirrors vanilla `Block.tryDropExperience`. Mining experience is incidental
-/// live-gameplay randomness, so Foton samples it from an unseeded runtime source.
-pub(crate) fn try_drop_experience(
+/// Paper parity: `CraftEventFactory.callPlayerHarvestBlockEvent`, which
+/// sweet berry bushes and cave vines go through with the main hand. Returns
+/// the stacks to drop, or `None` when a plugin refused -- the caller then
+/// leaves the block as it was.
+pub(crate) fn offer_harvest(
+    player: &Player,
     world: &Arc<World>,
     pos: BlockPos,
-    tool: &ItemStack,
-    experience: &IntProvider,
-) {
+    items: Vec<ItemStack>,
+) -> Option<Vec<ItemStack>> {
+    let mut event = PlayerHarvestBlockEvent::new(
+        player.gameprofile.id,
+        world.key.to_string(),
+        pos,
+        InteractionHand::MainHand,
+        items,
+    );
+    player.fire_event(&mut event);
+    if event.is_cancelled() {
+        return None;
+    }
+    Some(event.items().to_vec())
+}
+
+/// Samples a block's experience drop and applies the tool's enchantments to it.
+///
+/// Mirrors the sampling half of vanilla `Block.tryDropExperience`. Mining
+/// experience is incidental live-gameplay randomness, so Foton samples it from
+/// an unseeded runtime source.
+pub(crate) fn sample_block_experience(tool: &ItemStack, experience: &IntProvider) -> i32 {
     let mut random = LegacyRandom::from_seed(rand::random());
     let base_experience = experience.sample(&mut random);
-    let experience = tool.apply_unconditional_enchantment_value_effects(
+    tool.apply_unconditional_enchantment_value_effects(
         EnchantmentEffectComponent::BlockExperience,
         base_experience as f32,
-    ) as i32;
+    ) as i32
+}
+
+/// Drops sampled block experience, after plugins had their say.
+///
+/// Mirrors the dropping half of vanilla `Block.tryDropExperience`, with
+/// Bukkit's `BlockExpEvent` in between.
+fn pop_block_experience(world: &Arc<World>, pos: BlockPos, experience: i32) {
     if experience > 0 {
         let mut event = BlockExpEvent::new(world.key.to_string(), pos, experience);
         world.fire_event(&mut event);
@@ -396,10 +425,6 @@ pub trait BlockBehavior: Send + Sync {
     /// other destruction paths retain their Vanilla-specific ordering. Ore
     /// experience and similar non-item drops belong here rather than in the
     /// loot-table override.
-    #[expect(
-        unused_variables,
-        reason = "default trait implementation ignores all params"
-    )]
     fn spawn_after_break(
         &self,
         state: BlockStateId,
@@ -408,6 +433,29 @@ pub trait BlockBehavior: Send + Sync {
         tool: &ItemStack,
         drop_experience: bool,
     ) {
+        if drop_experience {
+            pop_block_experience(world, pos, self.experience_drop(state, world, pos, tool));
+        }
+    }
+
+    /// The experience breaking this block with `tool` releases, sampled now.
+    ///
+    /// Paper parity: `Block.getExpDrop`. Vanilla samples it inside
+    /// `spawnAfterBreak`; Foton samples it here so a player's break can offer
+    /// the amount to plugins through `BlockBreakEvent` before anything drops,
+    /// and the default [`Self::spawn_after_break`] drops what this answers.
+    #[expect(
+        unused_variables,
+        reason = "default trait implementation ignores all params"
+    )]
+    fn experience_drop(
+        &self,
+        state: BlockStateId,
+        world: &Arc<World>,
+        pos: BlockPos,
+        tool: &ItemStack,
+    ) -> i32 {
+        0
     }
 
     /// Called after this block is removed from the world, to affect neighbors.

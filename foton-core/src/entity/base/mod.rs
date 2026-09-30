@@ -38,6 +38,7 @@ use crate::entity::{
     EntityLevelCallback, EntityMoveError, EntitySpawnReason, InsideBlockEffectType,
     NullEntityCallback, RemovalReason, SharedEntity,
 };
+use crate::event::{EntityDismountEvent, Event as _};
 use crate::physics::EntityPhysicsState;
 use crate::portal::{PortalKind, PortalProcessResult, PortalProcessor};
 use crate::world::World;
@@ -878,9 +879,32 @@ impl EntityBase {
         self.relationships.lock().remove_passenger_id(passenger_id)
     }
 
-    /// Stops riding the current vehicle, if any.
+    /// Stops riding the current vehicle, if any, unless a plugin keeps the
+    /// rider on.
     pub fn stop_riding(&self) {
+        if !self.dismount_allowed() {
+            return;
+        }
         self.stop_riding_relationship();
+    }
+
+    /// Asks plugins whether this entity may leave its vehicle.
+    ///
+    /// Paper parity: the `EntityDismountEvent` of `Entity.removePassenger`.
+    /// When either side is being removed the dismount is reported but cannot
+    /// be refused -- a rider kept on a vehicle that no longer exists would be
+    /// riding nothing.
+    fn dismount_allowed(&self) -> bool {
+        let Some(vehicle) = self.vehicle() else {
+            return true;
+        };
+        let Some(world) = vehicle.level() else {
+            return true;
+        };
+        let cancellable = !self.is_removed() && !vehicle.is_removed();
+        let mut event = EntityDismountEvent::new(self.uuid, vehicle.uuid(), cancellable);
+        world.fire_event(&mut event);
+        !event.is_cancelled()
     }
 
     /// Restores a persisted passenger relationship without applying gameplay boarding rules.
@@ -1104,6 +1128,8 @@ impl EntityBase {
 
     fn detach_from_relationships(&self, reason: RemovalReason) {
         if reason.should_destroy() {
+            // Being removed, so the answer cannot be no; plugins still hear it.
+            let _ = self.dismount_allowed();
             self.stop_riding_relationship();
         }
         self.eject_passenger_relationships();

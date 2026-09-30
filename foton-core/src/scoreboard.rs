@@ -2,19 +2,25 @@
 //!
 //! This module owns the scoreboard data needed by selectors and command
 //! execution: objective identity and mutability, score values and locks, and
-//! team membership. Display slots and client presentation are outside this
-//! command-system scope.
+//! team membership, plus what a team shows the client -- its prefix, suffix,
+//! colour and name-tag rules, which every change queues as a team packet for
+//! the server to send (see [`Scoreboard::take_team_updates`]). Display slots
+//! are outside this scope.
 
 use std::{
     collections::{BTreeMap, BTreeSet, btree_map::Entry},
-    io,
+    io, mem,
     sync::atomic::{AtomicU64, Ordering},
 };
 
 use std::sync::Arc;
 
-use foton_utils::locks::{AsyncMutex, SyncRwLock};
+use foton_protocol::packets::game::{
+    CSetPlayerTeam, TeamCollisionRule, TeamColor, TeamMethod, TeamParameters, TeamVisibility,
+};
+use foton_utils::locks::{AsyncMutex, SyncMutex, SyncRwLock};
 use serde::{Deserialize, Serialize};
+use text_components::TextComponent;
 use thiserror::Error;
 
 use crate::{server::worlds::WorldMap, world::World};
@@ -145,6 +151,28 @@ impl Default for TeamOptions {
     }
 }
 
+/// What a team shows the client around its members' names.
+///
+/// Vanilla parity: the presentation fields of `PlayerTeam`. Every default is
+/// what vanilla's constructor sets: no prefix or suffix, `RESET` colour, name
+/// tags always shown, pushing everyone, and the team's own name displayed.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TeamDisplay {
+    /// `PlayerTeam.displayName`; `None` is the team's name as literal text.
+    pub display_name: Option<TextComponent>,
+    /// `PlayerTeam.playerPrefix`, drawn before each member's name.
+    pub prefix: Option<TextComponent>,
+    /// `PlayerTeam.playerSuffix`, drawn after it.
+    pub suffix: Option<TextComponent>,
+    /// `PlayerTeam.color`, the colour of members' names.
+    pub color: TeamColor,
+    /// `PlayerTeam.nameTagVisibility`.
+    pub name_tag_visibility: TeamVisibility,
+    /// `PlayerTeam.collisionRule`.
+    pub collision_rule: TeamCollisionRule,
+}
+
 /// Reads `teams` whether it was written as a set of names or a map of options.
 ///
 /// Every scoreboard saved before team options existed holds a JSON array, and
@@ -179,6 +207,28 @@ struct PersistentScoreboard {
     #[serde(deserialize_with = "deserialize_teams")]
     teams: BTreeMap<String, TeamOptions>,
     holder_teams: BTreeMap<String, String>,
+    /// Presentation, for teams whose look was ever changed from the default.
+    team_display: BTreeMap<String, TeamDisplay>,
+}
+
+impl PersistentScoreboard {
+    /// The packet parameters of a team as it now stands.
+    fn team_parameters(&self, name: &str) -> TeamParameters {
+        let options = self.teams.get(name).copied().unwrap_or_default();
+        let display = self.team_display.get(name).cloned().unwrap_or_default();
+        TeamParameters {
+            display_name: display
+                .display_name
+                .unwrap_or_else(|| TextComponent::plain(name.to_owned())),
+            allow_friendly_fire: options.allow_friendly_fire,
+            see_friendly_invisibles: options.see_friendly_invisibles,
+            name_tag_visibility: display.name_tag_visibility,
+            collision_rule: display.collision_rule,
+            color: display.color,
+            prefix: display.prefix.unwrap_or_default(),
+            suffix: display.suffix.unwrap_or_default(),
+        }
+    }
 }
 
 /// Invalid scoreboard operation or persisted state.
@@ -220,6 +270,13 @@ pub struct Scoreboard {
     state: SyncRwLock<PersistentScoreboard>,
     revision: AtomicU64,
     saved_revision: AtomicU64,
+    /// Team packets for every change since the server last sent them.
+    ///
+    /// Vanilla parity: `ServerScoreboard`'s `onTeamAdded`, `onTeamChanged`,
+    /// `onTeamRemoved`, `addPlayerToTeam` and `removePlayerFromTeam`, which
+    /// broadcast as they happen. Queued here because this scoreboard does not
+    /// know who is online; the server drains it every tick.
+    team_updates: SyncMutex<Vec<CSetPlayerTeam>>,
 }
 
 impl Scoreboard {
@@ -230,6 +287,7 @@ impl Scoreboard {
             state: SyncRwLock::new(PersistentScoreboard::default()),
             revision: AtomicU64::new(0),
             saved_revision: AtomicU64::new(0),
+            team_updates: SyncMutex::new(Vec::new()),
         }
     }
 
@@ -239,6 +297,7 @@ impl Scoreboard {
             state: SyncRwLock::new(state),
             revision: AtomicU64::new(0),
             saved_revision: AtomicU64::new(0),
+            team_updates: SyncMutex::new(Vec::new()),
         })
     }
 
@@ -312,7 +371,10 @@ impl Scoreboard {
         {
             return Err(ScoreboardError::DuplicateTeam(name));
         }
+        let parameters = state.team_parameters(&name);
+        drop(state);
         self.mark_dirty();
+        self.queue_team_update(&name, TeamMethod::Add(parameters, Vec::new()));
         Ok(ScoreboardTeam { name })
     }
 
@@ -348,8 +410,10 @@ impl Scoreboard {
         state
             .holder_teams
             .retain(|_, assigned| assigned != team.name());
+        state.team_display.remove(team.name());
         drop(state);
         self.mark_dirty();
+        self.queue_team_update(team.name(), TeamMethod::Remove);
         true
     }
 
@@ -359,11 +423,12 @@ impl Scoreboard {
     /// holder was on one.
     pub fn remove_holder_from_team(&self, holder: &ScoreHolder) -> bool {
         let mut state = self.state.write();
-        if state.holder_teams.remove(holder.name()).is_none() {
+        let Some(team) = state.holder_teams.remove(holder.name()) else {
             return false;
-        }
+        };
         drop(state);
         self.mark_dirty();
+        self.queue_team_update(&team, TeamMethod::Leave(vec![holder.name().to_owned()]));
         true
     }
 
@@ -393,9 +458,97 @@ impl Scoreboard {
             return true;
         }
         *stored = options;
+        let parameters = state.team_parameters(team.name());
         drop(state);
         self.mark_dirty();
+        self.queue_team_update(team.name(), TeamMethod::Change(parameters));
         true
+    }
+
+    /// Returns a team's presentation, or vanilla's defaults if it does not exist.
+    #[must_use]
+    pub fn team_display(&self, team: &ScoreboardTeam) -> TeamDisplay {
+        self.state
+            .read()
+            .team_display
+            .get(team.name())
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Replaces a team's presentation; returns whether the team existed.
+    ///
+    /// Vanilla parity: the `setDisplayName`, `setPlayerPrefix`,
+    /// `setPlayerSuffix`, `setColor`, `setNameTagVisibility` and
+    /// `setCollisionRule` of `PlayerTeam`, each of which reports the team as
+    /// changed to every client.
+    pub fn set_team_display(&self, team: &ScoreboardTeam, display: TeamDisplay) -> bool {
+        let mut state = self.state.write();
+        if !state.teams.contains_key(team.name()) {
+            return false;
+        }
+        if state.team_display.get(team.name()) == Some(&display) {
+            return true;
+        }
+        state.team_display.insert(team.name().to_owned(), display);
+        let parameters = state.team_parameters(team.name());
+        drop(state);
+        self.mark_dirty();
+        self.queue_team_update(team.name(), TeamMethod::Change(parameters));
+        true
+    }
+
+    /// One `Add` packet per team, with its members: what a client joining
+    /// this scoreboard's domain is sent.
+    ///
+    /// Vanilla parity: the team half of `PlayerList.updateEntireScoreboard`.
+    #[must_use]
+    pub fn team_snapshot(&self) -> Vec<CSetPlayerTeam> {
+        let state = self.state.read();
+        state
+            .teams
+            .keys()
+            .map(|name| {
+                let entries = state
+                    .holder_teams
+                    .iter()
+                    .filter(|(_, assigned)| *assigned == name)
+                    .map(|(holder, _)| holder.clone())
+                    .collect();
+                CSetPlayerTeam {
+                    name: name.clone(),
+                    method: TeamMethod::Add(state.team_parameters(name), entries),
+                }
+            })
+            .collect()
+    }
+
+    /// One `Remove` packet per team: what takes this scoreboard's teams off a
+    /// client leaving the domain.
+    #[must_use]
+    pub fn team_removals(&self) -> Vec<CSetPlayerTeam> {
+        self.state
+            .read()
+            .teams
+            .keys()
+            .map(|name| CSetPlayerTeam {
+                name: name.clone(),
+                method: TeamMethod::Remove,
+            })
+            .collect()
+    }
+
+    /// Takes the team packets queued since the last call, oldest first.
+    #[must_use]
+    pub fn take_team_updates(&self) -> Vec<CSetPlayerTeam> {
+        mem::take(&mut *self.team_updates.lock())
+    }
+
+    fn queue_team_update(&self, name: &str, method: TeamMethod) {
+        self.team_updates.lock().push(CSetPlayerTeam {
+            name: name.to_owned(),
+            method,
+        });
     }
 
     /// Returns whether two holders are on one team, and whether it lets them
@@ -464,7 +617,14 @@ impl Scoreboard {
         {
             return Ok(());
         }
+        drop(state);
         self.mark_dirty();
+        // The client takes the holder off any previous team itself, as the
+        // server's own `addPlayerToTeam` does.
+        self.queue_team_update(
+            team.name(),
+            TeamMethod::Join(vec![holder.name().to_owned()]),
+        );
         Ok(())
     }
 
@@ -618,6 +778,11 @@ fn validate_persistent_scoreboard(state: &PersistentScoreboard) -> Result<(), Sc
             return Err(ScoreboardError::MissingTeam(team.clone()));
         }
     }
+    for team in state.team_display.keys() {
+        if !state.teams.contains_key(team) {
+            return Err(ScoreboardError::MissingTeam(team.clone()));
+        }
+    }
     Ok(())
 }
 
@@ -708,6 +873,13 @@ impl DomainScoreboards {
         self.scoreboards.get(domain)
     }
 
+    /// Every domain and its scoreboard, in domain order.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &Scoreboard)> {
+        self.scoreboards
+            .iter()
+            .map(|(domain, scoreboard)| (domain.as_str(), scoreboard))
+    }
+
     /// Saves every dirty domain scoreboard and returns the number written.
     pub async fn save(&self, worlds: &WorldMap) -> io::Result<usize> {
         let _save_guard = self.save_lock.lock().await;
@@ -755,9 +927,12 @@ mod tests {
 
     use foton_utils::saved_data::{SavedDataManager, names as saved_data_names};
 
+    use foton_protocol::packets::game::{TeamColor, TeamMethod, TeamVisibility};
+    use text_components::TextComponent;
+
     use super::{
         AsyncMutex, DomainScoreboards, PersistentScoreboard, ScoreHolder, Scoreboard,
-        ScoreboardError, TeamOptions,
+        ScoreboardError, TeamDisplay, TeamOptions,
     };
 
     #[test]
@@ -1034,5 +1209,113 @@ mod tests {
             !scoreboard.remove_team(&red_again),
             "removing it twice reports that the second call changed nothing"
         );
+    }
+
+    /// Each change queues the packet vanilla's `ServerScoreboard` would
+    /// broadcast, in order, and draining leaves nothing behind.
+    #[test]
+    fn team_changes_queue_the_packets_vanilla_sends() {
+        let scoreboard = Scoreboard::new();
+        let Ok(red) = scoreboard.add_team("red") else {
+            panic!("the red team should be created");
+        };
+        let alice = ScoreHolder::new("alice".to_owned());
+        scoreboard
+            .add_holder_to_team(&alice, &red)
+            .expect("alice should join red");
+        let display = TeamDisplay {
+            prefix: Some(TextComponent::plain("[R] ")),
+            color: TeamColor::Red,
+            ..TeamDisplay::default()
+        };
+        assert!(scoreboard.set_team_display(&red, display.clone()));
+        assert!(
+            scoreboard.set_team_display(&red, display),
+            "an unchanged display still answers that the team exists"
+        );
+        assert!(scoreboard.remove_holder_from_team(&alice));
+        assert!(scoreboard.remove_team(&red));
+
+        let methods: Vec<&str> = scoreboard
+            .take_team_updates()
+            .iter()
+            .map(|packet| match &packet.method {
+                TeamMethod::Add(..) => "add",
+                TeamMethod::Remove => "remove",
+                TeamMethod::Change(parameters) => {
+                    assert_eq!(parameters.prefix, TextComponent::plain("[R] "));
+                    "change"
+                }
+                TeamMethod::Join(entries) => {
+                    assert_eq!(entries, &["alice".to_owned()]);
+                    "join"
+                }
+                TeamMethod::Leave(_) => "leave",
+            })
+            .collect();
+        assert_eq!(methods, ["add", "join", "change", "leave", "remove"]);
+        assert!(scoreboard.take_team_updates().is_empty());
+    }
+
+    /// A joining client is sent every team with its members and its look.
+    #[test]
+    fn the_snapshot_carries_members_and_presentation() {
+        let scoreboard = Scoreboard::new();
+        let Ok(gerudo) = scoreboard.add_team("gerudo") else {
+            panic!("the team should be created");
+        };
+        scoreboard
+            .add_holder_to_team(&ScoreHolder::new("urbosa".to_owned()), &gerudo)
+            .expect("urbosa should join");
+        assert!(scoreboard.set_team_display(
+            &gerudo,
+            TeamDisplay {
+                suffix: Some(TextComponent::plain(" *")),
+                ..TeamDisplay::default()
+            }
+        ));
+
+        let snapshot = scoreboard.team_snapshot();
+        let [packet] = snapshot.as_slice() else {
+            panic!("one team, one packet: {snapshot:?}");
+        };
+        let TeamMethod::Add(parameters, entries) = &packet.method else {
+            panic!("a snapshot adds the team");
+        };
+        assert_eq!(entries, &["urbosa".to_owned()]);
+        assert_eq!(parameters.suffix, TextComponent::plain(" *"));
+        assert_eq!(
+            parameters.display_name,
+            TextComponent::plain("gerudo"),
+            "an unnamed team displays its own name, as vanilla's constructor sets"
+        );
+    }
+
+    /// A team's look is saved with the scoreboard and read back.
+    #[test]
+    fn team_presentation_survives_a_save() {
+        let scoreboard = Scoreboard::new();
+        let Ok(zora) = scoreboard.add_team("zora") else {
+            panic!("the team should be created");
+        };
+        let display = TeamDisplay {
+            prefix: Some(TextComponent::plain("~ ")),
+            name_tag_visibility: TeamVisibility::HideForOtherTeams,
+            ..TeamDisplay::default()
+        };
+        assert!(scoreboard.set_team_display(&zora, display.clone()));
+        let Some(snapshot) = scoreboard.pending_save() else {
+            panic!("the change must be pending a save");
+        };
+        let json = serde_json::to_string(&snapshot.state).expect("the scoreboard serializes");
+        let persistent: PersistentScoreboard =
+            serde_json::from_str(&json).expect("the saved scoreboard deserializes");
+        let Ok(loaded) = Scoreboard::from_persistent(persistent) else {
+            panic!("the saved scoreboard is valid");
+        };
+        let Some(zora) = loaded.team("zora") else {
+            panic!("the team survives");
+        };
+        assert_eq!(loaded.team_display(&zora), display);
     }
 }

@@ -14,6 +14,11 @@ import net.kyori.adventure.key.Keyed;
 public interface RegistryKey<T> extends Keyed {
     RegistryKey<org.bukkit.inventory.ItemType> ITEM = RegistryKeyImpl.create("item");
     RegistryKey<org.bukkit.enchantments.Enchantment> ENCHANTMENT = RegistryKeyImpl.create("enchantment");
+    RegistryKey<org.bukkit.block.Biome> BIOME = RegistryKeyImpl.create("worldgen/biome");
+    RegistryKey<org.bukkit.inventory.meta.trim.TrimMaterial> TRIM_MATERIAL = RegistryKeyImpl.create("trim_material");
+    RegistryKey<org.bukkit.inventory.meta.trim.TrimPattern> TRIM_PATTERN = RegistryKeyImpl.create("trim_pattern");
+    RegistryKey<org.bukkit.block.banner.PatternType> BANNER_PATTERN = RegistryKeyImpl.create("banner_pattern");
+    RegistryKey<org.bukkit.MusicInstrument> INSTRUMENT = RegistryKeyImpl.create("instrument");
 
     /** The Adventure key backing this registry key. */
     @Override

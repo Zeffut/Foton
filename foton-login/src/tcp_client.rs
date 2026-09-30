@@ -3,6 +3,7 @@
 //! Handles the connection lifecycle from handshake through login and configuration,
 //! until the connection is upgraded to play state.
 
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::{
     cmp::Ordering,
     fmt::{self, Debug, Formatter},
@@ -14,6 +15,7 @@ use std::{
 };
 
 use crossbeam::atomic::AtomicCell;
+use foton_core::packet_tap::{PacketTap, TapPhase, TapVerdict};
 use foton_core::player::{
     ClientInformation, PlayerConnection,
     connection::{
@@ -194,6 +196,23 @@ impl ConnectionAction {
     }
 }
 
+/// What the packet tap made of a configuration packet it did not cancel.
+struct OfferedPacket {
+    /// The packet to write instead, when the tap rewrote it.
+    rewritten: Option<EncodedPacket>,
+    /// The tap to tell once it is written, when it asked to be.
+    tap: Option<Arc<dyn PacketTap>>,
+}
+
+impl OfferedPacket {
+    const fn untouched() -> Self {
+        Self {
+            rewritten: None,
+            tap: None,
+        }
+    }
+}
+
 /// Connection for pre-play packets.
 ///
 /// Gets dropped by `incoming_packet_task` if closed or upgraded to play connection.
@@ -252,6 +271,11 @@ pub struct JavaTcpClient {
     /// the play handoff releases the source slot while the global lifetime
     /// permit continues with both network halves.
     _pre_play_source_permit: Box<dyn Send + Sync>,
+    /// Whether the packet tap was told this connection opened, and so must be
+    /// told it closed.
+    pub(crate) tap_opened: AtomicBool,
+    /// Signalled only after the writer finishes its final atomic envelope.
+    outgoing_finished: CancellationToken,
     task_tracker: TaskTracker,
 }
 
@@ -330,6 +354,8 @@ impl JavaTcpClient {
             bedrock,
             connection_lifetime: ConnectionLifetimePermit::new(connection_permit),
             _pre_play_source_permit: Box::new(pre_play_source_permit),
+            tap_opened: AtomicBool::new(false),
+            outgoing_finished: CancellationToken::new(),
             task_tracker,
         };
 
@@ -360,23 +386,7 @@ impl JavaTcpClient {
             );
             return;
         };
-
-        match Self::write_network_packet_until_cancelled(
-            &self.cancel_token,
-            &self.network_writer,
-            self.translation.as_ref(),
-            &self.translated_serverbound,
-            self.compression.load(),
-            &packet,
-        )
-        .await
-        {
-            Ok(_) => {}
-            Err(err) => {
-                log::warn!("Failed to send packet to client {}: {}", self.id, err);
-                self.close();
-            }
-        }
+        self.send_packet_now(&packet).await;
     }
 
     async fn send_final_bare_packet<P: ClientPacket>(&self, packet: P) {
@@ -402,6 +412,10 @@ impl JavaTcpClient {
 
     /// Sends an already encoded packet immediately, without queuing.
     pub async fn send_packet_now(&self, packet: &EncodedPacket) {
+        let Some(OfferedPacket { rewritten, tap }) = self.offer_configuration_packet(packet) else {
+            return;
+        };
+        let packet = rewritten.as_ref().unwrap_or(packet);
         match Self::write_network_packet_until_cancelled(
             &self.cancel_token,
             &self.network_writer,
@@ -412,7 +426,12 @@ impl JavaTcpClient {
         )
         .await
         {
-            Ok(_) => {}
+            Ok(true) => {
+                if let Some(tap) = tap {
+                    tap.sent(self.id);
+                }
+            }
+            Ok(false) => {}
             Err(err) => {
                 log::warn!("Failed to send packet to client {}: {}", self.id, err);
                 self.close();
@@ -494,6 +513,42 @@ impl JavaTcpClient {
             .await
     }
 
+    /// Shows a configuration packet to the packet tap before it is written.
+    ///
+    /// Only configuration: before it there is no profile to name the
+    /// connection by, and play packets go through the connection's own queue,
+    /// which offers them there. This is where a packet library learns the
+    /// registries the client is given, which it needs to read play packets.
+    ///
+    /// `None` means the tap cancelled the packet. Otherwise the replacement, if
+    /// the tap rewrote it, and the tap to tell once it is written, if it asked.
+    fn offer_configuration_packet(&self, packet: &EncodedPacket) -> Option<OfferedPacket> {
+        if self.protocol.load() != ConnectionProtocol::Config
+            || !self.tap_opened.load(AtomicOrdering::Acquire)
+        {
+            return Some(OfferedPacket::untouched());
+        }
+        let Some(tap) = self.server.packet_taps.current() else {
+            return Some(OfferedPacket::untouched());
+        };
+        let compression = self.compression.load();
+        let Ok(payload) = packet.payload(compression) else {
+            return Some(OfferedPacket::untouched());
+        };
+        let outcome = tap.outbound(self.id, TapPhase::Configuration, packet.id(), &payload);
+        let rewritten = match outcome.verdict {
+            TapVerdict::Pass => None,
+            TapVerdict::Cancel => return None,
+            TapVerdict::Rewrite(payload) => {
+                EncodedPacket::from_id_and_payload(packet.id(), &payload, compression).ok()
+            }
+        };
+        Some(OfferedPacket {
+            rewritten,
+            tap: outcome.after_send.then_some(tap),
+        })
+    }
+
     async fn write_network_packet(
         network_writer: &JavaNetworkWriter,
         packet: &EncodedPacket,
@@ -545,8 +600,10 @@ impl JavaTcpClient {
         let translation = self.translation.clone();
         let translated_serverbound = self.translated_serverbound.clone();
         let compression = self.compression.clone();
+        let outgoing_finished = self.outgoing_finished.clone().drop_guard();
 
         self.task_tracker.spawn(async move {
+            let _outgoing_finished = outgoing_finished;
             let mut connection = None;
             loop {
                 select! {
@@ -699,6 +756,7 @@ impl JavaTcpClient {
         let connection_lifetime = self.connection_lifetime.clone();
 
         let self_clone = self.clone();
+        let outgoing_finished = self.outgoing_finished.clone();
 
         self.task_tracker.spawn(async move {
             let pre_play_deadline = Instant::now() + PRE_PLAY_LIFETIME_TIMEOUT;
@@ -813,22 +871,32 @@ impl JavaTcpClient {
             drop(cancel_token);
             drop(connection_updates_recv);
 
+            let server = Arc::clone(&self_clone.server);
+            let tap_opened = self_clone.tap_opened.load(AtomicOrdering::Acquire);
+            drop(self_clone);
             if let Some((connection, pending_serverbound)) = connection {
-                let server = self_clone.server.clone();
-                drop(self_clone);
-
                 match &*connection {
                     PlayerConnection::Java(java) => java.listener(
                         reader,
-                        server,
+                        Arc::clone(&server),
                         pending_serverbound,
                         translated_serverbound_recv,
                     ).await,
                     PlayerConnection::Other(_) => unreachable!("Expected Java connection"),
                 }
             }
+            // The reader owns the one close notification, but an atomic play
+            // envelope may still be writing after socket reads have stopped.
+            if tap_opened && let Some(tap) = server.packet_taps.current() {
+                Self::close_packet_tap(&outgoing_finished, tap.as_ref(), id).await;
+            }
             drop(connection_lifetime);
         });
+    }
+
+    async fn close_packet_tap(outgoing_finished: &CancellationToken, tap: &dyn PacketTap, id: u64) {
+        outgoing_finished.cancelled().await;
+        tap.closed(id);
     }
 
     async fn process_translation_batch(
@@ -1014,6 +1082,21 @@ impl JavaTcpClient {
         &self,
         packet: RawPacket,
     ) -> Result<ConnectionAction, PacketError> {
+        let packet = match self.server.packet_taps.current() {
+            None => packet,
+            Some(tap) => {
+                match tap.inbound(
+                    self.id,
+                    TapPhase::Configuration,
+                    packet.id,
+                    packet.payload(),
+                ) {
+                    TapVerdict::Pass => packet,
+                    TapVerdict::Cancel => return Ok(ConnectionAction::none()),
+                    TapVerdict::Rewrite(payload) => RawPacket::new(packet.id, payload),
+                }
+            }
+        };
         let data = &mut Cursor::new(packet.payload());
 
         match packet.id {
@@ -1096,10 +1179,54 @@ impl TextResolutor for JavaTcpClient {
 
 #[cfg(test)]
 mod tests {
-    use foton_utils::FrontVec;
     use tokio::{task::yield_now, time::sleep};
 
     use super::*;
+
+    struct CloseRecordingTap(AtomicBool);
+
+    impl PacketTap for CloseRecordingTap {
+        fn opened(&self, _: u64, _: Uuid, _: &str, _: SocketAddr) {}
+        fn playing(&self, _: u64, _: Uuid, _: i32) {}
+        fn closed(&self, _: u64) {
+            self.0.store(true, AtomicOrdering::Release);
+        }
+        fn inbound(&self, _: u64, _: TapPhase, _: i32, _: &[u8]) -> TapVerdict {
+            TapVerdict::Pass
+        }
+        fn outbound(
+            &self,
+            _: u64,
+            _: TapPhase,
+            _: i32,
+            _: &[u8],
+        ) -> foton_core::packet_tap::TapOutcome {
+            foton_core::packet_tap::TapOutcome::pass()
+        }
+        fn sent(&self, _: u64) {}
+    }
+
+    #[tokio::test]
+    async fn packet_tap_close_waits_for_the_outgoing_task_to_finish() {
+        let finished = CancellationToken::new();
+        let writer_guard = finished.clone().drop_guard();
+        let tap = CloseRecordingTap(AtomicBool::new(false));
+        let close = JavaTcpClient::close_packet_tap(&finished, &tap, 1);
+        tokio::pin!(close);
+
+        assert!(
+            timeout(Duration::from_millis(10), &mut close)
+                .await
+                .is_err()
+        );
+        assert!(!tap.0.load(AtomicOrdering::Acquire));
+        // Dropping the writer's task guard also signals completion on unwind.
+        drop(writer_guard);
+        timeout(Duration::from_secs(1), &mut close)
+            .await
+            .expect("the tap should close after the writer releases its guard");
+        assert!(tap.0.load(AtomicOrdering::Acquire));
+    }
 
     #[test]
     fn translation_handoff_preserves_every_packet_after_upgrade_in_order() {
@@ -1149,9 +1276,8 @@ mod tests {
         let writer: JavaNetworkWriter = Arc::new(AsyncMutex::new(None));
         let writer_guard = writer.lock().await;
         let cancel_token = CancellationToken::new();
-        let packet = EncodedPacket {
-            encoded_data: Arc::new(FrontVec::new(0)),
-        };
+        let packet =
+            EncodedPacket::from_id_and_payload(0, &[], None).expect("test packet should frame");
         let (translated, _translated_recv) = mpsc::channel(1);
 
         let write = JavaTcpClient::write_network_packet_until_cancelled(

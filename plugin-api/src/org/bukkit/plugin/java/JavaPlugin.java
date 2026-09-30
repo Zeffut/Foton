@@ -143,6 +143,20 @@ public abstract class JavaPlugin implements Plugin {
     @Override public void onEnable() {}
     @Override public void onDisable() {}
 
+    /** Declines, so plugin.yml's usage line is shown; a plugin overrides it. */
+    @Override
+    public boolean onCommand(org.bukkit.command.CommandSender sender,
+            org.bukkit.command.Command command, String label, String[] args) {
+        return false;
+    }
+
+    /** No suggestions of its own, so player names are offered. */
+    @Override
+    public java.util.List<String> onTabComplete(org.bukkit.command.CommandSender sender,
+            org.bukkit.command.Command command, String alias, String[] args) {
+        return null;
+    }
+
     /** The plugin's own config.yml, read the first time it is asked for.
      *
      * Bukkit lays the jar's bundled config.yml underneath as defaults, so a
@@ -158,6 +172,7 @@ public abstract class JavaPlugin implements Plugin {
         return config;
     }
 
+    @Override
     public void reloadConfig() {
         config = YamlConfiguration.loadConfiguration(configFile());
         InputStream bundled = getResource("config.yml");
@@ -171,12 +186,12 @@ public abstract class JavaPlugin implements Plugin {
         }
     }
 
+    /** Paper saves `getConfig()`, so a config never read is loaded and
+     * written rather than skipped. */
+    @Override
     public void saveConfig() {
-        if (config == null) {
-            return;
-        }
         try {
-            config.save(configFile());
+            getConfig().save(configFile());
         } catch (IOException error) {
             getLogger().log(Level.SEVERE, "cannot write " + configFile(), error);
         }

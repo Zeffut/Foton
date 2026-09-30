@@ -53,6 +53,8 @@ public final class Bukkit {
         if (type == org.bukkit.Particle.class) return (Registry<T>) Registry.PARTICLE_TYPE;
         if (type == org.bukkit.inventory.meta.trim.TrimPattern.class) return (Registry<T>) Registry.TRIM_PATTERN;
         if (type == org.bukkit.inventory.meta.trim.TrimMaterial.class) return (Registry<T>) Registry.TRIM_MATERIAL;
+        if (type == org.bukkit.block.banner.PatternType.class) return (Registry<T>) Registry.BANNER_PATTERN;
+        if (type == org.bukkit.MusicInstrument.class) return (Registry<T>) Registry.INSTRUMENT;
         throw new IllegalArgumentException("Unsupported registry type: " + type);
     }
     private static volatile boolean stopping;
@@ -61,7 +63,9 @@ public final class Bukkit {
     public static void markStopping() { stopping = true; }
     public static String getMinecraftVersion() { return server == null ? "" : server.getMinecraftVersion(); }
     public static String getMotd() { return server == null ? "" : server.getMotd(); }
-    public static double[] getTPS() { return foton.Native.serverTps(); }
+    public static double[] getTPS() { return server.getTPS(); }
+    public static String getUpdateFolder() { return server.getUpdateFolder(); }
+    public static java.io.File getUpdateFolderFile() { return server.getUpdateFolderFile(); }
     public static double getAverageTickTime() { return foton.Native.serverAverageTickTime(); }
     public static org.bukkit.block.data.BlockData createBlockData(String data) {
         return new org.bukkit.block.data.SimpleBlockData(data);
@@ -167,8 +171,7 @@ public final class Bukkit {
         return new foton.FotonCustomInventory(holder, size, title);
     }
     public static org.bukkit.inventory.Inventory createInventory(org.bukkit.inventory.InventoryHolder holder, int size, net.kyori.adventure.text.Component title) {
-        String plain = title == null ? "" : net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(title);
-        return new foton.FotonCustomInventory(holder, size, plain);
+        return new foton.FotonCustomInventory(holder, size, title);
     }
     public static org.bukkit.inventory.Inventory createInventory(org.bukkit.inventory.InventoryHolder holder,
             org.bukkit.event.inventory.InventoryType type, String title) {
@@ -226,11 +229,24 @@ public final class Bukkit {
 
     public static java.util.Set<OfflinePlayer> getBannedPlayers() {
         java.util.LinkedHashSet<OfflinePlayer> result = new java.util.LinkedHashSet<>();
-        for (BanEntry<?> entry : server.getBanList(BanList.Type.NAME).getBanEntries()) {
-            Object target = entry.getTarget();
-            if (target instanceof String name) result.add(server.getOfflinePlayer(name));
+        for (BanEntry<?> entry : server.getBanList(BanList.Type.PROFILE).getBanEntries()) {
+            if (!(entry.getTarget() instanceof org.bukkit.profile.PlayerProfile profile)) continue;
+            if (profile.getUniqueId() != null) result.add(server.getOfflinePlayer(profile.getUniqueId()));
+            else if (profile.getName() != null) result.add(server.getOfflinePlayer(profile.getName()));
         }
         return java.util.Collections.unmodifiableSet(result);
+    }
+
+    public static java.util.Iterator<org.bukkit.advancement.Advancement> advancementIterator() {
+        return server.advancementIterator();
+    }
+
+    public static boolean hasWhitelist() { return server.hasWhitelist(); }
+
+    public static OfflinePlayer getOfflinePlayerIfCached(String name) { return server.getOfflinePlayerIfCached(name); }
+
+    public static <B extends BanList<E>, E> B getBanList(io.papermc.paper.ban.BanListType<B> type) {
+        return server.getBanList(type);
     }
 
     public static org.bukkit.advancement.Advancement getAdvancement(NamespacedKey key) {
@@ -279,7 +295,7 @@ public final class Bukkit {
     }
 
     public static <T extends Keyed> Tag<T> getTag(String registry, NamespacedKey key, Class<T> type) {
-        return key == null || type == null ? null : new Tag<>(key, type, registry);
+        return key == null || type == null ? null : new foton.FotonTag<>(registry, key, type);
     }
 
     /** Every tag in a registry.
@@ -389,4 +405,8 @@ public final class Bukkit {
     public static io.papermc.paper.threadedregions.scheduler.AsyncScheduler getAsyncScheduler() {
         return server.getAsyncScheduler();
     }
+
+    public static org.bukkit.inventory.Merchant createMerchant(net.kyori.adventure.text.Component title) { return server.createMerchant(title); }
+    public static org.bukkit.inventory.Merchant createMerchant(String title) { return server.createMerchant(title); }
+    public static org.bukkit.inventory.Merchant createMerchant() { return server.createMerchant(); }
 }

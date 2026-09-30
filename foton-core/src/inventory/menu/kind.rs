@@ -3,6 +3,7 @@
 use foton_registry::item_stack::ItemStack;
 use foton_utils::ErasedType;
 
+use crate::event::CraftingClick;
 use crate::inventory::menu::behavior::MenuBehavior;
 use crate::{inventory::lock::ContainerLockGuard, player::Player};
 
@@ -24,6 +25,11 @@ pub trait MenuKind: ErasedType + Send + Sync {
         _guard: &mut ContainerLockGuard,
         _player: &Player,
     ) {
+    }
+
+    /// What a click on `slot` would craft, when `slot` is a crafting result.
+    fn crafting_click(&self, _guard: &ContainerLockGuard, _slot: usize) -> Option<CraftingClick> {
+        None
     }
 
     /// Extra cleanup on close beyond [`Menu::removed`].

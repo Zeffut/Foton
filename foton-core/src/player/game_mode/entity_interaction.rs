@@ -620,7 +620,8 @@ impl Player {
             return false;
         };
         let mut event =
-            EntityDamageByEntityEvent::new(self.uuid(), entity.uuid(), "ENTITY_ATTACK".to_owned());
+            EntityDamageByEntityEvent::new(self.uuid(), entity.uuid(), "ENTITY_ATTACK".to_owned())
+                .with_critical(critical_attack);
         self.fire_event(&mut event);
         let damage_allowed = !event.is_cancelled();
         let was_hurt = damage_allowed && entity.hurt(&target_world, &damage_source, total_damage);

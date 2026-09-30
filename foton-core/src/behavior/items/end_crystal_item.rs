@@ -8,9 +8,10 @@ use foton_registry::{vanilla_blocks, vanilla_entities, vanilla_game_events};
 use foton_utils::BlockPos;
 use glam::DVec3;
 
+use crate::behavior::items::entity_place::entity_place_allowed;
 use crate::behavior::{InteractionResult, ItemBehavior, UseOnContext};
 use crate::entity::entities::EndCrystalEntity;
-use crate::entity::next_entity_id;
+use crate::entity::{SharedEntity, next_entity_id};
 use crate::world::game_event::GameEventContext;
 use crate::world::{LevelReader as _, World};
 use foton_utils::WorldAabb;
@@ -54,8 +55,18 @@ impl ItemBehavior for EndCrystalItem {
             Arc::downgrade(context.world),
         ));
         crystal.set_show_bottom(false);
+        let placed: SharedEntity = crystal.clone();
         if let Err(error) = context.world.try_add_entity(crystal) {
             log::warn!("Failed to place end crystal: {error}");
+            return InteractionResult::Fail;
+        }
+        if !entity_place_allowed(
+            context.world,
+            &placed,
+            context.player,
+            (pos, context.hit_result.direction),
+            context.hand,
+        ) {
             return InteractionResult::Fail;
         }
 

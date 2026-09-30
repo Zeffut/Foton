@@ -1,0 +1,12 @@
+name: PacketProbe
+version: '1'
+main: foton.probe.PacketProbe
+api-version: '1.21'
+depend: [packetevents]
+commands:
+  probetp:
+    description: Moves the player into another loaded world.
+  probecraft:
+    description: Writes down the top of the open view.
+  probegui:
+    description: Opens a menu of the probe's own.

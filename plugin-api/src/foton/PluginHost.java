@@ -48,12 +48,24 @@ public final class PluginHost {
      * disable that same plugin. State transitions still use {@link #lifecycle}
      * so an in-flight event can drain without needing this operation lock. */
     private static final ReentrantLock lifecycleOperation = new ReentrantLock(true);
+    /** Plugins Foton ships because the upstream one cannot run here, keyed by lower-case name. */
+    private static final Set<String> bundledNames = new HashSet<>();
+    /** Where plugins keep their data, bundled ones included; the update folder lives in it. */
+    private static volatile File pluginsDirectory = new File("plugins");
 
     private PluginHost() {}
 
     /** Marks a real host shutdown; ordinary plugin disable/re-enable does not call this. */
     public static void markStopping() {
         org.bukkit.Bukkit.markStopping();
+    }
+
+    /** bukkit.yml's default `settings.update-folder`. */
+    public static final String UPDATE_FOLDER = "update";
+
+    /** Where a plugin stages a new copy of its own jar for the next start. */
+    public static File updateFolder() {
+        return new File(pluginsDirectory, UPDATE_FOLDER);
     }
 
     static Object lifecycleLock() {
@@ -112,7 +124,9 @@ public final class PluginHost {
 
     private static int loadAllOnLoadSerialized(String directory) {
         ensureServer();
-        List<File> ordered = orderedJars(new File(directory));
+        pluginsDirectory = new File(directory).getAbsoluteFile();
+        applyUpdates(pluginsDirectory);
+        List<File> ordered = orderedJars(pluginsDirectory);
         List<JavaPlugin> constructed = new ArrayList<>();
         for (File jar : ordered) {
             try {
@@ -252,12 +266,37 @@ public final class PluginHost {
         }
     }
 
-    private static List<File> orderedJars(File dir) {
+    /** SimplePluginManager's update step: a jar in the update folder with the
+     * same file name as a plugin jar replaces it before anything is loaded,
+     * and is removed once copied. A self-updating plugin stages its download
+     * there because the running jar cannot be overwritten safely. */
+    private static void applyUpdates(File dir) {
+        File updates = new File(dir, UPDATE_FOLDER);
         File[] jars = dir.listFiles((d, name) -> name.endsWith(".jar"));
-        if (jars == null) {
+        if (jars == null || !updates.isDirectory()) return;
+        for (File jar : jars) {
+            File staged = new File(updates, jar.getName());
+            if (!staged.isFile()) continue;
+            try {
+                Files.copy(staged.toPath(), jar.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                Files.delete(staged.toPath());
+                System.out.println("[host] updated " + jar.getName() + " from " + UPDATE_FOLDER + "/");
+            } catch (java.io.IOException error) {
+                System.out.println("[host] could not apply update for " + jar.getName() + ": " + error);
+            }
+        }
+    }
+
+    private static List<File> orderedJars(File dir) {
+        File[] found = dir.listFiles((d, name) -> name.endsWith(".jar"));
+        if (found == null) {
             System.out.println("[host] no plugin directory at " + dir);
             return List.of();
         }
+        // Bundled first, so that a name collision always keeps Foton's own.
+        List<File> bundled = bundledJars();
+        List<File> jars = new ArrayList<>(bundled);
+        jars.addAll(List.of(found));
         Map<String, File> jarsByName = new HashMap<>();
         Map<String, PluginDescriptionFile> descriptors = new HashMap<>();
         for (File jar : jars) {
@@ -265,9 +304,15 @@ public final class PluginHost {
                 PluginDescriptionFile descriptor = readDescriptor(jar);
                 String key = descriptor.getName().toLowerCase(java.util.Locale.ROOT);
                 if (jarsByName.putIfAbsent(key, jar) != null) {
-                    System.out.println("[host] duplicate plugin name " + descriptor.getName() + "; skipping " + jar.getName());
+                    if (bundledNames.contains(key)) {
+                        System.out.println("[host] " + descriptor.getName() + " is provided by Foton; skipping "
+                            + jar.getName() + " (the upstream plugin cannot run on Foton)");
+                    } else {
+                        System.out.println("[host] duplicate plugin name " + descriptor.getName() + "; skipping " + jar.getName());
+                    }
                     continue;
                 }
+                if (bundled.contains(jar)) bundledNames.add(key);
                 descriptors.put(key, descriptor);
             } catch (Throwable error) {
                 System.out.println("[host] " + jar.getName() + " failed: " + error);
@@ -427,6 +472,17 @@ public final class PluginHost {
 
     private record OrderingEdge(String from, String to) {}
 
+    /** Jars Foton ships beside its API, from {@code -Dfoton.bundled-plugins}. */
+    private static List<File> bundledJars() {
+        String directory = System.getProperty("foton.bundled-plugins");
+        if (directory == null || directory.isEmpty()) return List.of();
+        File[] jars = new File(directory).listFiles((d, name) -> name.endsWith(".jar"));
+        if (jars == null) return List.of();
+        List<File> sorted = new ArrayList<>(List.of(jars));
+        sorted.sort(java.util.Comparator.comparing(File::getName));
+        return sorted;
+    }
+
     private static PluginDescriptionFile readDescriptor(File jar) throws Exception {
         try (JarFile archive = new JarFile(jar)) {
             var paper = archive.getEntry("paper-plugin.yml");
@@ -462,7 +518,11 @@ public final class PluginHost {
         boolean registered = false;
         JavaPlugin plugin = null;
         try {
-            File dataFolder = new File(jar.getParentFile(), descriptor.getName());
+            // A bundled plugin lives beside the API jar but keeps its data
+            // where every other plugin does.
+            File dataRoot = bundledNames.contains(descriptor.getName().toLowerCase(java.util.Locale.ROOT))
+                && pluginsDirectory != null ? pluginsDirectory : jar.getParentFile();
+            File dataFolder = new File(dataRoot, descriptor.getName());
             // Before the constructor, not after: a plugin may call getName()
             // or getLogger() from it, and several do.
             loader.describe(org.bukkit.Bukkit.getServer(), descriptor, dataFolder);

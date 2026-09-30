@@ -1,7 +1,7 @@
 package org.bukkit.entity;
 
 /** A pig that can be equipped with a saddle. */
-public interface Pig extends Animal, Ageable, Steerable {
+public interface Pig extends Animals, Ageable, Steerable {
     enum Variant { COLD, TEMPERATE, WARM }
     default Variant getVariant() {
         String value = foton.Native.pigVariant(((foton.FotonEntity) this).getUniqueId().toString());

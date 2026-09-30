@@ -19,7 +19,7 @@ use foton_utils::{
 use glam::DVec3;
 use rand::RngExt;
 
-use crate::behavior::block::drop_from_block_interact_loot_table;
+use crate::behavior::block::{drop_from_block_interact_loot_table, offer_harvest};
 use crate::{
     behavior::{
         BlockBehavior, BlockPlaceContext, InteractionResult, InventoryAccess,
@@ -167,6 +167,11 @@ impl BlockBehavior for SweetBerryBushBlock {
             Some(player),
             &mut rng,
         );
+        // Paper answers success on a refusal too: anything else would let the
+        // item in hand be placed as a block instead.
+        let Some(items) = offer_harvest(player, world, pos, items) else {
+            return InteractionResult::Success;
+        };
 
         for item in items {
             world.pop_resource(pos, item);

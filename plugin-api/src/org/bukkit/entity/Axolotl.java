@@ -1,7 +1,7 @@
 package org.bukkit.entity;
 
 /** A water-dwelling axolotl. */
-public interface Axolotl extends Animal {
+public interface Axolotl extends Animals {
     enum Variant { LUCY, WILD, GOLD, CYAN, BLUE }
     Variant getVariant();
     void setVariant(Variant variant);

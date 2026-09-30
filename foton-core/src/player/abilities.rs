@@ -3,6 +3,7 @@
 use foton_protocol::packets::game::{CPlayerAbilities, SPlayerAbilities, ability_flags};
 use foton_utils::types::GameType;
 
+use crate::event::{Event as _, PlayerToggleFlightEvent};
 use crate::player::Player;
 
 /// Default flying speed in vanilla Minecraft
@@ -198,6 +199,20 @@ impl Player {
         // player is not allowed to make clears the flag rather than leaving
         // whatever was there. Keeping it left a player whose permission had
         // been revoked mid-flight flying on the server forever.
+        let (may_fly, changes) = {
+            let abilities = self.abilities.lock();
+            (abilities.may_fly, abilities.flying != packet.is_flying())
+        };
+        // Paper parity: a player allowed to fly who changes state is asked
+        // about first, outside the lock, since a listener reads abilities back.
+        if may_fly && changes {
+            let mut event = PlayerToggleFlightEvent::new(self.gameprofile.id, packet.is_flying());
+            self.fire_event(&mut event);
+            if event.is_cancelled() {
+                self.send_abilities();
+                return;
+            }
+        }
         let allowed = {
             let mut abilities = self.abilities.lock();
             abilities.flying = packet.is_flying() && abilities.may_fly;

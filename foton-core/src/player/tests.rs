@@ -25,6 +25,7 @@ use glam::DVec3;
 use text_components::TextComponent;
 use uuid::Uuid;
 
+use crate::advancement::ADVANCEMENT_TREE;
 use crate::behavior::{InteractionResult, init_behaviors};
 use crate::chunk_saver::PersistentEntity;
 use crate::entity::{
@@ -1409,4 +1410,59 @@ fn a_player_answers_for_each_of_its_own_slot_ranges() {
     // And the equipment every living entity shares, reached by falling
     // through everything above.
     assert_eq!(player.slot_item(103), Some(helmet));
+}
+
+fn packet_id(packet: &EncodedPacket) -> Option<i32> {
+    let mut cursor = Cursor::new(packet.encoded_data.as_slice());
+    VarInt::read(&mut cursor).ok()?;
+    Some(VarInt::read(&mut cursor).ok()?.0)
+}
+
+/// Unlocking a recipe is what completes its `recipes/...` advancement: the
+/// book fires `recipe_unlocked`, the advancement's `has_the_recipe` criterion
+/// listens for exactly that, and a second award sends nothing at all -- the
+/// shape `Recettes.ouvrirA` relies on when it re-runs on every join.
+#[test]
+fn awarding_a_recipe_unlocks_it_once_and_completes_its_advancement() {
+    use foton_registry::packets::play::{C_RECIPE_BOOK_ADD, C_RECIPE_BOOK_REMOVE};
+
+    init_vanilla_registry();
+    let world = fresh_test_world("recipe_book_award");
+    let sent_packets = Arc::new(SyncMutex::new(Vec::new()));
+    let connection = Arc::new(PlayerConnection::Other(Box::new(RecordingConnection {
+        sent_packets: Arc::clone(&sent_packets),
+        closed: AtomicBool::new(false),
+    })));
+    let player = TestPlayerBuilder::new(world, "TestPlayer", 1)
+        .connection(connection)
+        .build();
+    let cake = foton_utils::Identifier::vanilla_static("cake");
+    let advancement = ADVANCEMENT_TREE
+        .index_of(&foton_utils::Identifier::vanilla_static(
+            "recipes/food/cake",
+        ))
+        .expect("vanilla has a cake recipe advancement");
+    let sent = |id| {
+        sent_packets
+            .lock()
+            .iter()
+            .filter(|packet| packet_id(packet) == Some(id))
+            .count()
+    };
+
+    assert_eq!(player.award_recipes([&cake]), 1);
+    assert!(player.has_recipe(&cake));
+    assert!(player.has_advancement(advancement));
+    assert_eq!(sent(C_RECIPE_BOOK_ADD), 1);
+
+    assert_eq!(
+        player.award_recipes([&cake]),
+        0,
+        "a known recipe is not new"
+    );
+    assert_eq!(sent(C_RECIPE_BOOK_ADD), 1, "and is not sent again");
+
+    assert_eq!(player.reset_recipes([&cake]), 1);
+    assert!(!player.has_recipe(&cake));
+    assert_eq!(sent(C_RECIPE_BOOK_REMOVE), 1);
 }

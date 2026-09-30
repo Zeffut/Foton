@@ -89,18 +89,27 @@ impl BlockBehavior for SpawnerBlock {
     /// pays the same whatever the pickaxe was enchanted with.
     fn spawn_after_break(
         &self,
-        _state: BlockStateId,
+        state: BlockStateId,
         world: &Arc<World>,
         pos: BlockPos,
-        _tool: &ItemStack,
+        tool: &ItemStack,
         drop_experience: bool,
     ) {
         if !drop_experience {
             return;
         }
-        let experience = EXPERIENCE_BASE
+        world.pop_experience(pos, self.experience_drop(state, world, pos, tool));
+    }
+
+    fn experience_drop(
+        &self,
+        _state: BlockStateId,
+        _world: &Arc<World>,
+        _pos: BlockPos,
+        _tool: &ItemStack,
+    ) -> i32 {
+        EXPERIENCE_BASE
             + rand::random_range(0..EXPERIENCE_ROLL)
-            + rand::random_range(0..EXPERIENCE_ROLL);
-        world.pop_experience(pos, experience);
+            + rand::random_range(0..EXPERIENCE_ROLL)
     }
 }

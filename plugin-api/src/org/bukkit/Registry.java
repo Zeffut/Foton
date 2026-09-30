@@ -5,8 +5,12 @@ import java.util.Objects;
 import java.util.stream.Stream;
 import org.bukkit.enchantments.Enchantment;
 
-/** Read-only Bukkit registry view backed by Foton's generated values. */
-public interface Registry<T extends Keyed> {
+/** Read-only Bukkit registry view backed by Foton's generated values.
+ *
+ * <p>Iterable, as in Paper: {@code for (PatternType t : Registry.BANNER_PATTERN)}
+ * is how plugins walk one.</p>
+ */
+public interface Registry<T extends Keyed> extends Iterable<T> {
     T get(NamespacedKey key);
 
     /** Returns the value or throws when the key is absent. */
@@ -14,6 +18,36 @@ public interface Registry<T extends Keyed> {
         return Objects.requireNonNull(get(key), "No registry value for " + key);
     }
     Stream<T> stream();
+
+    @Override
+    default java.util.Iterator<T> iterator() { return stream().iterator(); }
+
+    /** Whether the data pack defines this tag for this registry. */
+    default boolean hasTag(io.papermc.paper.registry.tag.TagKey<T> key) {
+        return key != null && foton.Native.tagValues(key.registryKey().key().value(), key.key().asString()) != null;
+    }
+
+    /** The tag's members by key; throws, as Paper does, when there is no such tag. */
+    default io.papermc.paper.registry.tag.Tag<T> getTag(io.papermc.paper.registry.tag.TagKey<T> key) {
+        java.util.Objects.requireNonNull(key, "key");
+        String[] members = foton.Native.tagValues(key.registryKey().key().value(), key.key().asString());
+        if (members == null) throw new java.util.NoSuchElementException("No tag " + key + " in " + key.registryKey());
+        io.papermc.paper.registry.tag.SimpleTag<T> tag = new io.papermc.paper.registry.tag.SimpleTag<>(key);
+        java.util.List<io.papermc.paper.registry.TypedKey<T>> entries = new java.util.ArrayList<>();
+        for (String member : members) entries.add(io.papermc.paper.registry.TypedKey.create(key.registryKey(), member));
+        tag.addAll(entries);
+        return tag;
+    }
+
+    /** The tag's members as values of this registry. */
+    default java.util.Collection<T> getTagValues(io.papermc.paper.registry.tag.TagKey<T> key) {
+        java.util.List<T> values = new java.util.ArrayList<>();
+        for (io.papermc.paper.registry.TypedKey<T> member : getTag(key).values()) {
+            T value = get(NamespacedKey.fromString(member.asString()));
+            if (value != null) values.add(value);
+        }
+        return java.util.List.copyOf(values);
+    }
 
     default NamespacedKey getKey(T value) { return value == null ? null : value.getKey(); }
 
@@ -46,10 +80,9 @@ public interface Registry<T extends Keyed> {
         @Override public Stream<Material> stream() { return Arrays.stream(Material.values()); }
     };
 
-    Registry<org.bukkit.block.Biome> BIOME = new Registry<>() {
-        @Override public org.bukkit.block.Biome get(NamespacedKey key) { if (key == null) return null; for (org.bukkit.block.Biome value : org.bukkit.block.Biome.values()) if (value.getKey().equals(key)) return value; return null; }
-        @Override public Stream<org.bukkit.block.Biome> stream() { return Arrays.stream(org.bukkit.block.Biome.values()); }
-    };
+    Registry<org.bukkit.block.Biome> BIOME = foton.FotonRegistries.biomes();
+    Registry<org.bukkit.block.banner.PatternType> BANNER_PATTERN = foton.FotonRegistries.bannerPatterns();
+    Registry<org.bukkit.MusicInstrument> INSTRUMENT = foton.FotonRegistries.instruments();
 
     Registry<Material> BLOCK = new Registry<>() {
         @Override public Material get(NamespacedKey key) { Material value = key == null ? null : Material.matchMaterial(key.toString()); return value != null && value.isBlock() ? value : null; }
@@ -67,26 +100,6 @@ public interface Registry<T extends Keyed> {
         @Override public Particle get(NamespacedKey key) { return key == null ? null : java.util.Arrays.stream(Particle.values()).filter(p -> p.getKey().equals(key)).findFirst().orElse(null); }
         @Override public Stream<Particle> stream() { return Arrays.stream(Particle.values()); }
     };
-    Registry<org.bukkit.inventory.meta.trim.TrimPattern> TRIM_PATTERN = keyedTrimPatterns();
-    Registry<org.bukkit.inventory.meta.trim.TrimMaterial> TRIM_MATERIAL = keyedTrimMaterials();
-
-    private static Registry<org.bukkit.inventory.meta.trim.TrimPattern> keyedTrimPatterns() {
-        return keyedRegistry(new String[]{"sentry", "dune", "coast", "wild", "ward", "eye", "vex", "tide", "snout", "rib", "spire", "wayfinder", "shaper", "silence", "raiser", "host", "flow", "bolt"}, true);
-    }
-    private static Registry<org.bukkit.inventory.meta.trim.TrimMaterial> keyedTrimMaterials() {
-        return keyedRegistry(new String[]{"quartz", "iron", "netherite", "redstone", "copper", "gold", "emerald", "diamond", "lapis", "amethyst", "resin"}, false);
-    }
-    @SuppressWarnings("unchecked")
-    private static <T extends Keyed> Registry<T> keyedRegistry(String[] names, boolean pattern) {
-        // The two call sites select the matching concrete wrapper for T.
-        java.util.Map<NamespacedKey, T> values = new java.util.LinkedHashMap<>();
-        for (String name : names) {
-            T value = (T) (pattern ? new org.bukkit.inventory.meta.trim.TrimPattern(name) : new org.bukkit.inventory.meta.trim.TrimMaterial(name));
-            values.put(value.getKey(), value);
-        }
-        return new Registry<>() {
-            public T get(NamespacedKey key) { return values.get(key); }
-            public Stream<T> stream() { return values.values().stream(); }
-        };
-    }
+    Registry<org.bukkit.inventory.meta.trim.TrimPattern> TRIM_PATTERN = foton.FotonRegistries.trimPatterns();
+    Registry<org.bukkit.inventory.meta.trim.TrimMaterial> TRIM_MATERIAL = foton.FotonRegistries.trimMaterials();
 }

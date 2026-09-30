@@ -68,7 +68,9 @@ impl TooltipDisplay {
         !self.hide_tooltip && !self.hidden_components.contains(&component.key)
     }
 
-    fn from_hidden_components(
+    /// A display hiding `components`, each once, in the order given.
+    #[must_use]
+    pub fn from_hidden_components(
         hide_tooltip: bool,
         components: impl IntoIterator<Item = Identifier>,
     ) -> Self {

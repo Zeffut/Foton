@@ -617,11 +617,12 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     fn encoded_packet(byte_len: usize) -> EncodedPacket {
+        let mut packet =
+            EncodedPacket::from_id_and_payload(0, &[], None).expect("test packet should frame");
         let mut encoded_data = FrontVec::new(0);
         encoded_data.extend_from_slice(&vec![0; byte_len]);
-        EncodedPacket {
-            encoded_data: Arc::new(encoded_data),
-        }
+        packet.encoded_data = Arc::new(encoded_data);
+        packet
     }
 
     fn prepared_full_chunk(pos: ChunkPos) -> PreparedChunk {

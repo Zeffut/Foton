@@ -67,6 +67,15 @@ public class Vector implements Cloneable {
         return this;
     }
 
+    // Paper's int and float overloads. A plugin writing setY(0) compiled to
+    // setY(I), and without these the call links to nothing.
+    public Vector setX(int value) { return setX((double) value); }
+    public Vector setX(float value) { return setX((double) value); }
+    public Vector setY(int value) { return setY((double) value); }
+    public Vector setY(float value) { return setY((double) value); }
+    public Vector setZ(int value) { return setZ((double) value); }
+    public Vector setZ(float value) { return setZ((double) value); }
+
     public Vector add(Vector other) {
         x += other.x;
         y += other.y;

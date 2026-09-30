@@ -10,6 +10,8 @@ mod run_loop;
 mod service_keys;
 /// The tick rate manager for the server.
 pub mod tick_rate_manager;
+/// Paper's one, five and fifteen minute TPS averages.
+pub mod tps_average;
 mod world_tick_workers;
 /// Domain-aware loaded world map.
 pub mod worlds;
@@ -42,6 +44,7 @@ use crate::config::{
 use crate::entity::{
     Entity, EntityBase, PendingWorldChangeToken, RemovalReason, SharedEntity, change_entity_world,
 };
+use crate::packet_tap::PacketTaps;
 
 use crate::chunk_saver::{ChunkStorage, PersistentEntity, registry::WorldStorageRegistry};
 use crate::event::EventBus;
@@ -286,6 +289,8 @@ mod global_player_publication_tests {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+pub(crate) use tests::test_server;
 
 #[derive(Clone, Copy)]
 struct PreparedSpawn {
@@ -590,6 +595,8 @@ pub struct Server {
     /// it holds subscriptions rather than game data, and something being
     /// enabled or disabled while the server runs is ordinary.
     pub events: EventBus,
+    /// Outside code shown raw packets before Foton handles or sends them.
+    pub packet_taps: PacketTaps,
     /// Queued domain switches to process after world ticks.
     pending_domain_switches: SyncMutex<Vec<DomainSwitchRequest>>,
 }
@@ -803,15 +810,11 @@ impl Server {
 
     /// Returns a cached statistic for the player's last active domain.
     #[must_use]
-    pub fn offline_statistic(&self, uuid: Uuid, statistic: &str) -> i32 {
+    pub fn offline_statistic(&self, uuid: Uuid, custom_stat: &Identifier) -> i32 {
         let Some(data) = self.global_player_data(uuid) else {
             return 0;
         };
-        let value = match statistic {
-            "JUMP" => "minecraft:jump",
-            "TIME_SINCE_REST" => "minecraft:time_since_rest",
-            _ => return 0,
-        };
+        let value = custom_stat.to_string();
         data.statistics
             .iter()
             .find(|entry| entry.stat_type == "minecraft:custom" && entry.value == value)
@@ -1281,6 +1284,7 @@ impl Server {
             pending_world_additions: SyncMutex::new(vec![]),
             world_creation_closed: AtomicBool::new(false),
             events: EventBus::new(),
+            packet_taps: PacketTaps::new(),
             pending_domain_switches: SyncMutex::new(vec![]),
         })
     }

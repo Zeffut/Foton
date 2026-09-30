@@ -213,6 +213,10 @@ pub enum TeleportTransitionCause {
     Command,
     /// Travel caused by player/entity respawn or world spawn placement.
     Respawn,
+    /// A plugin sent them, and `PlayerTeleportEvent` was asked before the
+    /// move was made: by the plugin host for `Player.teleport`, or by the
+    /// move a listener redirected. Asking again would ask twice.
+    Plugin,
     /// A transition whose producer is not yet classified.
     #[default]
     Unknown,

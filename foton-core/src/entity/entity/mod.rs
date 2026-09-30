@@ -394,7 +394,10 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         let Some(living) = self.as_living_entity() else {
             return false;
         };
-        Entity::is_alive(living) && !living.is_spectator() && !living.on_climbable()
+        Entity::is_alive(living)
+            && !living.is_spectator()
+            && !living.on_climbable()
+            && living.living_base().collides()
     }
 
     /// Returns whether vanilla fluid currents can push this entity.

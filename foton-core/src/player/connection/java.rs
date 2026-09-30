@@ -23,10 +23,11 @@ use foton_protocol::packets::game::{
     SCommandSuggestion, SContainerButtonClick, SContainerClick, SContainerClose,
     SContainerSlotStateChanged, SEditBook, SInteract, SJigsawGenerate, SMovePlayer, SMovePlayerPos,
     SMovePlayerPosRot, SMovePlayerRot, SMovePlayerStatusOnly, SMoveVehicle, SPickItemFromBlock,
-    SPlayerAbilities, SPlayerAction, SPlayerCommand, SPlayerInput, SPlayerLoad, SRenameItem,
-    SSeenAdvancements, SSelectBundleItem, SSelectTrade, SSetBeacon, SSetCarriedItem,
-    SSetCommandBlock, SSetCommandMinecart, SSetCreativeModeSlot, SSetJigsawBlock,
-    SSetStructureBlock, SSignUpdate, SSpectatorAction, SSwing, SUseItem, SUseItemOn,
+    SPlayerAbilities, SPlayerAction, SPlayerCommand, SPlayerInput, SPlayerLoad,
+    SRecipeBookChangeSettings, SRecipeBookSeenRecipe, SRenameItem, SSeenAdvancements,
+    SSelectBundleItem, SSelectTrade, SSetBeacon, SSetCarriedItem, SSetCommandBlock,
+    SSetCommandMinecart, SSetCreativeModeSlot, SSetJigsawBlock, SSetStructureBlock, SSignUpdate,
+    SSpectatorAction, SSwing, SUseItem, SUseItemOn,
 };
 
 use foton_protocol::utils::{ConnectionProtocol, MAX_PACKET_DATA_SIZE, PacketError, RawPacket};
@@ -50,6 +51,7 @@ use tokio_util::sync::CancellationToken;
 use crate::command::{handle_client_request, sender::CommandSender};
 use crate::event::PlayerClientLoadedWorldEvent;
 use crate::event::PlayerCommandPreprocessEvent;
+use crate::packet_tap::{PacketTap, TapPhase, TapVerdict};
 use crate::player::Player;
 use crate::player::chat::is_chat_message_illegal;
 use crate::player::connection::NetworkConnection;
@@ -64,8 +66,20 @@ pub type JavaNetworkWriter = Arc<AsyncMutex<Option<JavaNetworkEncoder>>>;
 pub enum OutboundPacket {
     /// Normal packet write that may be interrupted by connection shutdown.
     Packet(EncodedPacket),
+    /// A normal packet the packet tap is not shown.
+    ///
+    /// What a packet library sends "silently": its own listeners must not see
+    /// a packet it built itself, or a listener answering a packet with a
+    /// packet would answer its own answer forever.
+    Silent(EncodedPacket),
     /// Final disconnect packet that must be flushed before closing the socket.
     Disconnect(EncodedPacket),
+}
+
+#[derive(Default)]
+struct OfferedOutboundPacket {
+    rewritten: Option<EncodedPacket>,
+    tap: Option<Arc<dyn PacketTap>>,
 }
 
 /// Maximum encoded bytes retained while a Java peer is not reading.
@@ -232,7 +246,7 @@ impl QueuedOutboundPacket {
     #[must_use]
     pub const fn write_parts(&self) -> (&EncodedPacket, bool) {
         match &self.packet {
-            OutboundPacket::Packet(packet) => (packet, false),
+            OutboundPacket::Packet(packet) | OutboundPacket::Silent(packet) => (packet, false),
             OutboundPacket::Disconnect(packet) => (packet, true),
         }
     }
@@ -793,7 +807,7 @@ enum OutboundBatchLane {
 impl OutboundPacket {
     const fn encoded_packet(&self) -> &EncodedPacket {
         match self {
-            Self::Packet(packet) | Self::Disconnect(packet) => packet,
+            Self::Packet(packet) | Self::Silent(packet) | Self::Disconnect(packet) => packet,
         }
     }
 }
@@ -861,6 +875,8 @@ enum ScheduledPlayPacketKind {
     SpectatorAction(SSpectatorAction),
     ClientCommand(SClientCommand),
     SeenAdvancements(SSeenAdvancements),
+    RecipeBookChangeSettings(SRecipeBookChangeSettings),
+    RecipeBookSeenRecipe(SRecipeBookSeenRecipe),
     ChangeGameMode(SChangeGameMode),
     ChangeDifficulty(SChangeDifficulty),
 }
@@ -937,7 +953,11 @@ impl ScheduledPlayPacket {
             | ScheduledPlayPacketKind::Swing(_)
             | ScheduledPlayPacketKind::PickItemFromBlock(_)
             | ScheduledPlayPacketKind::ClientCommand(_)
-            | ScheduledPlayPacketKind::SeenAdvancements(_) => ScheduledPacketExecution::PlayerLocal,
+            | ScheduledPlayPacketKind::SeenAdvancements(_)
+            | ScheduledPlayPacketKind::RecipeBookChangeSettings(_)
+            | ScheduledPlayPacketKind::RecipeBookSeenRecipe(_) => {
+                ScheduledPacketExecution::PlayerLocal
+            }
             ScheduledPlayPacketKind::PlayerCommand(packet) => match packet.action {
                 PlayerCommandAction::StartSprinting
                 | PlayerCommandAction::StopSprinting
@@ -1226,6 +1246,16 @@ impl ScheduledPlayPacket {
             ScheduledPlayPacketKind::SeenAdvancements(packet) => {
                 player.handle_seen_advancements(packet.tab);
             }
+            ScheduledPlayPacketKind::RecipeBookChangeSettings(packet) => {
+                player.handle_recipe_book_change_settings(
+                    packet.book_type,
+                    packet.is_open,
+                    packet.is_filtering,
+                );
+            }
+            ScheduledPlayPacketKind::RecipeBookSeenRecipe(packet) => {
+                player.handle_recipe_book_seen_recipe(packet.recipe);
+            }
             ScheduledPlayPacketKind::ChangeGameMode(packet) => {
                 handle_client_request(&player, server, packet.gamemode);
             }
@@ -1467,7 +1497,7 @@ impl JavaConnection {
             }
         }
         for serverbound in batch.serverbound {
-            self.process_packet(
+            self.process_tapped_packet(
                 RawPacket::from_packet_data(serverbound)?,
                 Arc::clone(player),
                 server,
@@ -1483,23 +1513,42 @@ impl JavaConnection {
         };
         match envelope {
             QueuedOutboundEnvelope::Single(outbound) => {
-                let (packet, close_after_write) = outbound.write_parts();
-                self.write_packet_with_writer(packet, network_writer)
-                    .await?;
-                Ok(close_after_write)
+                self.write_queued_packet(&outbound, network_writer).await
             }
             QueuedOutboundEnvelope::Batch(packets) => {
                 for outbound in packets {
-                    let (packet, close_after_write) = outbound.write_parts();
-                    self.write_packet_with_writer(packet, network_writer)
-                        .await?;
-                    if close_after_write {
+                    if self.write_queued_packet(&outbound, network_writer).await? {
                         return Ok(true);
                     }
                 }
                 Ok(false)
             }
         }
+    }
+
+    /// Offers native protocol bytes before translation while retaining the
+    /// queue permits and the enclosing envelope's writer lock through send.
+    async fn write_queued_packet(
+        &self,
+        outbound: &QueuedOutboundPacket,
+        network_writer: &mut JavaNetworkEncoder,
+    ) -> Result<bool, PacketError> {
+        let (packet, close_after_write) = outbound.write_parts();
+        let OfferedOutboundPacket { rewritten, tap } =
+            if matches!(&outbound.packet, OutboundPacket::Packet(_)) {
+                let Some(offered) = self.offer_outbound(packet) else {
+                    return Ok(false);
+                };
+                offered
+            } else {
+                OfferedOutboundPacket::default()
+            };
+        self.write_packet_with_writer(rewritten.as_ref().unwrap_or(packet), network_writer)
+            .await?;
+        if let Some(tap) = tap {
+            tap.sent(self.id);
+        }
+        Ok(close_after_write)
     }
 
     async fn release_network_writer(&self) {
@@ -1681,6 +1730,100 @@ impl JavaConnection {
         self.cancel_token.cancel();
     }
 
+    /// The id this connection was given at accept time.
+    #[must_use]
+    pub const fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// Queues a packet given as protocol bytes rather than as a `ClientPacket`.
+    ///
+    /// A `silent` packet is not shown to the packet tap. Returns `false` when
+    /// the packet could not be framed or the connection is closing.
+    pub fn send_raw(&self, id: i32, payload: &[u8], silent: bool) -> bool {
+        let Ok(packet) = EncodedPacket::from_id_and_payload(id, payload, self.compression) else {
+            return false;
+        };
+        let packet = if silent {
+            OutboundPacket::Silent(packet)
+        } else {
+            OutboundPacket::Packet(packet)
+        };
+        self.outgoing_packets.try_send(packet).is_ok()
+    }
+
+    /// Handles protocol bytes as though the client had sent them.
+    ///
+    /// A `silent` packet is not shown to the packet tap first. A packet that
+    /// does not decode is dropped and reported as `false`; unlike one read
+    /// from the socket, it did not come from the client and is no reason to
+    /// disconnect it.
+    pub fn receive_raw(&self, server: &Server, id: i32, payload: Vec<u8>, silent: bool) -> bool {
+        let packet = RawPacket::new(id, payload);
+        let packet = if silent {
+            packet
+        } else {
+            let Some(packet) = self.offer_inbound(server, packet) else {
+                return true;
+            };
+            packet
+        };
+        let Some(player) = self.player.upgrade() else {
+            return false;
+        };
+        self.process_packet(packet, player, server).is_ok()
+    }
+
+    /// Shows a received packet to the tap, if one is installed.
+    ///
+    /// `None` means the tap cancelled it and Foton must act as though it
+    /// never arrived.
+    fn offer_inbound(&self, server: &Server, packet: RawPacket) -> Option<RawPacket> {
+        let Some(tap) = server.packet_taps.current() else {
+            return Some(packet);
+        };
+        match tap.inbound(self.id, TapPhase::Play, packet.id, packet.payload()) {
+            TapVerdict::Pass => Some(packet),
+            TapVerdict::Cancel => None,
+            TapVerdict::Rewrite(payload) => Some(RawPacket::new(packet.id, payload)),
+        }
+    }
+
+    /// Shows a packet about to be written to the tap, if one is installed.
+    ///
+    /// Returns what to write and, when the tap asked to hear about it, the tap
+    /// to tell once it is written; `None` when the tap cancelled the packet.
+    fn offer_outbound(&self, packet: &EncodedPacket) -> Option<OfferedOutboundPacket> {
+        let Some(player) = self.player.upgrade() else {
+            return Some(OfferedOutboundPacket::default());
+        };
+        let server = player.server();
+        let Some(tap) = server.packet_taps.current() else {
+            return Some(OfferedOutboundPacket::default());
+        };
+        let id = packet.id();
+        if server.packet_taps.skips_outbound(id) {
+            return Some(OfferedOutboundPacket::default());
+        }
+        let Ok(payload) = packet.payload(self.compression) else {
+            // Foton framed this packet itself; failing to read it back is a
+            // bug here, not the client's doing, and the tap is simply skipped.
+            return Some(OfferedOutboundPacket::default());
+        };
+        let outcome = tap.outbound(self.id, TapPhase::Play, id, &payload);
+        let packet = match outcome.verdict {
+            TapVerdict::Pass => None,
+            TapVerdict::Cancel => return None,
+            TapVerdict::Rewrite(payload) => {
+                Some(EncodedPacket::from_id_and_payload(id, &payload, self.compression).ok()?)
+            }
+        };
+        Some(OfferedOutboundPacket {
+            rewritten: packet,
+            tap: outcome.after_send.then_some(tap),
+        })
+    }
+
     /// Returns whether the connection is closed.
     #[must_use]
     pub fn closed(&self) -> bool {
@@ -1713,6 +1856,19 @@ impl JavaConnection {
             packet_id,
             play::S_ACCEPT_TELEPORTATION | play::S_CHUNK_BATCH_RECEIVED | play::S_PLAYER_LOADED
         )
+    }
+
+    /// The tap sees the server's native protocol after any Via translation.
+    fn process_tapped_packet(
+        &self,
+        packet: RawPacket,
+        player: Arc<Player>,
+        server: &Server,
+    ) -> Result<(), PacketError> {
+        let Some(packet) = self.offer_inbound(server, packet) else {
+            return Ok(());
+        };
+        self.process_packet(packet, player, server)
     }
 
     /// Decodes and dispatches one packet received from the client.
@@ -1928,6 +2084,16 @@ impl JavaConnection {
             play::S_SEEN_ADVANCEMENTS => scheduled(ScheduledPlayPacketKind::SeenAdvancements(
                 SSeenAdvancements::read_packet(data)?,
             )),
+            play::S_RECIPE_BOOK_CHANGE_SETTINGS => {
+                scheduled(ScheduledPlayPacketKind::RecipeBookChangeSettings(
+                    SRecipeBookChangeSettings::read_packet(data)?,
+                ))
+            }
+            play::S_RECIPE_BOOK_SEEN_RECIPE => {
+                scheduled(ScheduledPlayPacketKind::RecipeBookSeenRecipe(
+                    SRecipeBookSeenRecipe::read_packet(data)?,
+                ))
+            }
             play::S_PING_REQUEST => scheduled(ScheduledPlayPacketKind::PingRequest(
                 SPingRequest::read_packet(data)?,
             )),
@@ -1959,7 +2125,7 @@ impl JavaConnection {
     /// Vanilla throws `DecoderException` on an unknown id and drops the
     /// connection (`IdDispatchCodec.decode`), because vanilla has a handler for
     /// every id it defines. Foton does not: `lock_difficulty`,
-    /// `pick_item_from_entity`, `place_recipe`, both recipe-book packets,
+    /// `pick_item_from_entity`, `place_recipe`,
     /// `entity_tag_query` and `teleport_to_entity` are all sent by ordinary
     /// clients and none of them is handled here, so kicking would punish a
     /// player for pressing a button Foton has not implemented yet.
@@ -1996,8 +2162,9 @@ impl JavaConnection {
     ) {
         if let Some(player) = self.player.upgrade() {
             for pending in pending_serverbound {
-                let result = RawPacket::from_packet_data(pending)
-                    .and_then(|packet| self.process_packet(packet, Arc::clone(&player), &server));
+                let result = RawPacket::from_packet_data(pending).and_then(|packet| {
+                    self.process_tapped_packet(packet, Arc::clone(&player), &server)
+                });
                 if let Err(error) = result {
                     log::warn!(
                         "Translated handoff packet failed for client {}: {error}",
@@ -2028,7 +2195,7 @@ impl JavaConnection {
                                         Err(error) => Err(error),
                                     }
                                 } else {
-                                    self.process_packet(packet, player, &server)
+                                    self.process_tapped_packet(packet, player, &server)
                                 };
                                 if let Err(err) = processed {
                                 // Vanilla parity: `Connection.exceptionCaught`
@@ -2059,7 +2226,7 @@ impl JavaConnection {
                     let Some(translated) = translated else { self.close(); break; };
                     if let Some(player) = self.player.upgrade() {
                         let result = RawPacket::from_packet_data(translated)
-                            .and_then(|packet| self.process_packet(packet, player, &server));
+                            .and_then(|packet| self.process_tapped_packet(packet, player, &server));
                         if let Err(error) = result {
                             log::warn!("Translated packet failed for client {}: {error}", self.id);
                             self.close();
@@ -2217,6 +2384,9 @@ impl NetworkConnection for JavaConnection {
 }
 
 #[cfg(test)]
+mod integration_tests;
+
+#[cfg(test)]
 mod tests {
     use std::{
         array,
@@ -2243,11 +2413,7 @@ mod tests {
     use super::*;
 
     fn encoded_packet(byte_len: usize) -> EncodedPacket {
-        let mut encoded_data = foton_utils::FrontVec::new(0);
-        encoded_data.extend_from_slice(&vec![0; byte_len]);
-        EncodedPacket {
-            encoded_data: Arc::new(encoded_data),
-        }
+        tagged_packet_with_size(0, byte_len)
     }
 
     fn encoded_packets(count: usize, byte_len: usize) -> Vec<EncodedPacket> {
@@ -2255,19 +2421,17 @@ mod tests {
     }
 
     fn tagged_packet(tag: u8) -> EncodedPacket {
-        let mut encoded_data = foton_utils::FrontVec::new(0);
-        encoded_data.push(tag);
-        EncodedPacket {
-            encoded_data: Arc::new(encoded_data),
-        }
+        tagged_packet_with_size(tag, 1)
     }
 
     fn tagged_packet_with_size(tag: u8, byte_len: usize) -> EncodedPacket {
+        let mut packet =
+            EncodedPacket::from_id_and_payload(0, &[], None).expect("test packet should frame");
+        // Budget and raw-writer tests deliberately use exact byte counts.
         let mut encoded_data = foton_utils::FrontVec::new(0);
         encoded_data.extend_from_slice(&vec![tag; byte_len]);
-        EncodedPacket {
-            encoded_data: Arc::new(encoded_data),
-        }
+        packet.encoded_data = Arc::new(encoded_data);
+        packet
     }
 
     fn queued_tag(packet: &QueuedOutboundPacket) -> u8 {
@@ -2280,7 +2444,9 @@ mod tests {
             .expect("tagged packets are non-empty")
     }
 
-    async fn test_java_connection(sender: OutboundPacketSender) -> (JavaConnection, TcpStream) {
+    pub(super) async fn test_java_connection(
+        sender: OutboundPacketSender,
+    ) -> (JavaConnection, TcpStream) {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("test listener should bind");

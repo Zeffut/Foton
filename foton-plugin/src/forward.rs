@@ -14,32 +14,34 @@ use std::sync::Arc;
 use crate::natives;
 use crate::natives::describe_slot;
 use crate::natives::parse_slot;
+use crate::relay::{self, component};
 use foton_core::entity::Entity as _;
 use foton_core::entity::conversion::ConversionReason;
 use foton_core::event::AsyncTabCompleteEvent;
 use foton_core::event::EntityTargetEvent;
+use foton_core::event::Event;
 use foton_core::event::ExplosionPrimeEvent;
 use foton_core::event::{
-    AsyncPlayerPreLoginEvent, AsyncPlayerPreLoginResult, BlockBreakEvent, BlockBurnEvent,
-    BlockDamageEvent, BlockDispenseEvent, BlockExpEvent, BlockExplodeEvent, BlockFadeEvent,
-    BlockFertilizeEvent, BlockFromToEvent, BlockGrowEvent, BlockIgniteEvent, BlockPlaceEvent,
-    BlockPreDispenseEvent, BlockSpreadEvent, ChunkLoadEvent, ChunkPopulateEvent, ChunkUnloadEvent,
-    CommandEvent, CrafterCraftEvent, CreatureSpawnEvent, EntityChangeBlockEvent,
-    EntityDamageByEntityEvent, EntityDeathEvent, EntityExplodeEvent, EntityMountEvent,
-    EntityPickupItemEvent, EntityPortalEvent, EntityPushedByEntityAttackEvent,
-    EntityRegainHealthEvent, EntityRemoveFromWorldEvent, EntityResurrectEvent,
-    EntityTransformEvent, ExpBottleEvent, FoodLevelChangeEvent, HangingBreakEvent,
-    HangingPlaceEvent, InventoryClickEvent, InventoryCloseEvent, InventoryDragEvent,
-    InventoryOpenEvent, ItemSpawnEvent, LeavesDecayEvent, LightningStrikeEvent, PistonEvent,
-    PlayerAdvancementCriterionGrantEvent, PlayerAdvancementDoneEvent, PlayerBucketEmptyEvent,
-    PlayerBucketFillEvent, PlayerChatEvent, PlayerClientLoadedWorldEvent,
-    PlayerCommandPreprocessEvent, PlayerCustomPayloadEvent, PlayerDeathEvent, PlayerDropItemEvent,
-    PlayerFishEvent, PlayerInteractEntityEvent, PlayerInteractEvent, PlayerItemBreakEvent,
-    PlayerJoinEvent, PlayerLocaleChangeEvent, PlayerLoginAbortEvent, PlayerLoginEvent,
-    PlayerMoveEvent, PlayerOpenSignCause, PlayerOpenSignEvent, PlayerPortalEvent, PlayerQuitEvent,
-    PlayerRespawnEvent, PlayerSpawnLocationEvent, PlayerTakeLecternBookEvent, PortalCreateEvent,
-    PreCreatureSpawnEvent, PrepareItemCraftEvent, ProjectileLaunchEvent, ServerTickEvent,
-    SignChangeEvent, ThunderChangeEvent, WeatherChangeEvent,
+    AsyncPlayerPreLoginEvent, AsyncPlayerPreLoginResult, BlockBurnEvent, BlockDamageEvent,
+    BlockDispenseEvent, BlockExpEvent, BlockExplodeEvent, BlockFadeEvent, BlockFertilizeEvent,
+    BlockFromToEvent, BlockGrowEvent, BlockIgniteEvent, BlockPlaceEvent, BlockPreDispenseEvent,
+    BlockSpreadEvent, ChunkLoadEvent, ChunkPopulateEvent, ChunkUnloadEvent, CommandEvent,
+    CrafterCraftEvent, CreatureSpawnEvent, EntityChangeBlockEvent, EntityDamageByEntityEvent,
+    EntityDeathEvent, EntityExplodeEvent, EntityMountEvent, EntityPickupItemEvent,
+    EntityPortalEvent, EntityPushedByEntityAttackEvent, EntityRegainHealthEvent,
+    EntityRemoveFromWorldEvent, EntityResurrectEvent, EntityTransformEvent, ExpBottleEvent,
+    FoodLevelChangeEvent, HangingBreakEvent, HangingPlaceEvent, InventoryClickEvent,
+    InventoryCloseEvent, InventoryDragEvent, InventoryOpenEvent, ItemSpawnEvent, LeavesDecayEvent,
+    LightningStrikeEvent, PistonEvent, PlayerAdvancementCriterionGrantEvent,
+    PlayerAdvancementDoneEvent, PlayerBucketEmptyEvent, PlayerBucketFillEvent, PlayerChatEvent,
+    PlayerClientLoadedWorldEvent, PlayerCommandPreprocessEvent, PlayerCustomPayloadEvent,
+    PlayerDeathEvent, PlayerDropItemEvent, PlayerFishEvent, PlayerInteractEntityEvent,
+    PlayerInteractEvent, PlayerItemBreakEvent, PlayerJoinEvent, PlayerLocaleChangeEvent,
+    PlayerLoginAbortEvent, PlayerLoginEvent, PlayerMoveEvent, PlayerOpenSignCause,
+    PlayerOpenSignEvent, PlayerPortalEvent, PlayerQuitEvent, PlayerRespawnEvent,
+    PlayerSpawnLocationEvent, PlayerTakeLecternBookEvent, PortalCreateEvent, PreCreatureSpawnEvent,
+    PrepareItemCraftEvent, ProjectileLaunchEvent, ServerTickEvent, SignChangeEvent,
+    ThunderChangeEvent, WeatherChangeEvent,
 };
 use foton_core::event::{
     PlayerChangedWorldEvent, PlayerCommandSendEvent, PlayerGameModeChangeEvent, PlayerItemHeldEvent,
@@ -47,13 +49,13 @@ use foton_core::event::{
 use foton_core::player::Player;
 use foton_core::server::Server;
 use foton_registry::item_stack::ItemStack;
-use foton_utils::text::DisplayResolutor;
+use foton_utils::text::json;
+use foton_utils::types::InteractionHand;
 use foton_utils::{BlockPos, Identifier};
 use jni::objects::{JObject, JString, JValue, JValueGen};
 use jni::{AttachGuard, JNIEnv, JavaVM};
 use std::net::SocketAddr;
 use std::ops::{Deref, DerefMut};
-use text_components::TextComponent;
 use uuid::Uuid;
 
 /// The Java class that owns the handler lists.
@@ -80,12 +82,12 @@ const MESSENGER: &str = "foton/FotonMessenger";
 ///
 /// Clearing on scope exit puts the reset at the one place every callback passes
 /// through, instead of at the seventy that swallow an error.
-struct BridgeEnv<'local> {
+pub(crate) struct BridgeEnv<'local> {
     guard: AttachGuard<'local>,
 }
 
 impl<'local> BridgeEnv<'local> {
-    fn attach(vm: &'local JavaVM) -> Option<Self> {
+    pub(crate) fn attach(vm: &'local JavaVM) -> Option<Self> {
         Some(Self {
             guard: vm.attach_current_thread().ok()?,
         })
@@ -119,7 +121,7 @@ impl Drop for BridgeEnv<'_> {
     }
 }
 
-fn owner() -> Identifier {
+pub(crate) fn owner() -> Identifier {
     Identifier::from_foton("plugins")
 }
 
@@ -162,12 +164,25 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
 
     let jvm = Arc::clone(&vm);
     events.on::<InventoryClickEvent, _>(owner(), move |event| {
-        let item = event.current_item().map_or(String::new(), |stack| {
-            format!("{} {}", stack.item().key, stack.count())
-        });
-        let cursor = event.cursor_item().map_or(String::new(), |stack| {
-            format!("{} {}", stack.item().key, stack.count())
-        });
+        // Whole stacks, components and all: a plugin's menu tells its buttons
+        // apart by their name or their persistent data, not their material.
+        let item = event
+            .current_item()
+            .map_or(String::new(), natives::describe_slot);
+        let cursor = event
+            .cursor_item()
+            .map_or(String::new(), natives::describe_slot);
+        let (recipe, matrix) = event
+            .craft()
+            .map_or((String::new(), String::new()), |craft| {
+                let matrix = craft
+                    .matrix
+                    .iter()
+                    .map(natives::describe_slot)
+                    .collect::<Vec<_>>()
+                    .join("\u{001e}");
+                (craft.recipe.to_string(), matrix)
+            });
         if !inventory_click_call(
             &jvm,
             &event.player_id().to_string(),
@@ -175,6 +190,7 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
             &cursor,
             event.click(),
             event.slot().map_or(-1, |slot| slot as i32),
+            (&recipe, &matrix),
         ) {
             event.set_cancelled(true);
         }
@@ -306,8 +322,14 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     });
     let jvm = Arc::clone(&vm);
     events.on::<EntityResurrectEvent, _>(owner(), move |event| {
-        if !entity_resurrect_call(&jvm, event.entity_id()) {
-            event.set_cancelled(true);
+        let hand = event.hand().map_or("", |hand| match hand {
+            InteractionHand::MainHand => "HAND",
+            InteractionHand::OffHand => "OFF_HAND",
+        });
+        if let Some(cancelled) =
+            entity_resurrect_call(&jvm, event.entity_id(), hand, Event::is_cancelled(event))
+        {
+            event.set_cancelled(cancelled);
         }
     });
 
@@ -677,6 +699,7 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
             &event.damager().to_string(),
             &event.entity().to_string(),
             event.cause(),
+            event.critical(),
         ) {
             event.set_cancelled(true);
         }
@@ -741,7 +764,7 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     events.on::<PlayerLoginEvent, _>(owner(), move |event| {
         let uuid = event.player().gameprofile.id.to_string();
         if let Some(message) = login_call(&jvm, &uuid, event.player().id()) {
-            event.deny(message);
+            event.deny(component(&message));
         }
     });
 
@@ -977,22 +1000,26 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     let jvm = Arc::clone(&vm);
     events.on::<PlayerJoinEvent, _>(owner(), move |event| {
         let uuid = event.player().gameprofile.id.to_string();
-        let message = event.message().map(plain);
+        let message = event
+            .message()
+            .map(|message| json::to_json(message).to_string());
         match join_call(&jvm, &uuid, event.player().id(), message.as_deref()) {
             Answer::Unreachable => {}
             Answer::Nothing => event.set_message(None),
-            Answer::Message(text) => event.set_message(Some(TextComponent::from(text))),
+            Answer::Message(text) => event.set_message(Some(component(&text))),
         }
     });
 
     let jvm = Arc::clone(&vm);
     events.on::<PlayerQuitEvent, _>(owner(), move |event| {
         let uuid = event.player().gameprofile.id.to_string();
-        let message = event.message().map(plain);
+        let message = event
+            .message()
+            .map(|message| json::to_json(message).to_string());
         match string_call(&jvm, "fireQuit", &uuid, message.as_deref()) {
             Answer::Unreachable => {}
             Answer::Nothing => event.set_message(None),
-            Answer::Message(text) => event.set_message(Some(TextComponent::from(text))),
+            Answer::Message(text) => event.set_message(Some(component(&text))),
         }
     });
 
@@ -1125,13 +1152,6 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     });
 
     let jvm = Arc::clone(&vm);
-    events.on::<BlockBreakEvent, _>(owner(), move |event| {
-        if !block_call(&jvm, "fireBlockBreak", event.player(), event.position()) {
-            event.set_cancelled(true);
-        }
-    });
-
-    let jvm = Arc::clone(&vm);
     events.on::<BlockPlaceEvent, _>(owner(), move |event| {
         if !block_place_call(&jvm, event.player(), event.position(), event.item()) {
             event.set_cancelled(true);
@@ -1165,6 +1185,8 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
             event.payload(),
         );
     });
+
+    relay::subscribe(server, &vm);
 
     // The tick. Not a gameplay event: it is what makes `runTask` mean what
     // Bukkit says it means. A plugin hands over a Runnable from whatever
@@ -1239,10 +1261,6 @@ fn world_call(vm: &JavaVM, method: &str, world: &str) {
         "(Ljava/lang/String;)V",
         &[JValue::Object(&world)],
     );
-}
-
-fn plain(message: &TextComponent) -> String {
-    message.to_plain(&DisplayResolutor)
 }
 
 /// What the plugins decided about a message.
@@ -1404,7 +1422,8 @@ pub(super) fn login_lifecycle_bridge_check(vm: &JavaVM) -> bool {
         && login_call(vm, UUID, 42).is_none()
         && matches!(
             join_call(vm, UUID, 42, Some("joined")),
-            Answer::Message(message) if message == "joined"
+            Answer::Message(message)
+                if json::to_json(&component(&message)) == json::to_json(&text_components::TextComponent::from("joined"))
         )
 }
 
@@ -1509,8 +1528,15 @@ fn inventory_click_call(
     cursor: &str,
     click: &str,
     raw_slot: i32,
+    (recipe, matrix): (&str, &str),
 ) -> bool {
     let Some(mut env) = BridgeEnv::attach(vm) else {
+        return true;
+    };
+    let Ok(recipe) = env.new_string(recipe) else {
+        return true;
+    };
+    let Ok(matrix) = env.new_string(matrix) else {
         return true;
     };
     let Ok(uuid) = env.new_string(player_uuid) else {
@@ -1528,13 +1554,15 @@ fn inventory_click_call(
     env.call_static_method(
         BRIDGE,
         "fireInventoryClick",
-        "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;I)Z",
+        "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;)Z",
         &[
             JValue::Object(&uuid),
             JValue::Object(&item),
             JValue::Object(&cursor),
             JValue::Object(&click),
             JValue::Int(raw_slot),
+            JValue::Object(&recipe),
+            JValue::Object(&matrix),
         ],
     )
     .and_then(JValueGen::z)
@@ -1593,21 +1621,25 @@ fn entity_death_call(vm: &JavaVM, entity: Uuid) {
     );
 }
 
-fn entity_resurrect_call(vm: &JavaVM, entity: Uuid) -> bool {
-    let Some(mut env) = BridgeEnv::attach(vm) else {
-        return true;
-    };
-    let Ok(uuid) = env.new_string(entity.to_string()) else {
-        return true;
-    };
+/// Returns whether the resurrection ends up cancelled, or `None` when the
+/// crossing failed and the event should stay as it was.
+fn entity_resurrect_call(vm: &JavaVM, entity: Uuid, hand: &str, cancelled: bool) -> Option<bool> {
+    let mut env = BridgeEnv::attach(vm)?;
+    let uuid = env.new_string(entity.to_string()).ok()?;
+    let hand = env.new_string(hand).ok()?;
     env.call_static_method(
         BRIDGE,
         "fireEntityResurrect",
-        "(Ljava/lang/String;)Z",
-        &[JValue::Object(&uuid)],
+        "(Ljava/lang/String;Ljava/lang/String;Z)Z",
+        &[
+            JValue::Object(&uuid),
+            JValue::Object(&hand),
+            JValue::Bool(u8::from(cancelled)),
+        ],
     )
     .and_then(JValueGen::z)
-    .unwrap_or(true)
+    .ok()
+    .map(|allowed| !allowed)
 }
 
 fn player_take_lectern_book_call(
@@ -1871,7 +1903,7 @@ fn regain_health_call(vm: &JavaVM, entity: &str, amount: f32) -> bool {
     .unwrap_or(true)
 }
 
-fn damage_call(vm: &JavaVM, damager: &str, entity: &str, cause: &str) -> bool {
+fn damage_call(vm: &JavaVM, damager: &str, entity: &str, cause: &str, critical: bool) -> bool {
     let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
@@ -1887,11 +1919,12 @@ fn damage_call(vm: &JavaVM, damager: &str, entity: &str, cause: &str) -> bool {
     env.call_static_method(
         BRIDGE,
         "fireEntityDamage",
-        "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+        "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z)Z",
         &[
             JValue::Object(&damager),
             JValue::Object(&entity),
             JValue::Object(&cause),
+            JValue::Bool(u8::from(critical)),
         ],
     )
     .and_then(JValueGen::z)
@@ -1997,32 +2030,6 @@ fn hanging_place_call(
 ///
 /// A failed crossing answers `true`: a plugin host that cannot be reached must
 /// not silently start cancelling the world's block changes.
-fn block_call(vm: &JavaVM, method: &str, player: &Arc<Player>, position: BlockPos) -> bool {
-    let Some(mut env) = BridgeEnv::attach(vm) else {
-        return true;
-    };
-    let Ok(uuid) = env.new_string(player.gameprofile.id.to_string()) else {
-        return true;
-    };
-    let Ok(world) = env.new_string(player.get_world().key.to_string()) else {
-        return true;
-    };
-    env.call_static_method(
-        BRIDGE,
-        method,
-        "(Ljava/lang/String;IIILjava/lang/String;)Z",
-        &[
-            JValue::Object(&uuid),
-            JValue::Int(position.x()),
-            JValue::Int(position.y()),
-            JValue::Int(position.z()),
-            JValue::Object(&world),
-        ],
-    )
-    .and_then(JValueGen::z)
-    .unwrap_or(true)
-}
-
 fn block_place_call(
     vm: &JavaVM,
     player: &Arc<Player>,
@@ -2038,9 +2045,9 @@ fn block_place_call(
     let Ok(world) = env.new_string(player.get_world().key.to_string()) else {
         return true;
     };
-    let item = env
-        .new_string(format!("{} {}", item.item().key, item.count()))
-        .ok();
+    // The whole stack: a plugin tells its own placeable items apart by their
+    // components, not their material.
+    let item = env.new_string(natives::describe_slot(item)).ok();
     let Some(item) = item else {
         return true;
     };

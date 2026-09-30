@@ -82,7 +82,10 @@ in `plugin-runtime/`, beside the server binary, and update that directory as
 one verified release asset. A source checkout falls back to
 `plugin-api/build/foton-plugin-api.jar` and `plugin-api/lib/`. Override either
 location with `FOTON_PLUGIN_API_JAR` or `FOTON_PLUGIN_LIBRARY_DIRECTORY` when
-running a custom build. With no FOTON_PLUGIN_DIRECTORY, Foton neither opens
+running a custom build. The library override is a platform path list.
+Source builds also load `plugin-api/build/runtime-libs`, populated by
+`bash dev/fetch-plugin-runtime-libs.sh`, for Paper's additional runtime
+libraries such as the SQLite and MySQL drivers. With no FOTON_PLUGIN_DIRECTORY, Foton neither opens
 the runtime bundle nor starts a JVM, so the normal server path is unchanged.
 
 Direct ViaVersion and ViaBackwards 5.11.0 support is opt-in: download their
@@ -93,6 +96,37 @@ still experimental. The real-client `dev/via-test.sh` acceptance test verifies
 Minecraft 1.21.11 (protocol 774) joining Foton 26.2 (protocol 776) through the
 unmodified official 5.11.0 JARs, and separately verifies that a native 26.2
 client can still join while both plugins are active.
+
+### PacketEvents
+
+Plugins that read or rewrite raw packets usually do it through
+[PacketEvents](https://github.com/retrooper/packetevents), and expect a plugin
+named `packetevents` beside them. The upstream jar cannot run here -- it
+reaches into CraftBukkit to find Netty's pipeline -- so Foton builds its own:
+
+```sh
+bash dev/build-plugin-api.sh
+bash dev/build-packetevents.sh   # fetches PacketEvents 2.13.0, pinned by digest
+```
+
+The result, `plugin-api/build/bundled/packetevents.jar`, is PacketEvents' own
+unmodified API standing on Foton's packet tap (`foton-core/src/packet_tap.rs`)
+instead of a Netty pipeline. The host loads it before the plugin directory; an
+upstream `packetevents` jar dropped into `plugins/` is skipped with a message.
+The build refuses the jar if PacketEvents and Foton disagree on a single packet
+id.
+
+What differs from a Netty server, on purpose:
+
+- Chunk, light and biome packets are not shown to listeners by default: Foton
+  has already compressed them by then. `show-chunk-packets: true` in
+  `plugins/packetevents/config.yml` turns them back on.
+- Sending or injecting a packet works in the play phase only.
+- PacketEvents 2.13.0 was compiled against Adventure 4; Paper 26.2, and so
+  Foton, provide Adventure 5. `dev/plugin_link_check.py` finds 25 references
+  in PacketEvents that Adventure 5 no longer answers, all in its text
+  serializers (click events, show-item hovers, translation arguments, SNBT).
+  A packet carrying such a component fails to convert; nothing else does.
 
 ## License
 

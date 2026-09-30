@@ -15,7 +15,7 @@ fn config() -> PluginHostConfig {
     PluginHostConfig {
         java_home: PathBuf::from("/nowhere"),
         api_jar: PathBuf::from("/nowhere/foton-plugin-api.jar"),
-        library_directory: None,
+        library_directories: Vec::new(),
         plugin_directory: PathBuf::from("/nowhere/plugins"),
     }
 }
@@ -58,7 +58,7 @@ fn the_class_path_is_ordered() {
 
     let config = PluginHostConfig {
         api_jar: jar,
-        library_directory: Some(directory.path().to_owned()),
+        library_directories: vec![directory.path().to_owned()],
         ..config()
     };
     let class_path = config.class_path().expect("the jar exists");
@@ -105,7 +105,7 @@ fn login_attempt_lifecycle_crosses_the_rust_java_bridge() {
         &PluginHostConfig {
             java_home,
             api_jar,
-            library_directory: Some(repository.join("plugin-api/lib")),
+            library_directories: vec![repository.join("plugin-api/lib")],
             plugin_directory: plugins.path().to_owned(),
         },
         &Weak::new(),

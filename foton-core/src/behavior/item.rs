@@ -34,6 +34,7 @@ use crate::block_entity::entities::{SignBlockEntity, SignText};
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::ItemEntity;
 use crate::entity::{Entity, LivingEntity, MobEffectInstance};
+use crate::event::{Event as _, PlayerTeleportEvent, TeleportCause, TeleportPoint};
 use crate::inventory::click::MouseButton;
 use crate::inventory::lock::ContainerLockGuard;
 use crate::inventory::slots::slot::Slot;
@@ -227,6 +228,11 @@ fn teleport_randomly<T: LivingEntity + ?Sized>(world: &World, user: &T, diameter
         if !user.random_teleport(target) {
             continue;
         }
+        if let Some(player) = user.as_player()
+            && !player_teleport_allowed(world, player, origin)
+        {
+            continue;
+        }
 
         world.play_sound_at(
             &sound_events::ITEM_CHORUS_FRUIT_TELEPORT,
@@ -239,6 +245,43 @@ fn teleport_randomly<T: LivingEntity + ?Sized>(world: &World, user: &T, diameter
         user.reset_fall_distance();
         return;
     }
+}
+
+/// Asks plugins about a player's random teleport, which `random_teleport`
+/// has already made server-side, and sends the player where it ended up.
+/// False when they were kept at `origin`, which counts as a failed attempt.
+///
+/// Vanilla parity: `ServerPlayer.teleportTo`, which is how
+/// `randomTeleport` moves a player -- the client has to be told. Paper
+/// parity: `PlayerTeleportEvent` with `TeleportCause.CONSUMABLE_EFFECT`,
+/// whose refusal makes the attempt fail and the next one be tried.
+fn player_teleport_allowed(world: &World, player: &Player, origin: DVec3) -> bool {
+    let rotation = player.rotation();
+    let key = world.key.to_string();
+    let mut event = PlayerTeleportEvent::new(
+        player.gameprofile.id,
+        TeleportPoint {
+            world: key.clone(),
+            position: origin,
+            rotation,
+        },
+        TeleportPoint {
+            world: key,
+            position: player.position(),
+            rotation,
+        },
+        TeleportCause::ConsumableEffect,
+    );
+    player.fire_event(&mut event);
+    let moved = !event.is_cancelled()
+        && world
+            .players
+            .get_by_entity_id(player.id())
+            .is_some_and(|player| player.teleport_announced(event.to()));
+    if !moved {
+        let _ = player.try_set_position(origin);
+    }
+    moved
 }
 
 /// Yields every effect a potion bottle carries.

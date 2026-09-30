@@ -100,7 +100,21 @@ public abstract class Command {
 
     public abstract boolean execute(CommandSender sender, String label, String[] args);
 
+    /** Bukkit's default: the online players whose names start with the last
+     * argument, among those the sender can see, sorted without regard to case. */
     public List<String> tabComplete(CommandSender sender, String label, String[] args) {
-        return List.of();
+        if (args.length == 0) return List.of();
+        String last = args[args.length - 1].toLowerCase(java.util.Locale.ROOT);
+        org.bukkit.entity.Player viewer = sender instanceof org.bukkit.entity.Player player ? player : null;
+        java.util.ArrayList<String> names = new java.util.ArrayList<>();
+        for (org.bukkit.entity.Player player : org.bukkit.Bukkit.getOnlinePlayers()) {
+            String name = player.getName();
+            if ((viewer == null || viewer.canSee(player))
+                    && name.toLowerCase(java.util.Locale.ROOT).startsWith(last)) {
+                names.add(name);
+            }
+        }
+        names.sort(String.CASE_INSENSITIVE_ORDER);
+        return names;
     }
 }

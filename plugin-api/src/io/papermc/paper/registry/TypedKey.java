@@ -50,14 +50,16 @@ final class TypedKeyImpl<T> implements TypedKey<T> {
         return key.asString() + " (" + registryKey + ")";
     }
 
+    // By the key's text, not the key object: a NamespacedKey and Adventure's
+    // own Key name the same entry, and each class's equals only knows itself.
     @Override
     public boolean equals(Object other) {
         if (!(other instanceof TypedKey<?> that)) return false;
-        return registryKey.equals(that.registryKey()) && key.equals(that.key());
+        return registryKey.equals(that.registryKey()) && key.asString().equals(that.key().asString());
     }
 
     @Override
     public int hashCode() {
-        return 31 * registryKey.hashCode() + key.hashCode();
+        return 31 * registryKey.hashCode() + key.asString().hashCode();
     }
 }

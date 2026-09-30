@@ -4,6 +4,10 @@ package org.bukkit.inventory;
 public interface EntityEquipment {
     default org.bukkit.entity.Entity getHolder() { return null; }
     ItemStack[] getArmorContents();
+    ItemStack getItem(EquipmentSlot slot);
+    void setItem(EquipmentSlot slot, ItemStack item);
+    /** Sets an item; Foton plays no equip sound either way. */
+    default void setItem(EquipmentSlot slot, ItemStack item, boolean silent) { setItem(slot, item); }
     default ItemStack getHelmet() { ItemStack[] armor = getArmorContents(); return armor.length > 3 ? armor[3] : null; }
     default void setHelmet(ItemStack item) { ItemStack[] armor = getArmorContents(); if (armor.length > 3) { armor[3] = item; setArmorContents(armor); } }
     default ItemStack getChestplate() { ItemStack[] armor = getArmorContents(); return armor.length > 2 ? armor[2] : null; }

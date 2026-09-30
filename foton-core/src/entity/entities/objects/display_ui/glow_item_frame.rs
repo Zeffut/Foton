@@ -134,6 +134,14 @@ impl GlowItemFrameEntity {
         self.set_item_with_update(item, true);
     }
 
+    /// Plays the sound of an item being put in this frame.
+    ///
+    /// Vanilla parity: the `playSound(getAddItemSound())` of
+    /// `ItemFrame.setItem`, for callers that place an item without a player.
+    pub fn play_add_item_sound(&self) {
+        self.play_sound_at_frame(&sound_events::ENTITY_GLOW_ITEM_FRAME_ADD_ITEM);
+    }
+
     /// Sets the framed item and optionally notifies nearby comparators.
     pub(crate) fn set_item_with_update(&self, mut item: ItemStack, update_comparators: bool) {
         if !item.is_empty() {
