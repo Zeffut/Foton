@@ -109,10 +109,11 @@ public final class LifecycleCommandsCheck {
             PluginHost.cleanup(owner);
             Checks.expect(PluginHost.byName(NAME) == null, "discard must unpublish identity");
             Checks.expect(resourceAvailable(loader), "discard closed loader before task drain");
+            var teardown = LoadingTasksCheck.asyncTeardownBarrier();
+            Checks.expect(!teardown.isDone(), "teardown barrier passed a held invocation");
             release.countDown();
             await(finished, "late handler task did not finish");
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-            while (resourceAvailable(loader) && System.nanoTime() < deadline) Thread.onSpinWait();
+            teardown.get(5, TimeUnit.SECONDS);
             Checks.expect(!resourceAvailable(loader), "discard did not close drained loader");
             Checks.expect(taskFailure.get() == null, "late task failed: " + taskFailure.get());
         }

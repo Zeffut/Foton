@@ -91,10 +91,11 @@ public final class LoadingTasksCheck {
             Plugin current = foton.PluginHost.byName(NAME);
             Checks.expect(current != owner && !current.isEnabled(),
                 "replacement must have its own pre-enable identity");
+            var teardown = asyncTeardownBarrier();
+            Checks.expect(!teardown.isDone(), "teardown barrier passed a held invocation");
             releaseTask.countDown();
             await(finished, "old loading task did not finish");
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-            while (resourceAvailable(loader) && System.nanoTime() < deadline) Thread.onSpinWait();
+            teardown.get(5, TimeUnit.SECONDS);
             Checks.expect(!resourceAvailable(loader), "retired loader did not close after task drain");
             Checks.expect(taskFailure.get() == null, "held task failed: " + taskFailure.get());
             Checks.same(foton.PluginHost.byName(NAME), current,
@@ -186,6 +187,15 @@ public final class LoadingTasksCheck {
 
     private static boolean resourceAvailable(PluginClassLoader source) throws Exception {
         try (InputStream stream = source.getResourceAsStream(RESOURCE)) { return stream != null; }
+    }
+
+    static java.util.concurrent.Future<?> asyncTeardownBarrier() throws Exception {
+        var field = foton.FotonScheduler.class.getDeclaredField("OFF_TICK");
+        field.setAccessible(true);
+        var executor = (java.util.concurrent.ScheduledThreadPoolExecutor) field.get(null);
+        Checks.same(executor.getCorePoolSize(), 1, "teardown barrier needs the single async worker");
+        // A body latch precedes Invocation.close(); the next worker job follows deferred cleanup.
+        return executor.submit(() -> {});
     }
 
     private static void await(CountDownLatch latch, String message) {
