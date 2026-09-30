@@ -7,7 +7,7 @@ SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/foton-release-test.XXXXXX")"
 cleanup() {
   status=$?
   if [ "$status" -ne 0 ]; then
-    for log in "$SCRATCH/output" "$SCRATCH/real-output"; do
+    for log in "$SCRATCH/output" "$SCRATCH/real-output" "$SCRATCH"/reuse-*.log; do
       [ -f "$log" ] && { printf '\n--- %s ---\n' "$(basename "$log")" >&2; cat "$log" >&2; }
     done
   fi
@@ -21,12 +21,11 @@ MOCK_BIN="$SCRATCH/bin"
 TARGET="$SCRATCH/target"
 mkdir -p "$FIXTURE/dev" "$FIXTURE/plugin-api/lib" "$MOCK_BIN"
 cp "$REPO/dev/release.sh" "$FIXTURE/dev/release.sh"
+cp "$REPO/dev/fetch-plugin-api-libs.sh" "$FIXTURE/dev/"
 cp -R "$REPO/plugin-api/lib/licenses" "$FIXTURE/plugin-api/lib/licenses"
 printf '[workspace.package]\nversion = "9.8.7+mc26.2"\n' > "$FIXTURE/Cargo.toml"
 
-for source_jar in "$REPO"/plugin-api/lib/*.jar; do
-  printf 'dependency %s\n' "$(basename "$source_jar")" > "$FIXTURE/plugin-api/lib/$(basename "$source_jar")"
-done
+cp "$REPO"/plugin-api/lib/*.jar "$FIXTURE/plugin-api/lib/"
 
 cat > "$FIXTURE/dev/ci.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -226,7 +225,10 @@ for license in ADVENTURE-MIT.txt APACHE-2.0.txt BRIGADIER-MIT.txt JOML-MIT.txt \
 done
 grep -q 'END OF TERMS AND CONDITIONS' "$REPO/plugin-api/lib/licenses/APACHE-2.0.txt"
 for dependency in adventure-api adventure-key adventure-text-logger-slf4j \
-  adventure-text-serializer-plain annotations brigadier gson guava \
+  adventure-text-minimessage adventure-text-serializer-commons \
+  adventure-text-serializer-gson adventure-text-serializer-json \
+  adventure-text-serializer-legacy adventure-text-serializer-plain option \
+  annotations brigadier gson guava \
   failureaccess jspecify error_prone_annotations j2objc-annotations joml \
   kotlin-stdlib-jdk8 kotlin-stdlib-jdk7 kotlin-stdlib kotlin-stdlib-common \
   netty-buffer netty-codec-base netty-common netty-resolver netty-transport \
@@ -246,9 +248,17 @@ OUT="$TARGET/release-artifacts"
 tar -tzf "$OUT/foton-plugin-runtime.tar.gz" > "$SCRATCH/tar-list"
 jar tf "$OUT/foton-plugin-runtime.zip" > "$SCRATCH/zip-list"
 tar -xOzf "$OUT/foton-plugin-runtime.tar.gz" ./SHA256SUMS > "$SCRATCH/runtime-sums"
-[ "$(grep -c '^[0-9a-f]\{64\}  ' "$SCRATCH/runtime-sums")" -eq 31 ]
-[ "$(grep -c '\.jar$' "$SCRATCH/tar-list")" -eq 25 ]
-[ "$(grep -c '\.jar$' "$SCRATCH/zip-list")" -eq 25 ]
+[ "$(grep -c '^[0-9a-f]\{64\}  ' "$SCRATCH/runtime-sums")" -eq 37 ]
+[ "$(grep -c '\.jar$' "$SCRATCH/tar-list")" -eq 31 ]
+[ "$(grep -c '\.jar$' "$SCRATCH/zip-list")" -eq 31 ]
+[ "$(grep -vc '/$' "$SCRATCH/tar-list")" -eq 38 ]
+[ "$(grep -vc '/$' "$SCRATCH/zip-list")" -eq 38 ]
+for library in adventure-text-minimessage-5.2.0.jar adventure-text-serializer-commons-5.2.0.jar \
+  adventure-text-serializer-gson-5.2.0.jar adventure-text-serializer-json-5.2.0.jar \
+  adventure-text-serializer-legacy-5.2.0.jar option-1.1.0.jar; do
+  grep -qx "./lib/$library" "$SCRATCH/tar-list"
+  grep -qx "lib/$library" "$SCRATCH/zip-list"
+done
 [ "$(grep -c '^\./licenses/.*\.txt$' "$SCRATCH/tar-list")" -eq 6 ]
 [ "$(grep -c '^licenses/.*\.txt$' "$SCRATCH/zip-list")" -eq 6 ]
 grep -qx './foton-plugin-api.jar' "$SCRATCH/tar-list"
@@ -290,6 +300,29 @@ if bash "$FIXTURE/dev/release.sh" --dry-run > "$SCRATCH/missing-license-release.
 fi
 grep -q 'license input is missing or unsafe' "$SCRATCH/missing-license-release.log"
 cp "$REPO/plugin-api/lib/licenses/SLF4J-MIT.txt" "$FIXTURE/plugin-api/lib/licenses/"
+
+# Packaging must validate names and digests itself, even after the build gate.
+rm "$FIXTURE/plugin-api/lib/option-1.1.0.jar"
+if bash "$FIXTURE/dev/release.sh" --dry-run > "$SCRATCH/missing-jar-release.log" 2>&1; then
+  echo 'manual release accepted a missing pinned dependency' >&2
+  exit 1
+fi
+grep -q 'missing or stale: option-1.1.0.jar' "$SCRATCH/missing-jar-release.log"
+cp "$REPO/plugin-api/lib/option-1.1.0.jar" "$FIXTURE/plugin-api/lib/"
+printf 'unexpected dependency\n' > "$FIXTURE/plugin-api/lib/unexpected.jar"
+if bash "$FIXTURE/dev/release.sh" --dry-run > "$SCRATCH/extra-jar-release.log" 2>&1; then
+  echo 'manual release accepted an extra dependency' >&2
+  exit 1
+fi
+grep -q 'unpinned jar' "$SCRATCH/extra-jar-release.log"
+rm "$FIXTURE/plugin-api/lib/unexpected.jar"
+printf 'changed dependency\n' > "$FIXTURE/plugin-api/lib/option-1.1.0.jar"
+if bash "$FIXTURE/dev/release.sh" --dry-run > "$SCRATCH/changed-jar-release.log" 2>&1; then
+  echo 'manual release accepted a changed dependency digest' >&2
+  exit 1
+fi
+grep -q 'missing or stale: option-1.1.0.jar' "$SCRATCH/changed-jar-release.log"
+cp "$REPO/plugin-api/lib/option-1.1.0.jar" "$FIXTURE/plugin-api/lib/"
 
 # The final check closes changes that occur during the build: neither a moved
 # master branch nor a concurrently-created tag may be dispatched over.

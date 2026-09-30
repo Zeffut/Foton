@@ -238,7 +238,7 @@ jobs:
       - name: Package the optional plugin runtime
         run: |
           bash dev/fetch-plugin-api-libs.sh --check
-          test "$(find plugin-api/lib -maxdepth 1 -type f -name '*.jar' | wc -l)" -eq 24
+          test "$(find plugin-api/lib -maxdepth 1 -type f -name '*.jar' | wc -l)" -eq 30
           test "$(find plugin-api/lib/licenses -maxdepth 1 -type f -name '*.txt' | wc -l)" -eq 6
           for license in ADVENTURE-MIT.txt APACHE-2.0.txt BRIGADIER-MIT.txt JOML-MIT.txt SLF4J-MIT.txt THIRD-PARTY-NOTICES.txt; do
             test -f "plugin-api/lib/licenses/${license}" && test ! -L "plugin-api/lib/licenses/${license}"
@@ -280,7 +280,7 @@ jobs:
               exit 1
             }
           done
-          local_names=$(find release -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)
+          local_names=$(find release -mindepth 1 -maxdepth 1 -exec basename {} \; | LC_ALL=C sort)
           if [[ "${local_names}" != "${expected_names}" ]]; then
             echo "local release directory is not the exact expected asset set" >&2
             exit 1

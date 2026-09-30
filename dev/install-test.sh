@@ -3,6 +3,7 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export FOTON_INSTALL_REAL_CP="$(type -P cp)"
 SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/foton-install-test.XXXXXX")"
 cleanup() {
   status=$?
@@ -40,6 +41,11 @@ runtime_libraries() {
 adventure-api-5.2.0.jar
 adventure-key-5.2.0.jar
 adventure-text-logger-slf4j-5.2.0.jar
+adventure-text-minimessage-5.2.0.jar
+adventure-text-serializer-commons-5.2.0.jar
+adventure-text-serializer-gson-5.2.0.jar
+adventure-text-serializer-json-5.2.0.jar
+adventure-text-serializer-legacy-5.2.0.jar
 adventure-text-serializer-plain-5.2.0.jar
 annotations-26.1.0.jar
 brigadier-1.3.10.jar
@@ -59,6 +65,7 @@ netty-codec-base-4.2.15.Final.jar
 netty-common-4.2.15.Final.jar
 netty-resolver-4.2.15.Final.jar
 netty-transport-4.2.15.Final.jar
+option-1.1.0.jar
 slf4j-api-2.0.17.jar
 snakeyaml-2.2.jar
 EOF
@@ -150,7 +157,7 @@ cat > "$MOCK_BIN/cp" <<'EOF'
 if [ "${FOTON_INSTALL_FAIL_RESTORE:-0}" = 1 ]; then
   case "${2:-}" in */previous-binary) exit 73 ;; esac
 fi
-exec /usr/bin/cp "$@"
+exec "$FOTON_INSTALL_REAL_CP" "$@"
 EOF
 chmod +x "$MOCK_BIN/uname" "$MOCK_BIN/curl" "$MOCK_BIN/mv" "$MOCK_BIN/cp"
 
@@ -293,7 +300,8 @@ grep -qx 'keep save' "$COLLISION/saves/sentinel"
 write_binary "$INSTALL/foton" 9.8.6
 write_runtime "$INSTALL/plugin-runtime" v9.8.6 old 1
 write_runtime "$ASSETS/runtime" v9.8.7 truncated
-sed -i '$d' "$ASSETS/runtime/SHA256SUMS"
+sed -i.bak '$d' "$ASSETS/runtime/SHA256SUMS"
+rm "$ASSETS/runtime/SHA256SUMS.bak"
 package_release
 if (
   cd "$INSTALL"
@@ -307,26 +315,42 @@ grep -q 'incomplete or invalid runtime manifest' "$SCRATCH/truncated.log"
 grep -q '^library old adventure-api-5.2.0.jar$' "$INSTALL/plugin-runtime/lib/adventure-api-5.2.0.jar"
 
 # A self-consistent but shortened bundle is also invalid: the supported host
-# runtime is the API plus exactly twenty-four dependency jars.
+# runtime is the API plus exactly thirty dependency jars.
 write_runtime "$ASSETS/runtime" v9.8.7 shortened
 rm "$ASSETS/runtime/lib/netty-codec-base-4.2.15.Final.jar"
-sed -i '/lib\/netty-codec-base-4\.2\.15\.Final\.jar$/d' "$ASSETS/runtime/SHA256SUMS"
+sed -i.bak '/lib\/netty-codec-base-4\.2\.15\.Final\.jar$/d' "$ASSETS/runtime/SHA256SUMS"
+rm "$ASSETS/runtime/SHA256SUMS.bak"
 package_release
 if (
   cd "$INSTALL"
   bash "$REPO/site/static/install.sh" --update > "$SCRATCH/shortened.log" 2>&1
 ); then
-  echo 'installer accepted a runtime with only twenty-three dependency jars' >&2
+  echo 'installer accepted a runtime with only twenty-nine dependency jars' >&2
   exit 1
 fi
 grep -q 'unsafe or unexpected archive entry' "$SCRATCH/shortened.log"
+[ "$("$INSTALL/foton" --version)" = 'foton 9.8.6' ]
+
+# An extra jar is invalid even when both manifests include its real digest.
+write_runtime "$ASSETS/runtime" v9.8.7 extra-jar
+printf 'untrusted dependency\n' > "$ASSETS/runtime/lib/unexpected.jar"
+( cd "$ASSETS/runtime" && sha256sum lib/unexpected.jar >> SHA256SUMS )
+package_release
+if (
+  cd "$INSTALL"
+  bash "$REPO/site/static/install.sh" --update > "$SCRATCH/extra-jar.log" 2>&1
+); then
+  echo 'installer accepted a checksummed extra runtime jar' >&2
+  exit 1
+fi
 [ "$("$INSTALL/foton" --version)" = 'foton 9.8.6' ]
 
 # Required license filenames are part of the bundle contract. A publisher
 # cannot silently omit one while keeping a self-consistent checksum manifest.
 write_runtime "$ASSETS/runtime" v9.8.7 missing-license
 rm "$ASSETS/runtime/licenses/SLF4J-MIT.txt"
-sed -i '/licenses\/SLF4J-MIT\.txt$/d' "$ASSETS/runtime/SHA256SUMS"
+sed -i.bak '/licenses\/SLF4J-MIT\.txt$/d' "$ASSETS/runtime/SHA256SUMS"
+rm "$ASSETS/runtime/SHA256SUMS.bak"
 package_release
 if (
   cd "$INSTALL"
@@ -351,7 +375,7 @@ if (
 fi
 
 # The count alone is not the runtime contract. A self-consistent archive with
-# twenty-four jars but one unexpected name must be rejected before replacement.
+# thirty jars but one unexpected name must be rejected before replacement.
 write_runtime "$ASSETS/runtime" v9.8.7 renamed-jar
 mv "$ASSETS/runtime/lib/failureaccess-1.0.3.jar" "$ASSETS/runtime/lib/unexpected-1.0.jar"
 (

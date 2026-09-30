@@ -666,10 +666,15 @@ fn installed_plugin_runtime_directory() -> Result<Option<PathBuf>, String> {
     Ok(None)
 }
 
-const PLUGIN_RUNTIME_JARS: [&str; 24] = [
+const PLUGIN_RUNTIME_JARS: [&str; 30] = [
     "adventure-api-5.2.0.jar",
     "adventure-key-5.2.0.jar",
     "adventure-text-logger-slf4j-5.2.0.jar",
+    "adventure-text-minimessage-5.2.0.jar",
+    "adventure-text-serializer-commons-5.2.0.jar",
+    "adventure-text-serializer-gson-5.2.0.jar",
+    "adventure-text-serializer-json-5.2.0.jar",
+    "adventure-text-serializer-legacy-5.2.0.jar",
     "adventure-text-serializer-plain-5.2.0.jar",
     "annotations-26.1.0.jar",
     "brigadier-1.3.10.jar",
@@ -689,6 +694,7 @@ const PLUGIN_RUNTIME_JARS: [&str; 24] = [
     "netty-common-4.2.15.Final.jar",
     "netty-resolver-4.2.15.Final.jar",
     "netty-transport-4.2.15.Final.jar",
+    "option-1.1.0.jar",
     "slf4j-api-2.0.17.jar",
     "snakeyaml-2.2.jar",
 ];
@@ -1022,17 +1028,31 @@ mod tests {
     use tokio::time::Instant;
 
     use super::{
-        BedrockConfig, CancellationToken, FotonServerError, PLUGIN_RUNTIME_JARS,
-        PLUGIN_RUNTIME_LICENSES, SourceConnectionLimiter, accept_or_backoff, lowercase_hex,
-        resolve_run_directory, start_bedrock_supervisor, validate_installed_plugin_runtime,
+        BedrockConfig, CancellationToken, FotonServerError, PLUGIN_RUNTIME_LICENSES,
+        SourceConnectionLimiter, accept_or_backoff, lowercase_hex, resolve_run_directory,
+        start_bedrock_supervisor, validate_installed_plugin_runtime,
     };
 
     fn write_runtime_fixture(directory: &Path) {
         fs::create_dir_all(directory.join("lib")).expect("runtime library directory");
         fs::create_dir_all(directory.join("licenses")).expect("runtime license directory");
         fs::write(directory.join("foton-plugin-api.jar"), b"api").expect("API fixture");
-        for name in PLUGIN_RUNTIME_JARS {
-            fs::write(directory.join("lib").join(name), name).expect("library fixture");
+        // Model the vendored release input, independently of the startup allowlist.
+        let mut paths = vec!["foton-plugin-api.jar".to_owned()];
+        let libraries =
+            fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugin-api/lib"))
+                .expect("vendored runtime libraries");
+        for library in libraries {
+            let path = library.expect("vendored library entry").path();
+            if path.extension().is_some_and(|extension| extension == "jar") {
+                let name = path
+                    .file_name()
+                    .expect("library filename")
+                    .to_str()
+                    .expect("UTF-8 library name");
+                fs::write(directory.join("lib").join(name), name).expect("library fixture");
+                paths.push(format!("lib/{name}"));
+            }
         }
         for name in PLUGIN_RUNTIME_LICENSES {
             fs::write(directory.join("licenses").join(name), name).expect("license fixture");
@@ -1042,8 +1062,6 @@ mod tests {
             format!("v{}\n", env!("CARGO_PKG_VERSION")),
         )
         .expect("release tag fixture");
-        let mut paths = vec!["foton-plugin-api.jar".to_owned()];
-        paths.extend(PLUGIN_RUNTIME_JARS.map(|name| format!("lib/{name}")));
         paths.extend(PLUGIN_RUNTIME_LICENSES.map(|name| format!("licenses/{name}")));
         paths.sort();
         let manifest = paths
@@ -1085,6 +1103,35 @@ mod tests {
         fs::write(temporary.path().join("lib/unpinned.jar"), b"untrusted")
             .expect("unmanifested fixture");
 
+        assert!(validate_installed_plugin_runtime(temporary.path()).is_err());
+    }
+
+    #[test]
+    fn installed_plugin_runtime_rejects_self_consistent_missing_or_extra_jars() {
+        let temporary = tempfile::tempdir().expect("runtime fixture directory");
+        write_runtime_fixture(temporary.path());
+        let manifest_path = temporary.path().join("SHA256SUMS");
+        let manifest = fs::read_to_string(&manifest_path).expect("fixture manifest");
+        fs::remove_file(temporary.path().join("lib/option-1.1.0.jar"))
+            .expect("remove incoming dependency");
+        let shortened = manifest
+            .lines()
+            .filter(|line| !line.ends_with("  lib/option-1.1.0.jar"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        fs::write(&manifest_path, format!("{shortened}\n")).expect("shortened manifest");
+        assert!(validate_installed_plugin_runtime(temporary.path()).is_err());
+
+        write_runtime_fixture(temporary.path());
+        fs::write(temporary.path().join("lib/unpinned.jar"), b"untrusted").expect("extra library");
+        fs::write(
+            manifest_path,
+            format!(
+                "{manifest}{}  lib/unpinned.jar\n",
+                lowercase_hex(&Sha256::digest(b"untrusted"))
+            ),
+        )
+        .expect("self-consistent extra manifest entry");
         assert!(validate_installed_plugin_runtime(temporary.path()).is_err());
     }
 

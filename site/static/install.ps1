@@ -181,6 +181,11 @@ function Test-RuntimeComplete {
         'adventure-api-5.2.0.jar',
         'adventure-key-5.2.0.jar',
         'adventure-text-logger-slf4j-5.2.0.jar',
+        'adventure-text-minimessage-5.2.0.jar',
+        'adventure-text-serializer-commons-5.2.0.jar',
+        'adventure-text-serializer-gson-5.2.0.jar',
+        'adventure-text-serializer-json-5.2.0.jar',
+        'adventure-text-serializer-legacy-5.2.0.jar',
         'adventure-text-serializer-plain-5.2.0.jar',
         'annotations-26.1.0.jar',
         'brigadier-1.3.10.jar',
@@ -200,6 +205,7 @@ function Test-RuntimeComplete {
         'netty-common-4.2.15.Final.jar',
         'netty-resolver-4.2.15.Final.jar',
         'netty-transport-4.2.15.Final.jar',
+        'option-1.1.0.jar',
         'slf4j-api-2.0.17.jar',
         'snakeyaml-2.2.jar'
     )
@@ -251,8 +257,8 @@ function Test-RuntimeComplete {
     foreach ($licenseName in $expectedLicenses) {
         if (-not (Test-RegularFile (Join-Path $licenses $licenseName))) { return $false }
     }
-    return $apiSeen -eq 1 -and $librariesSeen -eq 24 -and
-        $jarFiles.Count -eq 24 -and $libraryFiles.Count -eq 24 -and
+    return $apiSeen -eq 1 -and $librariesSeen -eq 30 -and
+        $jarFiles.Count -eq 30 -and $libraryFiles.Count -eq 30 -and
         $licensesSeen -eq 6 -and $manifestEntries -eq $actualFiles.Count
 }
 
