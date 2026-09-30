@@ -18,22 +18,30 @@ public final class FotonLifecycle {
     }
 
     public static void dispatchCommands(JavaPlugin plugin) {
+        commandDispatcher(plugin).run();
+    }
+
+    /** One registrar and handler cursor shared by the two phases of an enable cycle. */
+    static Runnable commandDispatcher(JavaPlugin plugin) {
         Commands commands = new FotonCommands();
         ReloadableRegistrarEvent event = () -> commands;
-        try {
-            plugin.getLifecycleManager().dispatch(LifecycleEvents.COMMANDS, event);
-        } catch (LinkageError unsupportedLifecycleShape) {
-            System.out.println("[host] " + plugin.getName() + ": Paper lifecycle handler shape is unavailable; continuing without lifecycle commands");
-        }
-        for (var node : commands.getDispatcher().getRoot().getChildren()) {
-            if (!(node instanceof com.mojang.brigadier.tree.LiteralCommandNode<?> literal)) {
-                continue;
+        Runnable dispatch = plugin.getLifecycleManager().incrementalDispatch(LifecycleEvents.COMMANDS, event);
+        java.util.Set<String> published = new java.util.HashSet<>();
+        return () -> {
+            try {
+                dispatch.run();
+            } catch (LinkageError unsupportedLifecycleShape) {
+                System.out.println("[host] " + plugin.getName() + ": Paper lifecycle handler shape is unavailable; continuing without lifecycle commands");
             }
-            PluginCommand command = new PluginCommand(literal.getLiteral(), plugin);
-            command.setExecutor((sender, ignored, label, args) -> commands.dispatch(
-                sender, args.length == 0 ? label : label + " " + String.join(" ", args)));
-            CommandMap.register(command);
-        }
-        CommandMap.registerBrigadier(commands, plugin);
+            for (var node : commands.getDispatcher().getRoot().getChildren()) {
+                if (!(node instanceof com.mojang.brigadier.tree.LiteralCommandNode<?> literal)
+                        || !published.add(literal.getLiteral())) continue;
+                PluginCommand command = new PluginCommand(literal.getLiteral(), plugin);
+                command.setExecutor((sender, ignored, label, args) -> commands.dispatch(
+                    sender, args.length == 0 ? label : label + " " + String.join(" ", args)));
+                CommandMap.register(command);
+            }
+            CommandMap.registerBrigadier(commands, plugin);
+        };
     }
 }

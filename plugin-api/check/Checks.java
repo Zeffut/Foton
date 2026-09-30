@@ -11,6 +11,7 @@ public final class Checks {
         Services.check();
         Events.check(args[0]);
         LoadingTasksCheck.check();
+        LifecycleCommandsCheck.check();
         PluginLifecycle.check();
         NetworkHooks.check();
         foton.LibraryCacheChecks.check();

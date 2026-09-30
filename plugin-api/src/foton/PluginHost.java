@@ -1291,8 +1291,21 @@ public final class PluginHost {
         boolean disableRequested;
         boolean discardRequested;
         try {
-            invokeLifecycleCallback(() -> FotonLifecycle.dispatchCommands(plugin));
+            Runnable commands = FotonLifecycle.commandDispatcher(plugin);
+            invokeLifecycleCallback(commands);
             invokeLifecycleCallback(plugin::onEnable);
+            Invocation commandInvocation;
+            synchronized (lifecycle) {
+                InvocationState state = invocations.get(plugin);
+                commandInvocation = state != null && state.accepting && plugin.isEnabled()
+                    && isPublishedLocked(plugin) && !state.disableRequested && !state.discardRequested
+                    ? acquireInvocation(state) : null;
+            }
+            if (commandInvocation != null) {
+                try (commandInvocation) {
+                    invokeLifecycleCallback(commands);
+                }
+            }
         } finally {
             synchronized (lifecycle) {
                 InvocationState state = invocations.get(plugin);

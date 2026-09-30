@@ -36,13 +36,26 @@ public final class FotonLifecycleEventManager implements LifecycleEventManager {
         transferred = true;
     }
 
-    @SuppressWarnings("unchecked")
     public <T extends LifecycleEvent> void dispatch(LifecycleEventType<T> type, T event) {
-        for (Registration<?> registration : List.copyOf(handlers)) {
-            if (registration.type == type || registration.type == null) {
-                ((LifecycleEventHandler<T>) registration.handler).run(event);
+        incrementalDispatch(type, event).run();
+    }
+
+    /** Each call delivers only registrations not yet visited by this dispatch cycle. */
+    public <T extends LifecycleEvent> Runnable incrementalDispatch(LifecycleEventType<T> type, T event) {
+        return new Runnable() {
+            private int next;
+
+            @Override @SuppressWarnings("unchecked")
+            public void run() {
+                List<Registration<?>> snapshot = List.copyOf(handlers);
+                while (next < snapshot.size()) {
+                    Registration<?> registration = snapshot.get(next++);
+                    if (registration.type == type || registration.type == null) {
+                        ((LifecycleEventHandler<T>) registration.handler).run(event);
+                    }
+                }
             }
-        }
+        };
     }
 
     private void requireOpen() {
