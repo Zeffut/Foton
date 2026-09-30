@@ -1,8 +1,13 @@
 //! Vanilla `minecraft:potion_contents` item component.
 
+use foton_utils::serial::budget;
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 
 use foton_utils::codec::VarInt;
+use foton_utils::color::RgbColor;
 use foton_utils::hash::{ComponentHasher, HashComponent, HashEntry, sort_map_entries};
 use foton_utils::nbt::NbtNumeric as _;
 use foton_utils::serial::{PrefixedRead as _, PrefixedWrite as _, ReadFrom, WriteTo};
@@ -24,6 +29,8 @@ pub struct PotionContents {
 
 impl PotionContents {
     const MAX_NETWORK_STRING_LENGTH: usize = 32_767;
+    /// Vanilla's fallback color when potion contents have no visible effects.
+    pub const BASE_POTION_COLOR: i32 = -13_083_194;
 
     #[must_use]
     pub const fn empty() -> Self {
@@ -45,6 +52,52 @@ impl PotionContents {
             potion: Some(potion),
             ..self
         }
+    }
+
+    /// Returns these contents with one custom effect appended.
+    ///
+    /// Vanilla parity: `PotionContents.withEffectAdded` preserves every other
+    /// component field and appends without replacing existing custom effects.
+    #[must_use]
+    pub fn with_effect_added(mut self, effect: MobEffectInstance) -> Self {
+        self.custom_effects.push(effect);
+        self
+    }
+
+    /// Returns Vanilla's ARGB potion display color.
+    #[must_use]
+    pub fn color(&self) -> i32 {
+        if let Some(custom_color) = self.custom_color {
+            return custom_color;
+        }
+
+        let mut red = 0;
+        let mut green = 0;
+        let mut blue = 0;
+        let mut total_weight = 0;
+        if let Some(potion) = self.potion {
+            for effect in potion.value().effects {
+                let weight = effect.amplifier + 1;
+                red += i32::from(effect.effect.color.red()) * weight;
+                green += i32::from(effect.effect.color.green()) * weight;
+                blue += i32::from(effect.effect.color.blue()) * weight;
+                total_weight += weight;
+            }
+        }
+        for effect in &self.custom_effects {
+            if effect.show_particles() {
+                let weight = effect.amplifier() + 1;
+                red += i32::from(effect.effect().color.red()) * weight;
+                green += i32::from(effect.effect().color.green()) * weight;
+                blue += i32::from(effect.effect().color.blue()) * weight;
+                total_weight += weight;
+            }
+        }
+        if total_weight == 0 {
+            return Self::BASE_POTION_COLOR;
+        }
+        let rgb = (red / total_weight) << 16 | (green / total_weight) << 8 | (blue / total_weight);
+        RgbColor::new(rgb).with_alpha(u8::MAX).raw()
     }
 
     #[must_use]
@@ -189,7 +242,8 @@ impl ReadFrom for PotionContents {
             None
         };
         let count = read_count(data)?;
-        let mut custom_effects = Vec::with_capacity(count.min(65_536));
+        budget::check_collection_input(data, count, 4)?;
+        let mut custom_effects = budget::read_vec(count, count.min(65_536))?;
         for _ in 0..count {
             custom_effects.push(MobEffectInstance::read(data)?);
         }
@@ -294,6 +348,29 @@ fn push_hash_entry<T: HashComponent + ?Sized>(entries: &mut Vec<HashEntry>, key:
     let mut value_hasher = ComponentHasher::new();
     value.hash_component(&mut value_hasher);
     entries.push(HashEntry::new(key_hasher, value_hasher));
+}
+
+impl nbt_encode::NbtEncode for PotionContents {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+        if let Some(potion) = self.potion {
+            field("potion", &potion, writer, depth)?;
+        }
+        if let Some(color) = self.custom_color {
+            field("custom_color", &color, writer, depth)?;
+        }
+        if !self.custom_effects.is_empty() {
+            field("custom_effects", &self.custom_effects, writer, depth)?;
+        }
+        if let Some(name) = &self.custom_name {
+            field("custom_name", name, writer, depth)?;
+        }
+        end(writer)
+    }
 }
 
 #[cfg(test)]

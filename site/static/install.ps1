@@ -207,7 +207,7 @@ function Test-RuntimeComplete {
         'netty-transport-4.2.15.Final.jar',
         'option-1.1.0.jar',
         'slf4j-api-2.0.17.jar',
-        'snakeyaml-2.2.jar'
+        'snakeyaml-2.2.jar', 'sqlite-jdbc-3.49.1.0.jar'
     )
 
     $apiSeen = 0
@@ -257,8 +257,8 @@ function Test-RuntimeComplete {
     foreach ($licenseName in $expectedLicenses) {
         if (-not (Test-RegularFile (Join-Path $licenses $licenseName))) { return $false }
     }
-    return $apiSeen -eq 1 -and $librariesSeen -eq 30 -and
-        $jarFiles.Count -eq 30 -and $libraryFiles.Count -eq 30 -and
+    return $apiSeen -eq 1 -and $librariesSeen -eq 31 -and
+        $jarFiles.Count -eq 31 -and $libraryFiles.Count -eq 31 -and
         $licensesSeen -eq 6 -and $manifestEntries -eq $actualFiles.Count
 }
 

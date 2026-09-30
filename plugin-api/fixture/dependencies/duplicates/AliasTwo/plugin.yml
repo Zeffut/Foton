@@ -1,0 +1,4 @@
+name: AliasTwo
+version: 1
+main: fixture.dependencies.DependencyPlugins$AliasTwo
+provides: [sharedalias]

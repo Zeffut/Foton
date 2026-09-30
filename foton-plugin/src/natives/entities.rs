@@ -23,7 +23,7 @@ use foton_utils::Downcast as _;
 use glam::DVec3;
 use jni::JNIEnv;
 use jni::objects::{JClass, JObjectArray, JString};
-use jni::sys::{jboolean, jdouble, jdoubleArray, jfloat, jint, jobjectArray, jstring};
+use jni::sys::{jboolean, jdouble, jdoubleArray, jint, jobjectArray, jstring};
 use uuid::Uuid;
 
 use super::support::{component, doubles, entity, method, text};
@@ -169,54 +169,6 @@ extern "system" fn entity_gravity(
     uuid: JString<'_>,
 ) -> jboolean {
     entity(&mut env, &uuid).map_or(1, |(_, entity)| jboolean::from(!entity.is_no_gravity()))
-}
-
-extern "system" fn set_entity_gravity(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    gravity: jboolean,
-) {
-    if let Some((_, entity)) = entity(&mut env, &uuid) {
-        entity.set_no_gravity(gravity == 0);
-    }
-}
-
-extern "system" fn entity_silent(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-) -> jboolean {
-    entity(&mut env, &uuid).map_or(0, |(_, entity)| jboolean::from(entity.is_silent()))
-}
-
-extern "system" fn set_entity_silent(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    silent: jboolean,
-) {
-    if let Some((_, entity)) = entity(&mut env, &uuid) {
-        entity.set_silent(silent != 0);
-    }
-}
-
-/// CraftEntity.setRotation: the body and, for a living entity, the head turn
-/// together. The Java side has already normalised both angles.
-extern "system" fn set_entity_rotation(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    yaw: jfloat,
-    pitch: jfloat,
-) {
-    let Some((_, entity)) = entity(&mut env, &uuid) else {
-        return;
-    };
-    entity.set_rotation((yaw, pitch));
-    if let Some(living) = entity.as_living_entity() {
-        living.set_y_head_rot(yaw);
-    }
 }
 
 /// The entity's pose as vanilla's network id, which Bukkit's `Pose` ordinal is.
@@ -887,26 +839,6 @@ pub(super) fn bindings() -> Vec<jni::NativeMethod> {
             "entityGravity",
             "(Ljava/lang/String;)Z",
             entity_gravity as *mut c_void,
-        ),
-        method(
-            "setEntityGravity",
-            "(Ljava/lang/String;Z)V",
-            set_entity_gravity as *mut c_void,
-        ),
-        method(
-            "entitySilent",
-            "(Ljava/lang/String;)Z",
-            entity_silent as *mut c_void,
-        ),
-        method(
-            "setEntitySilent",
-            "(Ljava/lang/String;Z)V",
-            set_entity_silent as *mut c_void,
-        ),
-        method(
-            "setEntityRotation",
-            "(Ljava/lang/String;FF)V",
-            set_entity_rotation as *mut c_void,
         ),
         method(
             "entityPose",

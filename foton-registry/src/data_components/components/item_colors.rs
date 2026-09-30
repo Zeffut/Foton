@@ -1,5 +1,8 @@
 //! Vanilla item color and map ID components.
 
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Result, Write};
 
 use foton_utils::codec::VarInt;
@@ -215,6 +218,33 @@ impl FromNbtTag for MapId {
 impl HashComponent for MapId {
     fn hash_component(&self, hasher: &mut ComponentHasher) {
         hasher.put_int(self.id);
+    }
+}
+
+impl nbt_encode::NbtEncode for DyedItemColor {
+    fn nbt_id(&self) -> u8 {
+        (self.rgb).nbt_id()
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        (self.rgb).write_nbt_payload(writer, depth)
+    }
+}
+
+impl nbt_encode::NbtEncode for MapItemColor {
+    fn nbt_id(&self) -> u8 {
+        (self.rgb).nbt_id()
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        (self.rgb).write_nbt_payload(writer, depth)
+    }
+}
+
+impl nbt_encode::NbtEncode for MapId {
+    fn nbt_id(&self) -> u8 {
+        (self.id).nbt_id()
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        (self.id).write_nbt_payload(writer, depth)
     }
 }
 

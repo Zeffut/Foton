@@ -1,7 +1,13 @@
 //! Vanilla item, block, state, and NBT predicate codec values.
 
+use foton_utils::serial::budget;
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_preflight;
+use foton_utils::serial::nbt_stream;
+use foton_utils::serial::nbt_stream::NbtWrite;
 use std::cmp::Ordering;
 use std::fmt::Debug;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 
 use foton_utils::BlockStateId;
@@ -358,6 +364,10 @@ pub struct StatePropertiesPredicate {
 impl StatePropertiesPredicate {
     #[must_use]
     pub fn new(properties: Vec<StatePropertyMatcher>) -> Option<Self> {
+        budget::charge_map::<String, ()>(properties.len()).ok()?;
+        for property in &properties {
+            budget::charge::<u8>(property.name.len()).ok()?;
+        }
         let mut names = rustc_hash::FxHashSet::default();
         properties
             .iter()
@@ -427,7 +437,8 @@ impl WriteTo for StatePropertiesPredicate {
 impl ReadFrom for StatePropertiesPredicate {
     fn read(data: &mut Cursor<&[u8]>) -> Result<Self> {
         let count = read_len(data, usize::MAX, "state property")?;
-        let mut properties = Vec::with_capacity(count.min(1024));
+        budget::check_collection_input(data, count, 3)?;
+        let mut properties = budget::read_vec(count, count.min(1024))?;
         for _ in 0..count {
             properties.push(StatePropertyMatcher::new(
                 read_utf(data)?,
@@ -495,9 +506,12 @@ impl PartialEq for NbtPredicate {
 
 impl WriteTo for NbtPredicate {
     fn write(&self, writer: &mut impl Write) -> Result<()> {
-        let mut encoded = Vec::new();
-        NbtTag::Compound(self.tag.clone()).write(&mut encoded);
-        writer.write_all(&encoded)
+        writer.write_all(&[10])?;
+        nbt_stream::write_compound(
+            &self.tag,
+            &mut nbt_stream::LimitedWriter::new(writer, usize::MAX),
+            0,
+        )
     }
 }
 
@@ -591,8 +605,7 @@ impl BlockPredicate {
             .is_none_or(|properties| properties.matches_block_state(state))
     }
 
-    fn from_owned_nbt(tag: &NbtTag) -> Option<Self> {
-        let compound = tag.compound()?;
+    fn from_owned_compound(compound: &NbtCompound) -> Option<Self> {
         Some(Self::new(
             decode_optional(compound, "blocks", RegistryHolderSet::from_owned_nbt)?,
             decode_optional(compound, "state", StatePropertiesPredicate::from_owned_nbt)?,
@@ -670,6 +683,19 @@ impl AdventureModePredicate {
     pub fn predicates(&self) -> &[BlockPredicate] {
         &self.predicates
     }
+
+    pub(crate) fn from_owned_nbt(tag: &NbtTag) -> Option<Self> {
+        let predicates = if let Some(compound) = tag.compound() {
+            vec![BlockPredicate::from_owned_compound(compound)?]
+        } else {
+            tag.list()?
+                .compounds()?
+                .iter()
+                .map(BlockPredicate::from_owned_compound)
+                .collect::<Option<Vec<_>>>()?
+        };
+        Self::new(predicates)
+    }
 }
 
 impl WriteTo for AdventureModePredicate {
@@ -684,8 +710,10 @@ impl WriteTo for AdventureModePredicate {
 
 impl ReadFrom for AdventureModePredicate {
     fn read(data: &mut Cursor<&[u8]>) -> Result<Self> {
+        let _depth = crate::item_stack_template::TemplateDepthGuard::enter()?;
         let count = read_len(data, usize::MAX, "adventure-mode predicate")?;
-        let mut predicates = Vec::with_capacity(count.min(1024));
+        budget::check_collection_input(data, count, 5)?;
+        let mut predicates = budget::read_vec(count, count.min(1024))?;
         for _ in 0..count {
             predicates.push(BlockPredicate::read(data)?);
         }
@@ -722,17 +750,7 @@ impl ToNbtTag for AdventureModePredicate {
 
 impl FromNbtTag for AdventureModePredicate {
     fn from_nbt_tag(tag: simdnbt::borrow::NbtTag<'_, '_>) -> Option<Self> {
-        let tag = tag.to_owned();
-        let predicates = if tag.compound().is_some() {
-            vec![BlockPredicate::from_owned_nbt(&tag)?]
-        } else {
-            tag.list()?
-                .compounds()?
-                .iter()
-                .map(|compound| BlockPredicate::from_owned_nbt(&NbtTag::Compound(compound.clone())))
-                .collect::<Option<Vec<_>>>()?
-        };
-        Self::new(predicates)
+        Self::from_owned_nbt(&tag.to_owned())
     }
 }
 
@@ -793,7 +811,10 @@ impl ItemPredicate {
     }
 
     pub(crate) fn from_owned_nbt(tag: &NbtTag) -> Option<Self> {
-        let compound = tag.compound()?;
+        Self::from_owned_compound(tag.compound()?)
+    }
+
+    pub(crate) fn from_owned_compound(compound: &NbtCompound) -> Option<Self> {
         Some(Self::new(
             decode_optional(compound, "items", RegistryHolderSet::from_owned_nbt)?,
             compound
@@ -846,6 +867,11 @@ impl LockCode {
         Self { predicate }
     }
 
+    /// Streams this lock's persistent item predicate under a caller byte budget.
+    pub fn write_bounded(&self, budget: usize, writer: &mut dyn Write) -> Result<()> {
+        nbt_encode::write_bounded(&self.predicate, budget, writer)
+    }
+
     #[must_use]
     pub const fn predicate(&self) -> &ItemPredicate {
         &self.predicate
@@ -862,7 +888,8 @@ impl WriteTo for LockCode {
 
 impl ReadFrom for LockCode {
     fn read(data: &mut Cursor<&[u8]>) -> Result<Self> {
-        let tag = read_network_nbt(data)?;
+        nbt_preflight::check_single_owner(data)?;
+        let tag = read_checked_network_nbt(data)?;
         ItemPredicate::from_owned_nbt(&tag)
             .map(Self::new)
             .ok_or_else(|| Error::other("invalid lock item predicate"))
@@ -913,6 +940,11 @@ pub(crate) fn decode_optional<T>(
 }
 
 pub(crate) fn read_network_nbt(data: &mut Cursor<&[u8]>) -> Result<NbtTag> {
+    nbt_preflight::check(data, true)?;
+    read_checked_network_nbt(data)
+}
+
+fn read_checked_network_nbt(data: &mut Cursor<&[u8]>) -> Result<NbtTag> {
     let tag = read_tag(data).map_err(|error| Error::other(format!("invalid NBT: {error:?}")))?;
     let Some(heap_size) = vanilla_nbt_heap_size(&tag) else {
         return Err(Error::other("NBT contains malformed modified UTF-8"));
@@ -941,7 +973,10 @@ pub(crate) fn read_len(data: &mut Cursor<&[u8]>, max: usize, name: &str) -> Resu
 }
 
 fn write_utf(value: &str, writer: &mut impl Write) -> Result<()> {
-    if value.encode_utf16().count() > MAX_UTF_LENGTH {
+    let units = value.encode_utf16();
+    #[cfg(feature = "codec-test-support")]
+    let units = units.inspect(|_| crate::codec_work::utf16());
+    if units.count() > MAX_UTF_LENGTH {
         return Err(Error::other("string exceeds Vanilla's UTF-16 length limit"));
     }
     if value.len() > MAX_UTF_LENGTH * 3 {
@@ -951,10 +986,20 @@ fn write_utf(value: &str, writer: &mut impl Write) -> Result<()> {
     writer.write_all(value.as_bytes())
 }
 
+pub(crate) fn write_utf_bounded(value: &str, mut writer: &mut dyn NbtWrite) -> Result<()> {
+    if value.len() > MAX_UTF_LENGTH * 3 {
+        return Err(Error::other("string exceeds Vanilla's UTF-8 length limit"));
+    }
+    writer.ensure_remaining(value.len().saturating_add(1))?;
+    write_utf(value, &mut writer)
+}
+
 fn read_utf(data: &mut Cursor<&[u8]>) -> Result<String> {
     use std::io::Read as _;
 
     let len = read_len(data, MAX_UTF_LENGTH * 3, "string byte")?;
+    budget::check_collection_input(data, len, 1)?;
+    budget::charge::<u8>(len.saturating_mul(7))?;
     let mut bytes = vec![0; len];
     data.read_exact(&mut bytes)?;
     let value = String::from_utf8(bytes).map_err(Error::other)?;
@@ -1006,6 +1051,161 @@ pub(crate) fn hash_entries(hasher: &mut ComponentHasher, entries: &mut [HashEntr
         hasher.put_raw_bytes(&entry.value_bytes);
     }
     hasher.end_map();
+}
+
+impl nbt_encode::NbtEncode for ItemPredicate {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, w: &mut dyn NbtWrite, d: usize) -> Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(d)?;
+        if let Some(items) = &self.items {
+            field("items", items, w, d)?;
+        }
+        if !self.count.is_any() {
+            field("count", &self.count.as_nbt_tag(), w, d)?;
+        }
+        self.components.write_fields_stream(w, d + 1)?;
+        end(w)
+    }
+}
+
+impl nbt_encode::NbtEncode for LockCode {
+    fn nbt_id(&self) -> u8 {
+        (self.predicate).nbt_id()
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        (self.predicate).write_nbt_payload(writer, depth)
+    }
+}
+
+impl AdventureModePredicate {
+    pub(crate) fn write_bounded(&self, mut writer: &mut dyn NbtWrite) -> Result<()> {
+        write_len(self.predicates.len(), &mut writer)?;
+        for predicate in &self.predicates {
+            predicate.blocks.write(&mut writer)?;
+            predicate.state.is_some().write(&mut writer)?;
+            if let Some(state) = &predicate.state {
+                write_len(state.properties.len(), &mut writer)?;
+                for property in &state.properties {
+                    write_utf_bounded(&property.name, writer)?;
+                    match &property.value {
+                        StatePropertyValueMatcher::Exact(value) => {
+                            true.write(&mut writer)?;
+                            write_utf_bounded(value, writer)?;
+                        }
+                        StatePropertyValueMatcher::Range { min, max } => {
+                            false.write(&mut writer)?;
+                            for value in [min, max] {
+                                value.is_some().write(&mut writer)?;
+                                if let Some(value) = value {
+                                    write_utf_bounded(value, writer)?;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            predicate.nbt.is_some().write(&mut writer)?;
+            if let Some(nbt) = &predicate.nbt {
+                nbt_stream::write_compound_bounded(&nbt.tag, writer.remaining(), &mut writer)?;
+            }
+            predicate.components.write_bounded(writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl nbt_encode::NbtEncode for NbtPredicate {
+    fn nbt_id(&self) -> u8 {
+        8
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, _depth: usize) -> Result<()> {
+        foton_utils::nbt::write_compound_snbt_nbt(&self.tag, writer)
+    }
+}
+impl nbt_encode::NbtEncode for StatePropertyValueMatcher {
+    fn nbt_id(&self) -> u8 {
+        if matches!(self, Self::Exact(_)) {
+            8
+        } else {
+            10
+        }
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> Result<()> {
+        use foton_utils::serial::nbt_encode::{end, field};
+        match self {
+            Self::Exact(value) => value.write_nbt_payload(writer, depth),
+            Self::Range { min, max } => {
+                if let Some(value) = min {
+                    field("min", value, writer, depth)?;
+                }
+                if let Some(value) = max {
+                    field("max", value, writer, depth)?;
+                }
+                end(writer)
+            }
+        }
+    }
+}
+impl nbt_encode::NbtEncode for StatePropertiesPredicate {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+        let mut minimum = self.properties.len().saturating_mul(4).saturating_add(1);
+        writer.ensure_remaining(minimum)?;
+        for property in &self.properties {
+            minimum = minimum.saturating_add(property.name.len());
+            writer.ensure_remaining(minimum)?;
+        }
+        let required = self
+            .properties
+            .len()
+            .saturating_mul(size_of::<&StatePropertyMatcher>());
+        let mut writer = nbt_stream::ScratchWriter::new(writer, required)?;
+        let mut properties: Vec<_> = self.properties.iter().collect();
+        properties.sort_unstable_by(|a, b| a.name.cmp(&b.name));
+        for property in properties {
+            field(&property.name, &property.value, &mut *writer, depth)?;
+        }
+        end(&mut *writer)
+    }
+}
+impl nbt_encode::NbtEncode for BlockPredicate {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+        if let Some(v) = &self.blocks {
+            field("blocks", v, writer, depth)?;
+        }
+        if let Some(v) = &self.state {
+            field("state", v, writer, depth)?;
+        }
+        if let Some(v) = &self.nbt {
+            field("nbt", v, writer, depth)?;
+        }
+        self.components.write_fields_stream(writer, depth + 1)?;
+        end(writer)
+    }
+}
+impl nbt_encode::NbtEncode for AdventureModePredicate {
+    fn nbt_id(&self) -> u8 {
+        if self.predicates.len() == 1 { 10 } else { 9 }
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> Result<()> {
+        if let [predicate] = self.predicates.as_slice() {
+            predicate.write_nbt_payload(writer, depth)
+        } else {
+            nbt_encode::list(&self.predicates, writer, depth)
+        }
+    }
 }
 
 #[cfg(test)]

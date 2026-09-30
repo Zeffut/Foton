@@ -38,7 +38,7 @@ use crate::entity::ai::goal::{
     BreedGoal, FloatGoal, FollowParentGoal, LookAtPlayerGoal, PanicGoal, RandomLookAroundGoal,
     TemptGoal, WaterAvoidingRandomStrollGoal,
 };
-use crate::entity::conversion::ConversionReason::Lightning;
+use crate::entity::conversion::ConversionReason::Sheared;
 use crate::entity::conversion::{ConversionParams, convert_to};
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::CowEntity;
@@ -363,9 +363,19 @@ impl MushroomCowEntity {
     /// vanilla does, so they are placed while this mooshroom is still in the
     /// world and before the cow joins it.
     pub fn shear(&self, world: &World, tool: &ItemStack) {
+        self.shear_with_sound_source(world, tool, SoundSource::Players);
+    }
+
+    /// Forces shearing with the caller-selected Paper sound category.
+    pub fn shear_with_sound_source(
+        &self,
+        world: &World,
+        tool: &ItemStack,
+        sound_source: SoundSource,
+    ) {
         world.play_sound_at(
             &sound_events::ENTITY_MOOSHROOM_SHEAR,
-            SoundSource::Players,
+            sound_source,
             self.position(),
             1.0,
             1.0,
@@ -375,7 +385,7 @@ impl MushroomCowEntity {
         // Vanilla's `ConversionParams.single(this, false, false)`.
         convert_to(
             self,
-            ConversionParams::single(false, false).with_reason(Lightning),
+            ConversionParams::single(false, false).with_reason(Sheared),
             |id, position, level| CowEntity::new(&vanilla_entities::COW, id, position, level),
             |_cow| {
                 let position = self.position();

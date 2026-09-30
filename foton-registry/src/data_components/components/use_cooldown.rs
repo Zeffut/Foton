@@ -1,5 +1,9 @@
 //! Vanilla `minecraft:use_cooldown` item component.
 
+use crate::data_components::registry::ValidatePersistentComponent;
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Result, Write};
 use std::str::FromStr;
 
@@ -100,6 +104,32 @@ fn push_hash_entry<T: HashComponent + ?Sized>(entries: &mut Vec<HashEntry>, key:
     let mut value_hasher = ComponentHasher::new();
     value.hash_component(&mut value_hasher);
     entries.push(HashEntry::new(key_hasher, value_hasher));
+}
+
+impl ValidatePersistentComponent for UseCooldown {
+    fn validate_persistent(&self) -> io::Result<()> {
+        if !self.seconds.is_finite() || self.seconds <= 0.0 {
+            return Err(io::Error::other("Invalid persistent cooldown"));
+        }
+        Ok(())
+    }
+}
+
+impl nbt_encode::NbtEncode for UseCooldown {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+
+        self.validate_persistent()?;
+        field("seconds", &(self.seconds), writer, depth)?;
+        if let Some(group) = &self.cooldown_group {
+            field("cooldown_group", &(group), writer, depth)?;
+        }
+        end(writer)
+    }
 }
 
 #[cfg(test)]

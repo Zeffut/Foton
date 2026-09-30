@@ -1,5 +1,8 @@
 //! Vanilla `minecraft:food` item component.
 
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 
 use foton_utils::codec::VarInt;
@@ -137,6 +140,23 @@ fn push_hash_entry<T: HashComponent + ?Sized>(entries: &mut Vec<HashEntry>, key:
 
 const fn java_float_equals(left: f32, right: f32) -> bool {
     (left.is_nan() && right.is_nan()) || left.to_bits() == right.to_bits()
+}
+
+impl nbt_encode::NbtEncode for FoodProperties {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+
+        field("nutrition", &(self.nutrition), writer, depth)?;
+        field("saturation", &(self.saturation), writer, depth)?;
+        if self.can_always_eat {
+            field("can_always_eat", &(true), writer, depth)?;
+        }
+        end(writer)
+    }
 }
 
 #[cfg(test)]

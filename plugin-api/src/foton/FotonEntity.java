@@ -29,17 +29,20 @@ public class FotonEntity implements Entity, org.bukkit.projectiles.ProjectileSou
     @Override public void setInvulnerable(boolean invulnerable) { Native.setEntityInvulnerable(id.toString(), invulnerable); }
     @Override public boolean isGlowing() { return Native.entityGlowing(id.toString()); }
     @Override public void setGlowing(boolean glowing) { Native.setEntityGlowing(id.toString(), glowing); }
+    @Override public float getFallDistance() { return Native.entityFallDistance(id.toString()); }
+    @Override public void setFallDistance(float distance) { Native.setEntityFallDistance(id.toString(), distance); }
     private static final java.util.concurrent.ConcurrentHashMap<UUID, FotonPersistentDataContainer> DATA =
         new java.util.concurrent.ConcurrentHashMap<>();
     private final UUID id;
     public FotonEntity(UUID id) { this.id = id; }
     /** The Bukkit handle for any entity, players included. */
     public static Entity of(UUID id) {
-        return id == null ? null : FotonWorld.wrapEntity(id, id.toString());
+        return id == null ? null : FotonWorld.wrapEntity(id, Native.entityType(id.toString()));
     }
     public static FotonEntity handle(UUID id) {
         if (id == null) return null;
-        org.bukkit.entity.Entity wrapped = FotonWorld.wrapEntity(id, Native.entityType(id.toString()));
+        String type = Native.entityType(id.toString());
+        org.bukkit.entity.Entity wrapped = FotonWorld.wrapEntity(id, type);
         return wrapped instanceof FotonEntity entity ? entity : new FotonEntity(id);
     }
     @Override public boolean isPersistent() { return Native.entityPersistent(getUniqueId().toString()); }
@@ -58,7 +61,7 @@ public class FotonEntity implements Entity, org.bukkit.projectiles.ProjectileSou
     @Override public Location getLocation() {
         double[] p = Native.entityPosition(id.toString());
         String world = Native.entityWorld(id.toString());
-        return p == null || world == null ? null
+        return p == null || p.length < 5 || world == null ? null
             : new Location(new FotonWorld(world), p[0], p[1], p[2], (float) p[3], (float) p[4]);
     }
     @Override public Location getOrigin() {
@@ -121,16 +124,27 @@ public class FotonEntity implements Entity, org.bukkit.projectiles.ProjectileSou
         catch (IllegalArgumentException ignored) { return null; }
     }
     @Override public org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason getEntitySpawnReason() {
-        String reason = Native.entitySpawnReason(id.toString());
-        if (reason == null) return org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.DEFAULT;
-        try { return org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.valueOf(reason); }
-        catch (IllegalArgumentException ignored) { return org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.CUSTOM; }
+        return EventBridge.spawnReason(Native.entitySpawnReason(id.toString()));
     }
     @Override public org.bukkit.entity.SpawnCategory getSpawnCategory() {
         String category = Native.entitySpawnCategory(id.toString());
         if (category == null) return org.bukkit.entity.SpawnCategory.MISC;
         try { return org.bukkit.entity.SpawnCategory.valueOf(category.toUpperCase(java.util.Locale.ROOT)); }
         catch (IllegalArgumentException ignored) { return org.bukkit.entity.SpawnCategory.MISC; }
+    }
+    @Override public java.util.List<Entity> getNearbyEntities(double x, double y, double z) {
+        String[] ids = Native.entityNearby(getUniqueId().toString(), x, y, z);
+        java.util.ArrayList<Entity> result = new java.util.ArrayList<>(
+            ids == null ? 0 : ids.length);
+        if (ids == null) return result;
+        for (String value : ids) {
+            try {
+                UUID nearbyId = UUID.fromString(value);
+                Entity nearby = FotonEntity.handle(nearbyId);
+                if (nearby != null) result.add(nearby);
+            } catch (IllegalArgumentException ignored) { }
+        }
+        return result;
     }
     @Override public int getEntityId() { return Native.entityId(id.toString()); }
     @Override public boolean teleport(Location location) {

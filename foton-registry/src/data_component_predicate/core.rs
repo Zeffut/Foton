@@ -1,16 +1,29 @@
 use super::*;
 use crate::data_components::DataComponentPatch;
+use crate::data_components::PersistentValidationScope;
 use crate::item_stack::ItemStack;
+use foton_utils::serial::budget;
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream;
+use foton_utils::serial::nbt_stream::NbtWrite;
 
 /// Typed payload behavior for a registered partial component predicate.
 pub trait DataComponentPredicateCodec:
-    DowncastType + Clone + Debug + PartialEq + HashComponent + Send + Sync + 'static
+    DowncastType
+    + Clone
+    + Debug
+    + PartialEq
+    + HashComponent
+    + Send
+    + Sync
+    + nbt_encode::NbtEncode
+    + 'static
 {
     fn from_nbt_value(tag: &NbtTag) -> Option<Self>;
     fn to_nbt_value(&self) -> NbtTag;
 }
 
-trait ErasedDataComponentPredicate: ErasedType + Debug + Send + Sync {
+trait ErasedDataComponentPredicate: ErasedType + Debug + Send + Sync + nbt_encode::NbtEncode {
     fn clone_predicate(&self) -> Box<dyn ErasedDataComponentPredicate>;
     fn predicate_eq(&self, other: &dyn ErasedDataComponentPredicate) -> bool;
 }
@@ -144,6 +157,42 @@ impl DataComponentPredicateData {
         self.discriminator.key()
     }
 
+    fn validate_persistent_discriminator(&self) -> Result<()> {
+        let valid = match self.discriminator {
+            PredicateDiscriminator::Concrete(ty) => REGISTRY
+                .data_component_predicate_types
+                .by_key(&ty.key)
+                .is_some_and(|registered| registered.expected_type_key == ty.expected_type_key),
+            PredicateDiscriminator::Any(component) => {
+                // The persistent codec resolves concrete predicate keys first. An
+                // any-value predicate emits {}, which that reader must accept.
+                REGISTRY.data_components.by_key(&component.key).is_some()
+                    && REGISTRY
+                        .data_component_predicate_types
+                        .by_key(&component.key)
+                        .is_none_or(|ty| {
+                            (ty.reader)(&NbtTag::Compound(NbtCompound::new())).is_some()
+                        })
+            }
+        };
+        if !valid {
+            return Err(Error::other("Invalid persistent predicate discriminator"));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn write_nbt_stream(&self, writer: &mut dyn NbtWrite, depth: usize) -> Result<()> {
+        if let Some(value) = &self.value {
+            if value.nbt_id() == 10 {
+                nbt_encode::check_depth(depth)?;
+            }
+            writer.write_all(&[value.nbt_id()])?;
+            return value.write_nbt_payload(writer, depth);
+        }
+        nbt_encode::check_depth(depth)?;
+        writer.write_all(&[10, 0])
+    }
+
     pub(super) fn from_persistent_entry(key: &Identifier, tag: &NbtTag) -> Option<Self> {
         if let Some(predicate_type) = REGISTRY.data_component_predicate_types.by_key(key) {
             return Some(Self {
@@ -262,6 +311,11 @@ crate::impl_registry!(
 fn read_predicate<T: DataComponentPredicateCodec>(
     tag: &NbtTag,
 ) -> Option<Box<dyn ErasedDataComponentPredicate>> {
+    // Container/bundle predicates borrow recursive item descendants. Other
+    // predicate leaves may retain copied text/list suffixes during conversion.
+    if T::TYPE_KEY != ContainerPredicate::TYPE_KEY && T::TYPE_KEY != BundlePredicate::TYPE_KEY {
+        foton_utils::serial::nbt_preflight::check_owned(tag, 256 * 1024).ok()?;
+    }
     T::from_nbt_value(tag).map(|value| Box::new(value) as Box<dyn ErasedDataComponentPredicate>)
 }
 
@@ -323,15 +377,32 @@ impl DataComponentExactPredicate {
     /// nested in item components and must not make their containing stack unsavable.
     #[must_use]
     pub fn new(values: Vec<(ComponentEntryRef, ComponentData)>) -> Option<Self> {
+        budget::charge_map::<Identifier, ()>(values.len()).ok()?;
         let mut keys = FxHashSet::default();
-        values
+        if !values
             .iter()
-            .all(|(entry, value)| {
-                entry.validates(value)
-                    && keys.insert(entry.key.clone())
-                    && (!entry.is_persistent() || entry.validate_persistent_encoding(value).is_ok())
-            })
-            .then_some(Self { values })
+            .all(|(entry, value)| entry.validates(value) && keys.insert(&entry.key))
+        {
+            return None;
+        }
+        if budget::is_active() {
+            if !PersistentValidationScope::is_deferred() {
+                let mut sink = std::io::sink();
+                let mut writer = nbt_stream::LimitedWriter::persistent(&mut sink, 256 * 1024);
+                for (entry, value) in &values {
+                    if entry.is_persistent() {
+                        entry.write_nbt_bounded(value, &mut writer, 0).ok()?;
+                    }
+                }
+            }
+        } else {
+            for (entry, value) in &values {
+                if entry.is_persistent() {
+                    entry.validate_persistent_encoding(value).ok()?;
+                }
+            }
+        }
+        Some(Self { values })
     }
 
     #[must_use]
@@ -360,6 +431,7 @@ impl DataComponentExactPredicate {
 
     fn from_owned_nbt(tag: &NbtTag) -> Option<Self> {
         let compound = tag.compound()?;
+        let scope = PersistentValidationScope::enter();
         let mut values = Vec::with_capacity(compound.len());
         for (key, value) in compound.iter() {
             let key = key.to_owned().try_into_string().ok()?.parse().ok()?;
@@ -369,6 +441,7 @@ impl DataComponentExactPredicate {
             }
             values.push((entry, entry.read_nbt_owned(value)?));
         }
+        drop(scope);
         Self::new(values)
     }
 
@@ -435,11 +508,14 @@ impl WriteTo for DataComponentExactPredicate {
 impl ReadFrom for DataComponentExactPredicate {
     fn read(data: &mut Cursor<&[u8]>) -> Result<Self> {
         let count = read_len(data, usize::MAX, "exact component predicate")?;
-        let mut values = Vec::with_capacity(count.min(1024));
+        budget::check_collection_input(data, count, 1)?;
+        let scope = PersistentValidationScope::enter();
+        let mut values = budget::read_vec(count, count.min(1024))?;
         for _ in 0..count {
             let entry = read_component_entry(data)?;
             values.push((entry, entry.read_network(data)?));
         }
+        drop(scope);
         Self::new(values)
             .ok_or_else(|| Error::other("duplicate or mismatched exact component predicate"))
     }
@@ -489,6 +565,7 @@ impl DataComponentMatchers {
         exact: DataComponentExactPredicate,
         partial: Vec<DataComponentPredicateData>,
     ) -> Option<Self> {
+        budget::charge_map::<Identifier, ()>(partial.len()).ok()?;
         let mut keys = FxHashSet::default();
         partial
             .iter()
@@ -532,8 +609,89 @@ impl DataComponentMatchers {
         Self::new(exact, partial)
     }
 
+    pub(crate) fn write_fields_stream(
+        &self,
+        writer: &mut dyn NbtWrite,
+        depth: usize,
+    ) -> Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, field_with};
+        let count = self
+            .exact
+            .values()
+            .iter()
+            .filter(|(entry, _)| entry.is_persistent())
+            .count();
+        if count != 0 {
+            check_depth(depth)?;
+            field_with("components", 10, writer, |writer| {
+                writer.ensure_remaining(count.saturating_mul(4).saturating_add(1))?;
+                let required =
+                    count.saturating_mul(size_of::<&(ComponentEntryRef, ComponentData)>());
+                let mut writer = nbt_stream::ScratchWriter::new(writer, required)?;
+                let mut entries = Vec::new();
+                entries.try_reserve_exact(count).map_err(Error::other)?;
+                entries.extend(
+                    self.exact
+                        .values()
+                        .iter()
+                        .filter(|(entry, _)| entry.is_persistent()),
+                );
+                entries.sort_unstable_by_key(|(entry, _)| {
+                    (entry.key.namespace.as_ref(), entry.key.path.as_ref())
+                });
+                for (entry, value) in entries {
+                    nbt_encode::identifier_field(
+                        &entry.key,
+                        entry.nbt_value(value)?,
+                        &mut *writer,
+                        depth,
+                    )?;
+                }
+                writer.write_all(&[0])
+            })?;
+        }
+        if !self.partial.is_empty() {
+            check_depth(depth)?;
+            field_with("predicates", 10, writer, |writer| {
+                writer.ensure_remaining(self.partial.len().saturating_mul(4).saturating_add(1))?;
+                let mut minimum = 1usize;
+                for value in &self.partial {
+                    minimum = minimum
+                        .saturating_add(value.key().namespace.len())
+                        .saturating_add(value.key().path.len())
+                        .saturating_add(5);
+                    writer.ensure_remaining(minimum)?;
+                    value.validate_persistent_discriminator()?;
+                }
+                let required = self
+                    .partial
+                    .len()
+                    .saturating_mul(size_of::<&DataComponentPredicateData>());
+                let mut writer = nbt_stream::ScratchWriter::new(writer, required)?;
+                let mut entries: Vec<_> = self.partial.iter().collect();
+                entries.sort_unstable_by_key(|value| {
+                    (value.key().namespace.as_ref(), value.key().path.as_ref())
+                });
+                for value in entries {
+                    let payload: &dyn nbt_encode::NbtEncode = match &value.value {
+                        Some(value) => value.as_ref(),
+                        None => &(),
+                    };
+                    nbt_encode::identifier_field(value.key(), payload, &mut *writer, depth)?;
+                }
+                writer.write_all(&[0])
+            })?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn write_fields(&self, compound: &mut NbtCompound) {
-        if !self.exact.is_empty() {
+        if self
+            .exact
+            .values()
+            .iter()
+            .any(|(entry, _)| entry.is_persistent())
+        {
             compound.insert("components", self.exact.to_nbt_value());
         }
         if !self.partial.is_empty() {
@@ -546,7 +704,12 @@ impl DataComponentMatchers {
     }
 
     pub(crate) fn hash_fields(&self, entries: &mut Vec<HashEntry>) {
-        if !self.exact.is_empty() {
+        if self
+            .exact
+            .values()
+            .iter()
+            .any(|(entry, _)| entry.is_persistent())
+        {
             push_hash_entry(entries, "components", &self.exact);
         }
         if !self.partial.is_empty() {
@@ -602,7 +765,8 @@ impl ReadFrom for DataComponentMatchers {
     fn read(data: &mut Cursor<&[u8]>) -> Result<Self> {
         let exact = DataComponentExactPredicate::read(data)?;
         let count = read_len(data, 64, "partial component predicate")?;
-        let mut partial = Vec::with_capacity(count);
+        budget::check_collection_input(data, count, 3)?;
+        let mut partial = budget::read_vec(count, count)?;
         for _ in 0..count {
             let discriminator = if bool::read(data)? {
                 let id = read_registry_id(data, "component predicate type")?;
@@ -657,7 +821,7 @@ pub(super) fn write_registry_id(
 ) -> Result<()> {
     let id = entry
         .try_id()
-        .ok_or_else(|| Error::other(format!("unknown {name}: {}", entry.key())))?;
+        .ok_or_else(|| Error::other("Unknown registry discriminator"))?;
     let id = i32::try_from(id).map_err(|_| Error::other(format!("{name} id out of range")))?;
     VarInt(id).write(writer)
 }
@@ -674,3 +838,63 @@ fn read_component_entry(data: &mut Cursor<&[u8]>) -> Result<ComponentEntryRef> {
         .by_id(id)
         .ok_or_else(|| Error::other(format!("unknown data component id: {id}")))
 }
+impl DataComponentMatchers {
+    pub(crate) fn write_bounded(&self, mut writer: &mut dyn NbtWrite) -> Result<()> {
+        if self.partial.len() > 64 {
+            return Err(Error::other("partial component predicate count exceeds 64"));
+        }
+        write_len(self.exact.values.len(), &mut writer)?;
+        {
+            let required = self
+                .exact
+                .values
+                .len()
+                .saturating_mul(size_of::<&(ComponentEntryRef, ComponentData)>());
+            let mut writer = nbt_stream::ScratchWriter::new(writer, required)?;
+            let mut entries = Vec::new();
+            entries
+                .try_reserve_exact(self.exact.values.len())
+                .map_err(Error::other)?;
+            entries.extend(self.exact.values.iter());
+            entries.sort_unstable_by_key(|(entry, _)| {
+                REGISTRY.data_components.id_from_key(&entry.key)
+            });
+            for (entry, value) in entries {
+                write_registry_id(*entry, &mut writer, "data component")?;
+                entry.write_network_in(value, &mut *writer)?;
+            }
+        }
+        write_len(self.partial.len(), &mut writer)?;
+        let required = self
+            .partial
+            .len()
+            .saturating_mul(size_of::<&DataComponentPredicateData>());
+        let mut writer = nbt_stream::ScratchWriter::new(writer, required)?;
+        let mut partial = Vec::new();
+        partial
+            .try_reserve_exact(self.partial.len())
+            .map_err(Error::other)?;
+        partial.extend(self.partial.iter());
+        partial.sort_unstable_by_key(|value| {
+            (value.key().namespace.as_ref(), value.key().path.as_ref())
+        });
+        for predicate in partial {
+            match predicate.discriminator {
+                PredicateDiscriminator::Concrete(ty) => {
+                    true.write(&mut writer)?;
+                    write_registry_id(ty, &mut writer, "component predicate type")?;
+                }
+                PredicateDiscriminator::Any(component) => {
+                    false.write(&mut writer)?;
+                    write_registry_id(component, &mut writer, "data component")?;
+                }
+            }
+            predicate.write_nbt_stream(&mut *writer, 0)?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+#[path = "persistent_union_tests.rs"]
+mod persistent_union_tests;

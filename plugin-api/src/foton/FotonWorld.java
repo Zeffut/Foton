@@ -183,44 +183,77 @@ public final class FotonWorld implements World {
     }
 
     @Override public org.bukkit.entity.Entity spawnEntity(Location location, org.bukkit.entity.EntityType type) {
+        return spawnEntity(location, type, "");
+    }
+
+    private org.bukkit.entity.Entity spawnEntity(
+            Location location, org.bukkit.entity.EntityType type, String initialization) {
         if (location == null || type == null) return null;
-        String id = Native.spawnEntity(name, location.getX(), location.getY(), location.getZ(), type.getName());
+        String id = Native.spawnEntity(
+            name, location.getX(), location.getY(), location.getZ(), type.getName(), initialization);
         try { return id == null ? null : FotonEntity.handle(UUID.fromString(id)); }
         catch (IllegalArgumentException ignored) { return null; }
     }
 
     @Override public <T extends org.bukkit.entity.Entity> T spawn(Location location, Class<T> clazz) {
-        org.bukkit.entity.Entity entity = spawnEntity(location, typeFor(clazz));
-        if (clazz != null && clazz.isInstance(entity)) return clazz.cast(entity);
-        // Spawned but not what was asked for: do not leave it standing.
-        if (entity != null) entity.remove();
-        return null;
+        return spawn(location, clazz, null);
     }
 
-    /** The entity type a Paper interface spawns: its name in snake case
-     * ({@code ItemDisplay} is {@code item_display}), save for the interfaces
-     * whose name is not their type's. */
-    static org.bukkit.entity.EntityType typeFor(Class<?> clazz) {
-        if (clazz == null) return null;
-        String name = clazz.getSimpleName();
-        String key = switch (name) {
-            case "Boat" -> "oak_boat";
-            case "ChestBoat" -> "oak_chest_boat";
-            case "Firework" -> "firework_rocket";
-            case "TNTPrimed" -> "tnt";
-            case "LightningStrike" -> "lightning_bolt";
-            case "EnderCrystal" -> "end_crystal";
-            case "MushroomCow" -> "mooshroom";
-            case "PigZombie" -> "zombified_piglin";
-            case "Snowman" -> "snow_golem";
-            case "ThrownExpBottle" -> "experience_bottle";
-            case "FishHook" -> "fishing_bobber";
-            case "LeashHitch" -> "leash_knot";
-            case "EnderSignal" -> "eye_of_ender";
-            case "Item" -> "item";
-            default -> name.replaceFirst("^Foton", "").replaceAll("([a-z0-9])([A-Z])", "$1_$2").toLowerCase(java.util.Locale.ROOT);
-        };
-        return org.bukkit.entity.EntityType.fromName(key);
+    @Override public <T extends org.bukkit.entity.Entity> T spawn(
+            Location location, Class<T> clazz, java.util.function.Consumer<? super T> function) {
+        if (clazz == null) {
+            throw new IllegalArgumentException("Entity class cannot be null");
+        }
+        org.bukkit.entity.EntityType type = FotonEntityFactory.typeFor(clazz);
+        if (type == null) {
+            throw new IllegalArgumentException("Unsupported entity class: " + clazz.getName());
+        }
+        if (!FotonEntityFactory.supportsSpawn(clazz, type)) {
+            throw new IllegalArgumentException(
+                "Entity class has no compatible Foton wrapper: " + clazz.getName());
+        }
+
+        String initialization = clazz == org.bukkit.entity.TippedArrow.class
+            ? "minecraft:water"
+            : "";
+        if (location == null) {
+            throw new IllegalArgumentException("Location cannot be null");
+        }
+        if (!Double.isFinite(location.getX()) || !Double.isFinite(location.getY())
+                || !Double.isFinite(location.getZ())) {
+            throw new IllegalArgumentException("Location coordinates must be finite");
+        }
+        String id = Native.spawnEntityPending(
+            name, location.getX(), location.getY(), location.getZ(), type.getName(), initialization);
+        if (id == null) {
+            throw new IllegalArgumentException("Unable to spawn entity class: " + clazz.getName());
+        }
+        boolean published = false;
+        try {
+            org.bukkit.entity.Entity entity;
+            try {
+                entity = FotonEntity.handle(UUID.fromString(id));
+            } catch (IllegalArgumentException error) {
+                throw new IllegalArgumentException(
+                    "Unable to wrap spawned entity class: " + clazz.getName(), error);
+            }
+            if (clazz == org.bukkit.entity.TippedArrow.class) {
+                entity = new FotonTippedArrow(entity.getUniqueId());
+            }
+            if (!clazz.isInstance(entity)) {
+                throw new IllegalArgumentException(
+                    "Spawned wrapper does not implement requested class: " + clazz.getName());
+            }
+            T result = clazz.cast(entity);
+            if (function != null) function.accept(result);
+            if (!Native.finishPendingSpawn(name, id, true)) {
+                throw new IllegalArgumentException("Unable to publish entity class: " + clazz.getName());
+            }
+            published = true;
+            return result;
+        } finally {
+            if (!published) Native.finishPendingSpawn(name, id, false);
+        }
     }
 
     @Override
@@ -261,7 +294,8 @@ public final class FotonWorld implements World {
         for (String id : ids) {
             try {
                 UUID uuid = UUID.fromString(id);
-                entities.add(wrapEntity(uuid, id));
+                String type = Native.entityType(id);
+                entities.add(wrapEntity(uuid, type));
             } catch (IllegalArgumentException ignored) {
                 // Native UUIDs are validated before they cross this boundary.
             }
@@ -269,8 +303,7 @@ public final class FotonWorld implements World {
         return java.util.Collections.unmodifiableList(entities);
     }
 
-    static org.bukkit.entity.Entity wrapEntity(UUID uuid, String id) {
-        String type = Native.entityType(id);
+    static org.bukkit.entity.Entity wrapEntity(UUID uuid, String type) {
         if ("lightning_bolt".equalsIgnoreCase(type)) return new FotonLightningStrike(uuid);
         if ("player".equalsIgnoreCase(type)) return new FotonPlayer(uuid);
         if ("iron_golem".equalsIgnoreCase(type)) return new FotonIronGolem(uuid);
@@ -351,12 +384,14 @@ public final class FotonWorld implements World {
         if ("splash_potion".equalsIgnoreCase(type) || "lingering_potion".equalsIgnoreCase(type)) return new FotonThrownPotion(uuid);
         if (isVehicleType(type)) return new FotonVehicle(uuid);
         if ("arrow".equalsIgnoreCase(type) || "spectral_arrow".equalsIgnoreCase(type)) return new FotonArrow(uuid);
+        if ("fireball".equalsIgnoreCase(type) || "small_fireball".equalsIgnoreCase(type))
+            return new FotonSizedFireball(uuid);
         if (type != null && switch (type.toLowerCase(java.util.Locale.ROOT)) {
-            case "fireball", "small_fireball", "dragon_fireball", "wither_skull" -> true;
+            case "dragon_fireball", "wither_skull" -> true;
             default -> false;
         }) return new FotonFireball(uuid);
         if (isProjectileType(type)) return new FotonProjectile(uuid);
-        if (Native.entityIsLiving(id)) {
+        if (Native.entityIsLiving(uuid.toString())) {
             if (isFlyingMonsterType(type)) return new FotonFlyingMonster(uuid);
             if (isMonsterType(type)) return new FotonMonster(uuid);
             if (isTameableType(type)) return new FotonTameableEntity(uuid);

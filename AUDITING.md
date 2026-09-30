@@ -62,6 +62,34 @@ and the `dev/` tooling tests.
 Cheap, and the only layer that must be green before anything is merged. It
 finds compile errors and lint regressions. It does not find gameplay bugs.
 
+### Plugin compatibility evidence
+
+The plugin check also emits separate machine-readable API and fixture reports.
+Rebuild and combine them with the same commands an auditor should quote:
+
+```bash
+bash dev/build-plugin-api.sh --check
+python3 dev/plugin_api_usage.py --covered plugin-api/build/foton-plugin-api.jar
+python3 dev/plugin_api_usage.py --covered plugin-api/build/foton-plugin-api.jar --events plugin-api/src
+python3 dev/plugin_compatibility.py --api-report build/plugin-api-evidence.json --fixture-report plugin-api/build/fixture-evidence.json --output build/plugin-compatibility.json
+```
+
+Read the resulting `build/plugin-compatibility.json` as four independent kinds
+of evidence. Shared symbol coverage is not a plugin success rate. The legacy
+ledger cannot support a current ceiling because it lacks per-plugin class
+incidence and entrypoint reachability; the JSON therefore reports the current
+ceiling as unknown and labels 41/59 as historical. A corpus-backed v2 rewrite
+separates load-bearing internal references from optional adapters; a plugin
+with any unreadable class remains unknown, with the entry and parse reason
+retained. Event coverage is currently 96/199 and requires an exact Rust JNI
+owner, method and descriptor present in the compiled API before following exact
+owner/name/descriptor Java bytecode edges to an event constructor. Fixture
+evidence covers every direct jar in the event, lifecycle, replacement,
+dependency, cross-call alias, library, malformed-library and Paper directories;
+cache and nested decoy jars are excluded. Each jar records discovery, load,
+enable/rejection phase and causal reason. No aggregate plugin-success percentage
+is generated.
+
 ## Layer 2 — in-world
 
 ```bash

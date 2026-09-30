@@ -10,11 +10,15 @@
 //! (such as runtime recipes) expose their own synchronized write path.
 
 use crate::packet_tap;
+use foton_utils::serial::budget;
 use std::borrow::Cow;
 use std::fmt::Write;
+use std::io::{Cursor, Error as IoError, Result as IoResult, Write as IoWrite};
 use std::mem;
 use std::ptr::null_mut;
-use std::str::FromStr as _;
+use std::str::{self, FromStr as _};
+#[cfg(test)]
+use std::sync::LazyLock;
 use std::sync::{Arc, OnceLock, Weak};
 use std::thread::{self, ThreadId};
 use std::time::{Duration, Instant};
@@ -28,7 +32,11 @@ use foton_core::block_entity::entities::HopperBlockEntity;
 use foton_core::block_entity::entities::JukeboxBlockEntity;
 use foton_core::block_entity::entities::LecternBlockEntity;
 use foton_core::block_entity::entities::SpawnerBlockEntity;
+use foton_core::block_entity::entities::{
+    BREWING_STAND_SLOTS, BrewingStandBlockEntity, BrewingStandStateSnapshot, BrewingStandStateView,
+};
 use foton_core::block_entity::entities::{SignBlockEntity, SignText};
+use foton_core::block_entity::{BLOCK_ENTITIES, SharedBlockEntity};
 use foton_core::boss_event::ServerBossEvent;
 use foton_core::chunk::chunk_request::ChunkRequestState;
 use foton_core::chunk::light::LightLayer;
@@ -40,7 +48,6 @@ use foton_core::entity::ItemFrame;
 use foton_core::entity::LivingEntity;
 use foton_core::entity::NeutralMob;
 use foton_core::entity::PatrollingMonster;
-use foton_core::entity::Projectile;
 use foton_core::entity::SharedEntity;
 use foton_core::entity::TamableAnimal;
 use foton_core::entity::conversion::{
@@ -59,6 +66,7 @@ use foton_core::entity::entities::mobs::passive::AxolotlEntity;
 use foton_core::entity::entities::mobs::passive::BeeEntity;
 use foton_core::entity::entities::mobs::passive::CatEntity;
 use foton_core::entity::entities::mobs::passive::ChickenEntity;
+use foton_core::entity::entities::mobs::passive::CowEntity;
 use foton_core::entity::entities::mobs::passive::NautilusEntity;
 use foton_core::entity::entities::mobs::passive::PigEntity;
 use foton_core::entity::entities::mobs::passive::SheepEntity;
@@ -77,17 +85,19 @@ use foton_core::entity::entities::objects::explosives::PrimedTntEntity;
 use foton_core::entity::entities::objects::items::ExperienceOrbEntity;
 use foton_core::entity::entities::objects::items::FallingBlockEntity;
 use foton_core::entity::entities::objects::items::ItemEntity;
-use foton_core::entity::entities::objects::projectiles::ArrowEntity;
 use foton_core::entity::entities::objects::projectiles::FireworkRocketEntity;
+use foton_core::entity::entities::objects::projectiles::{ArrowEntity, ArrowPickup};
 use foton_core::entity::entities::objects::projectiles::{
-    DragonFireballEntity, LargeFireballEntity, SmallFireballEntity,
+    LargeFireballEntity, SmallFireballEntity,
 };
 use foton_core::entity::entities::objects::vehicles::{BoatEntity, RaftEntity};
-use foton_core::entity::spawn_util::spawn_entity_at;
+use foton_core::entity::spawn_util::{
+    SpawnEntityInitialization, create_entity_at, create_entity_at_initialized, prepare_then_publish,
+};
 use foton_core::entity::spellcaster_illager::{IllagerSpell, SpellcasterIllager};
 use foton_core::entity::{
-    Entity, EntitySpawnReason, LlamaVariant, MobEffectInstance, is_tamed, owner_uuid,
-    set_owner_uuid, set_tamed, start_riding_entities,
+    Animal, Entity, LlamaVariant, MobEffectInstance, PluginSpawnReason, RemovalReason, is_tamed,
+    owner_uuid, set_owner_uuid, set_tamed, start_riding_entities,
 };
 use foton_core::event::TeleportPoint;
 use foton_core::inventory::container::Container;
@@ -118,17 +128,20 @@ use foton_protocol::packets::game::{
     CSetDefaultSpawnPosition, CSetSubtitleText, CSetTitleText, CSetTitlesAnimation, CStopSound,
     CSystemChat, CTabList, SoundSource,
 };
+use foton_registry::MobEffectInstance as RegistryMobEffectInstance;
 use foton_registry::attribute::AttributeRef;
 use foton_registry::blocks::behavior::PushReaction;
 use foton_registry::blocks::block_state_ext::BlockStateExt;
 use foton_registry::blocks::properties::BlockStateProperties;
+use foton_registry::data_components::DataComponentPatch;
 use foton_registry::data_components::components::{
-    CustomModelData, ItemEnchantments, ItemLore, TooltipDisplay,
+    CustomModelData, ItemEnchantments, ItemLore, SuspiciousStewEffect, SuspiciousStewEffects,
+    TooltipDisplay,
 };
 use foton_registry::data_components::vanilla_components::{
-    CUSTOM_MODEL_DATA, ENCHANTMENTS, FIREWORKS, FireworkExplosion, FireworkExplosionShape,
-    Fireworks, ITEM_MODEL, ITEM_NAME, LORE, STORED_ENCHANTMENTS, TOOLTIP_DISPLAY, TOOLTIP_STYLE,
-    UNBREAKABLE, WRITABLE_BOOK_CONTENT, WRITTEN_BOOK_CONTENT,
+    CUSTOM_MODEL_DATA, DAMAGE, ENCHANTMENTS, FIREWORKS, FireworkExplosion, FireworkExplosionShape,
+    Fireworks, ITEM_MODEL, ITEM_NAME, LORE, POTION_CONTENTS, STORED_ENCHANTMENTS, TOOLTIP_DISPLAY,
+    TOOLTIP_STYLE, UNBREAKABLE, WRITABLE_BOOK_CONTENT, WRITTEN_BOOK_CONTENT,
 };
 use foton_registry::enchantment::{Enchantment, EnchantmentRef};
 use foton_registry::entity_type::EntityTypeRef;
@@ -137,23 +150,28 @@ use foton_registry::entity_variant::AxolotlVariant;
 use foton_registry::fuel;
 use foton_registry::game_rules::GameRuleType;
 use foton_registry::game_rules::GameRuleValue;
+use foton_registry::item_predicate::LockCode;
 use foton_registry::item_stack::ItemStack;
+use foton_registry::mob_effect::MobEffect;
 use foton_registry::recipe::{
     CraftingCategory, CraftingInput, Ingredient, RecipeResult, ShapedRecipe, ShapelessRecipe,
 };
 use foton_registry::stat::{CustomStatRef, Stat};
 use foton_registry::trading::ItemCost;
 use foton_registry::trading::MerchantOffer;
+use foton_registry::vanilla_block_entity_types::BREWING_STAND as BREWING_STAND_BLOCK_ENTITY;
 use foton_registry::vanilla_block_entity_types::SIGN;
 use foton_registry::vanilla_game_rules::TNT_EXPLOSION_DROP_DECAY;
 use foton_registry::{
-    REGISTRY, RegistryEntry as _, RegistryExt as _, TaggedRegistryExt as _, vanilla_entities,
-    vanilla_items,
+    REGISTRY, RegistryEntry as _, RegistryExt as _, RegistryReference, TaggedRegistryExt as _,
+    vanilla_blocks, vanilla_entities, vanilla_items,
 };
+use foton_utils::codec::VarInt;
 use foton_utils::entity_events::EntityStatus;
 use foton_utils::locks::{SyncMutex, SyncRwLock};
 use foton_utils::nbt::{merge_nbt_compounds, parse_snbt_compound, to_canonical_snbt};
-use foton_utils::serial::OptionalNbt;
+use foton_utils::serial::{OptionalNbt, ReadFrom as _, WriteTo as _};
+use foton_utils::serial::{budget::DecodeBudget, text_stream::write_bounded};
 use foton_utils::text::DisplayResolutor;
 use foton_utils::translations::CONTAINER_CARTOGRAPHY_TABLE;
 use foton_utils::translations::CONTAINER_CRAFTING;
@@ -169,11 +187,14 @@ use foton_utils::{BlockPos, BlockStateId, WorldAabb};
 use foton_utils::{Downcast as _, Identifier};
 use glam::DVec3;
 use jni::JNIEnv;
-use jni::objects::{JByteArray, JClass, JDoubleArray, JIntArray, JObject, JObjectArray, JString};
-use jni::sys::{
-    jboolean, jbyte, jdouble, jdoubleArray, jfloat, jint, jintArray, jlong, jobjectArray, jstring,
+use jni::objects::{
+    GlobalRef, JByteArray, JClass, JDoubleArray, JIntArray, JObject, JObjectArray, JString,
 };
-use rustc_hash::FxHashMap;
+use jni::sys::{
+    jboolean, jbyte, jbyteArray, jdouble, jdoubleArray, jfloat, jint, jintArray, jlong, jobject,
+    jobjectArray, jstring,
+};
+use rustc_hash::{FxHashMap, FxHashSet};
 use simdnbt::owned::NbtCompound;
 use simdnbt::owned::NbtTag;
 use text_components::{TextComponent, content::Content as TextContent};
@@ -225,6 +246,13 @@ static BOSS_BARS: OnceLock<SyncRwLock<FxHashMap<Uuid, Arc<ServerBossEvent>>>> = 
 static PLAYER_TAB_LISTS: OnceLock<SyncRwLock<FxHashMap<Uuid, (TextComponent, TextComponent)>>> =
     OnceLock::new();
 
+/// Non-entity Bukkit projectile sources retained for the lifetime of their projectile.
+///
+/// Entity sources remain authoritative Rust UUID state. Paper also permits block and
+/// plugin-defined sources, whose JVM object identity has no Rust gameplay counterpart;
+/// those references live here rather than in Java-only shadow fields.
+static PROJECTILE_SOURCES: OnceLock<SyncRwLock<FxHashMap<Uuid, GlobalRef>>> = OnceLock::new();
+
 /// Plugin world-creation requests. Requests are polled from JVM threads;
 /// actual construction and attachment remain owned by the server safe-point.
 static WORLD_CREATION_REQUESTS: OnceLock<SyncMutex<FxHashMap<u64, WorldCreationRequest>>> =
@@ -236,6 +264,13 @@ static WORLD_CREATION_REQUESTS: OnceLock<SyncMutex<FxHashMap<u64, WorldCreationR
 /// must replace the previous weak reference instead of permanently retaining
 /// the first binding.
 pub(crate) fn bind(server: Weak<Server>) {
+    if let Some(sources) = PROJECTILE_SOURCES.get() {
+        let stale = {
+            let mut sources = sources.write();
+            mem::take(&mut *sources)
+        };
+        drop(stale);
+    }
     let slot = SERVER.get_or_init(|| SyncRwLock::new(Weak::new()));
     *slot.write() = server;
 }
@@ -308,6 +343,25 @@ fn boss_bars() -> &'static SyncRwLock<FxHashMap<Uuid, Arc<ServerBossEvent>>> {
 
 fn player_tab_lists() -> &'static SyncRwLock<FxHashMap<Uuid, (TextComponent, TextComponent)>> {
     PLAYER_TAB_LISTS.get_or_init(|| SyncRwLock::new(FxHashMap::default()))
+}
+
+fn projectile_sources() -> &'static SyncRwLock<FxHashMap<Uuid, GlobalRef>> {
+    PROJECTILE_SOURCES.get_or_init(|| SyncRwLock::new(FxHashMap::default()))
+}
+
+#[cfg(test)]
+pub(crate) fn projectile_source_count() -> usize {
+    projectile_sources().read().len()
+}
+
+pub(crate) fn remove_projectile_source(id: &Uuid) {
+    let stale = { projectile_sources().write().remove(id) };
+    drop(stale);
+}
+
+fn discard_unpublished_entity(entity: &SharedEntity) {
+    entity.set_removed(RemovalReason::Discarded);
+    remove_projectile_source(&entity.uuid());
 }
 
 fn world_creation_requests() -> &'static SyncMutex<FxHashMap<u64, WorldCreationRequest>> {
@@ -409,12 +463,15 @@ extern "system" fn enchantment_can_enchant(
     let Ok(item) = env.get_string(&item) else {
         return 0;
     };
-    let Some(enchantment) = REGISTRY.enchantments.by_key(&Identifier::vanilla(
+    let Some(registry) = REGISTRY.get() else {
+        return 0;
+    };
+    let Some(enchantment) = registry.enchantments.by_key(&Identifier::vanilla(
         enchantment.to_str().unwrap_or_default().to_owned(),
     )) else {
         return 0;
     };
-    let Some(item) = REGISTRY.items.by_key(&Identifier::vanilla(
+    let Some(item) = registry.items.by_key(&Identifier::vanilla(
         item.to_str().unwrap_or_default().to_owned(),
     )) else {
         return 0;
@@ -461,22 +518,6 @@ extern "system" fn block_property_values(
     string_array(&mut env, &values)
 }
 
-/// `foton.Native.enchantmentsConflict`
-extern "system" fn enchantments_conflict(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    enchantment: JString<'_>,
-    other: JString<'_>,
-) -> jboolean {
-    let (Some(enchantment), Some(other)) = (
-        enchantment_named(&mut env, &enchantment),
-        enchantment_named(&mut env, &other),
-    ) else {
-        return 0;
-    };
-    jboolean::from(!Enchantment::are_compatible(enchantment, other))
-}
-
 /// `foton.Native.enchantmentItems`: the item keys an enchantment's primary or
 /// supported holder set names, or null when it names none.
 extern "system" fn enchantment_items(
@@ -518,6 +559,43 @@ extern "system" fn enchantment_items(
             .collect(),
     };
     string_array(&mut env, &items)
+}
+
+fn enchantments_conflict_state(first: &str, second: &str) -> bool {
+    let Ok(first) = first.parse::<Identifier>() else {
+        return false;
+    };
+    let Ok(second) = second.parse::<Identifier>() else {
+        return false;
+    };
+    let Some(registry) = REGISTRY.get() else {
+        return false;
+    };
+    let Some(first) = registry.enchantments.by_key(&first) else {
+        return false;
+    };
+    let Some(second) = registry.enchantments.by_key(&second) else {
+        return false;
+    };
+    !Enchantment::are_compatible(first, second)
+}
+
+extern "system" fn enchantments_conflict(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    first: JString<'_>,
+    second: JString<'_>,
+) -> jboolean {
+    let Ok(first) = env.get_string(&first) else {
+        return 0;
+    };
+    let Ok(second) = env.get_string(&second) else {
+        return 0;
+    };
+    jboolean::from(enchantments_conflict_state(
+        first.to_str().unwrap_or_default(),
+        second.to_str().unwrap_or_default(),
+    ))
 }
 
 fn parse_item_snbt_patch(input: &str) -> Option<NbtCompound> {
@@ -621,27 +699,35 @@ extern "system" fn is_tagged(
     let Ok(value) = env.get_string(&value) else {
         return 0;
     };
-    let Ok(tag) = String::from(tag).parse::<Identifier>() else {
-        return 0;
+    jboolean::from(is_tagged_state(
+        &String::from(registry),
+        &String::from(tag),
+        &String::from(value),
+    ))
+}
+
+fn is_tagged_state(registry_name: &str, tag: &str, value: &str) -> bool {
+    let Ok(tag) = tag.parse::<Identifier>() else {
+        return false;
     };
-    let Ok(value) = String::from(value).parse::<Identifier>() else {
-        return 0;
+    let Ok(value) = value.parse::<Identifier>() else {
+        return false;
     };
-    let registry = String::from(registry);
-    let answer = match registry.as_str() {
-        // The two a plugin asks about every tick keep their direct lookup.
-        "minecraft:items" | "items" | "item" => REGISTRY
+    let Some(registry) = REGISTRY.get() else {
+        return false;
+    };
+    match registry_name {
+        "minecraft:items" | "items" | "item" => registry
             .items
             .by_key(&value)
-            .is_some_and(|item| REGISTRY.items.is_in_tag(item, &tag)),
-        "minecraft:blocks" | "blocks" | "block" => REGISTRY
+            .is_some_and(|item| registry.items.is_in_tag(item, &tag)),
+        "minecraft:blocks" | "blocks" | "block" => registry
             .blocks
             .by_key(&value)
-            .is_some_and(|block| REGISTRY.blocks.is_in_tag(block, &tag)),
+            .is_some_and(|block| registry.blocks.is_in_tag(block, &tag)),
         other => tag_members(other, &tag)
             .is_some_and(|members| members.iter().any(|member| *member == value.to_string())),
-    };
-    jboolean::from(answer)
+    }
 }
 
 /// `foton.Native.tagValues`: the tag's members, or null when the registry has
@@ -658,10 +744,14 @@ extern "system" fn tag_values(
     let Ok(tag) = env.get_string(&tag) else {
         return null_mut();
     };
+    let registry_name = String::from(registry);
+    let Some(_registry) = REGISTRY.get() else {
+        return string_array(&mut env, &[]);
+    };
     let Ok(tag) = String::from(tag).parse::<Identifier>() else {
         return null_mut();
     };
-    let Some(values) = tag_members(&String::from(registry), &tag) else {
+    let Some(values) = tag_members(&registry_name, &tag) else {
         return null_mut();
     };
     string_array(&mut env, &values)
@@ -802,71 +892,6 @@ extern "system" fn set_spellcaster_spell(
     };
     if let Some(evoker) = entity.as_ref().downcast_ref::<EvokerEntity>() {
         evoker.set_is_casting_spell(spell);
-    }
-}
-
-extern "system" fn projectile_shooter(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-) -> jstring {
-    let Ok(text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
-        return null_mut();
-    };
-    let Ok(id) = text.parse() else {
-        return null_mut();
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return null_mut();
-    };
-    let owner = entity
-        .as_ref()
-        .downcast_ref::<LargeFireballEntity>()
-        .and_then(Projectile::owner_uuid)
-        .or_else(|| {
-            entity
-                .as_ref()
-                .downcast_ref::<SmallFireballEntity>()
-                .and_then(Projectile::owner_uuid)
-        })
-        .or_else(|| {
-            entity
-                .as_ref()
-                .downcast_ref::<DragonFireballEntity>()
-                .and_then(Projectile::owner_uuid)
-        });
-    to_java(&mut env, owner.map(|value| value.to_string()))
-}
-
-extern "system" fn set_projectile_shooter(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    owner: JString<'_>,
-) {
-    let Ok(text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
-        return;
-    };
-    let Ok(id) = text.parse() else {
-        return;
-    };
-    let Ok(owner_text): Result<String, _> = env.get_string(&owner).map(Into::into) else {
-        return;
-    };
-    let owner_id = owner_text.parse().ok();
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return;
-    };
-    if let Some(e) = entity.as_ref().downcast_ref::<LargeFireballEntity>() {
-        e.set_owner_uuid(owner_id);
-        return;
-    }
-    if let Some(e) = entity.as_ref().downcast_ref::<SmallFireballEntity>() {
-        e.set_owner_uuid(owner_id);
-        return;
-    }
-    if let Some(e) = entity.as_ref().downcast_ref::<DragonFireballEntity>() {
-        e.set_owner_uuid(owner_id);
     }
 }
 
@@ -1177,6 +1202,38 @@ fn entity_by_uuid(uuid: &Uuid) -> Option<(Arc<World>, SharedEntity)> {
     lifecycle::pending_entity(uuid)
 }
 
+#[cfg(test)]
+static PREPUBLICATION_TEST_ENTITIES: LazyLock<SyncMutex<FxHashMap<Uuid, SharedEntity>>> =
+    LazyLock::new(|| SyncMutex::new(FxHashMap::default()));
+
+#[cfg(test)]
+pub(crate) fn register_prepublication_test_entity(entity: SharedEntity) {
+    PREPUBLICATION_TEST_ENTITIES
+        .lock()
+        .insert(entity.uuid(), entity);
+}
+
+fn animal_entity_by_uuid(uuid: &Uuid) -> Option<SharedEntity> {
+    if let Some((_, entity)) = entity_by_uuid(uuid) {
+        return Some(entity);
+    }
+    #[cfg(test)]
+    {
+        return PREPUBLICATION_TEST_ENTITIES.lock().get(uuid).cloned();
+    }
+    #[cfg(not(test))]
+    None
+}
+
+fn entity_by_text(text: &str) -> Option<(Arc<World>, SharedEntity)> {
+    entity_by_uuid(&Uuid::parse_str(text).ok()?)
+}
+
+fn entity_handle(env: &mut JNIEnv<'_>, uuid: &JString<'_>) -> Option<(Arc<World>, SharedEntity)> {
+    let text: String = env.get_string(uuid).ok()?.into();
+    entity_by_text(&text)
+}
+
 extern "system" fn set_entity_custom_name_visible(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -1356,6 +1413,12 @@ extern "system" fn entity_item_stack(
     if let Some(frame) = entity.as_ref().downcast_ref::<ItemFrameEntity>() {
         return to_java(&mut env, Some(describe_slot(&frame.framed_item())));
     }
+    if let Some(fireball) = entity.as_ref().downcast_ref::<LargeFireballEntity>() {
+        return to_java(&mut env, Some(describe_slot(&fireball.item())));
+    }
+    if let Some(fireball) = entity.as_ref().downcast_ref::<SmallFireballEntity>() {
+        return to_java(&mut env, Some(describe_slot(&fireball.item())));
+    }
     null_mut()
 }
 
@@ -1389,6 +1452,10 @@ extern "system" fn set_entity_item_stack(
         item.set_item(stack);
     } else if let Some(frame) = entity.as_ref().downcast_ref::<ItemFrameEntity>() {
         frame.set_item(stack);
+    } else if let Some(fireball) = entity.as_ref().downcast_ref::<LargeFireballEntity>() {
+        fireball.set_item(stack);
+    } else if let Some(fireball) = entity.as_ref().downcast_ref::<SmallFireballEntity>() {
+        fireball.set_item(stack);
     }
 }
 
@@ -1471,12 +1538,15 @@ extern "system" fn remove_entity(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: 
         return;
     };
     if lifecycle::discard_pending(&id) {
+        remove_projectile_source(&id);
         return;
     }
-    let Some((world, entity)) = entity_by_uuid(&id) else {
+    let Some((_, entity)) = entity_by_uuid(&id) else {
+        remove_projectile_source(&id);
         return;
     };
-    let _ = world.remove_entity(entity.id());
+    entity.set_removed(RemovalReason::Discarded);
+    remove_projectile_source(&id);
 }
 
 extern "system" fn entity_world(
@@ -2962,9 +3032,6 @@ extern "system" fn set_slime_size(
     uuid: JString<'_>,
     size: jint,
 ) {
-    if size <= 0 {
-        return;
-    }
     let Ok(text) = env.get_string(&uuid) else {
         return;
     };
@@ -2977,7 +3044,50 @@ extern "system" fn set_slime_size(
     let Some(slime) = entity.as_ref().downcast_ref::<SlimeEntity>() else {
         return;
     };
-    slime.set_cube_size(size, true);
+    slime.set_cube_size(size, Entity::is_alive(slime));
+}
+
+extern "system" fn cube_mob_can_wander(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jboolean {
+    let Ok(text) = env.get_string(&uuid) else {
+        return 0;
+    };
+    let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
+        return 0;
+    };
+    entity_by_uuid(&id)
+        .and_then(|(_, entity)| {
+            entity
+                .as_ref()
+                .downcast_ref::<SlimeEntity>()
+                .map(SlimeEntity::can_wander)
+        })
+        .is_some_and(|can_wander| can_wander)
+        .into()
+}
+
+extern "system" fn set_cube_mob_wander(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    can_wander: jboolean,
+) {
+    let Ok(text) = env.get_string(&uuid) else {
+        return;
+    };
+    let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
+        return;
+    };
+    let Some((_, entity)) = entity_by_uuid(&id) else {
+        return;
+    };
+    let Some(slime) = entity.as_ref().downcast_ref::<SlimeEntity>() else {
+        return;
+    };
+    slime.set_wander(can_wander != 0);
 }
 
 extern "system" fn set_creeper_powered(
@@ -4502,10 +4612,10 @@ extern "system" fn entity_can_breed(
     let Some((_, entity)) = entity_by_uuid(&id) else {
         return 0;
     };
-    let Some(animal) = entity.as_ref().as_animal() else {
+    let Some(ageable) = entity.as_ref().as_ageable_mob() else {
         return 0;
     };
-    (animal.in_love_time() > 0).into()
+    (ageable.get_age() == 0).into()
 }
 
 extern "system" fn set_entity_breed(
@@ -4523,10 +4633,244 @@ extern "system" fn set_entity_breed(
     let Some((_, entity)) = entity_by_uuid(&id) else {
         return;
     };
+    let Some(ageable) = entity.as_ref().as_ageable_mob() else {
+        return;
+    };
+    if breed != 0 {
+        ageable.set_age(0);
+    } else if ageable.get_age() >= 0 {
+        ageable.set_age(6000);
+    }
+}
+
+extern "system" fn animal_breed_cause(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jstring {
+    let Ok(text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return null_mut();
+    };
+    let Ok(id) = text.parse() else {
+        return null_mut();
+    };
+    let value = entity_by_uuid(&id)
+        .and_then(|(_, entity)| {
+            entity
+                .as_ref()
+                .as_animal()
+                .and_then(Animal::love_cause_uuid)
+        })
+        .map(|cause| cause.to_string());
+    to_java(&mut env, value)
+}
+
+extern "system" fn set_animal_breed_cause(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    cause: JString<'_>,
+) {
+    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return;
+    };
+    let Ok(id) = uuid_text.parse() else {
+        return;
+    };
+    let Ok(cause_text): Result<String, _> = env.get_string(&cause).map(Into::into) else {
+        return;
+    };
+    let cause = if cause_text.is_empty() {
+        None
+    } else {
+        let Ok(cause) = cause_text.parse() else {
+            return;
+        };
+        Some(cause)
+    };
+    let Some((_, entity)) = entity_by_uuid(&id) else {
+        return;
+    };
     let Some(animal) = entity.as_ref().as_animal() else {
         return;
     };
-    animal.set_in_love_time(if breed != 0 { 600 } else { 0 });
+    animal.set_love_cause_uuid(cause);
+}
+
+extern "system" fn animal_love_ticks(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jint {
+    let Ok(text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return 0;
+    };
+    let Ok(id) = text.parse() else {
+        return 0;
+    };
+    entity_by_uuid(&id)
+        .and_then(|(_, entity)| entity.as_ref().as_animal().map(Animal::in_love_time))
+        .unwrap_or(0)
+}
+
+extern "system" fn set_animal_love_ticks(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    ticks: jint,
+) {
+    let Ok(text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return;
+    };
+    let Ok(id) = text.parse() else {
+        return;
+    };
+    let Some((_, entity)) = entity_by_uuid(&id) else {
+        return;
+    };
+    let Some(animal) = entity.as_ref().as_animal() else {
+        return;
+    };
+    animal.set_in_love_time(ticks);
+}
+
+extern "system" fn animal_is_breed_item(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    item: JString<'_>,
+) -> jboolean {
+    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return 0;
+    };
+    let Ok(id) = uuid_text.parse() else {
+        return 0;
+    };
+    let Ok(item_text): Result<String, _> = env.get_string(&item).map(Into::into) else {
+        return 0;
+    };
+    let Ok(item_key) = Identifier::from_str(&item_text) else {
+        return 0;
+    };
+    let Some(entity) = animal_entity_by_uuid(&id) else {
+        return 0;
+    };
+    let Some(animal) = entity.as_ref().as_animal() else {
+        return 0;
+    };
+    let Some(registry) = REGISTRY.get() else {
+        return 0;
+    };
+    let Some(item) = registry.items.by_key(&item_key) else {
+        return 0;
+    };
+    animal.is_food(&ItemStack::new(item)).into()
+}
+
+extern "system" fn cow_variant(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jstring {
+    let Ok(text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return null_mut();
+    };
+    let Ok(id) = text.parse() else {
+        return null_mut();
+    };
+    let value = entity_by_uuid(&id).and_then(|(_, entity)| {
+        entity
+            .as_ref()
+            .downcast_ref::<CowEntity>()
+            .map(|cow| cow.variant().key.to_string())
+    });
+    to_java(&mut env, value)
+}
+
+extern "system" fn set_cow_variant(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    variant: JString<'_>,
+) {
+    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return;
+    };
+    let Ok(id) = uuid_text.parse() else {
+        return;
+    };
+    let Ok(variant_text): Result<String, _> = env.get_string(&variant).map(Into::into) else {
+        return;
+    };
+    let Ok(key) = Identifier::from_str(&variant_text) else {
+        return;
+    };
+    let Some((_, entity)) = entity_by_uuid(&id) else {
+        return;
+    };
+    let Some(cow) = entity.as_ref().downcast_ref::<CowEntity>() else {
+        return;
+    };
+    let Some(registry) = REGISTRY.get() else {
+        return;
+    };
+    let Some(variant) = registry.cow_variants.by_key(&key) else {
+        return;
+    };
+    cow.set_variant(variant);
+}
+
+extern "system" fn cow_sound_variant(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jstring {
+    let Ok(text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return null_mut();
+    };
+    let Ok(id) = text.parse() else {
+        return null_mut();
+    };
+    let value = entity_by_uuid(&id).and_then(|(_, entity)| {
+        entity
+            .as_ref()
+            .downcast_ref::<CowEntity>()
+            .map(|cow| cow.sound_variant().key.to_string())
+    });
+    to_java(&mut env, value)
+}
+
+extern "system" fn set_cow_sound_variant(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    variant: JString<'_>,
+) {
+    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return;
+    };
+    let Ok(id) = uuid_text.parse() else {
+        return;
+    };
+    let Ok(variant_text): Result<String, _> = env.get_string(&variant).map(Into::into) else {
+        return;
+    };
+    let Ok(key) = Identifier::from_str(&variant_text) else {
+        return;
+    };
+    let Some((_, entity)) = entity_by_uuid(&id) else {
+        return;
+    };
+    let Some(cow) = entity.as_ref().downcast_ref::<CowEntity>() else {
+        return;
+    };
+    let Some(registry) = REGISTRY.get() else {
+        return;
+    };
+    let Some(variant) = registry.cow_sound_variants.by_key(&key) else {
+        return;
+    };
+    cow.set_sound_variant(variant);
 }
 
 extern "system" fn bee_anger(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jint {
@@ -5116,22 +5460,17 @@ extern "system" fn entity_spawn_reason(
     }) else {
         return null_mut();
     };
-    let Some((_world, entity)) = entity_by_uuid(&id) else {
-        return null_mut();
-    };
-    let reason = entity
-        .base()
-        .spawn_reason()
-        .map_or("DEFAULT", |reason| match reason {
-            EntitySpawnReason::Natural => "NATURAL",
-            EntitySpawnReason::ChunkGeneration => "DEFAULT",
-            EntitySpawnReason::Spawner | EntitySpawnReason::TrialSpawner => "SPAWNER",
-            EntitySpawnReason::Breeding => "BREEDING",
-            EntitySpawnReason::Command => "COMMAND",
-            _ => "CUSTOM",
-        });
-    to_java(&mut env, Some(reason.to_owned()))
+    let entity = entity_by_uuid(&id);
+    let reason = entity_spawn_reason_state(entity.as_ref().map(|(_, entity)| entity.as_ref()));
+    to_java(&mut env, Some(reason.as_str().to_owned()))
 }
+
+fn entity_spawn_reason_state(entity: Option<&dyn Entity>) -> PluginSpawnReason {
+    entity
+        .and_then(|entity| entity.base().plugin_spawn_reason())
+        .unwrap_or_default()
+}
+
 extern "system" fn entity_position(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -5144,13 +5483,195 @@ extern "system" fn entity_position(
     let Some(id) = Uuid::parse_str(&text).ok() else {
         return to_position(&mut env, None);
     };
+    let entity = entity_by_uuid(&id);
     to_position(
         &mut env,
-        entity_by_uuid(&id).map(|(_, entity)| {
-            let p = entity.position();
-            [p.x, p.y, p.z, 0.0, 0.0]
-        }),
+        entity_position_state(entity.as_ref().map(|(_, entity)| entity.as_ref())),
     )
+}
+
+fn entity_position_state(entity: Option<&dyn Entity>) -> Option<[f64; 5]> {
+    entity.map(|entity| {
+        let (position, (yaw, pitch)) = entity.base().position_and_rotation();
+        [
+            position.x,
+            position.y,
+            position.z,
+            f64::from(yaw),
+            f64::from(pitch),
+        ]
+    })
+}
+
+fn entity_scoreboard_tags_state(entity: Option<&dyn Entity>) -> Option<Vec<String>> {
+    entity.map(Entity::tags)
+}
+
+fn add_entity_scoreboard_tag_state(entity: Option<&dyn Entity>, tag: String) -> bool {
+    entity.is_some_and(|entity| entity.add_tag(tag))
+}
+
+fn remove_entity_scoreboard_tag_state(entity: Option<&dyn Entity>, tag: &str) -> bool {
+    entity.is_some_and(|entity| entity.remove_tag(tag))
+}
+
+fn entity_has_gravity_state(entity: Option<&dyn Entity>) -> bool {
+    entity.is_some_and(|entity| !entity.is_no_gravity())
+}
+
+fn set_entity_gravity_state(entity: Option<&dyn Entity>, gravity: bool) {
+    if let Some(entity) = entity {
+        entity.set_no_gravity(!gravity);
+    }
+}
+
+fn entity_silent_state(entity: Option<&dyn Entity>) -> bool {
+    entity.is_some_and(Entity::is_silent)
+}
+
+fn set_entity_silent_state(entity: Option<&dyn Entity>, silent: bool) {
+    if let Some(entity) = entity {
+        entity.set_silent(silent);
+    }
+}
+
+fn set_entity_rotation_state(entity: Option<&dyn Entity>, yaw: f32, pitch: f32) -> bool {
+    if !yaw.is_finite() || !pitch.is_finite() {
+        return false;
+    }
+    let Some(entity) = entity else {
+        return false;
+    };
+    entity.set_rotation((yaw, pitch));
+    if let Some(living) = entity.as_living_entity() {
+        living.set_y_head_rot(yaw);
+    }
+    true
+}
+
+fn entity_in_rain_state(entity: Option<&dyn Entity>) -> bool {
+    entity.is_some_and(Entity::is_in_rain)
+}
+
+extern "system" fn entity_scoreboard_tags(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jobjectArray {
+    let entity = entity_handle(&mut env, &uuid);
+    let Some(tags) =
+        entity_scoreboard_tags_state(entity.as_ref().map(|(_, entity)| entity.as_ref()))
+    else {
+        return null_mut();
+    };
+    string_array(&mut env, &tags)
+}
+
+extern "system" fn add_entity_scoreboard_tag(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    tag: JString<'_>,
+) -> jboolean {
+    let Some((_, entity)) = entity_handle(&mut env, &uuid) else {
+        return 0;
+    };
+    let Ok(tag): Result<String, _> = env.get_string(&tag).map(Into::into) else {
+        return 0;
+    };
+    jboolean::from(add_entity_scoreboard_tag_state(Some(entity.as_ref()), tag))
+}
+
+extern "system" fn remove_entity_scoreboard_tag(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    tag: JString<'_>,
+) -> jboolean {
+    let Some((_, entity)) = entity_handle(&mut env, &uuid) else {
+        return 0;
+    };
+    let Ok(tag): Result<String, _> = env.get_string(&tag).map(Into::into) else {
+        return 0;
+    };
+    jboolean::from(remove_entity_scoreboard_tag_state(
+        Some(entity.as_ref()),
+        &tag,
+    ))
+}
+
+extern "system" fn entity_has_gravity(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jboolean {
+    let entity = entity_handle(&mut env, &uuid);
+    jboolean::from(entity_has_gravity_state(
+        entity.as_ref().map(|(_, entity)| entity.as_ref()),
+    ))
+}
+
+extern "system" fn set_entity_gravity(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    gravity: jboolean,
+) {
+    let entity = entity_handle(&mut env, &uuid);
+    set_entity_gravity_state(
+        entity.as_ref().map(|(_, entity)| entity.as_ref()),
+        gravity != 0,
+    );
+}
+
+extern "system" fn entity_silent(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jboolean {
+    let entity = entity_handle(&mut env, &uuid);
+    jboolean::from(entity_silent_state(
+        entity.as_ref().map(|(_, entity)| entity.as_ref()),
+    ))
+}
+
+extern "system" fn set_entity_silent(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    silent: jboolean,
+) {
+    let entity = entity_handle(&mut env, &uuid);
+    set_entity_silent_state(
+        entity.as_ref().map(|(_, entity)| entity.as_ref()),
+        silent != 0,
+    );
+}
+
+extern "system" fn set_entity_rotation(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    yaw: jfloat,
+    pitch: jfloat,
+) {
+    let entity = entity_handle(&mut env, &uuid);
+    set_entity_rotation_state(
+        entity.as_ref().map(|(_, entity)| entity.as_ref()),
+        yaw,
+        pitch,
+    );
+}
+
+extern "system" fn entity_in_rain(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jboolean {
+    let Some((_, entity)) = entity_handle(&mut env, &uuid) else {
+        return 0;
+    };
+    jboolean::from(entity_in_rain_state(Some(entity.as_ref())))
 }
 
 extern "system" fn entity_origin(
@@ -5510,8 +6031,7 @@ extern "system" fn entity_nearby(
     let Some((world, entity)) = entity_by_uuid(&id) else {
         return null_mut();
     };
-    let p = entity.position();
-    let bounds = WorldAabb::new(p.x - x, p.y - y, p.z - z, p.x + x, p.y + y, p.z + z);
+    let bounds = entity.bounding_box().inflate_xyz(x, y, z);
     let values: Vec<String> = world
         .get_entities_in_aabb(&bounds)
         .into_iter()
@@ -5795,8 +6315,173 @@ extern "system" fn entity_projectile_owner(
     let Ok(id) = Uuid::parse_str(text.to_str().unwrap_or_default()) else {
         return null_mut();
     };
-    let owner = entity_by_uuid(&id).and_then(|(_, entity)| entity.projectile_owner_uuid());
+    let owner = {
+        let sources = projectile_sources().read();
+        entity_by_uuid(&id).and_then(|(_, entity)| {
+            if entity.is_removed() || sources.contains_key(&id) {
+                None
+            } else {
+                entity.projectile_owner_uuid()
+            }
+        })
+    };
     to_java(&mut env, owner.map(|value| value.to_string()))
+}
+
+extern "system" fn entity_projectile_source(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jobject {
+    let Ok(uuid): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return null_mut();
+    };
+    let Ok(id) = Uuid::parse_str(&uuid) else {
+        return null_mut();
+    };
+    let source = {
+        let sources = projectile_sources().read();
+        entity_by_uuid(&id)
+            .filter(|(_, entity)| !entity.is_removed())
+            .and_then(|_| sources.get(&id).cloned())
+    };
+    let Some(source) = source else {
+        return null_mut();
+    };
+    env.new_local_ref(source.as_obj())
+        .map_or(null_mut(), JObject::into_raw)
+}
+
+extern "system" fn entity_projectile_shooter(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jobject {
+    let Ok(uuid): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return null_mut();
+    };
+    let Ok(id) = Uuid::parse_str(&uuid) else {
+        return null_mut();
+    };
+    let (source, owner) = {
+        let sources = projectile_sources().read();
+        let Some((_, entity)) = entity_by_uuid(&id) else {
+            return null_mut();
+        };
+        if entity.is_removed() {
+            return null_mut();
+        }
+        let source = sources.get(&id).cloned();
+        let owner = if source.is_none() {
+            entity.projectile_owner_uuid()
+        } else {
+            None
+        };
+        (source, owner)
+    };
+    if let Some(source) = source {
+        return env
+            .new_local_ref(source.as_obj())
+            .map_or(null_mut(), JObject::into_raw);
+    }
+    owner
+        .and_then(|owner| env.new_string(owner.to_string()).ok())
+        .map_or(null_mut(), JString::into_raw)
+        .cast()
+}
+
+extern "system" fn set_entity_projectile_source(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    owner: JString<'_>,
+    source: JObject<'_>,
+    reset_pickup: jboolean,
+) -> jboolean {
+    let Ok(uuid): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return 0;
+    };
+    let Ok(id) = Uuid::parse_str(&uuid) else {
+        return 0;
+    };
+    let Ok(owner): Result<String, _> = env.get_string(&owner).map(Into::into) else {
+        return 0;
+    };
+    let owner = if owner.is_empty() {
+        None
+    } else {
+        let Ok(owner) = Uuid::parse_str(&owner) else {
+            return 0;
+        };
+        Some(owner)
+    };
+    let Some((_, entity)) = entity_by_uuid(&id) else {
+        remove_projectile_source(&id);
+        return 0;
+    };
+    #[cfg(test)]
+    task_one_tests::after_source_resolution();
+    let Some(projectile) = entity.as_projectile() else {
+        remove_projectile_source(&id);
+        return 0;
+    };
+    let source = if owner.is_none() && !source.is_null() {
+        let Ok(source) = env.new_global_ref(&source) else {
+            return 0;
+        };
+        Some(source)
+    } else {
+        None
+    };
+
+    let replaced = {
+        let mut sources = projectile_sources().write();
+        if entity.is_removed()
+            || !entity_by_uuid(&id).is_some_and(|(_, current)| Arc::ptr_eq(&current, &entity))
+        {
+            return 0;
+        }
+        projectile.set_owner_uuid(owner);
+        if let Some(source) = source {
+            sources.insert(id, source)
+        } else {
+            sources.remove(&id)
+        }
+    };
+    drop(replaced);
+    if reset_pickup != 0
+        && let Some(arrow) = entity.downcast_ref::<ArrowEntity>()
+        && let Some(shooter) =
+            owner.and_then(|owner| entity_by_uuid(&owner).map(|(_, entity)| entity))
+    {
+        arrow.apply_owner_pickup_reset(shooter.as_ref());
+    }
+    1
+}
+
+extern "system" fn mob_effect_instant(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    key: JString<'_>,
+) -> jboolean {
+    let Ok(key): Result<String, _> = env.get_string(&key).map(Into::into) else {
+        return 0;
+    };
+    let Ok(key) = Identifier::from_str(&format!("minecraft:{key}")) else {
+        return 0;
+    };
+    REGISTRY
+        .get()
+        .map_or_else(
+            || MobEffect::is_instantaneous_key(&key),
+            |registry| {
+                registry
+                    .mob_effects
+                    .by_key(&key)
+                    .is_some_and(MobEffect::is_instantaneous)
+            },
+        )
+        .into()
 }
 
 extern "system" fn entity_potion_effects(
@@ -5916,6 +6601,120 @@ const fn equipment_slot_from_index(slot: jint) -> Option<EquipmentSlot> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EquipmentSlotRequestError {
+    InvalidIndex,
+}
+
+fn entity_equipment_slot_state(
+    entity: Option<&dyn Entity>,
+    slot: jint,
+) -> Result<Option<String>, EquipmentSlotRequestError> {
+    let Some(slot) = equipment_slot_from_index(slot) else {
+        return Err(EquipmentSlotRequestError::InvalidIndex);
+    };
+    let Some(living) = entity.and_then(Entity::as_living_entity) else {
+        return Ok(None);
+    };
+    let mut described = None;
+    living.with_equipment_slot(slot, &mut |item| described = Some(describe_slot(item)));
+    Ok(described)
+}
+
+fn set_entity_equipment_slot_state(
+    entity: Option<&dyn Entity>,
+    slot: jint,
+    encoded: &str,
+) -> Result<(), EquipmentSlotRequestError> {
+    let Some(slot) = equipment_slot_from_index(slot) else {
+        return Err(EquipmentSlotRequestError::InvalidIndex);
+    };
+    let Some(living) = entity.and_then(Entity::as_living_entity) else {
+        return Ok(());
+    };
+    let Some(stack) = parse_slot(encoded) else {
+        return Ok(());
+    };
+    let mut stack = stack;
+    living.with_equipment_slot_mut(slot, &mut |item| mem::swap(item, &mut stack));
+    Ok(())
+}
+
+fn clear_entity_equipment_state(entity: Option<&dyn Entity>) -> bool {
+    let Some(living) = entity.and_then(Entity::as_living_entity) else {
+        return false;
+    };
+    living.clear_equipment();
+    true
+}
+
+fn throw_invalid_equipment_slot_index(env: &mut JNIEnv<'_>) {
+    let _ = env.throw_new(
+        "java/lang/IllegalArgumentException",
+        "equipment slot index is invalid",
+    );
+}
+
+extern "system" fn entity_equipment_slot(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    slot: jint,
+) -> jstring {
+    let entity = env
+        .get_string(&uuid)
+        .ok()
+        .and_then(|text| Uuid::parse_str(text.to_str().ok()?).ok())
+        .and_then(|id| entity_by_uuid(&id).map(|(_, entity)| entity));
+    match entity_equipment_slot_state(entity.as_deref(), slot) {
+        Ok(value) => to_java(&mut env, value),
+        Err(EquipmentSlotRequestError::InvalidIndex) => {
+            throw_invalid_equipment_slot_index(&mut env);
+            null_mut()
+        }
+    }
+}
+
+extern "system" fn set_entity_equipment_slot(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    slot: jint,
+    item: JString<'_>,
+) {
+    let Some(encoded) = env
+        .get_string(&item)
+        .ok()
+        .and_then(|text| text.to_str().ok().map(str::to_owned))
+    else {
+        return;
+    };
+    let entity = env
+        .get_string(&uuid)
+        .ok()
+        .and_then(|text| Uuid::parse_str(text.to_str().ok()?).ok())
+        .and_then(|id| entity_by_uuid(&id).map(|(_, entity)| entity));
+    if matches!(
+        set_entity_equipment_slot_state(entity.as_deref(), slot, &encoded),
+        Err(EquipmentSlotRequestError::InvalidIndex)
+    ) {
+        throw_invalid_equipment_slot_index(&mut env);
+    }
+}
+
+extern "system" fn clear_entity_equipment(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) {
+    let entity = env
+        .get_string(&uuid)
+        .ok()
+        .and_then(|text| Uuid::parse_str(text.to_str().ok()?).ok())
+        .and_then(|id| entity_by_uuid(&id).map(|(_, entity)| entity));
+    clear_entity_equipment_state(entity.as_deref());
+}
+
 extern "system" fn entity_drop_chance(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -5985,6 +6784,47 @@ extern "system" fn arrow_potion(
     to_java(&mut env, value)
 }
 
+extern "system" fn set_arrow_potion(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    potion: JString<'_>,
+) {
+    let Ok(text) = env.get_string(&uuid) else {
+        return;
+    };
+    let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
+        return;
+    };
+    let Ok(potion_text) = env.get_string(&potion) else {
+        return;
+    };
+    let Some((_, entity)) = entity_by_uuid(&id) else {
+        return;
+    };
+    let Some(arrow) = entity.as_ref().downcast_ref::<ArrowEntity>() else {
+        return;
+    };
+    let Some(potion_text) = potion_text.to_str().ok() else {
+        return;
+    };
+    let potion = if potion_text.is_empty() {
+        None
+    } else {
+        let Some(registry) = REGISTRY.get() else {
+            return;
+        };
+        let Ok(key) = Identifier::from_str(potion_text) else {
+            return;
+        };
+        let Some(potion) = registry.potions.by_key(&key) else {
+            return;
+        };
+        Some(potion)
+    };
+    arrow.set_base_potion(potion);
+}
+
 extern "system" fn arrow_potion_color(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -6023,21 +6863,482 @@ extern "system" fn arrow_custom_effects(
         return null_mut();
     };
     let effects: Vec<String> = arrow
-        .effects()
+        .ammo_potion_contents()
+        .map(|contents| contents.custom_effects().to_vec())
+        .unwrap_or_default()
         .into_iter()
-        .map(|effect| {
-            format!(
-                "{}|{}|{}|{}|{}|{}",
-                effect.effect().key.path,
-                effect.duration(),
-                effect.amplifier(),
-                effect.is_ambient(),
-                effect.is_visible(),
-                effect.show_icon()
-            )
-        })
+        .map(|effect| encode_arrow_custom_effect(&effect))
         .collect();
     string_array(&mut env, &effects)
+}
+
+fn encode_arrow_custom_effect(effect: &RegistryMobEffectInstance) -> String {
+    let mut encoded = format!(
+        "{}|{}|{}|{}|{}|{}",
+        effect.effect().key.path,
+        effect.duration(),
+        effect.amplifier(),
+        effect.ambient(),
+        effect.show_particles(),
+        effect.show_icon()
+    );
+    let mut hidden = effect.hidden_effect();
+    while let Some(details) = hidden {
+        let _ = write!(
+            encoded,
+            "|{}|{}|{}|{}|{}",
+            details.duration(),
+            details.amplifier(),
+            details.ambient(),
+            details.show_particles(),
+            details.show_icon()
+        );
+        hidden = details.hidden_effect();
+    }
+    encoded
+}
+
+fn parse_arrow_custom_effect(encoded: &str) -> Option<RegistryMobEffectInstance> {
+    let mut fields = encoded.split('|');
+    let effect_name = fields.next()?;
+    let effect = REGISTRY
+        .mob_effects
+        .by_key(&Identifier::from_str(&format!("minecraft:{effect_name}")).ok()?)?;
+    let duration = fields.next()?.parse::<i32>().ok()?;
+    let amplifier = fields.next()?.parse::<i32>().ok()?;
+    let ambient = fields.next()?.parse::<bool>().ok()?;
+    let particles = fields.next()?.parse::<bool>().ok()?;
+    let icon = fields.next()?.parse::<bool>().ok()?;
+    if fields.next().is_some() {
+        return None;
+    }
+    Some(RegistryMobEffectInstance::new(
+        effect, duration, amplifier, ambient, particles, icon, None,
+    ))
+}
+
+fn add_or_replace_arrow_custom_effect(
+    effects: &mut Vec<RegistryMobEffectInstance>,
+    replacement: RegistryMobEffectInstance,
+    overwrite: bool,
+) -> bool {
+    let effect = replacement.effect();
+    let already_present = effects.iter().any(|current| current.effect() == effect);
+    if already_present && !overwrite {
+        return false;
+    }
+    if already_present {
+        effects.retain(|current| current.effect() != effect);
+    }
+    effects.push(replacement);
+    true
+}
+
+extern "system" fn arrow_property(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    property: JString<'_>,
+) -> jstring {
+    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return null_mut();
+    };
+    let Ok(property): Result<String, _> = env.get_string(&property).map(Into::into) else {
+        return null_mut();
+    };
+    let Some((_, entity)) = Uuid::parse_str(&uuid_text)
+        .ok()
+        .and_then(|id| entity_by_uuid(&id))
+    else {
+        return null_mut();
+    };
+    let Some(arrow) = entity.downcast_ref::<ArrowEntity>() else {
+        return null_mut();
+    };
+    let value = match property.as_str() {
+        "damage" => match arrow.base_damage() {
+            f64::INFINITY => "Infinity".to_owned(),
+            f64::NEG_INFINITY => "-Infinity".to_owned(),
+            damage => damage.to_string(),
+        },
+        "pierce" => arrow.pierce_level().to_string(),
+        "critical" => arrow.is_crit_arrow().to_string(),
+        "in_block" => arrow.is_in_ground().to_string(),
+        "attached" => arrow
+            .attached_blocks()
+            .into_iter()
+            .map(|pos| format!("{},{},{}", pos.x(), pos.y(), pos.z()))
+            .collect::<Vec<_>>()
+            .join(";"),
+        "pickup" => match arrow.pickup() {
+            ArrowPickup::Disallowed => "DISALLOWED".to_owned(),
+            ArrowPickup::Allowed => "ALLOWED".to_owned(),
+            ArrowPickup::CreativeOnly => "CREATIVE_ONLY".to_owned(),
+        },
+        "crossbow" => arrow
+            .weapon_item()
+            .is_some_and(|weapon| weapon.is(&vanilla_items::CROSSBOW))
+            .to_string(),
+        "item" => describe_slot(&arrow.pickup_item()),
+        "weapon" => {
+            let Some(item) = arrow.weapon_item() else {
+                return null_mut();
+            };
+            describe_slot(&item)
+        }
+        "lifetime" => arrow.lifetime_ticks().to_string(),
+        "sound" => arrow.hit_sound().key.to_string(),
+        _ => return null_mut(),
+    };
+    to_java(&mut env, Some(value))
+}
+
+extern "system" fn set_arrow_property(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    property: JString<'_>,
+    value: JString<'_>,
+) -> jboolean {
+    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return 0;
+    };
+    let Ok(property): Result<String, _> = env.get_string(&property).map(Into::into) else {
+        return 0;
+    };
+    let Ok(value): Result<String, _> = env.get_string(&value).map(Into::into) else {
+        return 0;
+    };
+    let Some((_, entity)) = Uuid::parse_str(&uuid_text)
+        .ok()
+        .and_then(|id| entity_by_uuid(&id))
+    else {
+        return 0;
+    };
+    let Some(arrow) = entity.downcast_ref::<ArrowEntity>() else {
+        return 0;
+    };
+    let changed = match property.as_str() {
+        "damage" => match value.as_str() {
+            "Infinity" => Some(f64::INFINITY),
+            "-Infinity" => Some(f64::NEG_INFINITY),
+            _ => value.parse::<f64>().ok(),
+        }
+        .filter(|damage| *damage >= 0.0)
+        .is_some_and(|damage| {
+            arrow.set_base_damage(damage);
+            true
+        }),
+        "pierce" => value.parse::<i8>().is_ok_and(|level| {
+            arrow.set_pierce_level(level);
+            true
+        }),
+        "critical" => value.parse::<bool>().is_ok_and(|critical| {
+            arrow.set_crit_arrow(critical);
+            true
+        }),
+        "pickup" => match value.as_str() {
+            "DISALLOWED" => {
+                arrow.set_pickup(ArrowPickup::Disallowed);
+                true
+            }
+            "ALLOWED" => {
+                arrow.set_pickup(ArrowPickup::Allowed);
+                true
+            }
+            "CREATIVE_ONLY" => {
+                arrow.set_pickup(ArrowPickup::CreativeOnly);
+                true
+            }
+            _ => false,
+        },
+        "item" => parse_slot(&value).is_some_and(|item| {
+            arrow.set_ammo_item(item);
+            true
+        }),
+        "weapon" => parse_slot(&value).is_some_and(|item| {
+            arrow.set_weapon_item(Some(item));
+            true
+        }),
+        "lifetime" => value.parse::<i32>().is_ok_and(|ticks| {
+            arrow.set_lifetime_ticks(ticks);
+            true
+        }),
+        "sound" => Identifier::from_str(&value)
+            .ok()
+            .and_then(|key| REGISTRY.sound_events.by_key(&key))
+            .is_some_and(|sound| {
+                arrow.set_hit_sound(sound);
+                true
+            }),
+        _ => false,
+    };
+    jboolean::from(changed)
+}
+
+extern "system" fn set_arrow_potion_color(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    color: jint,
+    present: jboolean,
+) {
+    let Ok(text) = env.get_string(&uuid) else {
+        return;
+    };
+    let Some(id) = text
+        .to_str()
+        .ok()
+        .and_then(|value| Uuid::parse_str(value).ok())
+    else {
+        return;
+    };
+    if let Some((_, entity)) = entity_by_uuid(&id)
+        && let Some(arrow) = entity.downcast_ref::<ArrowEntity>()
+    {
+        let color = if present != 0 { color } else { -1 };
+        arrow.set_potion_color(Some(color));
+    }
+}
+
+extern "system" fn add_arrow_custom_effect(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    encoded_effect: JString<'_>,
+    overwrite: jboolean,
+) -> jboolean {
+    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return 0;
+    };
+    let Ok(encoded_effect): Result<String, _> = env.get_string(&encoded_effect).map(Into::into)
+    else {
+        return 0;
+    };
+    let Some((_, entity)) = Uuid::parse_str(&uuid_text)
+        .ok()
+        .and_then(|id| entity_by_uuid(&id))
+    else {
+        return 0;
+    };
+    let Some(arrow) = entity.downcast_ref::<ArrowEntity>() else {
+        return 0;
+    };
+    let Some(replacement) = parse_arrow_custom_effect(&encoded_effect) else {
+        return 0;
+    };
+    let mut effects = arrow
+        .ammo_potion_contents()
+        .map(|contents| contents.custom_effects().to_vec())
+        .unwrap_or_default();
+    if !add_or_replace_arrow_custom_effect(&mut effects, replacement, overwrite != 0) {
+        return 0;
+    }
+    arrow.set_custom_effects(effects);
+    1
+}
+
+extern "system" fn remove_arrow_custom_effect(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    effect_name: JString<'_>,
+) -> jboolean {
+    let Ok(uuid_text): Result<String, _> = env.get_string(&uuid).map(Into::into) else {
+        return 0;
+    };
+    let Ok(effect_name): Result<String, _> = env.get_string(&effect_name).map(Into::into) else {
+        return 0;
+    };
+    let Some((_, entity)) = Uuid::parse_str(&uuid_text)
+        .ok()
+        .and_then(|id| entity_by_uuid(&id))
+    else {
+        return 0;
+    };
+    let Some(arrow) = entity.downcast_ref::<ArrowEntity>() else {
+        return 0;
+    };
+    let mut effects = arrow
+        .ammo_potion_contents()
+        .map(|contents| contents.custom_effects().to_vec())
+        .unwrap_or_default();
+    let before = effects.len();
+    effects.retain(|effect| effect.effect().key.path != effect_name);
+    if effects.len() == before {
+        return 0;
+    }
+    arrow.set_custom_effects(effects);
+    1
+}
+
+extern "system" fn clear_arrow_custom_effects(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) {
+    let Ok(text) = env.get_string(&uuid) else {
+        return;
+    };
+    let Some(id) = text
+        .to_str()
+        .ok()
+        .and_then(|value| Uuid::parse_str(value).ok())
+    else {
+        return;
+    };
+    if let Some((_, entity)) = entity_by_uuid(&id)
+        && let Some(arrow) = entity.downcast_ref::<ArrowEntity>()
+    {
+        arrow.set_custom_effects(Vec::new());
+    }
+}
+
+extern "system" fn mushroom_cow_stew_effects(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jobjectArray {
+    let Ok(text) = env.get_string(&uuid) else {
+        return null_mut();
+    };
+    let Some(id) = text
+        .to_str()
+        .ok()
+        .and_then(|value| Uuid::parse_str(value).ok())
+    else {
+        return null_mut();
+    };
+    let Some((_, entity)) = entity_by_uuid(&id) else {
+        return null_mut();
+    };
+    let Some(cow) = entity.downcast_ref::<MushroomCowEntity>() else {
+        return null_mut();
+    };
+    let effects = cow
+        .stew_effects()
+        .map(|effects| {
+            effects
+                .effects()
+                .iter()
+                .map(|effect| format!("{}|{}", effect.effect().key.path, effect.duration()))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    string_array(&mut env, &effects)
+}
+
+extern "system" fn set_mushroom_cow_stew_effects(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    encoded: JObjectArray<'_>,
+) -> jboolean {
+    let Ok(text) = env.get_string(&uuid) else {
+        return 0;
+    };
+    let Some(id) = text
+        .to_str()
+        .ok()
+        .and_then(|value| Uuid::parse_str(value).ok())
+    else {
+        return 0;
+    };
+    let Some(values) = read_string_array(&mut env, &encoded) else {
+        return 0;
+    };
+    let Some((_, entity)) = entity_by_uuid(&id) else {
+        return 0;
+    };
+    let Some(cow) = entity.downcast_ref::<MushroomCowEntity>() else {
+        return 0;
+    };
+    let mut effects = Vec::with_capacity(values.len());
+    for value in values {
+        let Some((effect_name, duration)) = value.split_once('|') else {
+            return 0;
+        };
+        let Ok(key) = Identifier::from_str(&format!("minecraft:{effect_name}")) else {
+            return 0;
+        };
+        let Some(effect) = REGISTRY.mob_effects.by_key(&key) else {
+            return 0;
+        };
+        let Ok(duration) = duration.parse::<i32>() else {
+            return 0;
+        };
+        effects.push(SuspiciousStewEffect::new(effect, duration));
+    }
+    cow.set_stew_effects((!effects.is_empty()).then(|| SuspiciousStewEffects::new(effects)));
+    1
+}
+
+extern "system" fn mushroom_cow_ready_to_shear(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jboolean {
+    let Ok(text) = env.get_string(&uuid) else {
+        return 0;
+    };
+    let Some(id) = text
+        .to_str()
+        .ok()
+        .and_then(|value| Uuid::parse_str(value).ok())
+    else {
+        return 0;
+    };
+    jboolean::from(entity_by_uuid(&id).is_some_and(|(_, entity)| {
+        entity
+            .downcast_ref::<MushroomCowEntity>()
+            .is_some_and(MushroomCowEntity::ready_for_shearing)
+    }))
+}
+
+extern "system" fn shear_mushroom_cow(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    source: JString<'_>,
+) {
+    let Ok(text) = env.get_string(&uuid) else {
+        return;
+    };
+    let Some(id) = text
+        .to_str()
+        .ok()
+        .and_then(|value| Uuid::parse_str(value).ok())
+    else {
+        return;
+    };
+    let Ok(source): Result<String, _> = env.get_string(&source).map(Into::into) else {
+        return;
+    };
+    let sound_source = match source.as_str() {
+        "MASTER" => SoundSource::Master,
+        "MUSIC" => SoundSource::Music,
+        "RECORD" => SoundSource::Records,
+        "WEATHER" => SoundSource::Weather,
+        "BLOCK" => SoundSource::Blocks,
+        "HOSTILE" => SoundSource::Hostile,
+        "NEUTRAL" => SoundSource::Neutral,
+        "PLAYER" => SoundSource::Players,
+        "AMBIENT" => SoundSource::Ambient,
+        "VOICE" => SoundSource::Voice,
+        "UI" => SoundSource::Ui,
+        _ => return,
+    };
+    let Some((world, entity)) = entity_by_uuid(&id) else {
+        return;
+    };
+    let Some(cow) = entity.downcast_ref::<MushroomCowEntity>() else {
+        return;
+    };
+    cow.shear_with_sound_source(
+        world.as_ref(),
+        &ItemStack::new(&vanilla_items::SHEARS),
+        sound_source,
+    );
 }
 
 extern "system" fn air_supply(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jint {
@@ -6091,36 +7392,6 @@ extern "system" fn max_air_supply(
         return 300;
     };
     entity_by_uuid(&id).map_or(300, |(_, entity)| entity.max_air_supply())
-}
-
-extern "system" fn set_entity_projectile_owner(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    owner: JString<'_>,
-) -> jboolean {
-    let Ok(uuid_text) = env.get_string(&uuid) else {
-        return 0;
-    };
-    let Ok(entity_id) = Uuid::parse_str(uuid_text.to_str().unwrap_or_default()) else {
-        return 0;
-    };
-    let Ok(owner_text) = env.get_string(&owner) else {
-        return 0;
-    };
-    let owner = if owner_text.to_str().unwrap_or_default().is_empty() {
-        None
-    } else {
-        Uuid::parse_str(owner_text.to_str().unwrap_or_default()).ok()
-    };
-    let Some((_, entity)) = entity_by_uuid(&entity_id) else {
-        return 0;
-    };
-    let Some(projectile) = entity.as_projectile() else {
-        return 0;
-    };
-    projectile.set_owner_uuid(owner);
-    1
 }
 
 fn mutate_villager_offer(
@@ -6683,7 +7954,7 @@ extern "system" fn set_entity_fall_distance(
     let Some((_, entity)) = entity_by_uuid(&id) else {
         return;
     };
-    entity.set_fall_distance(f64::from(distance.max(0.0)));
+    entity.set_fall_distance(f64::from(distance));
 }
 
 extern "system" fn player_food_saturation(
@@ -7530,11 +8801,42 @@ fn hex_decode(value: &str) -> Vec<u8> {
         .collect()
 }
 
+fn append_potion_effects(value: &mut String, stack: &ItemStack) {
+    let Some(contents) = stack.get(POTION_CONTENTS) else {
+        return;
+    };
+    if let Some(potion) = contents.potion() {
+        value.push_str("\u{1d}basepotionhex=");
+        value.push_str(&hex_encode(potion.value().key.to_string().as_bytes()));
+    }
+    if contents.custom_effects().is_empty() {
+        return;
+    }
+
+    value.push_str("\u{1d}potioneffects=");
+    for effect in contents.custom_effects() {
+        let _ = write!(
+            value,
+            "{},{},{},{},{},{};",
+            effect.effect().key.path,
+            effect.duration(),
+            effect.amplifier(),
+            effect.ambient(),
+            effect.show_particles(),
+            effect.show_icon()
+        );
+    }
+}
+
 pub(crate) fn describe_slot(stack: &ItemStack) -> String {
     if stack.is_empty() {
         return String::new();
     }
     let mut value = format!("{} {}", stack.item().key, stack.count());
+    if let Some(damage) = stack.get(DAMAGE).copied().filter(|damage| *damage != 0) {
+        value.push('\u{1d}');
+        let _ = write!(value, "damage={damage}");
+    }
     if let Some(opaque) = stack.opaque_nbt() {
         value.push('\u{1d}');
         value.push_str("nbthex=");
@@ -7607,6 +8909,7 @@ pub(crate) fn describe_slot(stack: &ItemStack) -> String {
         }
     }
     item_components::describe(stack, &mut value);
+    append_potion_effects(&mut value, stack);
     value
 }
 
@@ -7638,6 +8941,14 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
     let mut encoded = text.trim().split('\u{1d}');
     let text = encoded.next().unwrap_or_default();
     let metadata = encoded.collect::<Vec<_>>();
+    if metadata
+        .iter()
+        .filter(|value| value.starts_with("lorehex="))
+        .count()
+        > 256
+    {
+        return None;
+    }
     if text.is_empty() {
         return Some(ItemStack::empty());
     }
@@ -7786,21 +9097,53 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
         stack.set(STORED_ENCHANTMENTS, stored);
     }
     item_components::parse(&mut stack, &metadata);
-    // Potion effects are the one field with no name.
-    if let Some(effects) = metadata
+    let effects = metadata
         .iter()
-        .find(|value| !value.contains('=') && **value != "hidetooltip" && **value != "unbreakable")
-    {
-        use foton_registry::data_components::components::PotionContents;
-        use foton_registry::data_components::vanilla_components::POTION_CONTENTS;
+        .find_map(|value| value.strip_prefix("potioneffects="))
+        .or_else(|| {
+            metadata.iter().copied().find(|value| {
+                !value.contains('=') && *value != "hidetooltip" && *value != "unbreakable"
+            })
+        });
+    let base_potion = metadata
+        .iter()
+        .find_map(|value| value.strip_prefix("basepotionhex="))
+        .and_then(|encoded| String::from_utf8(hex_decode(encoded)).ok())
+        .and_then(|name| name.parse::<Identifier>().ok())
+        .and_then(|key| REGISTRY.potions.by_key(&key))
+        .map(RegistryReference::new);
+    let mut custom = Vec::new();
+    if let Some(effects) = effects {
         use foton_registry::mob_effect::instance::MobEffectInstance;
-        let mut custom = Vec::new();
         for field in effects.split(';') {
-            let mut parts = field.split(',');
-            let (Some(name), Some(duration), Some(amplifier)) =
-                (parts.next(), parts.next(), parts.next())
-            else {
-                continue;
+            let parts = field.split(',').collect::<Vec<_>>();
+            let (name, duration, amplifier, ambient, show_particles, show_icon) = match parts[..] {
+                [name, duration, amplifier] => (name, duration, amplifier, false, true, true),
+                [
+                    name,
+                    duration,
+                    amplifier,
+                    ambient,
+                    show_particles,
+                    show_icon,
+                ] => {
+                    let (Ok(ambient), Ok(show_particles), Ok(show_icon)) = (
+                        ambient.parse::<bool>(),
+                        show_particles.parse::<bool>(),
+                        show_icon.parse::<bool>(),
+                    ) else {
+                        continue;
+                    };
+                    (
+                        name,
+                        duration,
+                        amplifier,
+                        ambient,
+                        show_particles,
+                        show_icon,
+                    )
+                }
+                _ => continue,
             };
             let (Ok(duration), Ok(amplifier)) = (duration.parse(), amplifier.parse()) else {
                 continue;
@@ -7811,14 +9154,23 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
             let Some(effect) = REGISTRY.mob_effects.by_key(&key) else {
                 continue;
             };
-            custom.push(MobEffectInstance::simple(effect, duration, amplifier));
+            custom.push(MobEffectInstance::new(
+                effect,
+                duration,
+                amplifier,
+                ambient,
+                show_particles,
+                show_icon,
+                None,
+            ));
         }
-        if !custom.is_empty() {
-            stack.set(
-                POTION_CONTENTS,
-                PotionContents::new(None, None, custom, None),
-            );
-        }
+    }
+    if base_potion.is_some() || !custom.is_empty() {
+        use foton_registry::data_components::components::PotionContents;
+        stack.set(
+            POTION_CONTENTS,
+            PotionContents::new(base_potion, None, custom, None),
+        );
     }
     Some(stack)
 }
@@ -9894,11 +11246,17 @@ extern "system" fn spawn_entity(
     y: jdouble,
     z: jdouble,
     type_name: JString<'_>,
+    initialization: JString<'_>,
 ) -> jstring {
     let Ok(world_text): Result<String, _> = env.get_string(&world_name).map(Into::into) else {
         return null_mut();
     };
     let Ok(type_text): Result<String, _> = env.get_string(&type_name).map(Into::into) else {
+        return null_mut();
+    };
+    let Ok(initialization_text): Result<String, _> =
+        env.get_string(&initialization).map(Into::into)
+    else {
         return null_mut();
     };
     let Ok(world_key) = Identifier::from_str(&world_text) else {
@@ -9910,10 +11268,125 @@ extern "system" fn spawn_entity(
     let Some(world) = server().and_then(|server| server.worlds.get_owned(&world_key)) else {
         return null_mut();
     };
-    let Some(entity) = spawn_entity_at(&world, &type_key, DVec3::new(x, y, z)) else {
+    let position = DVec3::new(x, y, z);
+    let entity = if initialization_text.is_empty() {
+        create_entity_at(&world, &type_key, position)
+    } else {
+        let Some(registry) = REGISTRY.get() else {
+            return null_mut();
+        };
+        let Ok(potion_key) = Identifier::from_str(&initialization_text) else {
+            return null_mut();
+        };
+        let Some(potion) = registry.potions.by_key(&potion_key) else {
+            return null_mut();
+        };
+        create_entity_at_initialized(
+            &world,
+            &type_key,
+            position,
+            SpawnEntityInitialization::ArrowPotion(potion),
+        )
+    };
+    let Some(entity) = entity else {
         return null_mut();
     };
-    to_java(&mut env, Some(entity.uuid().to_string()))
+    match prepare_then_publish(&world, entity, |entity| {
+        env.new_string(entity.uuid().to_string())
+    }) {
+        Ok(uuid) => uuid.into_raw(),
+        Err(_) => null_mut(),
+    }
+}
+
+extern "system" fn spawn_entity_pending(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    world_name: JString<'_>,
+    x: jdouble,
+    y: jdouble,
+    z: jdouble,
+    type_name: JString<'_>,
+    initialization: JString<'_>,
+) -> jstring {
+    let Ok(world_text): Result<String, _> = env.get_string(&world_name).map(Into::into) else {
+        return null_mut();
+    };
+    let Ok(type_text): Result<String, _> = env.get_string(&type_name).map(Into::into) else {
+        return null_mut();
+    };
+    let Ok(initialization_text): Result<String, _> =
+        env.get_string(&initialization).map(Into::into)
+    else {
+        return null_mut();
+    };
+    let Ok(world_key) = Identifier::from_str(&world_text) else {
+        return null_mut();
+    };
+    let Ok(type_key) = Identifier::from_str(&format!("minecraft:{type_text}")) else {
+        return null_mut();
+    };
+    let Some(world) = server().and_then(|server| server.worlds.get_owned(&world_key)) else {
+        return null_mut();
+    };
+    let position = DVec3::new(x, y, z);
+    let entity = if initialization_text.is_empty() {
+        create_entity_at(&world, &type_key, position)
+    } else {
+        let Some(registry) = REGISTRY.get() else {
+            return null_mut();
+        };
+        let Ok(potion_key) = Identifier::from_str(&initialization_text) else {
+            return null_mut();
+        };
+        let Some(potion) = registry.potions.by_key(&potion_key) else {
+            return null_mut();
+        };
+        create_entity_at_initialized(
+            &world,
+            &type_key,
+            position,
+            SpawnEntityInitialization::ArrowPotion(potion),
+        )
+    };
+    let Some(entity) = entity else {
+        return null_mut();
+    };
+    let Ok(uuid) = env.new_string(entity.uuid().to_string()) else {
+        return null_mut();
+    };
+    world.begin_pending_spawn(entity);
+    uuid.into_raw()
+}
+
+extern "system" fn finish_pending_spawn(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    world_name: JString<'_>,
+    entity_uuid: JString<'_>,
+    publish: jboolean,
+) -> jboolean {
+    let Some(world) = world(&mut env, &world_name) else {
+        return 0;
+    };
+    let Ok(uuid_text): Result<String, _> = env.get_string(&entity_uuid).map(Into::into) else {
+        return 0;
+    };
+    let Ok(uuid) = Uuid::parse_str(&uuid_text) else {
+        return 0;
+    };
+    let Some(entity) = world.take_pending_spawn(&uuid) else {
+        return 0;
+    };
+    if publish == 0 {
+        discard_unpublished_entity(&entity);
+        return 1;
+    }
+    let published = world.try_add_entity(Arc::clone(&entity)).is_ok();
+    if !published {
+        discard_unpublished_entity(&entity);
+    }
+    jboolean::from(published)
 }
 
 extern "system" fn set_world_game_rule(
@@ -10252,6 +11725,731 @@ extern "system" fn set_furnace_times(
     } else {
         DEFERRED.lock().push((world.key.clone(), pos, lit));
     }
+}
+
+const BREWING_SNAPSHOT_HEADER: &[u8; 4] = b"FBS\x02";
+const MAX_BREWING_SNAPSHOT_BYTES: usize = 1 << 20;
+const MAX_BREWING_ITEM_BYTES: usize = 256 * 1024;
+const MAX_BREWING_COMPONENTS: usize = 256;
+const MAX_BREWING_OPAQUE_NBT_BYTES: usize = 256 * 1024;
+const MAX_BREWING_TEXT_BYTES: usize = 64 * 1024;
+const MAX_BREWING_LOCK_BYTES: usize = 64 * 1024;
+
+const fn brewing_payload_length_is_valid(length: usize) -> bool {
+    length <= MAX_BREWING_SNAPSHOT_BYTES
+}
+
+const fn brewing_item_payload_length_is_valid(length: usize) -> bool {
+    length <= MAX_BREWING_ITEM_BYTES
+}
+
+struct BrewingBridgeSnapshot {
+    identity: u64,
+    items: Vec<ItemStack>,
+    brew_time: i32,
+    recipe_brew_time: i32,
+    fuel: i32,
+    custom_name: Option<TextComponent>,
+    lock: LockCode,
+}
+
+struct BrewingPayloadWriter {
+    bytes: Vec<u8>,
+    limit: usize,
+    length: usize,
+    counting: bool,
+}
+
+impl BrewingPayloadWriter {
+    const fn new(limit: usize) -> Self {
+        Self {
+            bytes: Vec::new(),
+            limit,
+            length: 0,
+            counting: false,
+        }
+    }
+
+    fn begin_blob(&mut self) -> Option<usize> {
+        let offset = self.length;
+        self.write_all(&0_u32.to_be_bytes()).ok()?;
+        Some(offset)
+    }
+
+    fn finish_blob(&mut self, offset: usize, field_limit: usize) -> Option<()> {
+        let body_start = offset.checked_add(4)?;
+        let length = self.length.checked_sub(body_start)?;
+        if length > field_limit {
+            return None;
+        }
+        let length = u32::try_from(length).ok()?;
+        if !self.counting {
+            self.bytes
+                .get_mut(offset..body_start)?
+                .copy_from_slice(&length.to_be_bytes());
+        }
+        Some(())
+    }
+
+    fn write_optional_blob(&mut self, value: Option<&[u8]>, field_limit: usize) -> Option<()> {
+        let Some(value) = value else {
+            return self.write_all(&u32::MAX.to_be_bytes()).ok();
+        };
+        if value.len() > field_limit {
+            return None;
+        }
+        let length = u32::try_from(value.len()).ok()?;
+        self.write_all(&length.to_be_bytes()).ok()?;
+        self.write_all(value).ok()
+    }
+
+    fn into_inner(self) -> Vec<u8> {
+        self.bytes
+    }
+}
+
+impl IoWrite for BrewingPayloadWriter {
+    fn write(&mut self, bytes: &[u8]) -> IoResult<usize> {
+        let Some(length) = self.length.checked_add(bytes.len()) else {
+            return Err(IoError::other("brewing payload length overflow"));
+        };
+        if length > self.limit {
+            return Err(IoError::other("brewing payload exceeds its byte limit"));
+        }
+        self.length = length;
+        if self.counting {
+            return Ok(bytes.len());
+        }
+        if length > self.bytes.capacity() {
+            let capacity = self
+                .bytes
+                .capacity()
+                .saturating_mul(2)
+                .max(64)
+                .max(length)
+                .min(self.limit);
+            self.bytes
+                .try_reserve_exact(capacity - self.bytes.len())
+                .map_err(IoError::other)?;
+        }
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> IoResult<()> {
+        Ok(())
+    }
+}
+
+fn write_brewing_item(output: &mut BrewingPayloadWriter, item: &ItemStack) -> Option<()> {
+    use foton_registry::data_components::ComponentPatchEntry;
+    if item.components_patch().len() > MAX_BREWING_COMPONENTS {
+        return None;
+    }
+    let mut added = Vec::new();
+    let mut removed = Vec::new();
+    for (key, value) in item.components_patch().iter() {
+        let id = REGISTRY.data_components.id_from_key(key)?;
+        match value {
+            ComponentPatchEntry::Set(value) => added.push((id, value)),
+            ComponentPatchEntry::Removed => removed.push(id),
+        }
+    }
+    added.sort_unstable_by_key(|(id, _)| *id);
+    removed.sort_unstable();
+    VarInt(item.count).write(output).ok()?;
+    VarInt(i32::try_from(item.item.id()).ok()?)
+        .write(output)
+        .ok()?;
+    VarInt(i32::try_from(added.len()).ok()?)
+        .write(output)
+        .ok()?;
+    VarInt(i32::try_from(removed.len()).ok()?)
+        .write(output)
+        .ok()?;
+    for (id, value) in added {
+        VarInt(i32::try_from(id).ok()?).write(output).ok()?;
+        let remaining = output.limit.checked_sub(output.length)?;
+        REGISTRY
+            .data_components
+            .by_id(id)?
+            .write_network_bounded(value, remaining, output)
+            .ok()?;
+    }
+    for id in removed {
+        VarInt(i32::try_from(id).ok()?).write(output).ok()?;
+    }
+    output.write_optional_blob(
+        item.opaque_nbt().map(str::as_bytes),
+        MAX_BREWING_OPAQUE_NBT_BYTES,
+    )
+}
+
+fn append_brewing_item(output: &mut BrewingPayloadWriter, item: &ItemStack) -> Option<()> {
+    let offset = output.begin_blob()?;
+    let limit = output.limit;
+    output.limit = limit.min(output.length.checked_add(MAX_BREWING_ITEM_BYTES)?);
+    let result = write_brewing_item(output, item);
+    output.limit = limit;
+    result?;
+    output.finish_blob(offset, MAX_BREWING_ITEM_BYTES)
+}
+
+fn encode_brewing_item(item: &ItemStack) -> Option<Vec<u8>> {
+    let mut output = BrewingPayloadWriter::new(MAX_BREWING_ITEM_BYTES);
+    write_brewing_item(&mut output, item)?;
+    Some(output.into_inner())
+}
+
+#[cfg(test)]
+fn encode_brewing_snapshot(snapshot: &BrewingBridgeSnapshot) -> Option<Vec<u8>> {
+    encode_brewing_state(&BrewingStandStateView {
+        identity: snapshot.identity,
+        items: &snapshot.items,
+        brew_time: snapshot.brew_time,
+        recipe_brew_time: snapshot.recipe_brew_time,
+        fuel: snapshot.fuel,
+        custom_name: snapshot.custom_name.as_ref(),
+        lock: &snapshot.lock,
+    })
+}
+
+fn encode_brewing_state(snapshot: &BrewingStandStateView<'_>) -> Option<Vec<u8>> {
+    // Reject aggregate/field overflow before retaining a snapshot-sized output.
+    let mut count = BrewingPayloadWriter::new(MAX_BREWING_SNAPSHOT_BYTES);
+    count.counting = true;
+    write_brewing_snapshot(snapshot, &mut count)?;
+    let mut output = BrewingPayloadWriter::new(MAX_BREWING_SNAPSHOT_BYTES);
+    write_brewing_snapshot(snapshot, &mut output)?;
+    Some(output.into_inner())
+}
+
+fn write_brewing_snapshot(
+    snapshot: &BrewingStandStateView<'_>,
+    output: &mut BrewingPayloadWriter,
+) -> Option<()> {
+    if snapshot.items.len() != BREWING_STAND_SLOTS {
+        return None;
+    }
+    output.write_all(BREWING_SNAPSHOT_HEADER).ok()?;
+    output.write_all(&snapshot.identity.to_be_bytes()).ok()?;
+    output.write_all(&snapshot.brew_time.to_be_bytes()).ok()?;
+    output
+        .write_all(&snapshot.recipe_brew_time.to_be_bytes())
+        .ok()?;
+    output.write_all(&snapshot.fuel.to_be_bytes()).ok()?;
+    for item in snapshot.items {
+        append_brewing_item(output, item)?;
+    }
+    match &snapshot.custom_name {
+        Some(name) => {
+            let offset = output.begin_blob()?;
+            write_bounded(
+                name,
+                MAX_BREWING_TEXT_BYTES.min(output.limit.checked_sub(output.length)?),
+                output,
+            )
+            .ok()?;
+            output.finish_blob(offset, MAX_BREWING_TEXT_BYTES)?;
+        }
+        None => output.write_all(&u32::MAX.to_be_bytes()).ok()?,
+    }
+    let offset = output.begin_blob()?;
+    snapshot
+        .lock
+        .write_bounded(
+            MAX_BREWING_LOCK_BYTES.min(output.limit.checked_sub(output.length)?),
+            output,
+        )
+        .ok()?;
+    output.finish_blob(offset, MAX_BREWING_LOCK_BYTES)?;
+    Some(())
+}
+
+struct BrewingPayloadReader<'a> {
+    bytes: &'a [u8],
+    cursor: usize,
+}
+
+impl<'a> BrewingPayloadReader<'a> {
+    const fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, cursor: 0 }
+    }
+
+    fn take(&mut self, length: usize) -> Option<&'a [u8]> {
+        let end = self.cursor.checked_add(length)?;
+        let value = self.bytes.get(self.cursor..end)?;
+        self.cursor = end;
+        Some(value)
+    }
+
+    fn u32(&mut self) -> Option<u32> {
+        Some(u32::from_be_bytes(self.take(4)?.try_into().ok()?))
+    }
+
+    fn i32(&mut self) -> Option<i32> {
+        Some(i32::from_be_bytes(self.take(4)?.try_into().ok()?))
+    }
+
+    fn u64(&mut self) -> Option<u64> {
+        Some(u64::from_be_bytes(self.take(8)?.try_into().ok()?))
+    }
+
+    fn blob(&mut self, field_limit: usize) -> Option<&'a [u8]> {
+        let length = usize::try_from(self.u32()?).ok()?;
+        if length > field_limit {
+            return None;
+        }
+        self.take(length)
+    }
+
+    const fn is_finished(&self) -> bool {
+        self.cursor == self.bytes.len()
+    }
+}
+
+fn read_brewing_item_after_length_check(
+    length: usize,
+    copy: impl FnOnce() -> Option<Vec<u8>>,
+) -> Option<ItemStack> {
+    if !brewing_item_payload_length_is_valid(length) {
+        return None;
+    }
+    let bytes = copy()?;
+    if bytes.len() != length {
+        return None;
+    }
+    read_brewing_item(&bytes)
+}
+
+fn read_brewing_component_count(input: &mut Cursor<&[u8]>) -> Option<usize> {
+    usize::try_from(VarInt::read(input).ok()?.0).ok()
+}
+
+fn read_brewing_item(bytes: &[u8]) -> Option<ItemStack> {
+    DecodeBudget::new(512 * 1024)
+        .decode(|| {
+            read_brewing_item_inner(bytes).ok_or_else(|| IoError::other("Invalid brewing item"))
+        })
+        .ok()
+}
+
+fn read_brewing_item_inner(bytes: &[u8]) -> Option<ItemStack> {
+    use foton_registry::data_components::ComponentPatchEntry;
+    if bytes.len() > MAX_BREWING_ITEM_BYTES {
+        return None;
+    }
+    let mut input = Cursor::new(bytes);
+    let count = VarInt::read(&mut input).ok()?.0;
+    let mut item = {
+        let item_id = usize::try_from(VarInt::read(&mut input).ok()?.0).ok()?;
+        let item_type = REGISTRY.items.by_id(item_id)?;
+        let added_count = read_brewing_component_count(&mut input)?;
+        let removed_count = read_brewing_component_count(&mut input)?;
+        if added_count.checked_add(removed_count)? > MAX_BREWING_COMPONENTS {
+            return None;
+        }
+
+        budget::charge_map::<Identifier, ComponentPatchEntry>(added_count + removed_count).ok()?;
+        budget::charge_map::<Identifier, ()>(added_count + removed_count).ok()?;
+        let mut patch = DataComponentPatch::new();
+        let mut seen = FxHashSet::default();
+        for _ in 0..added_count {
+            let component_id = usize::try_from(VarInt::read(&mut input).ok()?.0).ok()?;
+            let key = REGISTRY
+                .data_components
+                .get_key_by_id(component_id)?
+                .clone();
+            if !seen.insert(key.clone()) {
+                return None;
+            }
+            let component = REGISTRY.data_components.by_id(component_id)?;
+            let data = component.read_network(&mut input).ok()?;
+            if !patch.set_raw(key, data) {
+                return None;
+            }
+        }
+        for _ in 0..removed_count {
+            let component_id = usize::try_from(VarInt::read(&mut input).ok()?.0).ok()?;
+            let key = REGISTRY
+                .data_components
+                .get_key_by_id(component_id)?
+                .clone();
+            if !seen.insert(key.clone()) || !patch.remove_raw(key) {
+                return None;
+            }
+        }
+        ItemStack::from_raw_parts(item_type, count, patch)
+    };
+
+    let opaque_length = u32::from_be_bytes({
+        let start = usize::try_from(input.position()).ok()?;
+        let end = start.checked_add(4)?;
+        let bytes: [u8; 4] = input.get_ref().get(start..end)?.try_into().ok()?;
+        input.set_position(u64::try_from(end).ok()?);
+        bytes
+    });
+    if opaque_length != u32::MAX {
+        let opaque_length = usize::try_from(opaque_length).ok()?;
+        if opaque_length > MAX_BREWING_OPAQUE_NBT_BYTES {
+            return None;
+        }
+        let start = usize::try_from(input.position()).ok()?;
+        let end = start.checked_add(opaque_length)?;
+        let opaque = str::from_utf8(input.get_ref().get(start..end)?).ok()?;
+        budget::charge::<u8>(opaque.len()).ok()?;
+        item.set_opaque_nbt(Some(opaque.to_owned()));
+        input.set_position(u64::try_from(end).ok()?);
+    }
+    if usize::try_from(input.position()).ok()? != bytes.len() {
+        return None;
+    }
+    if encode_brewing_item(&item)?.as_slice() != bytes {
+        return None;
+    }
+    Some(item)
+}
+
+fn decode_brewing_snapshot(bytes: &[u8]) -> Option<BrewingBridgeSnapshot> {
+    DecodeBudget::new(512 * 1024)
+        .decode(|| {
+            decode_brewing_snapshot_inner(bytes)
+                .ok_or_else(|| IoError::other("Invalid brewing snapshot"))
+        })
+        .ok()
+}
+
+fn decode_brewing_snapshot_inner(bytes: &[u8]) -> Option<BrewingBridgeSnapshot> {
+    if !brewing_payload_length_is_valid(bytes.len()) {
+        return None;
+    }
+    let mut input = BrewingPayloadReader::new(bytes);
+    if input.take(BREWING_SNAPSHOT_HEADER.len())? != BREWING_SNAPSHOT_HEADER {
+        return None;
+    }
+    let identity = input.u64()?;
+    let brew_time = input.i32()?;
+    let recipe_brew_time = input.i32()?;
+    let fuel = input.i32()?;
+    if recipe_brew_time <= 0 {
+        return None;
+    }
+    budget::charge::<ItemStack>(BREWING_STAND_SLOTS).ok()?;
+    let mut items = Vec::with_capacity(BREWING_STAND_SLOTS);
+    for _ in 0..BREWING_STAND_SLOTS {
+        items.push(read_brewing_item(input.blob(MAX_BREWING_ITEM_BYTES)?)?);
+    }
+    let custom_name = match input.u32()? {
+        u32::MAX => None,
+        length => {
+            let length = usize::try_from(length).ok()?;
+            if length > MAX_BREWING_TEXT_BYTES {
+                return None;
+            }
+            let encoded = input.take(length)?;
+            let mut cursor = Cursor::new(encoded);
+            let name = TextComponent::read(&mut cursor).ok()?;
+            let consumed = usize::try_from(cursor.position()).ok()?;
+            if consumed != encoded.len() {
+                return None;
+            }
+            let mut canonical_name = BrewingPayloadWriter::new(MAX_BREWING_TEXT_BYTES);
+            write_bounded(&name, MAX_BREWING_TEXT_BYTES, &mut canonical_name).ok()?;
+            if canonical_name.bytes != encoded {
+                return None;
+            }
+            Some(name)
+        }
+    };
+    let encoded_lock = input.blob(MAX_BREWING_LOCK_BYTES)?;
+    let mut cursor = Cursor::new(encoded_lock);
+    let lock = LockCode::read(&mut cursor).ok()?;
+    if usize::try_from(cursor.position()).ok()? != encoded_lock.len() || !input.is_finished() {
+        return None;
+    }
+    let mut canonical_lock = BrewingPayloadWriter::new(MAX_BREWING_LOCK_BYTES);
+    lock.write_bounded(MAX_BREWING_LOCK_BYTES, &mut canonical_lock)
+        .ok()?;
+    if canonical_lock.bytes != encoded_lock {
+        return None;
+    }
+    Some(BrewingBridgeSnapshot {
+        identity,
+        items,
+        brew_time,
+        recipe_brew_time,
+        fuel,
+        custom_name,
+        lock,
+    })
+}
+
+const fn brewing_update_flags(apply_physics: bool) -> UpdateFlags {
+    if apply_physics {
+        UpdateFlags::UPDATE_ALL
+    } else {
+        UpdateFlags::UPDATE_CLIENTS
+    }
+}
+
+fn brewing_apply_matches(
+    current_state: BlockStateId,
+    current_identity: Option<u64>,
+    desired_state: BlockStateId,
+    snapshot_identity: u64,
+    force: bool,
+) -> bool {
+    desired_state.get_block() == &vanilla_blocks::BREWING_STAND
+        && (force
+            || (current_state.get_block() == desired_state.get_block()
+                && current_identity == Some(snapshot_identity)))
+}
+
+const fn brewing_identity_from_java(identity: jlong) -> u64 {
+    u64::from_ne_bytes(identity.to_ne_bytes())
+}
+
+fn apply_brewing_snapshot(
+    world: &Arc<World>,
+    pos: BlockPos,
+    state: BlockStateId,
+    snapshot: BrewingBridgeSnapshot,
+    force: bool,
+    apply_physics: bool,
+) -> bool {
+    if snapshot.items.len() != BREWING_STAND_SLOTS || snapshot.recipe_brew_time <= 0 {
+        return false;
+    }
+    let current_state = world.get_block_state(pos);
+    let current_entity = world.get_block_entity(pos);
+    let current = current_entity
+        .as_deref()
+        .and_then(|entity| entity.downcast_ref::<BrewingStandBlockEntity>());
+    let current_identity = current.map(BrewingStandBlockEntity::identity);
+    if !brewing_apply_matches(
+        current_state,
+        current_identity,
+        state,
+        snapshot.identity,
+        force,
+    ) {
+        return false;
+    }
+    if current_state.get_block() == state.get_block() {
+        let Some(brewing) = current else {
+            return false;
+        };
+        let target = BrewingStandStateSnapshot {
+            identity: if force {
+                brewing.identity()
+            } else {
+                snapshot.identity
+            },
+            items: snapshot.items,
+            brew_time: snapshot.brew_time,
+            recipe_brew_time: snapshot.recipe_brew_time,
+            fuel: snapshot.fuel,
+            custom_name: snapshot.custom_name,
+            lock: snapshot.lock,
+        };
+        if current_state == state {
+            return brewing.apply_state_snapshot(target);
+        }
+        let Some(current_entity) = current_entity.as_ref() else {
+            return false;
+        };
+        return brewing.apply_state_snapshot_with_state(
+            world,
+            current_entity,
+            state,
+            target,
+            brewing_update_flags(apply_physics),
+        );
+    }
+    if !BLOCK_ENTITIES.has_factory(&BREWING_STAND_BLOCK_ENTITY) {
+        return false;
+    }
+    let brewing = Arc::new(BrewingStandBlockEntity::new(
+        Arc::downgrade(world),
+        pos,
+        state,
+    ));
+    let mut target = brewing.state_snapshot();
+    target.items = snapshot.items;
+    target.brew_time = snapshot.brew_time;
+    target.recipe_brew_time = snapshot.recipe_brew_time;
+    target.fuel = snapshot.fuel;
+    target.custom_name = snapshot.custom_name;
+    target.lock = snapshot.lock;
+    brewing.apply_replacement_snapshot(target);
+    let replacement: SharedBlockEntity = brewing;
+    world.replace_block_with_entity_if_unchanged(
+        pos,
+        current_state,
+        current_entity.as_ref(),
+        state,
+        replacement,
+        brewing_update_flags(apply_physics),
+    )
+}
+
+extern "system" fn brewing_stand_snapshot(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jint,
+    y: jint,
+    z: jint,
+) -> jbyteArray {
+    let encoded = world(&mut env, &name)
+        .and_then(|world| world.get_block_entity(BlockPos::new(x, y, z)))
+        .and_then(|entity| {
+            let brewing = entity.downcast_ref::<BrewingStandBlockEntity>()?;
+            brewing.with_state(|snapshot| encode_brewing_state(&snapshot))
+        });
+    let Some(encoded) = encoded else {
+        return null_mut();
+    };
+    env.byte_array_from_slice(&encoded)
+        .map_or_else(|_| null_mut(), JByteArray::into_raw)
+}
+
+extern "system" fn brewing_stand_live_item(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jint,
+    y: jint,
+    z: jint,
+    identity: jlong,
+    slot: jint,
+) -> jbyteArray {
+    let value = world(&mut env, &name)
+        .and_then(|world| world.get_block_entity(BlockPos::new(x, y, z)))
+        .and_then(|entity| {
+            let brewing = entity.downcast_ref::<BrewingStandBlockEntity>()?;
+            let slot = usize::try_from(slot).ok()?;
+            brewing
+                .with_live_item(
+                    brewing_identity_from_java(identity),
+                    slot,
+                    encode_brewing_item,
+                )
+                .flatten()
+        });
+    let Some(value) = value else {
+        return null_mut();
+    };
+    env.byte_array_from_slice(&value)
+        .map_or_else(|_| null_mut(), JByteArray::into_raw)
+}
+
+extern "system" fn brewing_stand_set_live_item(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jint,
+    y: jint,
+    z: jint,
+    identity: jlong,
+    slot: jint,
+    item: JByteArray<'_>,
+) -> jboolean {
+    if !on_tick() {
+        return 0;
+    }
+    let Some(slot) = usize::try_from(slot).ok() else {
+        return 0;
+    };
+    let Ok(item_length) = env.get_array_length(&item) else {
+        return 0;
+    };
+    let Ok(item_length) = usize::try_from(item_length) else {
+        return 0;
+    };
+    let Some(item) =
+        read_brewing_item_after_length_check(item_length, || env.convert_byte_array(&item).ok())
+    else {
+        return 0;
+    };
+    let changed = world(&mut env, &name)
+        .and_then(|world| world.get_block_entity(BlockPos::new(x, y, z)))
+        .and_then(|entity| {
+            entity
+                .downcast_ref::<BrewingStandBlockEntity>()
+                .map(|brewing| {
+                    brewing.set_live_item(brewing_identity_from_java(identity), slot, item)
+                })
+        })
+        .unwrap_or(false);
+    jboolean::from(changed)
+}
+
+extern "system" fn brewing_stand_apply(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jint,
+    y: jint,
+    z: jint,
+    state: JString<'_>,
+    payload: JByteArray<'_>,
+    force: jboolean,
+    apply_physics: jboolean,
+) -> jboolean {
+    if !on_tick() {
+        return 0;
+    }
+    let Ok(state): Result<String, _> = env.get_string(&state).map(Into::into) else {
+        return 0;
+    };
+    let Some(state) = parse_state(&state) else {
+        return 0;
+    };
+    let Ok(payload_length) = env.get_array_length(&payload) else {
+        return 0;
+    };
+    let Ok(payload_length) = usize::try_from(payload_length) else {
+        return 0;
+    };
+    if !brewing_payload_length_is_valid(payload_length) {
+        return 0;
+    }
+    let Ok(payload) = env.convert_byte_array(&payload) else {
+        return 0;
+    };
+    let Some(snapshot) = decode_brewing_snapshot(&payload) else {
+        return 0;
+    };
+    let Some(world) = world(&mut env, &name) else {
+        return 0;
+    };
+    jboolean::from(apply_brewing_snapshot(
+        &world,
+        BlockPos::new(x, y, z),
+        state,
+        snapshot,
+        force != 0,
+        apply_physics != 0,
+    ))
+}
+
+extern "system" fn brewing_stand_state(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jint,
+    y: jint,
+    z: jint,
+) -> jstring {
+    let value = world(&mut env, &name)
+        .and_then(|world| world.get_block_entity(BlockPos::new(x, y, z)))
+        .and_then(|entity| {
+            let brewing = entity.downcast_ref::<BrewingStandBlockEntity>()?;
+            let (brew_time, fuel) = brewing.with_state(|state| (state.brew_time, state.fuel));
+            Some(format!("{brew_time}\u{001f}{fuel}"))
+        });
+    to_java(&mut env, value)
 }
 
 extern "system" fn hopper_set_inventory_slot(
@@ -11650,8 +13848,18 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method(
             "spawnEntity",
-            "(Ljava/lang/String;DDDLjava/lang/String;)Ljava/lang/String;",
+            "(Ljava/lang/String;DDDLjava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
             spawn_entity as *mut c_void,
+        ),
+        method(
+            "spawnEntityPending",
+            "(Ljava/lang/String;DDDLjava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            spawn_entity_pending as *mut c_void,
+        ),
+        method(
+            "finishPendingSpawn",
+            "(Ljava/lang/String;Ljava/lang/String;Z)Z",
+            finish_pending_spawn as *mut c_void,
         ),
         method(
             "worldGameRule",
@@ -11713,6 +13921,31 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "setFurnaceTimes",
             "(Ljava/lang/String;III[I)V",
             set_furnace_times as *mut c_void,
+        ),
+        method(
+            "brewingStandState",
+            "(Ljava/lang/String;III)Ljava/lang/String;",
+            brewing_stand_state as *mut c_void,
+        ),
+        method(
+            "brewingStandSnapshot",
+            "(Ljava/lang/String;III)[B",
+            brewing_stand_snapshot as *mut c_void,
+        ),
+        method(
+            "brewingStandLiveItem",
+            "(Ljava/lang/String;IIIJI)[B",
+            brewing_stand_live_item as *mut c_void,
+        ),
+        method(
+            "brewingStandSetLiveItem",
+            "(Ljava/lang/String;IIIJI[B)Z",
+            brewing_stand_set_live_item as *mut c_void,
+        ),
+        method(
+            "brewingStandApply",
+            "(Ljava/lang/String;IIILjava/lang/String;[BZZ)Z",
+            brewing_stand_apply as *mut c_void,
         ),
         method(
             "hopperSetInventorySlot",
@@ -12255,6 +14488,26 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             mushroom_cow_variant as *mut c_void,
         ),
         method(
+            "mushroomCowStewEffects",
+            "(Ljava/lang/String;)[Ljava/lang/String;",
+            mushroom_cow_stew_effects as *mut c_void,
+        ),
+        method(
+            "setMushroomCowStewEffects",
+            "(Ljava/lang/String;[Ljava/lang/String;)Z",
+            set_mushroom_cow_stew_effects as *mut c_void,
+        ),
+        method(
+            "mushroomCowReadyToShear",
+            "(Ljava/lang/String;)Z",
+            mushroom_cow_ready_to_shear as *mut c_void,
+        ),
+        method(
+            "shearMushroomCow",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            shear_mushroom_cow as *mut c_void,
+        ),
+        method(
             "setZombieNautilusVariant",
             "(Ljava/lang/String;Ljava/lang/String;)V",
             set_zombie_nautilus_variant as *mut c_void,
@@ -12395,6 +14648,51 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             set_entity_breed as *mut c_void,
         ),
         method(
+            "animalBreedCause",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            animal_breed_cause as *mut c_void,
+        ),
+        method(
+            "setAnimalBreedCause",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            set_animal_breed_cause as *mut c_void,
+        ),
+        method(
+            "animalLoveTicks",
+            "(Ljava/lang/String;)I",
+            animal_love_ticks as *mut c_void,
+        ),
+        method(
+            "setAnimalLoveTicks",
+            "(Ljava/lang/String;I)V",
+            set_animal_love_ticks as *mut c_void,
+        ),
+        method(
+            "animalIsBreedItem",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            animal_is_breed_item as *mut c_void,
+        ),
+        method(
+            "cowVariant",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            cow_variant as *mut c_void,
+        ),
+        method(
+            "setCowVariant",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            set_cow_variant as *mut c_void,
+        ),
+        method(
+            "cowSoundVariant",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            cow_sound_variant as *mut c_void,
+        ),
+        method(
+            "setCowSoundVariant",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            set_cow_sound_variant as *mut c_void,
+        ),
+        method(
             "beeAnger",
             "(Ljava/lang/String;)I",
             bee_anger as *mut c_void,
@@ -12518,6 +14816,16 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "setSlimeSize",
             "(Ljava/lang/String;I)V",
             set_slime_size as *mut c_void,
+        ),
+        method(
+            "cubeMobCanWander",
+            "(Ljava/lang/String;)Z",
+            cube_mob_can_wander as *mut c_void,
+        ),
+        method(
+            "setCubeMobWander",
+            "(Ljava/lang/String;Z)V",
+            set_cube_mob_wander as *mut c_void,
         ),
         method(
             "setCreeperPowered",
@@ -12881,6 +15189,51 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             entity_bounding_box as *mut c_void,
         ),
         method(
+            "entityScoreboardTags",
+            "(Ljava/lang/String;)[Ljava/lang/String;",
+            entity_scoreboard_tags as *mut c_void,
+        ),
+        method(
+            "addEntityScoreboardTag",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            add_entity_scoreboard_tag as *mut c_void,
+        ),
+        method(
+            "removeEntityScoreboardTag",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            remove_entity_scoreboard_tag as *mut c_void,
+        ),
+        method(
+            "entityHasGravity",
+            "(Ljava/lang/String;)Z",
+            entity_has_gravity as *mut c_void,
+        ),
+        method(
+            "setEntityGravity",
+            "(Ljava/lang/String;Z)V",
+            set_entity_gravity as *mut c_void,
+        ),
+        method(
+            "entitySilent",
+            "(Ljava/lang/String;)Z",
+            entity_silent as *mut c_void,
+        ),
+        method(
+            "setEntitySilent",
+            "(Ljava/lang/String;Z)V",
+            set_entity_silent as *mut c_void,
+        ),
+        method(
+            "setEntityRotation",
+            "(Ljava/lang/String;FF)V",
+            set_entity_rotation as *mut c_void,
+        ),
+        method(
+            "entityInRain",
+            "(Ljava/lang/String;)Z",
+            entity_in_rain as *mut c_void,
+        ),
+        method(
             "entityInvulnerable",
             "(Ljava/lang/String;)Z",
             entity_invulnerable as *mut c_void,
@@ -13041,14 +15394,29 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             entity_projectile_owner as *mut c_void,
         ),
         method(
-            "setEntityProjectileOwner",
-            "(Ljava/lang/String;Ljava/lang/String;)Z",
-            set_entity_projectile_owner as *mut c_void,
+            "entityProjectileSource",
+            "(Ljava/lang/String;)Lorg/bukkit/projectiles/ProjectileSource;",
+            entity_projectile_source as *mut c_void,
+        ),
+        method(
+            "entityProjectileShooter",
+            "(Ljava/lang/String;)Ljava/lang/Object;",
+            entity_projectile_shooter as *mut c_void,
+        ),
+        method(
+            "setEntityProjectileSource",
+            "(Ljava/lang/String;Ljava/lang/String;Lorg/bukkit/projectiles/ProjectileSource;Z)Z",
+            set_entity_projectile_source as *mut c_void,
         ),
         method(
             "entityPotionEffects",
             "(Ljava/lang/String;)[Ljava/lang/String;",
             entity_potion_effects as *mut c_void,
+        ),
+        method(
+            "mobEffectInstant",
+            "(Ljava/lang/String;)Z",
+            mob_effect_instant as *mut c_void,
         ),
         method(
             "entityPersistent",
@@ -13081,9 +15449,29 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             set_entity_drop_chance as *mut c_void,
         ),
         method(
+            "entityEquipmentSlot",
+            "(Ljava/lang/String;I)Ljava/lang/String;",
+            entity_equipment_slot as *mut c_void,
+        ),
+        method(
+            "setEntityEquipmentSlot",
+            "(Ljava/lang/String;ILjava/lang/String;)V",
+            set_entity_equipment_slot as *mut c_void,
+        ),
+        method(
+            "clearEntityEquipment",
+            "(Ljava/lang/String;)V",
+            clear_entity_equipment as *mut c_void,
+        ),
+        method(
             "arrowPotion",
             "(Ljava/lang/String;)Ljava/lang/String;",
             arrow_potion as *mut c_void,
+        ),
+        method(
+            "setArrowPotion",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            set_arrow_potion as *mut c_void,
         ),
         method(
             "arrowPotionColor",
@@ -13094,6 +15482,36 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "arrowCustomEffects",
             "(Ljava/lang/String;)[Ljava/lang/String;",
             arrow_custom_effects as *mut c_void,
+        ),
+        method(
+            "arrowProperty",
+            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            arrow_property as *mut c_void,
+        ),
+        method(
+            "setArrowProperty",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+            set_arrow_property as *mut c_void,
+        ),
+        method(
+            "setArrowPotionColor",
+            "(Ljava/lang/String;IZ)V",
+            set_arrow_potion_color as *mut c_void,
+        ),
+        method(
+            "addArrowCustomEffect",
+            "(Ljava/lang/String;Ljava/lang/String;Z)Z",
+            add_arrow_custom_effect as *mut c_void,
+        ),
+        method(
+            "removeArrowCustomEffect",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            remove_arrow_custom_effect as *mut c_void,
+        ),
+        method(
+            "clearArrowCustomEffects",
+            "(Ljava/lang/String;)V",
+            clear_arrow_custom_effects as *mut c_void,
         ),
         method(
             "airSupply",
@@ -13319,16 +15737,6 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "setSpellcasterSpell",
             "(Ljava/lang/String;Ljava/lang/String;)V",
             set_spellcaster_spell as *mut c_void,
-        ),
-        method(
-            "projectileShooter",
-            "(Ljava/lang/String;)Ljava/lang/String;",
-            projectile_shooter as *mut c_void,
-        ),
-        method(
-            "setProjectileShooter",
-            "(Ljava/lang/String;Ljava/lang/String;)V",
-            set_projectile_shooter as *mut c_void,
         ),
         method(
             "setHangingFacing",
@@ -13888,6 +16296,735 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
 }
 
 #[cfg(test)]
+mod integration_union_tests {
+    #[test]
+    fn text_codec_combines_damage_potions_json_and_extended_components() {
+        use foton_registry::data_components::vanilla_components::*;
+        use foton_registry::{init_vanilla_registry, item_stack::ItemStack};
+        init_vanilla_registry();
+        let fields = [
+            "minecraft:diamond_sword 1",
+            "damage=37",
+            "basepotionhex=6d696e6563726166743a7761746572",
+            "potioneffects=speed,120,2,true,false,true;",
+            "namejsonhex=7b2274657874223a22556e696f6e227d",
+            "customhex=7b756e696f6e3a317d",
+            "cooldown=2.5",
+            "cooldowngroup=minecraft:union",
+            "trim=minecraft:iron,minecraft:sentry",
+        ];
+        let original = super::parse_slot(&fields.join("\u{1d}")).unwrap();
+        assert_eq!(original.get_damage_value(), 37);
+        let potion = original.get(POTION_CONTENTS).unwrap();
+        assert!(potion.potion().is_some());
+        assert!(original.get(CUSTOM_NAME).is_some());
+        assert!(original.get(CUSTOM_DATA).is_some());
+        assert!(original.get(TRIM).is_some());
+        assert_eq!(original.get(USE_COOLDOWN).unwrap().seconds, 2.5);
+        let encoded = super::describe_slot(&original);
+        assert!(encoded.contains("speed,120,2,true,false,true;"));
+        assert!(encoded.contains("namejsonhex="));
+        assert!(encoded.contains("customhex="));
+        assert!(encoded.contains("trim="));
+        let restored = super::parse_slot(&encoded).unwrap();
+        assert!(ItemStack::matches(&restored, &original));
+    }
+
+    #[test]
+    fn native_registration_has_one_implementation_per_java_method() {
+        let mut seen = std::collections::BTreeSet::new();
+        for method in super::bindings() {
+            let key = (
+                method.name.to_str().unwrap().to_owned(),
+                method.sig.to_str().unwrap().to_owned(),
+            );
+            assert!(seen.insert(key.clone()), "ambiguous JNI binding: {key:?}");
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod entity_bridge_tests {
+    use std::sync::{Arc, Weak};
+    use std::thread;
+    use std::time::Duration;
+
+    use foton_core::chunk::chunk_request::{ChunkRequestState, ChunkTicketKind};
+    use foton_core::chunk::status::ChunkStatus;
+    use foton_core::config::RuntimeConfig;
+    use foton_core::entity::Entity;
+    use foton_core::entity::entities::{ArmorStandEntity, HorseEntity, RawEntity};
+    use foton_core::inventory::container::Container as _;
+    use foton_core::inventory::equipment::EquipmentSlot;
+    use foton_core::level_data::WorldGenerationSettings;
+    use foton_core::player::connection::NetworkConnection;
+    use foton_core::player::{ClientInformation, GameProfile, Player, PlayerConnection};
+    use foton_core::world::{World, WorldConfig, WorldStorageConfig};
+    use foton_core::worldgen::{ChunkGeneratorType, EmptyChunkGenerator};
+    use foton_protocol::packet_traits::{CompressionInfo, EncodedPacket};
+    use foton_registry::{init_vanilla_registry, vanilla_dimension_types, vanilla_entities};
+    use foton_utils::types::{Difficulty, GameType};
+    use foton_utils::{ChunkPos, Identifier};
+    use glam::DVec3;
+    use text_components::TextComponent;
+    use tokio::runtime::{Builder as RuntimeBuilder, Runtime};
+    use toml::Value as TomlValue;
+    use toml::map::Map as TomlMap;
+    use uuid::Uuid;
+
+    use super::{
+        EquipmentSlotRequestError, add_entity_scoreboard_tag_state, bindings,
+        clear_entity_equipment_state, enchantments_conflict_state, entity_by_text,
+        entity_equipment_slot_state, entity_has_gravity_state, entity_in_rain_state,
+        entity_position_state, entity_scoreboard_tags_state, entity_silent_state,
+        equipment_slot_from_index, is_tagged_state, remove_entity_scoreboard_tag_state,
+        set_entity_equipment_slot_state, set_entity_gravity_state, set_entity_rotation_state,
+        set_entity_silent_state,
+    };
+
+    fn entity() -> RawEntity {
+        RawEntity::new(
+            7,
+            DVec3::new(1.25, 64.5, -3.75),
+            Weak::new(),
+            &vanilla_entities::ITEM,
+        )
+    }
+
+    struct EquipmentTestConnection;
+
+    impl NetworkConnection for EquipmentTestConnection {
+        fn compression(&self) -> Option<CompressionInfo> {
+            None
+        }
+
+        fn send_encoded(&self, _packet: EncodedPacket) {}
+
+        fn send_encoded_bundle(&self, _packets: Vec<EncodedPacket>) {}
+
+        fn disconnect_with_reason(&self, _reason: TextComponent) {}
+
+        fn tick(&self) {}
+
+        fn latency(&self) -> i32 {
+            0
+        }
+
+        fn close(&self) {}
+
+        fn closed(&self) -> bool {
+            false
+        }
+    }
+
+    pub(crate) fn equipment_test_config() -> Arc<RuntimeConfig> {
+        Arc::new(RuntimeConfig {
+            max_players: 1,
+            view_distance: 2,
+            simulation_distance: 2,
+            max_chained_neighbor_updates: 1_000_000,
+            online_mode: false,
+            whitelist_enabled: false,
+            auth_server: None,
+            allow_insecure_auth_server: false,
+            profile_server: None,
+            services_server: None,
+            encryption: false,
+            allow_flight: false,
+            motd: String::new(),
+            use_favicon: false,
+            favicon: String::new(),
+            enforce_secure_chat: false,
+            chat_spam_threshold_seconds: 10,
+            command_spam_threshold_seconds: 10,
+            compression: None,
+            server_links: None,
+            packet_workers: Some(1),
+            chunk_generation_threads: Some(1),
+            chunk_encoding_threads: Some(1),
+            bug_report_webhook: None,
+        })
+    }
+
+    fn equipment_test_player() -> Arc<Player> {
+        let world = rain_test_world();
+        Arc::new_cyclic(|player| {
+            Player::new(
+                GameProfile {
+                    id: Uuid::new_v4(),
+                    name: "EquipmentBridge".to_owned(),
+                    properties: Vec::new(),
+                    profile_actions: None,
+                },
+                Arc::new(PlayerConnection::Other(Box::new(EquipmentTestConnection))),
+                world,
+                Weak::new(),
+                equipment_test_config(),
+                10,
+                ClientInformation::default(),
+                player,
+            )
+        })
+    }
+
+    pub(crate) fn rain_test_world() -> Arc<World> {
+        rain_test_world_with_worker_observer(|_, _| {})
+    }
+
+    pub(crate) fn rain_test_world_with_worker_observer(
+        observe: impl FnOnce(&Runtime, &rayon::ThreadPool),
+    ) -> Arc<World> {
+        init_vanilla_registry();
+        let runtime = Arc::new(
+            match RuntimeBuilder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime,
+                Err(error) => panic!("rain test runtime should start: {error}"),
+            },
+        );
+        let generation_pool = Arc::new(
+            match rayon::ThreadPoolBuilder::new()
+                .num_threads(1)
+                .thread_name(|index| format!("foton-plugin-rain-test-{index}"))
+                .build()
+            {
+                Ok(pool) => pool,
+                Err(error) => panic!("rain test generation pool should start: {error}"),
+            },
+        );
+        observe(&runtime, &generation_pool);
+        let dimension_type = &vanilla_dimension_types::OVERWORLD;
+        let generator_config = TomlValue::Table(TomlMap::new());
+        let generation_settings = WorldGenerationSettings::from_generator_config(
+            Identifier::vanilla_static("empty"),
+            &generator_config,
+            dimension_type.key.clone(),
+            dimension_type.min_y,
+            dimension_type.height,
+        );
+        let world = match runtime.block_on(World::new_with_config(
+            Arc::clone(&runtime),
+            Identifier::vanilla_static("plugin_rain_binding"),
+            dimension_type,
+            0,
+            WorldConfig {
+                storage: WorldStorageConfig::RamOnly,
+                level_data_path: None,
+                generator: Arc::new(ChunkGeneratorType::Empty(EmptyChunkGenerator::new())),
+                generation_settings,
+                view_distance: 2,
+                simulation_distance: 2,
+                max_chained_neighbor_updates: 1_000_000,
+                compression: None,
+                is_flat: false,
+                sea_level: 63,
+                default_gamemode: GameType::Survival,
+                difficulty: Difficulty::Normal,
+                bonus_chest: false,
+            },
+            generation_pool,
+        )) {
+            Ok(world) => world,
+            Err(error) => panic!("rain test world should initialize: {error}"),
+        };
+        let request = world.chunk_map.request_square(
+            ChunkPos::new(0, -1),
+            1,
+            ChunkStatus::Full,
+            ChunkTicketKind::Command,
+        );
+        for _ in 0..10_000 {
+            world.chunk_map.advance_scheduling();
+            if request.poll() == ChunkRequestState::Ready {
+                return world;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        panic!("rain test chunks did not become ready");
+    }
+
+    #[test]
+    fn spawn_reason_query_preserves_override_and_defaults_without_custom() {
+        use foton_core::entity::{EntitySpawnReason, PluginSpawnReason};
+        let entity = entity();
+        assert_eq!(
+            super::entity_spawn_reason_state(None),
+            PluginSpawnReason::Default
+        );
+        assert_eq!(
+            super::entity_spawn_reason_state(Some(&entity)),
+            PluginSpawnReason::Default
+        );
+        for (vanilla, expected) in [
+            (
+                EntitySpawnReason::ChunkGeneration,
+                PluginSpawnReason::ChunkGen,
+            ),
+            (
+                EntitySpawnReason::TrialSpawner,
+                PluginSpawnReason::TrialSpawner,
+            ),
+            (EntitySpawnReason::Load, PluginSpawnReason::Default),
+        ] {
+            entity.base().set_spawn_reason(vanilla);
+            assert_eq!(super::entity_spawn_reason_state(Some(&entity)), expected);
+        }
+        entity
+            .base()
+            .set_plugin_spawn_reason(PluginSpawnReason::Beehive);
+        assert_eq!(
+            super::entity_spawn_reason_state(Some(&entity)),
+            PluginSpawnReason::Beehive
+        );
+        assert_eq!(entity.base().spawn_reason(), Some(EntitySpawnReason::Load));
+    }
+
+    #[test]
+    fn entity_lookup_rejects_invalid_and_missing_uuids() {
+        assert!(entity_by_text("not-a-uuid").is_none());
+        assert!(entity_by_text("00000000-0000-0000-0000-000000000000").is_none());
+    }
+
+    #[test]
+    fn equipment_bridge_reads_and_writes_body_and_saddle_on_a_horse() {
+        init_vanilla_registry();
+        let horse = HorseEntity::new(&vanilla_entities::HORSE, 8, DVec3::ZERO, Weak::new());
+        let horse = &horse as &dyn Entity;
+
+        for (index, slot) in [
+            EquipmentSlot::MainHand,
+            EquipmentSlot::OffHand,
+            EquipmentSlot::Feet,
+            EquipmentSlot::Legs,
+            EquipmentSlot::Chest,
+            EquipmentSlot::Head,
+            EquipmentSlot::Body,
+            EquipmentSlot::Saddle,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(equipment_slot_from_index(index as i32), Some(slot));
+        }
+
+        assert_eq!(
+            set_entity_equipment_slot_state(Some(horse), 6, "minecraft:leather_horse_armor 1"),
+            Ok(())
+        );
+        assert_eq!(
+            set_entity_equipment_slot_state(Some(horse), 7, "minecraft:saddle 1"),
+            Ok(())
+        );
+        assert!(matches!(
+            entity_equipment_slot_state(Some(horse), 6),
+            Ok(Some(value)) if value.starts_with("minecraft:leather_horse_armor 1")
+        ));
+        assert!(matches!(
+            entity_equipment_slot_state(Some(horse), 7),
+            Ok(Some(value)) if value.starts_with("minecraft:saddle 1")
+        ));
+    }
+
+    #[test]
+    fn equipment_bridge_crosses_player_inventory_for_selected_hand_offhand_and_armor() {
+        init_vanilla_registry();
+        let player = equipment_test_player();
+        player.inventory.lock().set_selected_slot(4);
+        let entity = player.as_ref() as &dyn Entity;
+
+        for (bridge_slot, inventory_slot, encoded) in [
+            (0, 4, "minecraft:diamond_sword 1"),
+            (1, 40, "minecraft:shield 1"),
+            (2, 36, "minecraft:diamond_boots 1"),
+            (3, 37, "minecraft:diamond_leggings 1"),
+            (4, 38, "minecraft:diamond_chestplate 1"),
+            (5, 39, "minecraft:diamond_helmet 1"),
+        ] {
+            assert_eq!(
+                set_entity_equipment_slot_state(Some(entity), bridge_slot, encoded),
+                Ok(())
+            );
+            assert!(
+                super::describe_slot(player.inventory.lock().get_item(inventory_slot))
+                    .starts_with(encoded)
+            );
+        }
+
+        let changes_before_idempotent_write = player.inventory.lock().get_times_changed();
+        assert_eq!(
+            set_entity_equipment_slot_state(Some(entity), 0, "minecraft:diamond_sword 1"),
+            Ok(())
+        );
+        assert_eq!(
+            player.inventory.lock().get_times_changed(),
+            changes_before_idempotent_write
+        );
+
+        for (bridge_slot, inventory_slot, encoded) in [
+            (0, 4, "minecraft:iron_sword 1"),
+            (1, 40, "minecraft:totem_of_undying 1"),
+            (2, 36, "minecraft:iron_boots 1"),
+            (3, 37, "minecraft:iron_leggings 1"),
+            (4, 38, "minecraft:iron_chestplate 1"),
+            (5, 39, "minecraft:iron_helmet 1"),
+        ] {
+            let stack = super::parse_slot(encoded).expect("test item should parse");
+            player.inventory.lock().set_item(inventory_slot, stack);
+            assert!(matches!(
+                entity_equipment_slot_state(Some(entity), bridge_slot),
+                Ok(Some(value)) if value.starts_with(encoded)
+            ));
+        }
+    }
+
+    #[test]
+    fn equipment_bridge_uses_storage_for_slots_the_entity_cannot_naturally_use() {
+        init_vanilla_registry();
+        let stand =
+            ArmorStandEntity::new(&vanilla_entities::ARMOR_STAND, 9, DVec3::ZERO, Weak::new());
+        let entity = &stand as &dyn Entity;
+
+        assert_eq!(
+            set_entity_equipment_slot_state(Some(entity), 6, "minecraft:stone 2"),
+            Ok(())
+        );
+        assert_eq!(
+            set_entity_equipment_slot_state(Some(entity), 7, "minecraft:saddle 1"),
+            Ok(())
+        );
+        assert!(matches!(
+            entity_equipment_slot_state(Some(entity), 6),
+            Ok(Some(value)) if value.starts_with("minecraft:stone 2")
+        ));
+        assert!(matches!(
+            entity_equipment_slot_state(Some(entity), 7),
+            Ok(Some(value)) if value.starts_with("minecraft:saddle 1")
+        ));
+    }
+
+    #[test]
+    fn equipment_bridge_clear_is_atomic_and_validates_before_mutating() {
+        init_vanilla_registry();
+        let stand =
+            ArmorStandEntity::new(&vanilla_entities::ARMOR_STAND, 11, DVec3::ZERO, Weak::new());
+        let entity = &stand as &dyn Entity;
+
+        for slot in 0..8 {
+            assert_eq!(
+                set_entity_equipment_slot_state(
+                    Some(entity),
+                    slot,
+                    &format!("minecraft:stone {}", slot + 1),
+                ),
+                Ok(())
+            );
+        }
+        let before = (0..8)
+            .map(|slot| entity_equipment_slot_state(Some(entity), slot))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            set_entity_equipment_slot_state(Some(entity), 8, "minecraft:diamond 1"),
+            Err(EquipmentSlotRequestError::InvalidIndex)
+        );
+        assert_eq!(
+            entity_equipment_slot_state(Some(entity), -1),
+            Err(EquipmentSlotRequestError::InvalidIndex)
+        );
+        assert!(!clear_entity_equipment_state(None));
+        assert_eq!(
+            (0..8)
+                .map(|slot| entity_equipment_slot_state(Some(entity), slot))
+                .collect::<Vec<_>>(),
+            before
+        );
+
+        assert!(clear_entity_equipment_state(Some(entity)));
+        assert!(bindings().iter().any(|method| {
+            method.name.to_str().ok() == Some("clearEntityEquipment")
+                && method.sig.to_str().ok() == Some("(Ljava/lang/String;)V")
+        }));
+        for slot in 0..8 {
+            assert_eq!(
+                entity_equipment_slot_state(Some(entity), slot),
+                Ok(Some(String::new()))
+            );
+        }
+    }
+
+    #[test]
+    fn equipment_bridge_clear_updates_player_inventory_once() {
+        init_vanilla_registry();
+        let player = equipment_test_player();
+        let entity = player.as_ref() as &dyn Entity;
+        let living = entity
+            .as_living_entity()
+            .expect("a player should expose living equipment");
+        living.clear_equipment();
+
+        for (bridge_slot, inventory_slot) in [
+            (0, 0),
+            (1, 40),
+            (2, 36),
+            (3, 37),
+            (4, 38),
+            (5, 39),
+            (6, 41),
+            (7, 42),
+        ] {
+            if bridge_slot % 2 == 0 {
+                assert_eq!(
+                    set_entity_equipment_slot_state(Some(entity), bridge_slot, "minecraft:stone 1",),
+                    Ok(())
+                );
+            } else {
+                let stack =
+                    super::parse_slot("minecraft:stone 1").expect("test equipment should parse");
+                player.inventory.lock().set_item(inventory_slot, stack);
+            }
+            assert!(!player.inventory.lock().get_item(inventory_slot).is_empty());
+            assert!(matches!(
+                entity_equipment_slot_state(Some(entity), bridge_slot),
+                Ok(Some(value)) if value.starts_with("minecraft:stone 1")
+            ));
+        }
+        let changes_before_clear = player.inventory.lock().get_times_changed();
+
+        assert!(clear_entity_equipment_state(Some(entity)));
+
+        assert_eq!(
+            player.inventory.lock().get_times_changed(),
+            changes_before_clear + 1
+        );
+        for (bridge_slot, inventory_slot) in [
+            (0, 0),
+            (1, 40),
+            (2, 36),
+            (3, 37),
+            (4, 38),
+            (5, 39),
+            (6, 41),
+            (7, 42),
+        ] {
+            assert!(player.inventory.lock().get_item(inventory_slot).is_empty());
+            assert_eq!(
+                entity_equipment_slot_state(Some(entity), bridge_slot),
+                Ok(Some(String::new()))
+            );
+        }
+    }
+
+    #[test]
+    fn scoreboard_tag_bindings_delegate_and_absence_stays_absent() {
+        let entity = entity();
+
+        assert_eq!(entity_scoreboard_tags_state(None), None);
+        assert!(!add_entity_scoreboard_tag_state(None, "alpha".to_owned()));
+        assert!(!remove_entity_scoreboard_tag_state(None, "alpha"));
+
+        assert!(add_entity_scoreboard_tag_state(
+            Some(&entity),
+            "beta".to_owned()
+        ));
+        assert!(add_entity_scoreboard_tag_state(
+            Some(&entity),
+            "alpha".to_owned()
+        ));
+        assert!(!add_entity_scoreboard_tag_state(
+            Some(&entity),
+            "alpha".to_owned()
+        ));
+        assert_eq!(
+            entity_scoreboard_tags_state(Some(&entity)),
+            Some(vec!["alpha".to_owned(), "beta".to_owned()])
+        );
+        assert!(remove_entity_scoreboard_tag_state(Some(&entity), "alpha"));
+        assert!(!remove_entity_scoreboard_tag_state(Some(&entity), "alpha"));
+    }
+
+    #[test]
+    fn live_registry_bridge_resolves_namespaced_tags_and_enchantment_conflicts() {
+        init_vanilla_registry();
+
+        assert!(is_tagged_state(
+            "items",
+            "minecraft:trimmable_armor",
+            "minecraft:diamond_chestplate"
+        ));
+        assert!(!is_tagged_state(
+            "items",
+            "minecraft:trimmable_armor",
+            "minecraft:elytra"
+        ));
+
+        assert!(enchantments_conflict_state(
+            "minecraft:infinity",
+            "minecraft:infinity"
+        ));
+        assert!(enchantments_conflict_state(
+            "minecraft:infinity",
+            "minecraft:mending"
+        ));
+        assert!(enchantments_conflict_state(
+            "minecraft:mending",
+            "minecraft:infinity"
+        ));
+        assert!(!enchantments_conflict_state(
+            "minecraft:sharpness",
+            "minecraft:unbreaking"
+        ));
+        assert!(!enchantments_conflict_state(
+            "example:infinity",
+            "minecraft:mending"
+        ));
+        assert!(!enchantments_conflict_state(
+            "minecraft:missing",
+            "minecraft:mending"
+        ));
+        assert!(bindings().iter().any(|method| {
+            method.name.to_str().ok() == Some("enchantmentsConflict")
+                && method.sig.to_str().ok() == Some("(Ljava/lang/String;Ljava/lang/String;)Z")
+        }));
+    }
+
+    #[test]
+    fn gravity_bindings_invert_the_native_no_gravity_flag() {
+        let entity = entity();
+
+        assert!(!entity_has_gravity_state(None));
+        set_entity_gravity_state(None, true);
+        assert!(entity_has_gravity_state(Some(&entity)));
+
+        set_entity_gravity_state(Some(&entity), false);
+        assert!(entity.is_no_gravity());
+        assert!(!entity_has_gravity_state(Some(&entity)));
+        set_entity_gravity_state(Some(&entity), true);
+        assert!(!entity.is_no_gravity());
+    }
+
+    #[test]
+    fn silent_bindings_delegate_and_ignore_a_missing_entity() {
+        let entity = entity();
+
+        assert!(!entity_silent_state(None));
+        set_entity_silent_state(None, true);
+        assert!(!entity_silent_state(Some(&entity)));
+
+        set_entity_silent_state(Some(&entity), true);
+        assert!(entity_silent_state(Some(&entity)));
+        set_entity_silent_state(Some(&entity), false);
+        assert!(!entity_silent_state(Some(&entity)));
+    }
+
+    #[test]
+    fn rotation_binding_delegates_only_finite_values() {
+        let entity = entity();
+
+        assert!(!set_entity_rotation_state(None, 45.0, 20.0));
+        assert!(set_entity_rotation_state(Some(&entity), 450.0, 120.0));
+        assert_eq!(entity.rotation(), (90.0, 90.0));
+
+        assert!(!set_entity_rotation_state(Some(&entity), f32::NAN, 0.0));
+        assert!(!set_entity_rotation_state(
+            Some(&entity),
+            0.0,
+            f32::INFINITY
+        ));
+        assert_eq!(entity.rotation(), (90.0, 90.0));
+    }
+
+    #[test]
+    fn entity_position_keeps_the_rotation_from_the_same_snapshot() {
+        let entity = entity();
+        entity.set_rotation((120.0, -35.0));
+
+        assert_eq!(entity_position_state(None), None);
+        assert_eq!(
+            entity_position_state(Some(&entity)),
+            Some([1.25, 64.5, -3.75, 120.0, -35.0])
+        );
+    }
+
+    #[test]
+    fn rain_binding_observes_dry_to_raining_world_transition() {
+        let world = rain_test_world();
+        let entity = RawEntity::new(
+            8,
+            DVec3::new(1.25, 64.5, -3.75),
+            Arc::downgrade(&world),
+            &vanilla_entities::ITEM,
+        );
+
+        assert!(!entity_in_rain_state(None));
+        assert!(!entity_in_rain_state(Some(&entity)));
+
+        world.level_data.write().set_raining(true);
+        world.weather.lock().rain_level = 1.0;
+
+        assert!(world.can_see_sky(entity.block_position()));
+        assert!(world.is_raining_at(entity.block_position()));
+        assert!(entity_in_rain_state(Some(&entity)));
+    }
+
+    #[test]
+    fn every_entity_state_native_has_the_java_descriptor_it_serves() {
+        let expected = [
+            (
+                "entityScoreboardTags",
+                "(Ljava/lang/String;)[Ljava/lang/String;",
+            ),
+            (
+                "addEntityScoreboardTag",
+                "(Ljava/lang/String;Ljava/lang/String;)Z",
+            ),
+            (
+                "removeEntityScoreboardTag",
+                "(Ljava/lang/String;Ljava/lang/String;)Z",
+            ),
+            ("entityHasGravity", "(Ljava/lang/String;)Z"),
+            ("setEntityGravity", "(Ljava/lang/String;Z)V"),
+            ("entitySilent", "(Ljava/lang/String;)Z"),
+            ("setEntitySilent", "(Ljava/lang/String;Z)V"),
+            ("setEntityRotation", "(Ljava/lang/String;FF)V"),
+            ("entityInRain", "(Ljava/lang/String;)Z"),
+            ("animalBreedCause", "(Ljava/lang/String;)Ljava/lang/String;"),
+            (
+                "setAnimalBreedCause",
+                "(Ljava/lang/String;Ljava/lang/String;)V",
+            ),
+            ("animalLoveTicks", "(Ljava/lang/String;)I"),
+            ("setAnimalLoveTicks", "(Ljava/lang/String;I)V"),
+            (
+                "animalIsBreedItem",
+                "(Ljava/lang/String;Ljava/lang/String;)Z",
+            ),
+            ("cowVariant", "(Ljava/lang/String;)Ljava/lang/String;"),
+            ("setCowVariant", "(Ljava/lang/String;Ljava/lang/String;)V"),
+            ("cowSoundVariant", "(Ljava/lang/String;)Ljava/lang/String;"),
+            (
+                "setCowSoundVariant",
+                "(Ljava/lang/String;Ljava/lang/String;)V",
+            ),
+            ("setArrowPotion", "(Ljava/lang/String;Ljava/lang/String;)V"),
+        ];
+        let methods = bindings();
+
+        for (name, signature) in expected {
+            let method = methods
+                .iter()
+                .find(|method| method.name.to_str().ok() == Some(name));
+            assert_eq!(
+                method.and_then(|method| method.sig.to_str().ok()),
+                Some(signature)
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod snbt_tests {
     use super::parse_item_snbt_patch;
     #[test]
@@ -13933,3 +17070,1207 @@ mod tag_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod arrow_effect_bridge_tests {
+    use foton_registry::{
+        MobEffectInstance, MobEffectInstanceDetails, init_vanilla_registry, vanilla_mob_effects,
+    };
+
+    use super::{
+        add_or_replace_arrow_custom_effect, encode_arrow_custom_effect, parse_arrow_custom_effect,
+    };
+
+    #[test]
+    fn native_arrow_effect_encoding_preserves_hidden_but_bukkit_addition_drops_it() {
+        init_vanilla_registry();
+        let deepest = MobEffectInstanceDetails::new(4, 600, true, false, true, None);
+        let hidden = MobEffectInstanceDetails::new(3, 400, false, true, false, Some(deepest));
+        let original = MobEffectInstance::new(
+            vanilla_mob_effects::LUCK,
+            80,
+            2,
+            true,
+            false,
+            true,
+            Some(hidden),
+        );
+
+        let encoded = encode_arrow_custom_effect(&original);
+        assert_eq!(
+            encoded, "luck|80|2|true|false|true|400|3|false|true|false|600|4|true|false|true",
+            "native Arrow reads must retain the complete hidden-effect chain"
+        );
+        assert!(
+            parse_arrow_custom_effect(&encoded).is_none(),
+            "Bukkit addition must reject the native-only hidden payload"
+        );
+        let visible = "luck|80|2|true|false|true";
+        let decoded = parse_arrow_custom_effect(visible)
+            .unwrap_or_else(|| panic!("visible Arrow effect must decode: {visible}"));
+
+        assert_eq!(decoded.effect(), vanilla_mob_effects::LUCK);
+        assert_eq!(decoded.duration(), 80);
+        assert_eq!(decoded.amplifier(), 2);
+        assert!(decoded.ambient());
+        assert!(!decoded.show_particles());
+        assert!(decoded.show_icon());
+        assert!(decoded.hidden_effect().is_none());
+    }
+
+    #[test]
+    fn arrow_effect_override_removes_every_duplicate_before_appending() {
+        init_vanilla_registry();
+        let luck = || MobEffectInstance::simple(vanilla_mob_effects::LUCK, 20, 0);
+        let mut effects = vec![
+            luck(),
+            MobEffectInstance::simple(vanilla_mob_effects::POISON, 40, 1),
+            luck(),
+        ];
+        let replacement = MobEffectInstance::simple(vanilla_mob_effects::LUCK, 80, 2);
+
+        assert!(add_or_replace_arrow_custom_effect(
+            &mut effects,
+            replacement,
+            true,
+        ));
+        assert_eq!(effects.len(), 2);
+        assert_eq!(effects[0].effect(), vanilla_mob_effects::POISON);
+        assert_eq!(effects[1].effect(), vanilla_mob_effects::LUCK);
+        assert_eq!((effects[1].duration(), effects[1].amplifier()), (80, 2));
+    }
+}
+
+#[cfg(test)]
+mod slot_codec_tests {
+    use foton_registry::data_components::components::PotionContents;
+    use foton_registry::data_components::vanilla_components::POTION_CONTENTS;
+    use foton_registry::item_stack::ItemStack;
+    use foton_registry::mob_effect::instance::MobEffectInstance;
+    use foton_registry::{
+        RegistryReference, init_vanilla_registry, vanilla_items, vanilla_mob_effects,
+        vanilla_potions,
+    };
+
+    use super::{describe_slot, parse_slot};
+
+    #[test]
+    fn slot_codec_round_trip_preserves_damage_exactly() {
+        init_vanilla_registry();
+        let mut original = ItemStack::new(&vanilla_items::DIAMOND_SWORD);
+        original.set_damage_value(37);
+
+        let encoded = describe_slot(&original);
+        let decoded = parse_slot(&encoded).expect("described damaged item should parse");
+
+        assert!(encoded.split('\u{1d}').any(|field| field == "damage=37"));
+        assert_eq!(decoded.get_damage_value(), 37);
+        assert!(ItemStack::matches(&decoded, &original));
+    }
+
+    #[test]
+    fn slot_codec_round_trip_preserves_base_potion_identity() {
+        init_vanilla_registry();
+        let mut original = ItemStack::new(&vanilla_items::POTION);
+        original.set(
+            POTION_CONTENTS,
+            PotionContents::new(
+                Some(RegistryReference::new(&vanilla_potions::WATER)),
+                None,
+                Vec::new(),
+                None,
+            ),
+        );
+
+        let encoded = describe_slot(&original);
+        let decoded = parse_slot(&encoded).expect("described base potion should parse");
+
+        assert!(
+            encoded
+                .split('\u{1d}')
+                .any(|field| field.starts_with("basepotionhex="))
+        );
+        assert_eq!(decoded.get(POTION_CONTENTS), original.get(POTION_CONTENTS));
+        assert!(ItemStack::matches(&decoded, &original));
+    }
+
+    #[test]
+    fn slot_codec_round_trip_preserves_custom_potion_effects_exactly() {
+        init_vanilla_registry();
+        let mut original = ItemStack::new(&vanilla_items::POTION);
+        original.set_opaque_nbt(Some("{foton_opaque:1b}".to_owned()));
+        original.set(
+            POTION_CONTENTS,
+            PotionContents::new(
+                None,
+                None,
+                vec![
+                    MobEffectInstance::new(
+                        vanilla_mob_effects::SPEED,
+                        120,
+                        2,
+                        true,
+                        false,
+                        true,
+                        None,
+                    ),
+                    MobEffectInstance::new(
+                        vanilla_mob_effects::POISON,
+                        45,
+                        1,
+                        false,
+                        true,
+                        false,
+                        None,
+                    ),
+                ],
+                None,
+            ),
+        );
+
+        let encoded = describe_slot(&original);
+        let decoded = parse_slot(&encoded).expect("described custom potion should parse");
+
+        let effects = encoded
+            .split('\u{1d}')
+            .find_map(|field| field.strip_prefix("potioneffects="))
+            .expect("potion effects should use their labeled metadata field");
+        assert_eq!(
+            effects,
+            "speed,120,2,true,false,true;poison,45,1,false,true,false;"
+        );
+        assert!(
+            effects
+                .split(';')
+                .filter(|effect| !effect.is_empty())
+                .all(|effect| effect.split(',').count() == 6)
+        );
+        assert_eq!(decoded.opaque_nbt(), original.opaque_nbt());
+        assert_eq!(decoded.get(POTION_CONTENTS), original.get(POTION_CONTENTS));
+        assert!(ItemStack::matches(&decoded, &original));
+    }
+
+    #[test]
+    fn slot_codec_round_trip_accepts_legacy_unlabeled_potion_effects() {
+        init_vanilla_registry();
+
+        let decoded =
+            parse_slot("minecraft:potion 1\u{1d}speed,20,1;\u{1d}nbthex=7b666f6f3a31627d")
+                .expect("legacy potion metadata should parse");
+        let effects = decoded
+            .get(POTION_CONTENTS)
+            .expect("legacy potion effects should survive");
+
+        assert_eq!(effects.custom_effects().len(), 1);
+        assert!(!effects.custom_effects()[0].ambient());
+        assert!(effects.custom_effects()[0].show_particles());
+        assert!(effects.custom_effects()[0].show_icon());
+        assert_eq!(decoded.opaque_nbt(), Some("{foo:1b}"));
+    }
+
+    #[test]
+    fn legacy_slot_parser_rejects_more_than_256_lore_lines() {
+        init_vanilla_registry();
+        let mut encoded = "minecraft:stone 1".to_owned();
+        for _ in 0..257 {
+            encoded.push_str("\u{1d}lorehex=78");
+        }
+
+        assert!(parse_slot(&encoded).is_none());
+    }
+}
+
+#[cfg(test)]
+mod brewing_bridge_tests {
+    mod brewing_reachable_gaps;
+    mod brewing_review_regressions;
+    mod brewing_union_jni;
+    #[path = "brewing_recursive_bounds.rs"]
+    mod recursive_bounds;
+    use foton_core::behavior::init_behaviors;
+    use foton_core::block_entity::entities::{BREWING_STAND_SLOTS, BrewingStandBlockEntity};
+    use foton_core::block_entity::{BlockEntity as _, init_block_entities};
+    use foton_core::entity::entities::ItemEntity;
+    use foton_core::world::{LevelReader as _, World};
+    use foton_registry::blocks::block_state_ext::BlockStateExt as _;
+    use foton_registry::blocks::properties::BlockStateProperties;
+    use foton_registry::data_component_predicate::DataComponentMatchers;
+    use foton_registry::data_components::components::{
+        Filterable, FireworkExplosion, FireworkExplosionShape, Fireworks, ItemContainerContents,
+        ItemLore, PotionContents, WrittenBookContent,
+    };
+    use foton_registry::data_components::vanilla_components::{
+        CONTAINER, CUSTOM_NAME, FIREWORKS, ITEM_NAME, LORE, POTION_CONTENTS, WRITTEN_BOOK_CONTENT,
+    };
+    use foton_registry::item_predicate::{IntBounds, ItemPredicate, LockCode};
+    use foton_registry::item_stack::ItemStack;
+    use foton_registry::potion_brewing::potion_item;
+    use foton_registry::{
+        ItemStackTemplate, REGISTRY, RegistryEntry as _, RegistryExt as _, RegistryHolderSet,
+        RegistryReference, init_vanilla_registry, vanilla_blocks, vanilla_items, vanilla_potions,
+    };
+    use foton_utils::Identifier;
+    use foton_utils::codec::VarInt;
+    use foton_utils::serial::WriteTo as _;
+    use foton_utils::types::UpdateFlags;
+    use foton_utils::{BlockPos, Downcast as _};
+    use std::cell::Cell;
+    use std::ops::Deref;
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
+    use text_components::TextComponent;
+    use text_components::format::Color;
+
+    use super::{
+        BrewingBridgeSnapshot, MAX_BREWING_ITEM_BYTES, MAX_BREWING_SNAPSHOT_BYTES,
+        apply_brewing_snapshot, bindings, brewing_apply_matches,
+        brewing_item_payload_length_is_valid, brewing_payload_length_is_valid,
+        brewing_update_flags, decode_brewing_snapshot, encode_brewing_item,
+        encode_brewing_snapshot, read_brewing_item,
+    };
+
+    fn snapshot(items: Vec<ItemStack>) -> BrewingBridgeSnapshot {
+        BrewingBridgeSnapshot {
+            identity: 7,
+            items,
+            brew_time: 37,
+            recipe_brew_time: 240,
+            fuel: 11,
+            custom_name: Some(TextComponent::plain("Bridge brewer")),
+            lock: LockCode::NO_LOCK,
+        }
+    }
+
+    struct LoadedBridgeWorld(Arc<World>, brewing_union_jni::WorkerFailureObserver);
+
+    impl LoadedBridgeWorld {
+        fn new(world: Arc<World>) -> Self {
+            let failures = brewing_union_jni::WorkerFailureObserver::new(&world);
+            Self(world, failures)
+        }
+    }
+
+    impl Deref for LoadedBridgeWorld {
+        type Target = Arc<World>;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    impl Drop for LoadedBridgeWorld {
+        fn drop(&mut self) {
+            let world = &self.0;
+            world.chunk_map.stop_generation_refill_loop();
+            world.chunk_map.cancel_token.cancel();
+            world.chunk_map.task_tracker.close();
+            Arc::clone(&world.chunk_map.chunk_runtime)
+                .block_on(world.chunk_map.task_tracker.wait());
+            let failures = self.1.failures();
+            if !thread::panicking() {
+                assert_eq!(
+                    failures, 0,
+                    "brewing world workers failed before teardown completed"
+                );
+            }
+        }
+    }
+
+    fn loaded_bridge_world() -> LoadedBridgeWorld {
+        init_vanilla_registry();
+        init_behaviors();
+        init_block_entities();
+        let mut failures = None;
+        let world =
+            super::entity_bridge_tests::rain_test_world_with_worker_observer(|runtime, pool| {
+                failures = Some(brewing_union_jni::WorkerFailureObserver::for_workers(
+                    runtime, pool,
+                ));
+            });
+        LoadedBridgeWorld(
+            world,
+            failures.expect("worker observer installed before world creation"),
+        )
+    }
+
+    #[test]
+    fn loaded_bridge_world_teardown_joins_tracked_worldgen() {
+        use std::{
+            sync::mpsc::{self, RecvTimeoutError},
+            thread,
+        };
+        use tokio::time::sleep;
+        let world = loaded_bridge_world();
+        let weak_world = Arc::downgrade(&world);
+        let runtime = Arc::clone(&world.chunk_map.chunk_runtime);
+        let task_tracker = world.chunk_map.task_tracker.clone();
+
+        let cancel = world.chunk_map.cancel_token.clone();
+        let alive = weak_world.clone();
+        let task = task_tracker.spawn_on(
+            async move {
+                cancel.cancelled().await;
+                sleep(Duration::from_millis(20)).await;
+                assert!(
+                    alive.upgrade().is_some(),
+                    "world must outlive its tracked tasks"
+                );
+            },
+            runtime.handle(),
+        );
+        let (finished, completion) = mpsc::channel();
+        let teardown = thread::spawn(move || {
+            drop(world);
+            let _ = finished.send(());
+        });
+        // The deadline surrounds the destructor that actually blocks on the join.
+        let completed = completion.recv_timeout(Duration::from_secs(5));
+        assert!(
+            !matches!(completed, Err(RecvTimeoutError::Timeout)),
+            "brewing world teardown timed out"
+        );
+        teardown.join().expect("brewing world teardown panicked");
+        completed.expect("teardown completion channel disconnected");
+        runtime
+            .block_on(task)
+            .expect("tracked worldgen task panicked");
+        assert!(weak_world.upgrade().is_none());
+    }
+
+    fn installed_brewing_identity(world: &Arc<World>, pos: BlockPos) -> u64 {
+        world
+            .get_block_entity(pos)
+            .and_then(|entity| {
+                entity
+                    .downcast_ref::<BrewingStandBlockEntity>()
+                    .map(|brewing| brewing.state_snapshot().identity)
+            })
+            .expect("test brewing stand must be installed")
+    }
+
+    fn replace_snapshot_blob(encoded: &mut Vec<u8>, length_offset: usize, replacement: &[u8]) {
+        let start = length_offset + 4;
+        let original_length = u32::from_be_bytes(
+            encoded[length_offset..start]
+                .try_into()
+                .expect("test blob length is present"),
+        ) as usize;
+        encoded.splice(start..start + original_length, replacement.iter().copied());
+        encoded[length_offset..start].copy_from_slice(&(replacement.len() as u32).to_be_bytes());
+    }
+
+    fn custom_name_length_offset(encoded: &[u8]) -> usize {
+        let mut offset = 4 + 8 + 4 + 4 + 4;
+        for _ in 0..BREWING_STAND_SLOTS {
+            let start = offset + 4;
+            let length = u32::from_be_bytes(
+                encoded[offset..start]
+                    .try_into()
+                    .expect("test item length is present"),
+            ) as usize;
+            offset = start + length;
+        }
+        offset
+    }
+
+    #[test]
+    fn bridge_rejected_nested_lock_predicate_stays_below_one_mib() {
+        use foton_registry::data_component_predicate::{
+            CollectionPredicate, DataComponentExactPredicate, DataComponentMatchers,
+            DataComponentPredicateData, WrittenBookPagePredicate, WrittenBookPredicate,
+            vanilla_data_component_predicate_types,
+        };
+        init_vanilla_registry();
+        let partial = DataComponentPredicateData::new(
+            &vanilla_data_component_predicate_types::WRITTEN_BOOK_CONTENT,
+            WrittenBookPredicate::new(
+                Some(CollectionPredicate::new(
+                    Some(vec![WrittenBookPagePredicate::new(TextComponent::plain(
+                        "x".repeat(2 << 20),
+                    ))]),
+                    None,
+                    None,
+                )),
+                None,
+                None,
+                IntBounds::ANY,
+                None,
+            ),
+        );
+        let mut value = snapshot(vec![ItemStack::empty(); 5]);
+        value.lock = LockCode::new(ItemPredicate::new(
+            None,
+            IntBounds::ANY,
+            DataComponentMatchers::new(DataComponentExactPredicate::EMPTY, vec![partial])
+                .expect("unique predicate"),
+        ));
+        let stats = allocation_counter::measure(|| {
+            assert!(encode_brewing_snapshot(&value).is_none());
+        });
+        assert!(stats.bytes_max <= 1 << 20, "{stats:?}");
+    }
+
+    #[test]
+    fn live_item_length_preflight_precedes_copy_and_uses_shared_decode() {
+        init_vanilla_registry();
+        let copied = Cell::new(false);
+        assert!(
+            super::read_brewing_item_after_length_check(MAX_BREWING_ITEM_BYTES + 1, || {
+                copied.set(true);
+                Some(Vec::new())
+            })
+            .is_none()
+        );
+        assert!(!copied.get());
+        let mut item = ItemStack::with_count(&vanilla_items::STONE, -7);
+        item.set(CUSTOM_NAME, TextComponent::plain("negative"));
+        item.remove(ITEM_NAME);
+        let bytes = encode_brewing_item(&item).expect("encode");
+        let decoded = super::read_brewing_item_after_length_check(bytes.len(), || Some(bytes))
+            .expect("shared decode");
+        assert_eq!(decoded.item, item.item);
+        assert_eq!(decoded.count, item.count);
+        assert_eq!(decoded.components_patch(), item.components_patch());
+    }
+
+    #[test]
+    fn bridge_zero_count_preserves_raw_item_count_and_patch() {
+        init_vanilla_registry();
+        let mut item = ItemStack::with_count(&vanilla_items::STONE, 0);
+        item.set(CUSTOM_NAME, TextComponent::plain("zero"));
+        item.remove(ITEM_NAME);
+        let encoded = encode_brewing_item(&item).expect("item encodes");
+        let decoded = read_brewing_item(&encoded).expect("item decodes");
+        assert_eq!(decoded.item, item.item);
+        assert_eq!(decoded.count, item.count);
+        assert_eq!(decoded.components_patch(), item.components_patch());
+        let live =
+            super::read_brewing_item_after_length_check(encoded.len(), || Some(encoded.clone()))
+                .expect("shared live decode");
+        assert_eq!(live.item, item.item);
+        assert_eq!(live.count, item.count);
+        assert_eq!(live.components_patch(), item.components_patch());
+        let mut items = vec![ItemStack::empty(); 5];
+        items[0] = item;
+        let original = snapshot(items);
+        let encoded = encode_brewing_snapshot(&original).expect("snapshot encodes");
+        let decoded = decode_brewing_snapshot(&encoded).expect("snapshot decodes");
+        assert_eq!(decoded.items[0].item, original.items[0].item);
+        assert_eq!(decoded.items[0].count, original.items[0].count);
+        assert_eq!(
+            decoded.items[0].components_patch(),
+            original.items[0].components_patch()
+        );
+    }
+
+    #[test]
+    fn bridge_rejects_nonminimal_varints() {
+        init_vanilla_registry();
+        let mut bytes =
+            encode_brewing_item(&ItemStack::new(&vanilla_items::STONE)).expect("encode");
+        bytes.splice(0..1, [0x81, 0]);
+        assert!(read_brewing_item(&bytes).is_none());
+    }
+
+    #[test]
+    fn bridge_rejects_boolean_two() {
+        init_vanilla_registry();
+        let key = Identifier::vanilla_static("enchantment_glint_override");
+        let id = REGISTRY
+            .data_components
+            .id_from_key(&key)
+            .expect("registered");
+        let mut bytes = Vec::new();
+        for value in [1, vanilla_items::STONE.id() as i32, 1, 0, id as i32] {
+            VarInt(value).write(&mut bytes).expect("write");
+        }
+        bytes.push(2);
+        bytes.extend_from_slice(&u32::MAX.to_be_bytes());
+        assert!(read_brewing_item(&bytes).is_none());
+    }
+
+    #[test]
+    fn bridge_rejects_unsorted_and_duplicate_component_ids() {
+        init_vanilla_registry();
+        let mut ids = ["glider", "unbreakable"].map(|name| {
+            REGISTRY
+                .data_components
+                .id_from_key(&Identifier::vanilla_static(name))
+                .expect("registered")
+        });
+        ids.sort_unstable();
+        for (added, removed) in [
+            (vec![ids[1], ids[0]], vec![]),
+            (vec![], vec![ids[1], ids[0]]),
+            (vec![ids[0], ids[0]], vec![]),
+            (vec![], vec![ids[0], ids[0]]),
+            (vec![ids[0]], vec![ids[0]]),
+        ] {
+            let mut bytes = Vec::new();
+            for value in [
+                1,
+                vanilla_items::STONE.id() as i32,
+                added.len() as i32,
+                removed.len() as i32,
+            ] {
+                VarInt(value).write(&mut bytes).expect("header");
+            }
+            for id in added.into_iter().chain(removed) {
+                VarInt(id as i32).write(&mut bytes).expect("component id");
+            }
+            bytes.extend_from_slice(&u32::MAX.to_be_bytes());
+            assert!(read_brewing_item(&bytes).is_none());
+        }
+    }
+
+    #[test]
+    fn bridge_rejected_text_conversion_stays_below_one_mib() {
+        init_vanilla_registry();
+        let mut value = snapshot(vec![ItemStack::empty(); 5]);
+        value.custom_name = Some(TextComponent::plain("x".repeat(2 << 20)));
+        let stats = allocation_counter::measure(|| {
+            assert!(encode_brewing_snapshot(&value).is_none());
+        });
+        assert!(stats.bytes_max <= 1 << 20, "{stats:?}");
+    }
+
+    #[test]
+    fn bridge_rejected_lock_conversion_stays_below_one_mib() {
+        init_vanilla_registry();
+        let mut value = snapshot(vec![ItemStack::empty(); 5]);
+        value.lock = LockCode::new(ItemPredicate::new(
+            Some(RegistryHolderSet::Direct(vec![
+                &vanilla_items::STONE;
+                100_000
+            ])),
+            IntBounds::ANY,
+            DataComponentMatchers::ANY,
+        ));
+        let stats = allocation_counter::measure(|| {
+            assert!(encode_brewing_snapshot(&value).is_none());
+        });
+        assert!(stats.bytes_max <= 1 << 20, "{stats:?}");
+    }
+
+    #[test]
+    fn versioned_snapshot_round_trip_preserves_every_bridge_field() {
+        init_vanilla_registry();
+        let mut items = vec![ItemStack::empty(); BREWING_STAND_SLOTS];
+        let mut potion = ItemStack::new(&vanilla_items::POTION);
+        potion.set(
+            POTION_CONTENTS,
+            PotionContents::new(
+                Some(RegistryReference::new(&vanilla_potions::WATER)),
+                Some(0x12_34_56),
+                Vec::new(),
+                None,
+            ),
+        );
+        items[0] = potion;
+        let mut renamed = ItemStack::new(&vanilla_items::DIAMOND_SWORD);
+        renamed.remove(ITEM_NAME);
+        renamed.set_opaque_nbt(Some("{bridge:{unknown:1b}}".to_owned()));
+        items[1] = renamed;
+        items[3] = ItemStack::new(&vanilla_items::NETHER_WART);
+        let snapshot = BrewingBridgeSnapshot {
+            identity: 0x0102_0304_0506_0708,
+            items,
+            brew_time: 37,
+            recipe_brew_time: 240,
+            fuel: 11,
+            custom_name: Some(TextComponent::plain("Bridge brewer")),
+            lock: LockCode::NO_LOCK,
+        };
+
+        let encoded = encode_brewing_snapshot(&snapshot).expect("snapshot should encode");
+        assert_eq!(&encoded[..4], b"FBS\x02");
+        let decoded = decode_brewing_snapshot(&encoded).expect("snapshot should decode");
+
+        assert_eq!(decoded.identity, snapshot.identity);
+        assert_eq!(decoded.brew_time, snapshot.brew_time);
+        assert_eq!(decoded.recipe_brew_time, snapshot.recipe_brew_time);
+        assert_eq!(decoded.fuel, snapshot.fuel);
+        assert_eq!(decoded.custom_name, snapshot.custom_name);
+        assert_eq!(decoded.lock, snapshot.lock);
+        assert_eq!(decoded.items, snapshot.items);
+        let mut trailing = encoded;
+        trailing.push(0);
+        assert!(decode_brewing_snapshot(&trailing).is_none());
+    }
+
+    #[test]
+    fn item_codec_exactly_preserves_diverse_components_and_removals() {
+        init_vanilla_registry();
+        let mut rich_name = TextComponent::plain("Root");
+        rich_name.format.color = Some(Color::Aqua);
+        let mut child = TextComponent::plain(" child");
+        child.format.bold = Some(true);
+        rich_name.children.push(child);
+
+        let mut potion = ItemStack::new(&vanilla_items::POTION);
+        potion.set(CUSTOM_NAME, rich_name.clone());
+        potion.set(
+            POTION_CONTENTS,
+            PotionContents::new(None, Some(0x65_43_21), Vec::new(), Some("named".to_owned())),
+        );
+
+        let mut sword = ItemStack::new(&vanilla_items::DIAMOND_SWORD);
+        sword.remove(ITEM_NAME);
+        sword.set(
+            LORE,
+            ItemLore::new(vec![rich_name, TextComponent::plain("second")])
+                .expect("two lore lines are valid"),
+        );
+        sword.set_opaque_nbt(Some("{bridge:{opaque:[I;1,2,3]}}".to_owned()));
+
+        let mut rocket = ItemStack::new(&vanilla_items::FIREWORK_ROCKET);
+        rocket.set(
+            FIREWORKS,
+            Fireworks::new(
+                3,
+                vec![FireworkExplosion::new(
+                    FireworkExplosionShape::Creeper,
+                    vec![0x11_22_33],
+                    vec![0x44_55_66],
+                    true,
+                    true,
+                )],
+            )
+            .expect("one firework explosion is valid"),
+        );
+
+        let mut book = ItemStack::new(&vanilla_items::WRITTEN_BOOK);
+        book.set(
+            WRITTEN_BOOK_CONTENT,
+            WrittenBookContent::new(
+                Filterable::pass_through("Bridge book".to_owned()),
+                "Foton".to_owned(),
+                2,
+                vec![Filterable::pass_through(TextComponent::plain("Page"))],
+                true,
+            )
+            .expect("written book fixture is valid"),
+        );
+
+        let mut container = ItemStack::new(&vanilla_items::CHEST);
+        container.set(
+            CONTAINER,
+            ItemContainerContents::new(vec![
+                None,
+                Some(ItemStackTemplate::new(&vanilla_items::DIAMOND)),
+            ])
+            .expect("two container slots are valid"),
+        );
+
+        let original = vec![potion, sword, rocket, book, container];
+        let encoded = encode_brewing_snapshot(&snapshot(original.clone()))
+            .expect("diverse snapshot should encode");
+        let decoded = decode_brewing_snapshot(&encoded).expect("diverse snapshot should decode");
+
+        assert_eq!(decoded.items, original);
+    }
+
+    #[test]
+    fn live_item_codec_rejects_duplicate_unknown_malformed_and_trailing_data() {
+        init_vanilla_registry();
+        let valid = encode_brewing_item(&ItemStack::new(&vanilla_items::STONE))
+            .expect("stone should encode");
+
+        let mut trailing = valid.clone();
+        trailing.push(0);
+        assert!(read_brewing_item(&trailing).is_none());
+        assert!(read_brewing_item(&valid[..valid.len() - 1]).is_none());
+
+        let item_name: Identifier = "minecraft:item_name"
+            .parse()
+            .expect("vanilla component identifier is valid");
+        let item_name_id = REGISTRY
+            .data_components
+            .id_from_key(&item_name)
+            .expect("item name component is registered");
+        let mut duplicate = Vec::new();
+        VarInt(1)
+            .write(&mut duplicate)
+            .expect("count should encode");
+        VarInt(vanilla_items::STONE.id() as i32)
+            .write(&mut duplicate)
+            .expect("item id should encode");
+        VarInt(0)
+            .write(&mut duplicate)
+            .expect("added count should encode");
+        VarInt(2)
+            .write(&mut duplicate)
+            .expect("removed count should encode");
+        for _ in 0..2 {
+            VarInt(item_name_id as i32)
+                .write(&mut duplicate)
+                .expect("component id should encode");
+        }
+        duplicate.extend_from_slice(&u32::MAX.to_be_bytes());
+        assert!(read_brewing_item(&duplicate).is_none());
+
+        let mut unknown = Vec::new();
+        VarInt(1).write(&mut unknown).expect("count should encode");
+        VarInt(vanilla_items::STONE.id() as i32)
+            .write(&mut unknown)
+            .expect("item id should encode");
+        VarInt(0)
+            .write(&mut unknown)
+            .expect("added count should encode");
+        VarInt(1)
+            .write(&mut unknown)
+            .expect("removed count should encode");
+        VarInt(i32::MAX)
+            .write(&mut unknown)
+            .expect("unknown component id should encode");
+        unknown.extend_from_slice(&u32::MAX.to_be_bytes());
+        assert!(read_brewing_item(&unknown).is_none());
+    }
+
+    #[test]
+    fn live_item_codec_preflight_rejects_oversize_payloads() {
+        assert!(brewing_item_payload_length_is_valid(MAX_BREWING_ITEM_BYTES));
+        assert!(!brewing_item_payload_length_is_valid(
+            MAX_BREWING_ITEM_BYTES + 1
+        ));
+        assert!(read_brewing_item(&vec![0; MAX_BREWING_ITEM_BYTES + 1]).is_none());
+    }
+
+    #[test]
+    fn brewing_update_physics_controls_neighbor_notifications() {
+        assert_eq!(brewing_update_flags(false), UpdateFlags::UPDATE_CLIENTS);
+        assert_eq!(brewing_update_flags(true), UpdateFlags::UPDATE_ALL);
+    }
+
+    #[test]
+    fn brewing_apply_requires_type_and_identity_unless_forced() {
+        init_vanilla_registry();
+        let brewing = vanilla_blocks::BREWING_STAND.default_state();
+        let dirt = vanilla_blocks::DIRT.default_state();
+
+        assert!(brewing_apply_matches(brewing, Some(7), brewing, 7, false));
+        assert!(!brewing_apply_matches(brewing, Some(8), brewing, 7, false));
+        assert!(!brewing_apply_matches(dirt, None, brewing, 7, false));
+        assert!(brewing_apply_matches(brewing, Some(8), brewing, 7, true));
+        assert!(brewing_apply_matches(dirt, None, brewing, 7, true));
+        assert!(!brewing_apply_matches(brewing, Some(7), dirt, 7, true));
+    }
+
+    #[test]
+    fn malformed_snapshot_item_binary_components_are_rejected() {
+        init_vanilla_registry();
+        let entry = REGISTRY
+            .data_components
+            .id_from_key(&Identifier::vanilla_static("custom_name"))
+            .expect("registered");
+        for body in [
+            vec![8, 0, 4, b'x'],
+            vec![10, 8, 0],
+            vec![255],
+            vec![8, 0, 1, b'x', 0],
+        ] {
+            let mut item = Vec::new();
+            for value in [1, vanilla_items::STONE.id() as i32, 1, 0, entry as i32] {
+                VarInt(value).write(&mut item).expect("header");
+            }
+            item.extend(body);
+            item.extend_from_slice(&u32::MAX.to_be_bytes());
+            let mut encoded =
+                encode_brewing_snapshot(&snapshot(vec![ItemStack::empty(); 5])).expect("snapshot");
+            replace_snapshot_blob(&mut encoded, 24, &item);
+            assert!(decode_brewing_snapshot(&encoded).is_none());
+        }
+    }
+
+    #[test]
+    fn malformed_or_trailing_text_component_payload_is_rejected() {
+        init_vanilla_registry();
+        let encoded =
+            encode_brewing_snapshot(&snapshot(vec![ItemStack::empty(); BREWING_STAND_SLOTS]))
+                .expect("snapshot");
+        let name_offset = custom_name_length_offset(&encoded);
+        for replacement in [
+            vec![8, 0, 2, b'x'],
+            vec![8, 0, 1, b'x', 0],
+            vec![10, 8, 0],
+            vec![255],
+        ] {
+            let mut malformed = encoded.clone();
+            replace_snapshot_blob(&mut malformed, name_offset, &replacement);
+            assert!(decode_brewing_snapshot(&malformed).is_none());
+        }
+    }
+
+    #[test]
+    fn strict_snapshot_slot_decoder_preserves_valid_potion_metadata() {
+        init_vanilla_registry();
+        let mut potion = ItemStack::new(&vanilla_items::POTION);
+        potion.set(
+            POTION_CONTENTS,
+            PotionContents::new(
+                Some(RegistryReference::new(&vanilla_potions::WATER)),
+                None,
+                Vec::new(),
+                None,
+            ),
+        );
+        let mut items = vec![ItemStack::empty(); BREWING_STAND_SLOTS];
+        items[0] = potion.clone();
+
+        let encoded =
+            encode_brewing_snapshot(&snapshot(items)).expect("test snapshot should encode");
+        let decoded = decode_brewing_snapshot(&encoded).expect("valid snapshot should decode");
+
+        assert_eq!(
+            decoded.items[0].get(POTION_CONTENTS),
+            potion.get(POTION_CONTENTS)
+        );
+    }
+
+    #[test]
+    fn brewing_payload_limit_includes_the_one_mebibyte_boundary() {
+        assert!(brewing_payload_length_is_valid(MAX_BREWING_SNAPSHOT_BYTES));
+        assert!(!brewing_payload_length_is_valid(
+            MAX_BREWING_SNAPSHOT_BYTES + 1
+        ));
+    }
+
+    #[test]
+    fn rejected_force_apply_leaves_the_real_world_unchanged() {
+        let world = loaded_bridge_world();
+        let pos = BlockPos::new(3, 64, -2);
+        let dirt = vanilla_blocks::DIRT.default_state();
+        let brewing = vanilla_blocks::BREWING_STAND.default_state();
+        assert!(world.set_block(pos, dirt, UpdateFlags::UPDATE_NONE));
+
+        assert!(
+            !apply_brewing_snapshot(&world, pos, brewing, snapshot(Vec::new()), true, false),
+            "an invalid complete snapshot must reject"
+        );
+        assert_eq!(
+            world.get_block_state(pos),
+            dirt,
+            "a rejected apply must not leave a replacement block behind"
+        );
+        assert!(
+            world.get_block_entity(pos).is_none(),
+            "a rejected apply must not create a brewing stand entity"
+        );
+    }
+
+    #[test]
+    fn real_apply_rejects_type_mismatch_without_force() {
+        let world = loaded_bridge_world();
+        let pos = BlockPos::new(4, 64, -2);
+        let dirt = vanilla_blocks::DIRT.default_state();
+        assert!(world.set_block(pos, dirt, UpdateFlags::UPDATE_NONE));
+
+        assert!(!apply_brewing_snapshot(
+            &world,
+            pos,
+            vanilla_blocks::BREWING_STAND.default_state(),
+            snapshot(vec![ItemStack::empty(); BREWING_STAND_SLOTS]),
+            false,
+            false,
+        ));
+        assert_eq!(world.get_block_state(pos), dirt);
+        assert!(world.get_block_entity(pos).is_none());
+    }
+
+    #[test]
+    fn real_apply_rejects_a_stale_brewing_stand_identity() {
+        let world = loaded_bridge_world();
+        let pos = BlockPos::new(5, 64, -2);
+        let state = vanilla_blocks::BREWING_STAND.default_state();
+        assert!(world.set_block(pos, state, UpdateFlags::UPDATE_NONE));
+        let identity = installed_brewing_identity(&world, pos);
+        let mut stale_snapshot = snapshot(vec![ItemStack::empty(); BREWING_STAND_SLOTS]);
+        stale_snapshot.identity = identity.wrapping_add(1);
+
+        assert!(!apply_brewing_snapshot(
+            &world,
+            pos,
+            state,
+            stale_snapshot,
+            false,
+            false,
+        ));
+        assert_eq!(installed_brewing_identity(&world, pos), identity);
+    }
+
+    #[test]
+    fn forced_real_apply_replaces_the_block_and_commits_the_snapshot() {
+        let world = loaded_bridge_world();
+        let pos = BlockPos::new(6, 64, -2);
+        assert!(world.set_block(
+            pos,
+            vanilla_blocks::DIRT.default_state(),
+            UpdateFlags::UPDATE_NONE,
+        ));
+        let mut items = vec![ItemStack::empty(); BREWING_STAND_SLOTS];
+        items[0] = ItemStack::new(&vanilla_items::POTION);
+        items[4] = ItemStack::new(&vanilla_items::BLAZE_POWDER);
+        let expected = snapshot(items);
+
+        assert!(apply_brewing_snapshot(
+            &world,
+            pos,
+            vanilla_blocks::BREWING_STAND.default_state(),
+            expected,
+            true,
+            false,
+        ));
+        assert_eq!(
+            world.get_block_state(pos),
+            vanilla_blocks::BREWING_STAND.default_state()
+        );
+        let entity = world
+            .get_block_entity(pos)
+            .expect("forced replacement must install a block entity");
+        let brewing = entity
+            .downcast_ref::<BrewingStandBlockEntity>()
+            .expect("forced replacement must install a brewing stand entity");
+        let actual = brewing.state_snapshot();
+        assert!(actual.items[0].is(&vanilla_items::POTION));
+        assert!(actual.items[4].is(&vanilla_items::BLAZE_POWDER));
+        assert_eq!(actual.brew_time, 37);
+        assert_eq!(actual.recipe_brew_time, 240);
+        assert_eq!(actual.fuel, 11);
+        assert_eq!(
+            actual.custom_name,
+            Some(TextComponent::plain("Bridge brewer"))
+        );
+    }
+
+    #[test]
+    fn forced_active_replacement_keeps_brewing_on_its_first_tick() {
+        let world = loaded_bridge_world();
+        let pos = BlockPos::new(6, 64, -3);
+        assert!(world.set_block(
+            pos,
+            vanilla_blocks::DIRT.default_state(),
+            UpdateFlags::UPDATE_NONE,
+        ));
+        let mut items = vec![ItemStack::empty(); BREWING_STAND_SLOTS];
+        items[0] = potion_item(&vanilla_items::POTION, &vanilla_potions::WATER);
+        items[3] = ItemStack::new(&vanilla_items::NETHER_WART);
+        let mut active = snapshot(items);
+        active.brew_time = 10;
+
+        assert!(apply_brewing_snapshot(
+            &world,
+            pos,
+            vanilla_blocks::BREWING_STAND.default_state(),
+            active,
+            true,
+            false,
+        ));
+        let entity = world
+            .get_block_entity(pos)
+            .expect("forced replacement must install a block entity");
+        let brewing = entity
+            .downcast_ref::<BrewingStandBlockEntity>()
+            .expect("forced replacement must install a brewing stand");
+
+        brewing.tick(&world);
+
+        assert_eq!(brewing.state_snapshot().brew_time, 9);
+    }
+
+    #[test]
+    fn successful_real_apply_updates_the_placed_entity_state() {
+        let world = loaded_bridge_world();
+        let pos = BlockPos::new(7, 64, -2);
+        let state = vanilla_blocks::BREWING_STAND.default_state();
+        assert!(world.set_block(pos, state, UpdateFlags::UPDATE_NONE));
+        let identity = installed_brewing_identity(&world, pos);
+        let mut expected = snapshot(vec![ItemStack::empty(); BREWING_STAND_SLOTS]);
+        expected.identity = identity;
+        expected.fuel = 3;
+
+        assert!(apply_brewing_snapshot(
+            &world, pos, state, expected, false, false,
+        ));
+        assert_eq!(
+            world.get_block_entity(pos).and_then(|entity| {
+                entity
+                    .downcast_ref::<BrewingStandBlockEntity>()
+                    .map(|brewing| brewing.state_snapshot().fuel)
+            }),
+            Some(3),
+            "the real placed entity must expose the committed state to its update path"
+        );
+    }
+
+    #[test]
+    fn forced_property_update_preserves_the_exact_entity_and_drops_no_inventory() {
+        let world = loaded_bridge_world();
+        let pos = BlockPos::new(8, 64, -2);
+        let initial_state = vanilla_blocks::BREWING_STAND.default_state();
+        let requested_state = initial_state.set_value(&BlockStateProperties::HAS_BOTTLE_0, true);
+        assert!(world.set_block(pos, initial_state, UpdateFlags::UPDATE_NONE));
+        let original = world
+            .get_block_entity(pos)
+            .expect("the brewing stand must own a block entity");
+        let identity = original
+            .downcast_ref::<BrewingStandBlockEntity>()
+            .expect("the block entity must be a brewing stand")
+            .identity();
+
+        let mut old_items = vec![ItemStack::empty(); BREWING_STAND_SLOTS];
+        old_items[0] = ItemStack::new(&vanilla_items::POTION);
+        old_items[3] = ItemStack::new(&vanilla_items::NETHER_WART);
+        let mut initial_snapshot = snapshot(old_items);
+        initial_snapshot.identity = identity;
+        assert!(apply_brewing_snapshot(
+            &world,
+            pos,
+            initial_state,
+            initial_snapshot,
+            false,
+            false,
+        ));
+
+        let mut requested_items = vec![ItemStack::empty(); BREWING_STAND_SLOTS];
+        requested_items[1] = ItemStack::new(&vanilla_items::DIAMOND);
+        requested_items[3] = ItemStack::new(&vanilla_items::REDSTONE);
+        let mut requested = snapshot(requested_items.clone());
+        requested.identity = identity.wrapping_add(1);
+
+        assert!(apply_brewing_snapshot(
+            &world,
+            pos,
+            requested_state,
+            requested,
+            true,
+            true,
+        ));
+
+        let current = world
+            .get_block_entity(pos)
+            .expect("the property update must keep a block entity");
+        assert!(
+            Arc::ptr_eq(&current, &original),
+            "same-block property updates must keep the exact current Arc"
+        );
+        assert_eq!(world.get_block_state(pos), requested_state);
+        assert_eq!(
+            current
+                .downcast_ref::<BrewingStandBlockEntity>()
+                .expect("the preserved entity must remain a brewing stand")
+                .state_snapshot()
+                .items,
+            requested_items,
+            "callbacks must observe and retain the complete requested inventory"
+        );
+        let dropped_items = world
+            .accessible_entities()
+            .into_iter()
+            .filter(|entity| entity.downcast_ref::<ItemEntity>().is_some())
+            .count();
+        assert_eq!(
+            dropped_items, 0,
+            "a same-block property update must not run destructive pre-remove effects"
+        );
+    }
+
+    #[test]
+    fn genuine_brewing_stand_removal_still_drops_its_inventory() {
+        let world = loaded_bridge_world();
+        let pos = BlockPos::new(9, 64, -2);
+        let brewing = vanilla_blocks::BREWING_STAND.default_state();
+        assert!(world.set_block(pos, brewing, UpdateFlags::UPDATE_NONE));
+        let identity = installed_brewing_identity(&world, pos);
+        let mut items = vec![ItemStack::empty(); BREWING_STAND_SLOTS];
+        items[0] = ItemStack::new(&vanilla_items::DIAMOND);
+        let mut populated = snapshot(items);
+        populated.identity = identity;
+        assert!(apply_brewing_snapshot(
+            &world, pos, brewing, populated, false, false,
+        ));
+
+        assert!(world.set_block(
+            pos,
+            vanilla_blocks::DIRT.default_state(),
+            UpdateFlags::UPDATE_ALL,
+        ));
+
+        let dropped_diamonds = world
+            .accessible_entities()
+            .into_iter()
+            .filter_map(|entity| {
+                entity
+                    .downcast_ref::<ItemEntity>()
+                    .map(ItemEntity::get_item)
+            })
+            .filter(|item| item.is(&vanilla_items::DIAMOND))
+            .count();
+        assert_eq!(dropped_diamonds, 1);
+    }
+
+    fn lamp_receives_a_power_loss_callback(apply_physics: bool) -> bool {
+        let world = loaded_bridge_world();
+        let pos = BlockPos::new(8, 64, -2);
+        let lamp_pos = pos.east();
+        assert!(world.set_block(
+            pos,
+            vanilla_blocks::REDSTONE_BLOCK.default_state(),
+            UpdateFlags::UPDATE_ALL,
+        ));
+        assert!(
+            world.set_block(
+                lamp_pos,
+                vanilla_blocks::REDSTONE_LAMP
+                    .default_state()
+                    .set_value(&BlockStateProperties::LIT, true),
+                UpdateFlags::UPDATE_NONE,
+            )
+        );
+
+        assert!(apply_brewing_snapshot(
+            &world,
+            pos,
+            vanilla_blocks::BREWING_STAND.default_state(),
+            snapshot(vec![ItemStack::empty(); BREWING_STAND_SLOTS]),
+            true,
+            apply_physics,
+        ));
+        world.has_scheduled_block_tick(lamp_pos, &vanilla_blocks::REDSTONE_LAMP)
+    }
+
+    #[test]
+    fn real_apply_physics_controls_neighbor_behavior() {
+        assert!(!lamp_receives_a_power_loss_callback(false));
+        assert!(lamp_receives_a_power_loss_callback(true));
+    }
+
+    #[test]
+    fn brewing_bridge_bindings_match_the_java_contract() {
+        let expected = [
+            ("brewingStandSnapshot", "(Ljava/lang/String;III)[B"),
+            ("brewingStandLiveItem", "(Ljava/lang/String;IIIJI)[B"),
+            ("brewingStandSetLiveItem", "(Ljava/lang/String;IIIJI[B)Z"),
+            (
+                "brewingStandApply",
+                "(Ljava/lang/String;IIILjava/lang/String;[BZZ)Z",
+            ),
+        ];
+        let methods = bindings();
+
+        for (name, signature) in expected {
+            let method = methods
+                .iter()
+                .find(|method| method.name.to_str().ok() == Some(name));
+            assert_eq!(
+                method.and_then(|method| method.sig.to_str().ok()),
+                Some(signature),
+                "missing or mismatched native {name}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "task_one_tests.rs"]
+mod task_one_tests;

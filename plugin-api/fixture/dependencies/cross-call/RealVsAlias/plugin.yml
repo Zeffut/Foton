@@ -1,0 +1,3 @@
+name: existingalias
+version: 1
+main: fixture.dependencies.DependencyPlugins$RealVsAlias

@@ -1,0 +1,4 @@
+name: AliasOne
+version: 1
+main: fixture.dependencies.DependencyPlugins$AliasOne
+provides: [SharedAlias]

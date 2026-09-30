@@ -66,8 +66,9 @@ def registered():
     files = sorted(NATIVES_SRC.rglob("*.rs"))
     source = "\n".join(path.read_text(encoding="utf-8") for path in files)
     # method(\n  "name",\n  "signature",\n  rust_fn as *mut c_void,\n)
+    # JNI fixture calls such as call_static_method are not registrations.
     pattern = re.compile(
-        r'method\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,', re.MULTILINE)
+        r'\bmethod\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,', re.MULTILINE)
     return {(name, signature) for name, signature in pattern.findall(source)}
 
 

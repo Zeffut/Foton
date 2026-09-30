@@ -2,7 +2,9 @@ package org.bukkit.entity;
 
 /** Bukkit age state exposed by ageable mobs. */
 public interface Ageable extends Creature {
+    @Deprecated(since = "1.16.2")
     default boolean canBreed() { return foton.Native.entityCanBreed(((foton.FotonEntity) this).getUniqueId().toString()); }
+    @Deprecated(since = "1.16.2")
     default void setBreed(boolean breed) { foton.Native.setEntityBreed(((foton.FotonEntity) this).getUniqueId().toString(), breed); }
 
     default int getAge() { return foton.Native.entityAge(((foton.FotonEntity) this).getUniqueId().toString()); }
@@ -19,5 +21,4 @@ public interface Ageable extends Creature {
     default void setBaby() {
         foton.Native.entitySetBaby(((foton.FotonEntity) this).getUniqueId().toString(), true);
     }
-    default void setBaby(boolean baby) { if (baby) setBaby(); else setAdult(); }
 }

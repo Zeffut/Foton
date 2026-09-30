@@ -11,8 +11,8 @@ use std::ptr::null_mut;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use foton_core::entity::SharedEntity;
 use foton_core::entity::serialization::{deserialize_entity, serialize_entity};
+use foton_core::entity::{PluginSpawnReason, SharedEntity};
 use foton_core::event::entity::CreatureSpawnEvent;
 use foton_core::world::World;
 use foton_utils::locks::SyncMutex;
@@ -118,7 +118,10 @@ extern "system" fn spawn_pending_entity(
     let Some(world) = world(&mut env, &world_name) else {
         return 0;
     };
-    let reason = text(&mut env, &reason).unwrap_or_else(|| "DEFAULT".to_owned());
+    let reason = text(&mut env, &reason)
+        .as_deref()
+        .and_then(PluginSpawnReason::from_paper_name)
+        .unwrap_or_default();
     let Some((_, entity)) = pending_entity(&id) else {
         return 0;
     };
@@ -128,6 +131,7 @@ extern "system" fn spawn_pending_entity(
         return 0;
     }
     entity.set_rotation((yaw, pitch));
+    entity.base().set_plugin_spawn_reason(reason);
     // Still held while listeners run, so a handler can read the entity it is
     // told about. A cancelled spawn leaves it unspawned, as on Paper.
     if entity.as_living_entity().is_some()

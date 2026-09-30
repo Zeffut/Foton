@@ -1,5 +1,8 @@
 //! Vanilla `minecraft:rarity` item component.
 
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Result, Write};
 
 use foton_utils::codec::VarInt;
@@ -96,6 +99,15 @@ impl FromNbtTag for Rarity {
 impl HashComponent for Rarity {
     fn hash_component(&self, hasher: &mut ComponentHasher) {
         hasher.put_string(self.serialized_name());
+    }
+}
+
+impl nbt_encode::NbtEncode for Rarity {
+    fn nbt_id(&self) -> u8 {
+        (self.serialized_name()).nbt_id()
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        (self.serialized_name()).write_nbt_payload(writer, depth)
     }
 }
 

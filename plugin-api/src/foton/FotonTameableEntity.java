@@ -3,7 +3,7 @@ package foton;
 import java.util.UUID;
 
 /** Living wrapper used only for vanilla tameable entity types. */
-public class FotonTameableEntity extends FotonLivingEntity implements org.bukkit.entity.Tameable {
+public class FotonTameableEntity extends FotonAnimals implements org.bukkit.entity.Tameable {
     public FotonTameableEntity(UUID id) { super(id); }
     @Override public boolean isTamed() { return Native.entityIsTamed(getUniqueId().toString()); }
     @Override public void setTamed(boolean tamed) { Native.setEntityTamed(getUniqueId().toString(), tamed); }

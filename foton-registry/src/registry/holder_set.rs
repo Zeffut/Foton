@@ -1,5 +1,8 @@
 //! Registry-backed holder sets used by vanilla codecs.
 
+use foton_utils::serial::budget;
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
 use std::fmt::Debug;
 use std::io::{Cursor, Error, Result, Write};
 use std::str::FromStr;
@@ -112,10 +115,7 @@ impl<T: RegistryHolderSetEntry> WriteTo for RegistryHolderSet<T> {
         match self {
             Self::Tag(tag) => {
                 if !T::holder_set_tag_exists(tag) {
-                    return Err(Error::other(format!(
-                        "Unknown {} tag: {tag}",
-                        T::REGISTRY_NAME
-                    )));
+                    return Err(Error::other("Unknown holder-set tag"));
                 }
                 VarInt(0).write(writer)?;
                 tag.write(writer)
@@ -136,9 +136,9 @@ impl<T: RegistryHolderSetEntry> WriteTo for RegistryHolderSet<T> {
                 })?;
                 VarInt(encoded_count).write(writer)?;
                 for entry in entries {
-                    let id = entry.try_id().ok_or_else(|| {
-                        Error::other(format!("Unknown {}: {}", T::REGISTRY_NAME, entry.key()))
-                    })?;
+                    let id = entry
+                        .try_id()
+                        .ok_or_else(|| Error::other("Unknown holder-set entry"))?;
                     let id = i32::try_from(id).map_err(|_| {
                         Error::other(format!(
                             "{} id out of protocol range: {id}",
@@ -159,10 +159,7 @@ impl<T: RegistryHolderSetEntry> ReadFrom for RegistryHolderSet<T> {
         if encoded_count == 0 {
             let tag = Identifier::read(data)?;
             if !T::holder_set_tag_exists(&tag) {
-                return Err(Error::other(format!(
-                    "Unknown {} tag: {tag}",
-                    T::REGISTRY_NAME
-                )));
+                return Err(Error::other("Unknown holder-set tag"));
             }
             return Ok(Self::Tag(tag));
         }
@@ -176,7 +173,8 @@ impl<T: RegistryHolderSetEntry> ReadFrom for RegistryHolderSet<T> {
                     T::REGISTRY_NAME
                 ))
             })?;
-        let mut entries = Vec::with_capacity(count.min(65_536));
+        budget::check_collection_input(data, count, 1)?;
+        let mut entries = budget::read_vec(count, count.min(65_536))?;
         for _ in 0..count {
             let id = VarInt::read(data)?.0;
             let id = usize::try_from(id)
@@ -268,6 +266,42 @@ impl_registry_holder_set_entry!(TrimMaterial, trim_materials, "trim material");
 impl_registry_holder_set_entry!(TrimPattern, trim_patterns, "trim pattern");
 impl_registry_holder_set_entry!(JukeboxSong, jukebox_songs, "jukebox song");
 impl_registry_holder_set_entry!(VillagerType, villager_types, "villager type");
+
+impl<T: RegistryHolderSetEntry> nbt_encode::NbtEncode for RegistryHolderSet<T> {
+    fn nbt_id(&self) -> u8 {
+        match self {
+            Self::Tag(_) => 8,
+            Self::Direct(v) if v.len() == 1 => 8,
+            Self::Direct(_) => 9,
+        }
+    }
+    fn write_nbt_payload(&self, w: &mut dyn NbtWrite, _depth: usize) -> Result<()> {
+        match self {
+            Self::Tag(id) => {
+                let len = id
+                    .namespace
+                    .len()
+                    .checked_add(id.path.len())
+                    .and_then(|n| n.checked_add(2))
+                    .ok_or_else(|| Error::other("tag length overflow"))?;
+                w.write_all(&u16::try_from(len).map_err(Error::other)?.to_be_bytes())?;
+                w.write_all(b"#")?;
+                w.write_all(id.namespace.as_bytes())?;
+                w.write_all(b":")?;
+                w.write_all(id.path.as_bytes())
+            }
+            Self::Direct(v) if v.len() == 1 => v[0].key().write_nbt_payload(w, 0),
+            Self::Direct(v) => {
+                w.write_all(&[if v.is_empty() { 0 } else { 8 }])?;
+                w.write_all(&i32::try_from(v.len()).map_err(Error::other)?.to_be_bytes())?;
+                for value in v {
+                    value.key().write_nbt_payload(w, 0)?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

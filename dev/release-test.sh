@@ -25,7 +25,7 @@ cp "$REPO/dev/fetch-plugin-api-libs.sh" "$FIXTURE/dev/"
 cp -R "$REPO/plugin-api/lib/licenses" "$FIXTURE/plugin-api/lib/licenses"
 printf '[workspace.package]\nversion = "9.8.7+mc26.2"\n' > "$FIXTURE/Cargo.toml"
 
-cp "$REPO"/plugin-api/lib/*.jar "$FIXTURE/plugin-api/lib/"
+cp "$REPO"/plugin-api/lib/*.jar "$REPO/plugin-api/lib/manifest.txt" "$FIXTURE/plugin-api/lib/"
 
 cat > "$FIXTURE/dev/ci.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -232,7 +232,7 @@ for dependency in adventure-api adventure-key adventure-text-logger-slf4j \
   failureaccess jspecify error_prone_annotations j2objc-annotations joml \
   kotlin-stdlib-jdk8 kotlin-stdlib-jdk7 kotlin-stdlib kotlin-stdlib-common \
   netty-buffer netty-codec-base netty-common netty-resolver netty-transport \
-  slf4j-api snakeyaml; do
+  slf4j-api snakeyaml sqlite-jdbc; do
   grep -qi "$dependency" "$REPO/plugin-api/lib/licenses/THIRD-PARTY-NOTICES.txt" \
     || { echo "third-party notices omit $dependency" >&2; exit 1; }
 done
@@ -248,11 +248,11 @@ OUT="$TARGET/release-artifacts"
 tar -tzf "$OUT/foton-plugin-runtime.tar.gz" > "$SCRATCH/tar-list"
 jar tf "$OUT/foton-plugin-runtime.zip" > "$SCRATCH/zip-list"
 tar -xOzf "$OUT/foton-plugin-runtime.tar.gz" ./SHA256SUMS > "$SCRATCH/runtime-sums"
-[ "$(grep -c '^[0-9a-f]\{64\}  ' "$SCRATCH/runtime-sums")" -eq 37 ]
-[ "$(grep -c '\.jar$' "$SCRATCH/tar-list")" -eq 31 ]
-[ "$(grep -c '\.jar$' "$SCRATCH/zip-list")" -eq 31 ]
-[ "$(grep -vc '/$' "$SCRATCH/tar-list")" -eq 38 ]
-[ "$(grep -vc '/$' "$SCRATCH/zip-list")" -eq 38 ]
+[ "$(grep -c '^[0-9a-f]\{64\}  ' "$SCRATCH/runtime-sums")" -eq 38 ]
+[ "$(grep -c '\.jar$' "$SCRATCH/tar-list")" -eq 32 ]
+[ "$(grep -c '\.jar$' "$SCRATCH/zip-list")" -eq 32 ]
+[ "$(grep -vc '/$' "$SCRATCH/tar-list")" -eq 39 ]
+[ "$(grep -vc '/$' "$SCRATCH/zip-list")" -eq 39 ]
 for library in adventure-text-minimessage-5.2.0.jar adventure-text-serializer-commons-5.2.0.jar \
   adventure-text-serializer-gson-5.2.0.jar adventure-text-serializer-json-5.2.0.jar \
   adventure-text-serializer-legacy-5.2.0.jar option-1.1.0.jar; do
@@ -363,7 +363,7 @@ grep -qx 'workflow workflow run release.yml --ref master' "$TEST_GH_CALLED"
 FETCH_FIXTURE="$SCRATCH/fetch-repo"
 mkdir -p "$FETCH_FIXTURE/dev" "$FETCH_FIXTURE/plugin-api/lib"
 cp "$REPO/dev/fetch-plugin-api-libs.sh" "$FETCH_FIXTURE/dev/"
-cp "$REPO"/plugin-api/lib/*.jar "$FETCH_FIXTURE/plugin-api/lib/"
+cp "$REPO"/plugin-api/lib/*.jar "$REPO/plugin-api/lib/manifest.txt" "$FETCH_FIXTURE/plugin-api/lib/"
 bash "$FETCH_FIXTURE/dev/fetch-plugin-api-libs.sh" --check
 CHECK_JAR="$FETCH_FIXTURE/plugin-api/lib/failureaccess-1.0.3.jar"
 printf 'locally changed\n' > "$CHECK_JAR"

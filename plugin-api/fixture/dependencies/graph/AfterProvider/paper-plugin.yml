@@ -1,0 +1,3 @@
+name: AfterProvider
+version: 1
+main: fixture.dependencies.DependencyPlugins$AfterProvider

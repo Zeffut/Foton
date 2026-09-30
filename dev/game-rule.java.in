@@ -38,11 +38,14 @@ public class GameRule<T> implements Keyed {
         return rule;
     }
 
-    /** A legacy name for a rule that was renamed and kept its meaning.
-     * A separate instance, equal to the canonical one, because `GameRules`
-     * cannot be read while this class is still being initialised. */
+    /** Intern a same-meaning alias without reading GameRules during class initialization. */
+    @SuppressWarnings("unchecked")
     private static <T> GameRule<T> alias(String key, Class<T> type) {
-        return new GameRule<>(key, type, type, Function.identity(), Function.identity(), false);
+        GameRule<?> existing = REGISTERED.get(key);
+        if (existing != null) return (GameRule<T>) existing;
+        GameRule<T> rule = new GameRule<>(key, type, type, Function.identity(), Function.identity(), false);
+        REGISTERED.put(key, rule);
+        return rule;
     }
 
     /** A legacy rule whose meaning was inverted or folded into another. */

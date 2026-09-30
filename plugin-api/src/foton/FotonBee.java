@@ -3,7 +3,7 @@ package foton;
 import java.util.UUID;
 
 /** Live Bukkit view of a Steel bee. */
-public final class FotonBee extends FotonLivingEntity implements org.bukkit.entity.Bee {
+public final class FotonBee extends FotonAnimals implements org.bukkit.entity.Bee {
     public FotonBee(UUID id) { super(id); }
     @Override public int getAnger() { return Native.beeAnger(getUniqueId().toString()); }
     @Override public void setAnger(int anger) { Native.setBeeAnger(getUniqueId().toString(), anger); }

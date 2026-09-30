@@ -6,6 +6,7 @@ use foton_utils::{ChunkPos, WorldAabb};
 use glam::DVec3;
 
 use super::EntityMoveError;
+use crate::event::EntityRemoveFromWorldEvent;
 use crate::world::World;
 use crate::world::game_event::DynamicListenerAction;
 
@@ -305,6 +306,9 @@ impl EntityLevelCallback for EntityChunkCallback {
             // of `ServerLevel.onEntityRemoved`.
             entity.update_dynamic_game_event_listener(DynamicListenerAction::Remove, &world);
             world.mark_chunk_dirty(ChunkPos::from_entity_pos(entity.position()));
+
+            let mut event = EntityRemoveFromWorldEvent::new(entity.uuid());
+            world.fire_event(&mut event);
         }
 
         world.remove_entity_from_tracker(self.entity_id);

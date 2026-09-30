@@ -3,7 +3,7 @@ package foton;
 import java.util.UUID;
 
 /** Live Bukkit view of a Steel frog. */
-public final class FotonFrog extends FotonLivingEntity implements org.bukkit.entity.Frog {
+public final class FotonFrog extends FotonAnimals implements org.bukkit.entity.Frog {
     public FotonFrog(UUID id) { super(id); }
     @Override public Variant getVariant() {
         String value = Native.frogVariant(getUniqueId().toString());

@@ -276,7 +276,7 @@ impl DataComponentPredicateCodec for ContainerPredicate {
     fn from_nbt_value(tag: &NbtTag) -> Option<Self> {
         let compound = tag.compound()?;
         decode_optional(compound, "items", |tag| {
-            CollectionPredicate::from_nbt_with(tag, ItemPredicate::from_owned_nbt)
+            CollectionPredicate::from_compounds(tag, ItemPredicate::from_owned_compound)
         })
         .map(Self)
     }
@@ -322,7 +322,7 @@ impl DataComponentPredicateCodec for BundlePredicate {
     fn from_nbt_value(tag: &NbtTag) -> Option<Self> {
         let compound = tag.compound()?;
         decode_optional(compound, "items", |tag| {
-            CollectionPredicate::from_nbt_with(tag, ItemPredicate::from_owned_nbt)
+            CollectionPredicate::from_compounds(tag, ItemPredicate::from_owned_compound)
         })
         .map(Self)
     }

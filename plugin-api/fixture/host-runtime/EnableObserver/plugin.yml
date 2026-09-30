@@ -1,0 +1,3 @@
+name: EnableObserver
+version: 1
+main: example.EnableObserverPlugin

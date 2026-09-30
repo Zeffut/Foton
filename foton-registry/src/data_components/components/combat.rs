@@ -1,5 +1,9 @@
 //! Combat-related item components.
 
+use crate::data_components::registry::ValidatePersistentComponent;
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 use std::str::FromStr;
 
@@ -44,9 +48,10 @@ impl Default for Weapon {
 
 impl WriteTo for DamageTypeComponent {
     fn write(&self, writer: &mut impl Write) -> Result<()> {
-        let id = self.damage_type.try_id().ok_or_else(|| {
-            Error::other(format!("Unknown damage type: {}", self.damage_type.key))
-        })?;
+        let id = self
+            .damage_type
+            .try_id()
+            .ok_or_else(|| Error::other("Unknown damage type"))?;
         let id = i32::try_from(id)
             .map_err(|_| Error::other(format!("Damage type id out of protocol range: {id}")))?;
         VarInt(id).write(writer)
@@ -443,6 +448,141 @@ fn push_hash_entry<T: HashComponent + ?Sized>(entries: &mut Vec<HashEntry>, key:
     let mut value_hasher = ComponentHasher::new();
     value.hash_component(&mut value_hasher);
     entries.push(HashEntry::new(key_hasher, value_hasher));
+}
+
+impl ValidatePersistentComponent for Weapon {
+    fn validate_persistent(&self) -> io::Result<()> {
+        if self.item_damage_per_attack < 0
+            || !self.disable_blocking_for_seconds.is_finite()
+            || self.disable_blocking_for_seconds.is_sign_negative()
+        {
+            return Err(Error::other("Invalid persistent weapon"));
+        }
+
+        Ok(())
+    }
+}
+
+impl nbt_encode::NbtEncode for Weapon {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+        self.validate_persistent()?;
+
+        if self.item_damage_per_attack != 1 {
+            field(
+                "item_damage_per_attack",
+                &(self.item_damage_per_attack),
+                writer,
+                depth,
+            )?;
+        }
+        if self.disable_blocking_for_seconds.to_bits() != 0.0_f32.to_bits() {
+            field(
+                "disable_blocking_for_seconds",
+                &(self.disable_blocking_for_seconds),
+                writer,
+                depth,
+            )?;
+        }
+        end(writer)
+    }
+}
+impl ValidatePersistentComponent for AttackRange {
+    fn validate_persistent(&self) -> io::Result<()> {
+        for (value, max) in [
+            (self.min_reach, 64.0),
+            (self.max_reach, 64.0),
+            (self.min_creative_reach, 64.0),
+            (self.max_creative_reach, 64.0),
+            (self.hitbox_margin, 1.0),
+            (self.mob_factor, 2.0),
+        ] {
+            if !value.is_finite() || value.is_sign_negative() || !(0.0..=max).contains(&value) {
+                return Err(Error::other("Invalid persistent attack range"));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl nbt_encode::NbtEncode for AttackRange {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+        self.validate_persistent()?;
+
+        let default = Self::default();
+
+        if self.min_reach.to_bits() != default.min_reach.to_bits() {
+            field("min_reach", &(self.min_reach), writer, depth)?;
+        }
+        if self.max_reach.to_bits() != default.max_reach.to_bits() {
+            field("max_reach", &(self.max_reach), writer, depth)?;
+        }
+        if self.min_creative_reach.to_bits() != default.min_creative_reach.to_bits() {
+            field(
+                "min_creative_reach",
+                &(self.min_creative_reach),
+                writer,
+                depth,
+            )?;
+        }
+        if self.max_creative_reach.to_bits() != default.max_creative_reach.to_bits() {
+            field(
+                "max_creative_reach",
+                &(self.max_creative_reach),
+                writer,
+                depth,
+            )?;
+        }
+        if self.hitbox_margin.to_bits() != default.hitbox_margin.to_bits() {
+            field("hitbox_margin", &(self.hitbox_margin), writer, depth)?;
+        }
+        if self.mob_factor.to_bits() != default.mob_factor.to_bits() {
+            field("mob_factor", &(self.mob_factor), writer, depth)?;
+        }
+        end(writer)
+    }
+}
+impl nbt_encode::NbtEncode for PiercingWeapon {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+
+        if !self.deals_knockback {
+            field("deals_knockback", &(self.deals_knockback), writer, depth)?;
+        }
+        if self.dismounts {
+            field("dismounts", &(self.dismounts), writer, depth)?;
+        }
+        if let Some(sound) = &self.sound {
+            field("sound", &(sound), writer, depth)?;
+        }
+        if let Some(sound) = &self.hit_sound {
+            field("hit_sound", &(sound), writer, depth)?;
+        }
+        end(writer)
+    }
+}
+
+impl nbt_encode::NbtEncode for DamageTypeComponent {
+    fn nbt_id(&self) -> u8 {
+        (self.damage_type.key).nbt_id()
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        (self.damage_type.key).write_nbt_payload(writer, depth)
+    }
 }
 
 #[cfg(test)]

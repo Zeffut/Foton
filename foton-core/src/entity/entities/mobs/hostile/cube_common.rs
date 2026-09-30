@@ -26,7 +26,7 @@ use crate::entity::SharedEntity;
 use crate::entity::ai::goal::{Goal, GoalControls};
 use crate::entity::living_base::LivingTravelInput;
 use crate::entity::mob::rotlerp;
-use crate::entity::{Entity, Mob, PathfinderMob};
+use crate::entity::{Entity, PathfinderMob};
 use crate::world::World;
 
 /// Largest size a cube may be set to.
@@ -85,7 +85,7 @@ const REDIRECT_SPREAD_TICKS: i32 = 60;
 const VOLUME_PER_SIZE: f32 = 0.4;
 
 /// The hopping state vanilla splits between the mob and its move control.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(super) struct CubeState {
     /// Whether the cube was on the ground last tick, for the squash sound.
     pub was_on_ground: bool,
@@ -97,10 +97,25 @@ pub(super) struct CubeState {
     pub wanted_movement: Option<f64>,
     /// Ticks until the next hop.
     pub jump_delay: i32,
+    /// Paper's persistent gate for the cube's existing movement goals.
+    pub can_wander: bool,
+}
+
+impl Default for CubeState {
+    fn default() -> Self {
+        Self {
+            was_on_ground: false,
+            wanted_y_rot: 0.0,
+            is_aggressive: false,
+            wanted_movement: None,
+            jump_delay: 0,
+            can_wander: true,
+        }
+    }
 }
 
 /// What a concrete cube exposes to the shared code.
-pub(super) trait CubeLike: Mob {
+pub(super) trait CubeLike: PathfinderMob {
     /// Returns the hopping state.
     fn cube_state(&self) -> &SyncMutex<CubeState>;
 
@@ -118,6 +133,27 @@ pub(super) trait CubeLike: Mob {
     /// adds on top of it.
     fn set_size(&self, size: i32, update_health: bool) {
         apply_size(self, size, update_health);
+    }
+
+    /// Returns Paper's persistent movement-goal gate.
+    fn can_wander(&self) -> bool {
+        self.cube_state().lock().can_wander
+    }
+
+    /// Changes Paper's persistent movement-goal gate.
+    fn set_wander(&self, can_wander: bool)
+    where
+        Self: Sized,
+    {
+        self.cube_state().lock().can_wander = can_wander;
+        self.mob_base()
+            .goal_selector()
+            .lock()
+            .set_external_controls(
+                self,
+                GoalControls::MOVE | GoalControls::JUMP | GoalControls::LOOK,
+                can_wander,
+            );
     }
 
     /// Returns whether this cube hurts what it touches.
@@ -246,6 +282,7 @@ pub(super) fn save_cube<C: CubeLike + ?Sized>(cube: &C, nbt: &mut NbtCompound) {
         "wasOnGround",
         i8::from(cube.cube_state().lock().was_on_ground),
     );
+    nbt.insert("Paper.canWander", i8::from(cube.can_wander()));
 }
 
 /// Loads what `AbstractCubeMob` owns.
@@ -254,11 +291,12 @@ pub(super) fn save_cube<C: CubeLike + ?Sized>(cube: &C, nbt: &mut NbtCompound) {
 /// size goes on before the shared mob data because `setSize` rewrites the
 /// health and speed attributes, and anything the compound says about them has
 /// to land after that rather than be overwritten by it.
-pub(super) fn load_cube<C: CubeLike + ?Sized>(cube: &C, nbt: BorrowedNbtCompoundView<'_, '_>) {
+pub(super) fn load_cube<C: CubeLike>(cube: &C, nbt: BorrowedNbtCompoundView<'_, '_>) {
     cube.set_size(nbt.int("Size").unwrap_or(0) + 1, false);
     cube.load_mob(nbt);
     cube.cube_state().lock().was_on_ground =
         nbt.byte("wasOnGround").is_some_and(|value| value != 0);
+    cube.set_wander(nbt.byte("Paper.canWander").is_none_or(|value| value != 0));
 }
 
 /// Returns this cube's hitbox.

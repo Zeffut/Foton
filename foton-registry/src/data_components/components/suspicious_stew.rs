@@ -1,5 +1,9 @@
 //! Vanilla `minecraft:suspicious_stew_effects` item component.
 
+use foton_utils::serial::budget;
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 use std::str::FromStr;
 
@@ -69,7 +73,7 @@ impl WriteTo for SuspiciousStewEffect {
         let id = self
             .effect
             .try_id()
-            .ok_or_else(|| Error::other(format!("Unknown mob effect: {}", self.effect.key)))?;
+            .ok_or_else(|| Error::other("Unknown mob effect"))?;
         let id = i32::try_from(id)
             .map_err(|_| Error::other(format!("Mob effect id out of range: {id}")))?;
         VarInt(id).write(writer)?;
@@ -139,7 +143,8 @@ impl WriteTo for SuspiciousStewEffects {
 impl ReadFrom for SuspiciousStewEffects {
     fn read(data: &mut Cursor<&[u8]>) -> Result<Self> {
         let count = read_count(data)?;
-        let mut effects = Vec::with_capacity(count.min(65_536));
+        budget::check_collection_input(data, count, 2)?;
+        let mut effects = budget::read_vec(count, count.min(65_536))?;
         for _ in 0..count {
             effects.push(SuspiciousStewEffect::read(data)?);
         }
@@ -211,6 +216,34 @@ fn hash_entries(hasher: &mut ComponentHasher, entries: &mut [HashEntry]) {
         hasher.put_raw_bytes(&entry.value_bytes);
     }
     hasher.end_map();
+}
+
+impl nbt_encode::NbtEncode for SuspiciousStewEffect {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+
+        field("id", &(self.effect.key), writer, depth)?;
+        if self.duration != Self::DEFAULT_DURATION {
+            field("duration", &(self.duration), writer, depth)?;
+        }
+        end(writer)
+    }
+}
+
+impl nbt_encode::NbtEncode for SuspiciousStewEffects {
+    fn nbt_id(&self) -> u8 {
+        9
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        if self.effects.is_empty() {
+            return writer.write_all(&[0, 0, 0, 0, 0]);
+        }
+        nbt_encode::list(&self.effects, writer, depth)
+    }
 }
 
 #[cfg(test)]

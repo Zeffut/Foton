@@ -793,6 +793,8 @@ pub mod entities;
 mod entity;
 pub mod equine;
 mod fluid_contact;
+#[cfg(feature = "test-support")]
+mod prepublication_test_animal;
 #[expect(warnings)]
 #[rustfmt::skip]
 #[path = "generated/entities.rs"]
@@ -888,6 +890,8 @@ pub use movement_sync::{
 pub(crate) use nautilus::{AbstractNautilus, AbstractNautilusBase};
 pub use neutral_mob::NeutralMob;
 pub use patrolling_monster::{PatrolState, PatrollingMonster};
+#[cfg(feature = "test-support")]
+pub use prepublication_test_animal::PrepublicationTestAnimal;
 pub use projectile::{
     EntityHitResult, HurtingProjectile, HurtingProjectileBase, INITIAL_ACCELERATION_POWER,
     Projectile, ProjectileBase, ProjectileDeflection, ProjectileEventSource, ProjectileHit,
@@ -896,10 +900,10 @@ pub use projectile::{
 };
 pub use raider::{RaidStatus, Raider, RaiderState};
 pub use registry::{ENTITIES, EntityLoadRequest, EntityRegistry, init_entities};
-pub use spawn::EntitySpawnReason;
 pub(crate) use spawn::{
     AgeableMobGroupData, AxolotlGroupData, HorseGroupData, LlamaGroupData, SpawnGroupData,
 };
+pub use spawn::{EntitySpawnReason, PluginSpawnReason};
 pub use spellcaster_illager::{IllagerSpell, SpellcasterIllager, SpellcasterState};
 pub(crate) use storage::{EntityStorage, EntityStorageAddResult};
 pub use synced_data::{EntitySyncedData, LivingEntitySyncedData};

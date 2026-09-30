@@ -1,0 +1,4 @@
+name: Consumer
+version: 1
+main: fixture.dependencies.DependencyPlugins$Consumer
+depend: [vAuLt]

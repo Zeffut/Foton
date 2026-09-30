@@ -2,6 +2,8 @@ use super::{
     ComponentData, ComponentPatchEntry, Cursor, DataComponentPatch, Identifier, ReadFrom, Result,
     VarInt, Write, WriteTo,
 };
+use foton_utils::serial::budget;
+use std::io;
 
 impl WriteTo for DataComponentPatch {
     fn write(&self, writer: &mut impl Write) -> Result<()> {
@@ -18,9 +20,9 @@ impl WriteTo for DataComponentPatch {
         }
 
         let added_count = i32::try_from(added.len())
-            .map_err(|_| std::io::Error::other("Too many added data components"))?;
+            .map_err(|_| io::Error::other("Too many added data components"))?;
         let removed_count = i32::try_from(removed.len())
-            .map_err(|_| std::io::Error::other("Too many removed data components"))?;
+            .map_err(|_| io::Error::other("Too many removed data components"))?;
         VarInt(added_count).write(writer)?;
         VarInt(removed_count).write(writer)?;
 
@@ -29,12 +31,12 @@ impl WriteTo for DataComponentPatch {
             let id = REGISTRY
                 .data_components
                 .id_from_key(key)
-                .ok_or_else(|| std::io::Error::other(format!("Unknown component key: {key:?}")))?;
+                .ok_or_else(|| io::Error::other(format!("Unknown component key: {key:?}")))?;
 
             let entry = REGISTRY
                 .data_components
                 .by_id(id)
-                .ok_or_else(|| std::io::Error::other(format!("No entry for component id: {id}")))?;
+                .ok_or_else(|| io::Error::other(format!("No entry for component id: {id}")))?;
 
             VarInt(id as i32).write(writer)?;
 
@@ -48,7 +50,7 @@ impl WriteTo for DataComponentPatch {
             let id = REGISTRY
                 .data_components
                 .id_from_key(key)
-                .ok_or_else(|| std::io::Error::other(format!("Unknown component key: {key:?}")))?;
+                .ok_or_else(|| io::Error::other(format!("Unknown component key: {key:?}")))?;
             VarInt(id as i32).write(writer)?;
         }
 
@@ -63,6 +65,9 @@ impl ReadFrom for DataComponentPatch {
         let added_count = read_component_count(data, "added")?;
         let removed_count = read_component_count(data, "removed")?;
 
+        budget::charge_map::<Identifier, ComponentPatchEntry>(
+            added_count.saturating_add(removed_count),
+        )?;
         let mut patch = Self::new();
 
         // Read added components. Nothing here logs: this loop runs once per
@@ -78,15 +83,13 @@ impl ReadFrom for DataComponentPatch {
             let key = REGISTRY
                 .data_components
                 .get_key_by_id(type_id)
-                .ok_or_else(|| {
-                    std::io::Error::other(format!("Unknown component type ID: {type_id}"))
-                })?
+                .ok_or_else(|| io::Error::other(format!("Unknown component type ID: {type_id}")))?
                 .clone();
 
             let entry = REGISTRY
                 .data_components
                 .by_id(type_id)
-                .ok_or_else(|| std::io::Error::other(format!("No entry for component: {key}")))?;
+                .ok_or_else(|| io::Error::other(format!("No entry for component: {key}")))?;
 
             let component_data = entry.read_network(data)?;
 
@@ -102,9 +105,7 @@ impl ReadFrom for DataComponentPatch {
             let key = REGISTRY
                 .data_components
                 .get_key_by_id(type_id)
-                .ok_or_else(|| {
-                    std::io::Error::other(format!("Unknown component type ID: {type_id}"))
-                })?
+                .ok_or_else(|| io::Error::other(format!("Unknown component type ID: {type_id}")))?
                 .clone();
 
             patch.entries.insert(key, ComponentPatchEntry::Removed);
@@ -115,6 +116,55 @@ impl ReadFrom for DataComponentPatch {
 }
 
 impl DataComponentPatch {
+    pub(crate) fn write_bounded(
+        &self,
+        writer: &mut dyn foton_utils::serial::nbt_stream::NbtWrite,
+    ) -> Result<()> {
+        use crate::{REGISTRY, RegistryExt};
+        use foton_utils::serial::budget::collection_capacity;
+
+        collection_capacity::<(usize, &ComponentPatchEntry)>(
+            self.entries.len(),
+            writer.remaining(),
+        )?;
+        let required = self
+            .entries
+            .len()
+            .saturating_mul(size_of::<(usize, &ComponentPatchEntry)>());
+        let mut writer = foton_utils::serial::nbt_stream::ScratchWriter::new(writer, required)?;
+        let mut entries = Vec::new();
+        entries
+            .try_reserve_exact(self.entries.len())
+            .map_err(io::Error::other)?;
+        for (key, value) in &self.entries {
+            let id = REGISTRY
+                .data_components
+                .id_from_key(key)
+                .ok_or_else(|| io::Error::other("Unknown component key"))?;
+            entries.push((id, value));
+        }
+        entries.sort_unstable_by_key(|(id, _)| *id);
+        VarInt(i32::try_from(self.count_set()).map_err(io::Error::other)?).write(&mut writer)?;
+        VarInt(i32::try_from(self.count_removed()).map_err(io::Error::other)?)
+            .write(&mut writer)?;
+        for (id, value) in &entries {
+            if let ComponentPatchEntry::Set(value) = value {
+                VarInt(i32::try_from(*id).map_err(io::Error::other)?).write(&mut writer)?;
+                let entry = REGISTRY
+                    .data_components
+                    .by_id(*id)
+                    .ok_or_else(|| io::Error::other("Unknown component id"))?;
+                entry.write_network_in(value, &mut *writer)?;
+            }
+        }
+        for (id, value) in entries {
+            if matches!(value, ComponentPatchEntry::Removed) {
+                VarInt(i32::try_from(id).map_err(io::Error::other)?).write(&mut writer)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Reads a patch where each component value is prefixed with a `VarInt` byte length.
     ///
     /// Vanilla uses this for untrusted client packets (e.g., creative mode slot)
@@ -130,7 +180,7 @@ impl DataComponentPatch {
         const MAX_COMPONENT_BYTES: usize = 2 * 1024 * 1024;
 
         if added_count.saturating_add(removed_count) > MAX_COMPONENTS {
-            return Err(std::io::Error::other(format!(
+            return Err(io::Error::other(format!(
                 "Component patch too large: {added_count} added + {removed_count} removed > {MAX_COMPONENTS}"
             )));
         }
@@ -142,7 +192,7 @@ impl DataComponentPatch {
             let byte_len = read_non_negative_varint(data, "component byte length")?;
 
             if byte_len > MAX_COMPONENT_BYTES {
-                return Err(std::io::Error::other(format!(
+                return Err(io::Error::other(format!(
                     "Component data too large: {byte_len} bytes > {MAX_COMPONENT_BYTES}"
                 )));
             }
@@ -150,15 +200,13 @@ impl DataComponentPatch {
             let key = REGISTRY
                 .data_components
                 .get_key_by_id(type_id)
-                .ok_or_else(|| {
-                    std::io::Error::other(format!("Unknown component type ID: {type_id}"))
-                })?
+                .ok_or_else(|| io::Error::other(format!("Unknown component type ID: {type_id}")))?
                 .clone();
 
             let entry = REGISTRY
                 .data_components
                 .by_id(type_id)
-                .ok_or_else(|| std::io::Error::other(format!("No entry for component: {key}")))?;
+                .ok_or_else(|| io::Error::other(format!("No entry for component: {key}")))?;
 
             // Read the component bytes into a sub-buffer.
             //
@@ -172,8 +220,8 @@ impl DataComponentPatch {
                 .len()
                 .saturating_sub(usize::try_from(data.position()).unwrap_or(usize::MAX));
             if byte_len > remaining {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
                     format!("Component claims {byte_len} bytes but only {remaining} remain"),
                 ));
             }
@@ -192,9 +240,7 @@ impl DataComponentPatch {
             let key = REGISTRY
                 .data_components
                 .get_key_by_id(type_id)
-                .ok_or_else(|| {
-                    std::io::Error::other(format!("Unknown component type ID: {type_id}"))
-                })?
+                .ok_or_else(|| io::Error::other(format!("Unknown component type ID: {type_id}")))?
                 .clone();
             patch.entries.insert(key, ComponentPatchEntry::Removed);
         }
@@ -209,5 +255,5 @@ fn read_component_count(data: &mut Cursor<&[u8]>, kind: &str) -> Result<usize> {
 
 fn read_non_negative_varint(data: &mut Cursor<&[u8]>, name: &str) -> Result<usize> {
     let value = VarInt::read(data)?.0;
-    usize::try_from(value).map_err(|_| std::io::Error::other(format!("Negative {name}: {value}")))
+    usize::try_from(value).map_err(|_| io::Error::other(format!("Negative {name}: {value}")))
 }

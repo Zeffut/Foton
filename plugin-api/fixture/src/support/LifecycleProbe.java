@@ -1,0 +1,153 @@
+package fixture;
+
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import org.bukkit.scheduler.BukkitTask;
+
+/** Parent-loaded lifecycle observations that never retain a plugin object or class. */
+public final class LifecycleProbe {
+    private static final Map<String, AtomicInteger> calls = new ConcurrentHashMap<>();
+    private static final Map<String, Boolean> flags = new ConcurrentHashMap<>();
+    private static final AtomicInteger followUpAttempts = new AtomicInteger();
+    private static final AtomicInteger followUpRejections = new AtomicInteger();
+    private static final AtomicInteger followUpRuns = new AtomicInteger();
+    private static final AtomicReference<BukkitTask> retainedAsyncHandle =
+        new AtomicReference<>();
+    private static volatile CountDownLatch asyncStarted = new CountDownLatch(1);
+    private static volatile CountDownLatch releaseAsync = new CountDownLatch(1);
+    private static volatile CountDownLatch asyncFinished = new CountDownLatch(1);
+    private static volatile CountDownLatch syncStarted = new CountDownLatch(1);
+    private static volatile CountDownLatch releaseSync = new CountDownLatch(1);
+    private static volatile CountDownLatch syncFinished = new CountDownLatch(1);
+
+    private LifecycleProbe() {}
+
+    public static void reset() {
+        calls.clear();
+        flags.clear();
+        followUpAttempts.set(0);
+        followUpRejections.set(0);
+        followUpRuns.set(0);
+        retainedAsyncHandle.set(null);
+        asyncStarted = new CountDownLatch(1);
+        releaseAsync = new CountDownLatch(1);
+        asyncFinished = new CountDownLatch(1);
+        syncStarted = new CountDownLatch(1);
+        releaseSync = new CountDownLatch(1);
+        syncFinished = new CountDownLatch(1);
+    }
+
+    public static void called(String name) {
+        calls.computeIfAbsent(name, ignored -> new AtomicInteger()).incrementAndGet();
+    }
+
+    public static int calls(String name) {
+        AtomicInteger count = calls.get(name);
+        return count == null ? 0 : count.get();
+    }
+
+    public static void flag(String name, boolean value) {
+        flags.put(name, value);
+    }
+
+    public static boolean flag(String name) {
+        return Boolean.TRUE.equals(flags.get(name));
+    }
+
+    public static void loaderOwned(String name, ClassLoader loader) {
+        flag(name, loader instanceof org.bukkit.plugin.java.PluginClassLoader);
+    }
+
+    public static void asyncStarted() {
+        asyncStarted.countDown();
+    }
+
+    public static void awaitAsyncStarted() {
+        await(asyncStarted, "async rollback task did not start");
+    }
+
+    public static void awaitRelease() {
+        await(releaseAsync, "async rollback task was not released");
+    }
+
+    public static void releaseAsync() {
+        releaseAsync.countDown();
+    }
+
+    public static void asyncFinished() {
+        asyncFinished.countDown();
+    }
+
+    public static void awaitAsyncFinished() {
+        await(asyncFinished, "async rollback task did not finish");
+    }
+
+    public static void syncStarted() {
+        syncStarted.countDown();
+    }
+
+    public static void awaitSyncStarted() {
+        await(syncStarted, "sync rollback task did not start");
+    }
+
+    public static void awaitSyncRelease() {
+        await(releaseSync, "sync rollback task was not released");
+    }
+
+    public static void releaseSync() {
+        releaseSync.countDown();
+    }
+
+    public static void syncFinished() {
+        syncFinished.countDown();
+    }
+
+    public static void awaitSyncFinished() {
+        await(syncFinished, "sync rollback task did not finish");
+    }
+
+    public static void followUpAttempt(boolean rejected) {
+        followUpAttempts.incrementAndGet();
+        if (rejected) followUpRejections.incrementAndGet();
+    }
+
+    public static int followUpAttempts() {
+        return followUpAttempts.get();
+    }
+
+    public static int followUpRejections() {
+        return followUpRejections.get();
+    }
+
+    public static void followUpRan() {
+        followUpRuns.incrementAndGet();
+    }
+
+    public static int followUpRuns() {
+        return followUpRuns.get();
+    }
+
+    /** Retains a handle only until the cancellation contract is asserted. */
+    public static void retainAsyncHandle(BukkitTask task) {
+        retainedAsyncHandle.set(task);
+    }
+
+    public static boolean takeRetainedAsyncCancelled() {
+        BukkitTask task = retainedAsyncHandle.getAndSet(null);
+        if (task == null) throw new AssertionError("async rollback handle was not retained");
+        return task.isCancelled();
+    }
+
+    private static void await(CountDownLatch latch, String message) {
+        try {
+            if (!latch.await(5, TimeUnit.SECONDS)) throw new AssertionError(message);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError(message, interrupted);
+        }
+    }
+}

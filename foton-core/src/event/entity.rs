@@ -8,6 +8,7 @@ use glam::DVec3;
 use uuid::Uuid;
 
 use super::Event;
+use crate::entity::PluginSpawnReason;
 use crate::entity::conversion::ConversionReason;
 
 /// An explosive is about to go off.
@@ -843,7 +844,7 @@ pub struct PreCreatureSpawnEvent {
     y: f64,
     z: f64,
     entity_type: String,
-    reason: String,
+    reason: PluginSpawnReason,
     cancelled: bool,
 }
 // SAFETY: This Foton-owned key uniquely identifies the concrete Rust type.
@@ -864,7 +865,7 @@ impl PreCreatureSpawnEvent {
         y: f64,
         z: f64,
         entity_type: String,
-        reason: String,
+        reason: PluginSpawnReason,
     ) -> Self {
         Self {
             world,
@@ -893,8 +894,8 @@ impl PreCreatureSpawnEvent {
     }
     /// What brought this about.
     #[must_use]
-    pub fn reason(&self) -> &str {
-        &self.reason
+    pub const fn reason(&self) -> PluginSpawnReason {
+        self.reason
     }
     /// Whether a listener has stopped this from happening.
     #[must_use]
@@ -1008,7 +1009,7 @@ pub struct CreatureSpawnEvent {
     x: f64,
     y: f64,
     z: f64,
-    reason: String,
+    reason: PluginSpawnReason,
     cancelled: bool,
 }
 // SAFETY: This Foton-owned key uniquely identifies the concrete Rust type.
@@ -1023,7 +1024,14 @@ impl Event for CreatureSpawnEvent {
 impl CreatureSpawnEvent {
     /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
     #[must_use]
-    pub const fn new(entity: Uuid, world: String, x: f64, y: f64, z: f64, reason: String) -> Self {
+    pub const fn new(
+        entity: Uuid,
+        world: String,
+        x: f64,
+        y: f64,
+        z: f64,
+        reason: PluginSpawnReason,
+    ) -> Self {
         Self {
             entity,
             world,
@@ -1051,8 +1059,8 @@ impl CreatureSpawnEvent {
     }
     /// What brought this about.
     #[must_use]
-    pub fn reason(&self) -> &str {
-        &self.reason
+    pub const fn reason(&self) -> PluginSpawnReason {
+        self.reason
     }
     /// Whether a listener has stopped this from happening.
     #[must_use]

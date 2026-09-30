@@ -2148,6 +2148,11 @@ impl LivingEntity for Player {
         inventory.with_equipment_item_mut(slot, visitor);
     }
 
+    fn clear_equipment(&self) {
+        let mut inventory = self.inventory.lock();
+        EntityEquipment::clear(&mut *inventory);
+    }
+
     #[cfg_attr(
         not(test),
         expect(

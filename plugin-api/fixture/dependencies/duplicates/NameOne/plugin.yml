@@ -1,0 +1,3 @@
+name: SameName
+version: 1
+main: fixture.dependencies.DependencyPlugins$NameOne

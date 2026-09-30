@@ -1,6 +1,28 @@
 //! Tool component for mining speed and drop behavior.
 
+use crate::data_components::registry::ValidatePersistentComponent;
+use foton_utils::serial::budget;
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
+
+#[cfg(test)]
+mod validation_work {
+    use std::cell::Cell;
+
+    thread_local! { static VALIDATIONS: Cell<usize> = const { Cell::new(0) }; }
+
+    pub(super) fn visit() {
+        VALIDATIONS.set(VALIDATIONS.get() + 1);
+    }
+
+    pub(super) fn measure(operation: impl FnOnce()) -> usize {
+        VALIDATIONS.set(0);
+        operation();
+        VALIDATIONS.get()
+    }
+}
 
 use foton_utils::{
     BlockStateId,
@@ -159,7 +181,8 @@ impl ReadFrom for Tool {
         let count = VarInt::read(data)?.0;
         let count = usize::try_from(count)
             .map_err(|_| Error::other(format!("Negative tool rule count: {count}")))?;
-        let mut rules = Vec::with_capacity(count.min(65_536));
+        budget::check_collection_input(data, count, 3)?;
+        let mut rules = budget::read_vec(count, count.min(65_536))?;
         for _ in 0..count {
             rules.push(ToolRule::read(data)?);
         }
@@ -350,9 +373,85 @@ fn push_hash_list_entry(entries: &mut Vec<HashEntry>, key: &str, values: &[ToolR
     entries.push(HashEntry::new(key_hasher, value_hasher));
 }
 
+impl ValidatePersistentComponent for ToolRule {
+    fn validate_persistent(&self) -> Result<()> {
+        #[cfg(test)]
+        validation_work::visit();
+        if self
+            .speed
+            .is_some_and(|speed| !speed.is_finite() || speed <= 0.0)
+        {
+            return Err(Error::other("Invalid persistent tool speed"));
+        }
+        Ok(())
+    }
+}
+
+impl nbt_encode::NbtEncode for ToolRule {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+
+        self.validate_persistent()?;
+        field("blocks", &(self.blocks), writer, depth)?;
+        if let Some(speed) = &self.speed {
+            field("speed", &(speed), writer, depth)?;
+        }
+        if let Some(correct_for_drops) = &self.correct_for_drops {
+            field("correct_for_drops", correct_for_drops, writer, depth)?;
+        }
+        end(writer)
+    }
+}
+
+impl ValidatePersistentComponent for Tool {
+    fn validate_persistent(&self) -> Result<()> {
+        if self.damage_per_block < 0 {
+            return Err(Error::other("Invalid persistent tool damage"));
+        }
+        for rule in &self.rules {
+            rule.validate_persistent()?;
+        }
+        Ok(())
+    }
+}
+
+impl nbt_encode::NbtEncode for Tool {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+        writer.ensure_remaining(self.rules.len().saturating_add(5))?;
+        if self.damage_per_block < 0 {
+            return Err(Error::other("Invalid persistent tool damage"));
+        }
+        field("rules", &self.rules, writer, depth)?;
+        if self.default_mining_speed.to_bits() != 1.0_f32.to_bits() {
+            field(
+                "default_mining_speed",
+                &self.default_mining_speed,
+                writer,
+                depth,
+            )?;
+        }
+        if self.damage_per_block != 1 {
+            field("damage_per_block", &self.damage_per_block, writer, depth)?;
+        }
+        if !self.can_destroy_blocks_in_creative {
+            field("can_destroy_blocks_in_creative", &false, writer, depth)?;
+        }
+        end(writer)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
+    use std::io::{self, Cursor};
 
     use foton_utils::Identifier;
     use foton_utils::hash::HashComponent;
@@ -362,8 +461,11 @@ mod tests {
     use simdnbt::{FromNbtTag, ToNbtTag};
 
     use super::{Tool, ToolRule, ToolRuleBlocks};
-    use crate::init_vanilla_registry;
+    use crate::data_component_predicate::{DataComponentExactPredicate, DataComponentMatchers};
+    use crate::data_components::{ComponentData, vanilla_components::TOOL};
+    use crate::item_predicate::{IntBounds, ItemPredicate, LockCode};
     use crate::vanilla_blocks::{COBWEB, STONE};
+    use crate::{REGISTRY, RegistryExt, init_vanilla_registry};
 
     fn with_borrowed_tag<R>(tag: NbtTag, visitor: impl FnOnce(BorrowedNbtTag<'_, '_>) -> R) -> R {
         let mut bytes = Vec::new();
@@ -395,6 +497,36 @@ mod tests {
             damage_per_block: 2,
             can_destroy_blocks_in_creative: false,
         }
+    }
+
+    #[test]
+    fn brewing_task13_persistent_lock_tiny_cap_precedes_rule_validation() {
+        init_vanilla_registry();
+        let rule = ToolRule::override_speed(ToolRuleBlocks::Direct(vec![]), 1.0);
+        let tool = Tool {
+            rules: vec![rule; 500_000],
+            ..Tool::default()
+        };
+        let entry = REGISTRY
+            .data_components
+            .by_key(TOOL.key())
+            .expect("tool component");
+        let exact = DataComponentExactPredicate::new(vec![(entry, ComponentData::new(tool))])
+            .expect("valid tool");
+        let lock = LockCode::new(ItemPredicate::new(
+            None,
+            IntBounds::ANY,
+            DataComponentMatchers::new(exact, vec![]).expect("matchers"),
+        ));
+        let mut stats = None;
+        let validations = super::validation_work::measure(|| {
+            stats = Some(allocation_counter::measure(|| {
+                assert!(lock.write_bounded(96, &mut io::sink()).is_err());
+            }));
+        });
+        assert_eq!(validations, 0, "tiny cap validated persistent tool rules");
+        let stats = stats.expect("allocation stats");
+        assert!(stats.bytes_max < 4096, "{stats:?}");
     }
 
     #[test]

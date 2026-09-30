@@ -42,6 +42,7 @@ macro_rules! impl_predicate_downcast_type {
 mod attributes;
 mod basic;
 mod books;
+mod bounded;
 mod collections;
 mod core;
 mod fireworks;

@@ -34,9 +34,11 @@ Apache License 2.0
 * Netty 4.2.15.Final: netty-common, netty-buffer, netty-transport,
   netty-resolver and netty-codec-base
 * snakeyaml 2.2
+* sqlite-jdbc 3.49.1.0 (Xerial)
 
 Their complete common license is APACHE-2.0.txt. None of the pinned JARs
-contains an additional NOTICE file. Guava and failureaccess's embedded
+contains an additional NOTICE file. SQLite JDBC also contains the Zentus
+license reproduced below. Guava and failureaccess's embedded
 META-INF/LICENSE files and SLF4J's embedded META-INF/LICENSE.txt were also
 checked against the durable texts in this directory.
 
@@ -50,3 +52,30 @@ Upstream license sources
 * https://github.com/qos-ch/slf4j/blob/v_2.0.17/LICENSE.txt
 * https://github.com/netty/netty/blob/netty-4.2.15.Final/LICENSE.txt
 * https://www.apache.org/licenses/LICENSE-2.0.txt
+
+SQLite JDBC / Zentus license (from the pinned JAR)
+-------------------------------------------------
+
+Copyright (c) 2006, David Crawshaw.  All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+SUCH DAMAGE.

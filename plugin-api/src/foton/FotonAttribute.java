@@ -26,7 +26,13 @@ public final class FotonAttribute implements Attribute {
 
     @Override public int compareTo(Attribute other) { return Integer.compare(ordinal, other.ordinal()); }
 
+    @Override public String getTranslationKey() { return translationKey(); }
+
     @Override public String translationKey() { return "attribute.name." + key.getKey(); }
+
+    @Override public Attribute.Sentiment getSentiment() { return Attribute.valueOf(name()).getSentiment(); }
+
+    @Override public double getDefaultValue() { return Attribute.valueOf(name()).getDefaultValue(); }
 
     @Override public String toString() { return name(); }
 }

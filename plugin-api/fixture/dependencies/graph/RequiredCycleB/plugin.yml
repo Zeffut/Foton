@@ -1,0 +1,4 @@
+name: RequiredCycleB
+version: 1
+main: fixture.dependencies.DependencyPlugins$RequiredCycleB
+depend: [RequiredCycleA]

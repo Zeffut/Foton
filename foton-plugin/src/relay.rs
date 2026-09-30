@@ -12,12 +12,12 @@ use std::sync::Arc;
 
 use foton_core::event::Event as _;
 use foton_core::event::{
-    BlockBreakEvent, BlockDropItemEvent, BrewEvent, EnchantOffer, EntitiesLoadEvent,
-    EntitiesUnloadEvent, EntityDamageEvent, EntityDismountEvent, EntityPlaceEvent,
-    FurnaceBurnEvent, FurnaceSmeltEvent, FurnaceStartSmeltEvent, PlayerArmorChangeEvent,
-    PlayerFailMoveEvent, PlayerHarvestBlockEvent, PlayerItemConsumeEvent, PlayerPurchaseEvent,
-    PlayerTeleportEvent, PlayerToggleFlightEvent, PlayerVelocityEvent, PrepareItemEnchantEvent,
-    PrepareSmithingEvent, ServerListPingEvent, TeleportPoint,
+    BlockBreakEvent, BlockDropItemEvent, EnchantOffer, EntitiesLoadEvent, EntitiesUnloadEvent,
+    EntityDamageEvent, EntityDismountEvent, EntityPlaceEvent, FurnaceBurnEvent, FurnaceSmeltEvent,
+    FurnaceStartSmeltEvent, PlayerArmorChangeEvent, PlayerFailMoveEvent, PlayerHarvestBlockEvent,
+    PlayerItemConsumeEvent, PlayerPurchaseEvent, PlayerTeleportEvent, PlayerToggleFlightEvent,
+    PlayerVelocityEvent, PrepareItemEnchantEvent, PrepareSmithingEvent, ServerListPingEvent,
+    TeleportPoint,
 };
 use foton_core::server::Server;
 use foton_registry::REGISTRY;
@@ -498,34 +498,6 @@ fn subscribe_blocks(server: &Arc<Server>, vm: &Arc<JavaVM>) {
             })
             .unwrap_or_default();
         event.set_items(kept);
-    });
-
-    let jvm = Arc::clone(vm);
-    events.on::<BrewEvent, _>(owner(), move |event| {
-        let Some(answer) = text_call(
-            &jvm,
-            "fireBrew",
-            &[
-                event.world(),
-                &block_position(event.position()),
-                &slot_list(event.results()),
-                &event.fuel_level().to_string(),
-            ],
-        ) else {
-            return;
-        };
-        let answer = fields(&answer);
-        if flag(answer.first()) == Some(true) {
-            event.set_cancelled(true);
-            return;
-        }
-        let Some(list) = answer.get(1) else {
-            return;
-        };
-        let results: Option<Vec<ItemStack>> = list.split(ITEM).map(parse_slot).collect();
-        if let Some(results) = results {
-            event.set_results(results);
-        }
     });
 }
 

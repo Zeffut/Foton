@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::bootstrap::init_globals_once;
 use crate::entity::{
-    DEFAULT_MAX_AIR_SUPPLY, ENTITIES, Entity, MobEffectInstance, SharedEntity,
+    DEFAULT_MAX_AIR_SUPPLY, ENTITIES, Entity, MobEffectInstance, PluginSpawnReason, SharedEntity,
     attribute::{AttributeModifier, AttributeModifierOperation},
     entities::{EndCrystalEntity, RawEntity},
     next_entity_id,

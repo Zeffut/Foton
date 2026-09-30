@@ -117,6 +117,17 @@ impl SlimeEntity {
         <Self as CubeLike>::set_size(self, size, update_health);
     }
 
+    /// Returns Paper's native cube-goal movement gate.
+    #[must_use]
+    pub fn can_wander(&self) -> bool {
+        <Self as CubeLike>::can_wander(self)
+    }
+
+    /// Changes Paper's native cube-goal movement gate.
+    pub fn set_wander(&self, can_wander: bool) {
+        <Self as CubeLike>::set_wander(self, can_wander);
+    }
+
     /// Creates a slime at runtime.
     #[must_use]
     pub fn new(entity_type: EntityTypeRef, id: i32, position: DVec3, world: Weak<World>) -> Self {
@@ -475,6 +486,12 @@ impl Enemy for SlimeEntity {}
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
+    use simdnbt::borrow::read_compound as read_borrowed_compound;
+
+    use crate::entity::ai::goal::{Goal as _, GoalControl};
+
     use super::*;
 
     /// Vanilla parity: `setSize` ends `this.xpReward = actualSize`, so one of
@@ -500,6 +517,88 @@ mod tests {
         assert_eq!(cube.xp_reward(), 4);
         cube.set_size(2, true);
         assert_eq!(cube.xp_reward(), 2, "a split cube kept the parent's reward");
+    }
+
+    #[test]
+    fn wander_state_disables_stops_and_restores_cube_goal_controls() {
+        use std::sync::Weak;
+
+        use foton_registry::{init_vanilla_registry, vanilla_entities};
+
+        init_vanilla_registry();
+        let cube = SlimeEntity::new(
+            &vanilla_entities::SLIME,
+            next_entity_id(),
+            DVec3::ZERO,
+            Weak::new(),
+        );
+        assert!(cube.can_wander());
+        {
+            let mut goals = cube.mob_base().goal_selector().lock();
+            assert_eq!(goals.available_goal_count(), 4);
+            goals.tick(&cube);
+            assert_eq!(goals.running_goal_count(), 1);
+        }
+
+        let hooks = cube_common::hooks_for::<SlimeEntity>();
+        let mut keep_jumping = CubeKeepOnJumpingGoal::new(hooks);
+        assert!(keep_jumping.can_use(&cube));
+        cube.set_wander(false);
+        assert!(!cube.can_wander());
+        cube.update_control_flags();
+        {
+            let goals = cube.mob_base().goal_selector().lock();
+            assert_eq!(goals.available_goal_count(), 4);
+            assert_eq!(goals.running_goal_count(), 0);
+            assert!(goals.is_control_disabled(GoalControl::Move));
+            assert!(goals.is_control_disabled(GoalControl::Jump));
+            assert!(goals.is_control_disabled(GoalControl::Look));
+        }
+        assert!(
+            keep_jumping.can_use(&cube),
+            "wander gating belongs to the selector, not a per-goal tick branch"
+        );
+
+        cube.set_wander(true);
+        let mut goals = cube.mob_base().goal_selector().lock();
+        assert!(!goals.is_control_disabled(GoalControl::Move));
+        assert!(!goals.is_control_disabled(GoalControl::Jump));
+        assert!(!goals.is_control_disabled(GoalControl::Look));
+        goals.tick(&cube);
+        assert_eq!(goals.running_goal_count(), 1);
+    }
+
+    #[test]
+    fn wander_state_survives_a_save_and_load_round_trip() {
+        use std::sync::Weak;
+
+        use foton_registry::{init_vanilla_registry, vanilla_entities};
+
+        init_vanilla_registry();
+        let cube = SlimeEntity::new(
+            &vanilla_entities::SLIME,
+            next_entity_id(),
+            DVec3::ZERO,
+            Weak::new(),
+        );
+        cube.set_wander(false);
+
+        let mut nbt = NbtCompound::new();
+        cube.save_additional(&mut nbt);
+        let mut bytes = Vec::new();
+        nbt.write(&mut bytes);
+        let borrowed = read_borrowed_compound(&mut Cursor::new(&bytes))
+            .unwrap_or_else(|error| panic!("slime save data should reborrow: {error}"));
+
+        let loaded = SlimeEntity::new(
+            &vanilla_entities::SLIME,
+            next_entity_id(),
+            DVec3::ZERO,
+            Weak::new(),
+        );
+        loaded.load_additional((&borrowed).into());
+
+        assert!(!loaded.can_wander());
     }
 
     #[test]

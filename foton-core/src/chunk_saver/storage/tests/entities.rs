@@ -1,5 +1,6 @@
 use super::*;
 use foton_registry::RegistryEntry as _;
+use simdnbt::owned::NbtTag;
 
 fn test_persistent_end_crystal(pos: DVec3) -> PersistentEntity {
     PersistentEntity {
@@ -559,6 +560,105 @@ fn test_zombie() -> SharedEntity {
         panic!("a zombie should have an entity factory");
     };
     zombie
+}
+
+/// Losing either the exact Paper key/value or the load-side restoration turns
+/// a persisted hive release into `DEFAULT` for plugins after a restart.
+#[test]
+fn plugin_spawn_reason_survives_entity_serialization_and_load() {
+    init_globals_once();
+
+    let zombie = test_zombie();
+    zombie
+        .base()
+        .set_plugin_spawn_reason(PluginSpawnReason::Beehive);
+
+    let Some(persistent) = ChunkStorage::entity_tree_to_persistent(&zombie) else {
+        panic!("a live zombie should be saveable");
+    };
+    let Ok(saved_nbt) = read_borrowed_compound(&mut Cursor::new(&persistent.nbt_data)) else {
+        panic!("the entity save should contain valid NBT");
+    };
+    let saved_nbt = simdnbt::borrow::NbtCompound::from(&saved_nbt);
+    assert_eq!(
+        saved_nbt
+            .string("Paper.SpawnReason")
+            .map(|value| value.to_str().into_owned()),
+        Some("BEEHIVE".to_owned())
+    );
+
+    let Ok(encoded) = wincode::serialize(&persistent) else {
+        panic!("the persistent entity should serialize");
+    };
+    let Ok(decoded) = wincode::deserialize_exact::<PersistentEntity>(&encoded) else {
+        panic!("the persistent entity should deserialize after a restart");
+    };
+    let Some(loaded) =
+        ChunkStorage::persistent_to_entity_at_level(&decoded, ChunkPos::new(0, 0), &Weak::new())
+    else {
+        panic!("the serialized entity should load back");
+    };
+
+    assert_eq!(
+        loaded.base().plugin_spawn_reason(),
+        Some(PluginSpawnReason::Beehive)
+    );
+    assert_eq!(loaded.base().spawn_reason(), None);
+}
+
+/// Old entity saves have no Paper field and must still load with the public
+/// plugin fallback materialized in the existing provenance snapshot.
+#[test]
+fn absent_plugin_spawn_reason_loads_as_default() {
+    init_globals_once();
+
+    let persistent = test_persistent_end_crystal(DVec3::new(1.0, 2.0, 3.0));
+    let Some(loaded) =
+        ChunkStorage::persistent_to_entity_at_level(&persistent, ChunkPos::new(0, 0), &Weak::new())
+    else {
+        panic!("an old entity save without spawn provenance should remain readable");
+    };
+
+    assert_eq!(
+        loaded.base().plugin_spawn_reason(),
+        Some(PluginSpawnReason::Default)
+    );
+    assert_eq!(loaded.base().spawn_reason(), None);
+}
+
+/// A future enum name or a non-string tag must not reject the entity or be
+/// mistaken for the plugin-only `CUSTOM` reason.
+#[test]
+fn unknown_or_malformed_plugin_spawn_reason_loads_as_default() {
+    init_globals_once();
+
+    for stored_reason in [NbtTag::String("FUTURE_REASON".into()), NbtTag::Int(47)] {
+        let expected_position = DVec3::new(1.0, 2.0, 3.0);
+        let mut persistent = test_persistent_end_crystal(expected_position);
+        let mut nbt = NbtCompound::new();
+        nbt.insert("Paper.SpawnReason", stored_reason);
+        nbt.write(&mut persistent.nbt_data);
+
+        let Some(loaded) = ChunkStorage::persistent_to_entity_at_level(
+            &persistent,
+            ChunkPos::new(0, 0),
+            &Weak::new(),
+        ) else {
+            panic!("an entity with invalid plugin provenance should remain readable");
+        };
+
+        assert_eq!(loaded.position(), expected_position);
+        assert_eq!(loaded.entity_type(), &vanilla_entities::END_CRYSTAL);
+        assert_eq!(
+            loaded.base().plugin_spawn_reason(),
+            Some(PluginSpawnReason::Default)
+        );
+        assert_ne!(
+            loaded.base().plugin_spawn_reason(),
+            Some(PluginSpawnReason::Custom)
+        );
+        assert_eq!(loaded.base().spawn_reason(), None);
+    }
 }
 
 /// The half of a save that belongs to every living entity rather than to a type.

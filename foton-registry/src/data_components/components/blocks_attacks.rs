@@ -1,5 +1,9 @@
 //! Vanilla `minecraft:blocks_attacks` item component.
 
+use foton_utils::serial::budget;
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 
 use foton_utils::codec::VarInt;
@@ -544,7 +548,8 @@ impl ReadFrom for BlocksAttacks {
         let block_delay_seconds = f32::read(data)?;
         let disable_cooldown_scale = f32::read(data)?;
         let count = read_count(data)?;
-        let mut damage_reductions = Vec::with_capacity(count.min(65_536));
+        budget::check_collection_input(data, count, 13)?;
+        let mut damage_reductions = budget::read_vec(count, count.min(65_536))?;
         for _ in 0..count {
             damage_reductions.push(DamageReduction::read(data)?);
         }
@@ -687,6 +692,91 @@ fn hash_entries(hasher: &mut ComponentHasher, entries: &mut [HashEntry]) {
         hasher.put_raw_bytes(&entry.value_bytes);
     }
     hasher.end_map();
+}
+
+impl nbt_encode::NbtEncode for DamageReduction {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+
+        if !float_equals(
+            self.horizontal_blocking_angle,
+            Self::DEFAULT_HORIZONTAL_BLOCKING_ANGLE,
+        ) {
+            field(
+                "horizontal_blocking_angle",
+                &(self.horizontal_blocking_angle),
+                writer,
+                depth,
+            )?;
+        }
+        if let Some(damage_types) = &self.damage_types {
+            field("type", &(damage_types), writer, depth)?;
+        }
+        field("base", &(self.base), writer, depth)?;
+        field("factor", &(self.factor), writer, depth)?;
+        end(writer)
+    }
+}
+
+impl nbt_encode::NbtEncode for ItemDamageFunction {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+
+        field("threshold", &(self.threshold), writer, depth)?;
+        field("base", &(self.base), writer, depth)?;
+        field("factor", &(self.factor), writer, depth)?;
+        end(writer)
+    }
+}
+
+impl nbt_encode::NbtEncode for BlocksAttacks {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+        if !float_equals(self.block_delay_seconds, 0.0) {
+            field(
+                "block_delay_seconds",
+                &self.block_delay_seconds,
+                writer,
+                depth,
+            )?;
+        }
+        if !float_equals(self.disable_cooldown_scale, 1.0) {
+            field(
+                "disable_cooldown_scale",
+                &self.disable_cooldown_scale,
+                writer,
+                depth,
+            )?;
+        }
+        if self.damage_reductions != [DamageReduction::default_rule()] {
+            field("damage_reductions", &self.damage_reductions, writer, depth)?;
+        }
+        if self.item_damage != ItemDamageFunction::DEFAULT {
+            field("item_damage", &self.item_damage, writer, depth)?;
+        }
+        if let Some(value) = &self.bypassed_by {
+            field("bypassed_by", value, writer, depth)?;
+        }
+        if let Some(value) = &self.block_sound {
+            field("block_sound", value, writer, depth)?;
+        }
+        if let Some(value) = &self.disabled_sound {
+            field("disabled_sound", value, writer, depth)?;
+        }
+        end(writer)
+    }
 }
 
 #[cfg(test)]

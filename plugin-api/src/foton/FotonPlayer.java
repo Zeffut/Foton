@@ -92,18 +92,18 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
         if (effect == null || effect.getType() == null) return false;
         org.bukkit.potion.PotionEffect old = getPotionEffect(effect.getType());
         String action = old == null ? "ADDED" : "CHANGED";
-        if (!EventBridge.firePotionEffect(id.toString(), effect.getType().getName(),
+        if (!EventBridge.firePotionEffect(id.toString(), effect.getType().getKey().getKey(),
                 old == null ? -1 : old.getDuration(), old == null ? -1 : old.getAmplifier(),
                 effect.getDuration(), effect.getAmplifier(), action)) return false;
-        return Native.addPotionEffect(id.toString(), effect.getType().getName(), effect.getDuration(), effect.getAmplifier());
+        return Native.addPotionEffect(id.toString(), effect.getType().getKey().getKey(), effect.getDuration(), effect.getAmplifier());
     }
     @Override public void removePotionEffect(org.bukkit.potion.PotionEffectType type) {
         if (type == null) return;
         org.bukkit.potion.PotionEffect old = getPotionEffect(type);
         if (old == null) return;
-        if (EventBridge.firePotionEffect(id.toString(), type.getName(),
+        if (EventBridge.firePotionEffect(id.toString(), type.getKey().getKey(),
                 old.getDuration(), old.getAmplifier(), -1, -1, "REMOVED"))
-            Native.removePotionEffect(id.toString(), type.getName());
+            Native.removePotionEffect(id.toString(), type.getKey().getKey());
     }
 
     @Override public org.bukkit.attribute.AttributeInstance getAttribute(org.bukkit.attribute.Attribute attribute) {
@@ -172,6 +172,18 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
     @Override
     public UUID getUniqueId() {
         return id;
+    }
+
+    @Override
+    public java.util.List<org.bukkit.entity.Entity> getPassengers() {
+        String encoded = Native.entityPassengers(id.toString());
+        if (encoded == null || encoded.isEmpty()) return java.util.List.of();
+        java.util.ArrayList<org.bukkit.entity.Entity> result = new java.util.ArrayList<>();
+        for (String value : encoded.split(",")) try {
+            org.bukkit.entity.Entity passenger = FotonEntity.handle(UUID.fromString(value));
+            if (passenger != null) result.add(passenger);
+        } catch (IllegalArgumentException ignored) { }
+        return java.util.Collections.unmodifiableList(result);
     }
 
     @Override
@@ -492,7 +504,7 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
     @Override
     public void playSound(org.bukkit.Location at, org.bukkit.Sound sound, float volume,
             float pitch) {
-        playSound(at, sound == null ? null : sound.key(), volume, pitch);
+        playSound(at, sound == null ? null : sound.getKey().toString(), volume, pitch);
     }
 
     @Override
@@ -508,7 +520,7 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
     @Override
     public void playSound(org.bukkit.Location at, org.bukkit.Sound sound,
             org.bukkit.SoundCategory category, float volume, float pitch) {
-        playSound(at, sound == null ? null : sound.key(), category, volume, pitch);
+        playSound(at, sound == null ? null : sound.getKey().toString(), category, volume, pitch);
     }
 
     @Override

@@ -1,0 +1,4 @@
+{
+  "repositories": {"MavenCentral": "https://repo.maven.apache.org/maven2/"},
+  "dependencies": ["example.fixture:paper-library:4.5.6"]
+}

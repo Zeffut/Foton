@@ -1,6 +1,9 @@
 //! Registry references used by fixed holder codecs.
 
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
 use std::fmt::Debug;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 use std::str::FromStr;
 
@@ -78,13 +81,10 @@ impl<T: RegistryReferenceEntry> Eq for RegistryReference<T> {}
 
 impl<T: RegistryReferenceEntry> WriteTo for RegistryReference<T> {
     fn write(&self, writer: &mut impl Write) -> Result<()> {
-        let id = self.value.try_id().ok_or_else(|| {
-            Error::other(format!(
-                "Unknown {}: {}",
-                T::REGISTRY_NAME,
-                self.value.key()
-            ))
-        })?;
+        let id = self
+            .value
+            .try_id()
+            .ok_or_else(|| Error::other("Unknown registry reference"))?;
         let id = i32::try_from(id).map_err(|_| {
             Error::other(format!(
                 "{} id out of protocol range: {id}",
@@ -173,6 +173,15 @@ impl_registry_reference_entry!(
     map_decoration_types,
     "map decoration type"
 );
+
+impl<T: RegistryReferenceEntry> nbt_encode::NbtEncode for RegistryReference<T> {
+    fn nbt_id(&self) -> u8 {
+        (self.value.key()).nbt_id()
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        (self.value.key()).write_nbt_payload(writer, depth)
+    }
+}
 
 #[cfg(test)]
 mod tests {

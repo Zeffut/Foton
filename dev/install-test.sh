@@ -68,6 +68,7 @@ netty-transport-4.2.15.Final.jar
 option-1.1.0.jar
 slf4j-api-2.0.17.jar
 snakeyaml-2.2.jar
+sqlite-jdbc-3.49.1.0.jar
 EOF
 }
 

@@ -666,7 +666,7 @@ fn installed_plugin_runtime_directory() -> Result<Option<PathBuf>, String> {
     Ok(None)
 }
 
-const PLUGIN_RUNTIME_JARS: [&str; 30] = [
+const PLUGIN_RUNTIME_JARS: [&str; 31] = [
     "adventure-api-5.2.0.jar",
     "adventure-key-5.2.0.jar",
     "adventure-text-logger-slf4j-5.2.0.jar",
@@ -697,6 +697,7 @@ const PLUGIN_RUNTIME_JARS: [&str; 30] = [
     "option-1.1.0.jar",
     "slf4j-api-2.0.17.jar",
     "snakeyaml-2.2.jar",
+    "sqlite-jdbc-3.49.1.0.jar",
 ];
 
 const PLUGIN_RUNTIME_LICENSES: [&str; 6] = [
@@ -1073,6 +1074,23 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         fs::write(directory.join("SHA256SUMS"), format!("{manifest}\n")).expect("manifest fixture");
+    }
+
+    #[test]
+    fn installed_plugin_runtime_manifest_matches_all_31_classpath_pins() {
+        let mut manifest: Vec<_> = include_str!("../../plugin-api/lib/manifest.txt")
+            .lines()
+            .filter(|line| !line.trim().is_empty() && !line.starts_with('#'))
+            .map(|line| {
+                let fields: Vec<_> = line.split_whitespace().collect();
+                format!("{}-{}.jar", fields[1], fields[2])
+            })
+            .collect();
+        manifest.sort();
+        let mut installed = super::PLUGIN_RUNTIME_JARS.to_vec();
+        installed.sort();
+        assert_eq!(manifest.len(), 31);
+        assert_eq!(manifest, installed);
     }
 
     #[test]

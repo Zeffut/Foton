@@ -3,7 +3,7 @@ package foton;
 import java.util.UUID;
 
 /** Live Bukkit view of a sheep. */
-public final class FotonSheep extends FotonLivingEntity implements org.bukkit.entity.Sheep {
+public final class FotonSheep extends FotonAnimals implements org.bukkit.entity.Sheep {
     public FotonSheep(UUID id) { super(id); }
     @Override public org.bukkit.DyeColor getColor() {
         int value = Native.sheepColor(getUniqueId().toString());

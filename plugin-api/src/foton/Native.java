@@ -105,7 +105,9 @@ public final class Native {
     public static native void setWorldThunderDuration(String world, int ticks);
     public static native boolean worldThundering(String world);
     public static native void setWorldThundering(String world, boolean thundering);
-    public static native String spawnEntity(String world, double x, double y, double z, String type);
+    public static native String spawnEntity(String world, double x, double y, double z, String type, String initialization);
+    public static native String spawnEntityPending(String world, double x, double y, double z, String type, String initialization);
+    public static native boolean finishPendingSpawn(String world, String uuid, boolean publish);
     public static native String[] signLines(String world, int x, int y, int z);
     public static native String hopperCustomName(String world, int x, int y, int z);
     public static native String hopperInventorySlot(String world, int x, int y, int z, int slot);
@@ -120,6 +122,14 @@ public final class Native {
     /** `{burn, cook, cookTotal}` of a furnace, smoker or blast furnace, or null. */
     public static native int[] furnaceTimes(String world, int x, int y, int z);
     public static native void setFurnaceTimes(String world, int x, int y, int z, int[] times);
+    public static native String brewingStandState(String world, int x, int y, int z);
+    public static native byte[] brewingStandSnapshot(String world, int x, int y, int z);
+    public static native byte[] brewingStandLiveItem(String world, int x, int y, int z,
+        long identity, int slot);
+    public static native boolean brewingStandSetLiveItem(String world, int x, int y, int z,
+        long identity, int slot, byte[] item);
+    public static native boolean brewingStandApply(String world, int x, int y, int z,
+        String blockState, byte[] snapshot, boolean force, boolean applyPhysics);
     public static native boolean jukeboxIsPlaying(String world, int x, int y, int z);
     public static native String jukeboxRecord(String world, int x, int y, int z);
     public static native void jukeboxSetRecord(String world, int x, int y, int z, String item);
@@ -248,18 +258,33 @@ public final class Native {
     public static native void setAirSupply(String uuid, int ticks);
     public static native int maxAirSupply(String uuid);
     public static native String[] entityPotionEffects(String uuid);
+    public static native boolean mobEffectInstant(String key);
     public static native String[] areaEffectCloudEffects(String uuid);
     public static native boolean addAreaEffectCloudEffect(String uuid, String type, int duration, int amplifier, boolean ambient, boolean particles, boolean icon, boolean override);
     public static native void clearAreaEffectCloudEffects(String uuid);
     public static native String[] arrowCustomEffects(String uuid);
     public static native String arrowPotion(String uuid);
+    public static native void setArrowPotion(String uuid, String potion);
     public static native int arrowPotionColor(String uuid);
+    public static native void setArrowPotionColor(String uuid, int color, boolean present);
+    public static native boolean addArrowCustomEffect(String uuid, String effect,
+        boolean overwrite);
+    public static native boolean removeArrowCustomEffect(String uuid, String effect);
+    public static native void clearArrowCustomEffects(String uuid);
+    public static native String arrowProperty(String uuid, String property);
+    public static native boolean setArrowProperty(String uuid, String property, String value);
     public static native boolean entityRemoveWhenFarAway(String uuid);
     public static native boolean entityPersistent(String uuid);
     public static native void setEntityPersistent(String uuid, boolean persistent);
     public static native void setEntityRemoveWhenFarAway(String uuid, boolean remove);
     public static native float entityDropChance(String uuid, int slot);
     public static native void setEntityDropChance(String uuid, int slot, float chance);
+    /** Reads one living-entity equipment slot through the item codec. */
+    public static native String entityEquipmentSlot(String uuid, int slot);
+    /** Writes one living-entity equipment slot through the item codec. */
+    public static native void setEntityEquipmentSlot(String uuid, int slot, String item);
+    /** Clears all living-entity equipment slots atomically. */
+    public static native void clearEntityEquipment(String uuid);
     public static native int experienceLevel(String uuid);
     public static native float experienceProgress(String uuid);
     public static native void setExperienceLevel(String uuid, int level);
@@ -327,8 +352,6 @@ public final class Native {
     public static native void removeEntity(String uuid);
     public static native String spellcasterSpell(String uuid);
     public static native void setSpellcasterSpell(String uuid, String spell);
-    public static native String projectileShooter(String uuid);
-    public static native void setProjectileShooter(String uuid, String owner);
     public static native String entityType(String uuid);
     public static native String hangingFacing(String uuid);
     public static native boolean setHangingFacing(String uuid, String face, boolean force);
@@ -396,6 +419,10 @@ public final class Native {
     public static native String parrotVariant(String uuid);
     public static native void setMushroomCowVariant(String uuid, String variant);
     public static native String mushroomCowVariant(String uuid);
+    public static native String[] mushroomCowStewEffects(String uuid);
+    public static native boolean setMushroomCowStewEffects(String uuid, String[] effects);
+    public static native boolean mushroomCowReadyToShear(String uuid);
+    public static native void shearMushroomCow(String uuid, String source);
     public static native void setFrogVariant(String uuid, String variant);
     public static native String frogVariant(String uuid);
     public static native void setChickenVariant(String uuid, String variant);
@@ -408,6 +435,8 @@ public final class Native {
     public static native void setTropicalFishBodyColor(String uuid, int color);
     public static native int slimeSize(String uuid);
     public static native void setSlimeSize(String uuid, int size);
+    public static native boolean cubeMobCanWander(String uuid);
+    public static native void setCubeMobWander(String uuid, boolean canWander);
     public static native void setCreeperPowered(String uuid, boolean powered);
     public static native boolean creeperPowered(String uuid);
     public static native void setGoatScreaming(String uuid, boolean screaming);
@@ -423,6 +452,15 @@ public final class Native {
     public static native boolean entityIsBaby(String uuid);
     public static native boolean entityCanBreed(String uuid);
     public static native void setEntityBreed(String uuid, boolean breed);
+    public static native String animalBreedCause(String uuid);
+    public static native void setAnimalBreedCause(String uuid, String cause);
+    public static native int animalLoveTicks(String uuid);
+    public static native void setAnimalLoveTicks(String uuid, int ticks);
+    public static native boolean animalIsBreedItem(String uuid, String item);
+    public static native String cowVariant(String uuid);
+    public static native void setCowVariant(String uuid, String variant);
+    public static native String cowSoundVariant(String uuid);
+    public static native void setCowSoundVariant(String uuid, String variant);
     public static native int entityAge(String uuid);
     public static native void setEntityAge(String uuid, int age);
     public static native boolean entityCanPickupItems(String uuid);
@@ -453,6 +491,15 @@ public final class Native {
     public static native double[] entityPosition(String uuid);
     public static native double[] entityOrigin(String uuid);
     public static native double[] entityBoundingBox(String uuid);
+    public static native String[] entityScoreboardTags(String uuid);
+    public static native boolean addEntityScoreboardTag(String uuid, String tag);
+    public static native boolean removeEntityScoreboardTag(String uuid, String tag);
+    public static native boolean entityHasGravity(String uuid);
+    public static native void setEntityGravity(String uuid, boolean gravity);
+    public static native boolean entitySilent(String uuid);
+    public static native void setEntitySilent(String uuid, boolean silent);
+    public static native void setEntityRotation(String uuid, float yaw, float pitch);
+    public static native boolean entityInRain(String uuid);
     public static native boolean entityOnGround(String uuid);
     public static native boolean entityInWater(String uuid);
     public static native boolean entityInvisible(String uuid);
@@ -482,7 +529,10 @@ public final class Native {
     public static native void setEntityPortalCooldown(String uuid, int ticks);
     public static native int entityId(String uuid);
     public static native String entityProjectileOwner(String uuid);
-    public static native boolean setEntityProjectileOwner(String uuid, String owner);
+    public static native org.bukkit.projectiles.ProjectileSource entityProjectileSource(String uuid);
+    public static native Object entityProjectileShooter(String uuid);
+    public static native boolean setEntityProjectileSource(String uuid, String owner,
+        org.bukkit.projectiles.ProjectileSource source, boolean resetPickupStatus);
     public static native String entityCustomName(String uuid);
     public static native boolean entityCustomNameVisible(String uuid);
     public static native void setEntityCustomNameVisible(String uuid, boolean visible);
@@ -695,10 +745,6 @@ public final class Native {
     /** Sets a custom name from vanilla component JSON; null clears it. */
     public static native void setEntityCustomNameComponent(String uuid, String json);
     public static native boolean entityGravity(String uuid);
-    public static native void setEntityGravity(String uuid, boolean gravity);
-    public static native boolean entitySilent(String uuid);
-    public static native void setEntitySilent(String uuid, boolean silent);
-    public static native void setEntityRotation(String uuid, float yaw, float pitch);
     public static native int entityPose(String uuid);
     public static native void damageEntity(String uuid, double amount, String source);
     public static native boolean entityHasAi(String uuid);

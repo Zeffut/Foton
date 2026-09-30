@@ -312,20 +312,58 @@ public final class FotonInventory implements PlayerInventory {
             result.setItemMeta(meta);
         }
         if (result.getItemMeta() instanceof org.bukkit.inventory.meta.PotionMeta meta) {
-            for (String encodedField : encoded) {
-                // Effects are the one field with no name; every other has one.
-                if (encodedField.contains("=") || encodedField.equals(encoded[0])) continue;
-                for (String effect : encodedField.split(";")) {
-                    String[] fields = effect.split(",", -1);
-                    if (fields.length < 3) continue;
-                    org.bukkit.potion.PotionEffectType type = org.bukkit.potion.PotionEffectType.getByName(fields[0]);
-                    try { if (type != null) meta.addCustomEffect(new org.bukkit.potion.PotionEffect(type, Integer.parseInt(fields[1]), Integer.parseInt(fields[2])), true); }
-                    catch (NumberFormatException ignored) { }
+            for (String field : encoded) if (field.startsWith("basepotionhex=")) {
+                String key = new String(hexDecode(field.substring(14)),
+                    java.nio.charset.StandardCharsets.UTF_8);
+                int separator = key.indexOf(':');
+                String potionName = (separator < 0 ? key : key.substring(separator + 1))
+                    .toUpperCase(java.util.Locale.ROOT);
+                try { meta.setBasePotionType(org.bukkit.potion.PotionType.valueOf(potionName)); }
+                catch (IllegalArgumentException ignored) { }
+            }
+            String encodedEffects = null;
+            for (int i = 1; i < encoded.length; i++) {
+                if (encoded[i].startsWith("potioneffects=")) {
+                    encodedEffects = encoded[i].substring(14);
+                    break;
                 }
+            }
+            if (encodedEffects == null) {
+                for (int i = 1; i < encoded.length; i++) {
+                    if (!isKnownMetadataField(encoded[i])) {
+                        encodedEffects = encoded[i];
+                        break;
+                    }
+                }
+            }
+            if (encodedEffects != null) for (String effect : encodedEffects.split(";")) {
+                String[] fields = effect.split(",", -1);
+                if (fields.length != 3 && fields.length != 6) continue;
+                org.bukkit.potion.PotionEffectType type = org.bukkit.potion.PotionEffectType.getByName(fields[0]);
+                try {
+                    boolean ambient = fields.length == 6 && Boolean.parseBoolean(fields[3]);
+                    boolean particles = fields.length == 3 || Boolean.parseBoolean(fields[4]);
+                    boolean icon = fields.length == 3 || Boolean.parseBoolean(fields[5]);
+                    if (type != null) meta.addCustomEffect(new org.bukkit.potion.PotionEffect(
+                        type, Integer.parseInt(fields[1]), Integer.parseInt(fields[2]),
+                        ambient, particles, icon), true);
+                } catch (NumberFormatException ignored) { }
             }
             result.setItemMeta(meta);
         }
         return result;
+    }
+
+    private static boolean isKnownMetadataField(String field) {
+        return field.startsWith("nbthex=") || field.startsWith("damage=")
+            || field.startsWith("namehex=") || field.startsWith("lorehex=")
+            || field.startsWith("enchhex=") || field.startsWith("storedenchhex=")
+            || field.startsWith("model=") || field.startsWith("modelfloat=")
+            || field.startsWith("modelflag=") || field.startsWith("modelstrhex=")
+            || field.startsWith("modelcolor=") || field.startsWith("itemmodelhex=")
+            || field.startsWith("tooltipstylehex=") || field.startsWith("basepotionhex=")
+            || field.startsWith("potioneffects=")
+            || field.equals("hidetooltip") || field.equals("unbreakable");
     }
 
     private static String hexEncode(String value) {
@@ -387,10 +425,23 @@ public final class FotonInventory implements PlayerInventory {
         if (item.hasItemMeta() && item.getItemMeta() instanceof org.bukkit.inventory.meta.SimpleItemMeta simple) {
             value += ItemComponents.encode(simple, item.getType());
         }
-        if (item.getItemMeta() instanceof org.bukkit.inventory.meta.PotionMeta meta && !meta.getCustomEffects().isEmpty()) {
-            StringBuilder effects = new StringBuilder("\u001d");
-            for (org.bukkit.potion.PotionEffect effect : meta.getCustomEffects()) effects.append(effect.getType().getName()).append(',').append(effect.getDuration()).append(',').append(effect.getAmplifier()).append(';');
-            value += effects;
+        if (item.getItemMeta() instanceof org.bukkit.inventory.meta.PotionMeta meta) {
+            if (meta.getBasePotionType() != null) {
+                value += "\u001dbasepotionhex=" + hexEncode(
+                    "minecraft:" + meta.getBasePotionType().name()
+                        .toLowerCase(java.util.Locale.ROOT));
+            }
+            if (!meta.getCustomEffects().isEmpty()) {
+                StringBuilder effects = new StringBuilder("\u001dpotioneffects=");
+                for (org.bukkit.potion.PotionEffect effect : meta.getCustomEffects()) effects
+                    .append(effect.getType().getKey().getKey()).append(',')
+                    .append(effect.getDuration()).append(',')
+                    .append(effect.getAmplifier()).append(',')
+                    .append(effect.isAmbient()).append(',')
+                    .append(effect.hasParticles()).append(',')
+                    .append(effect.hasIcon()).append(';');
+                value += effects;
+            }
         }
         return value;
     }

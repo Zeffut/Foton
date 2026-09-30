@@ -1,0 +1,4 @@
+name: ExistingProvider
+version: 1
+main: fixture.dependencies.DependencyPlugins$ExistingProvider
+provides: [ExistingAlias]

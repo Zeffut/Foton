@@ -4,8 +4,6 @@ package org.bukkit.inventory;
 public interface EntityEquipment {
     default org.bukkit.entity.Entity getHolder() { return null; }
     ItemStack[] getArmorContents();
-    ItemStack getItem(EquipmentSlot slot);
-    void setItem(EquipmentSlot slot, ItemStack item);
     /** Sets an item; Foton plays no equip sound either way. */
     default void setItem(EquipmentSlot slot, ItemStack item, boolean silent) { setItem(slot, item); }
     default ItemStack getHelmet() { ItemStack[] armor = getArmorContents(); return armor.length > 3 ? armor[3] : null; }
@@ -14,8 +12,8 @@ public interface EntityEquipment {
     default void setChestplate(ItemStack item) { ItemStack[] armor = getArmorContents(); if (armor.length > 2) { armor[2] = item; setArmorContents(armor); } }
     default ItemStack getBoots() { return getArmorContents().length > 0 ? getArmorContents()[0] : null; }
     default void setBoots(ItemStack item) { ItemStack[] armor = getArmorContents(); if (armor.length > 0) { armor[0] = item; setArmorContents(armor); } }
-    default ItemStack getLeggings() { ItemStack[] armor = getArmorContents(); return armor.length > 2 ? armor[2] : null; }
-    default void setLeggings(ItemStack item) { ItemStack[] armor = getArmorContents(); if (armor.length > 2) { armor[2] = item; setArmorContents(armor); } }
+    default ItemStack getLeggings() { ItemStack[] armor = getArmorContents(); return armor.length > 1 ? armor[1] : null; }
+    default void setLeggings(ItemStack item) { ItemStack[] armor = getArmorContents(); if (armor.length > 1) { armor[1] = item; setArmorContents(armor); } }
     default void setArmorContents(ItemStack[] items) { }
     ItemStack getItemInMainHand();
     void setItemInMainHand(ItemStack item);
@@ -27,6 +25,10 @@ public interface EntityEquipment {
     default void setItemInHand(ItemStack item) { setItemInMainHand(item); }
     ItemStack getItemInOffHand();
     void setItemInOffHand(ItemStack item);
+    /** Gets the live item at one of this entity's supported equipment slots. */
+    ItemStack getItem(EquipmentSlot slot);
+    /** Writes the live item at one of this entity's supported equipment slots. */
+    void setItem(EquipmentSlot slot, ItemStack item);
     default float getItemInHandDropChance() { return 0.085f; }
     default void setItemInHandDropChance(float chance) { }
     default float getItemInMainHandDropChance() { return getItemInHandDropChance(); }

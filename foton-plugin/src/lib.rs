@@ -24,11 +24,14 @@
 #![cfg_attr(not(test), warn(clippy::expect_used))]
 #![cfg_attr(not(test), warn(clippy::panic, clippy::unreachable, clippy::todo))]
 
+use std::collections::BTreeSet;
 use std::ffi::{CString, NulError, c_void};
-use std::fs::{read_dir, symlink_metadata};
+use std::fs::{read, read_dir, symlink_metadata};
 use std::io;
+use std::mem;
 use std::path::{Path, PathBuf};
 use std::ptr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Weak};
 use std::time::Duration;
 
@@ -38,6 +41,7 @@ use foton_utils::locks::SyncMutex;
 use jni::objects::JString;
 use jni::sys::{JNI_OK, JNI_VERSION_1_8, JavaVM as RawJavaVm, JavaVMInitArgs, JavaVMOption};
 use jni::{JavaVM, errors::Error as JniError};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tokio::{
     sync::Semaphore,
@@ -48,6 +52,8 @@ use tokio::{
 mod forward;
 mod item_components;
 mod natives;
+#[cfg(test)]
+mod natives_live_api_tests;
 mod packet_tap;
 mod relay;
 mod scoreboard_natives;
@@ -67,6 +73,7 @@ static JVM_RUNTIMES: LazyLock<SyncMutex<Vec<libloading::Library>>> =
 /// Limits connection setup calls that may be blocked inside a plugin's Netty initializer.
 static VIA_OPEN_WORKERS: LazyLock<Arc<Semaphore>> = LazyLock::new(|| Arc::new(Semaphore::new(32)));
 const VIA_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
+const LIBRARY_MANIFEST: &str = include_str!("../../plugin-api/lib/manifest.txt");
 
 /// Why a plugin host could not start, or could not do its job.
 #[derive(Debug, Error)]
@@ -89,6 +96,31 @@ pub enum PluginHostError {
     /// A configured classpath directory could not be read completely.
     #[error("could not read plugin library directory {0}: {1}")]
     LibraryDirectory(PathBuf, io::Error),
+    /// The pinned dependencies referenced by public API signatures are absent.
+    #[error("the plugin API dependency directory is unavailable at {0}: {1}")]
+    NoLibraryDirectory(PathBuf, #[source] io::Error),
+    /// One expected runtime jar is absent from the configured directory.
+    #[error("pinned runtime library is missing at {0}")]
+    MissingRuntimeLibrary(PathBuf),
+    /// A runtime jar is present without an entry in the authoritative manifest.
+    #[error("runtime library {0} is not in the pinned manifest")]
+    ExtraRuntimeLibrary(PathBuf),
+    /// A runtime jar's bytes differ from the authoritative manifest.
+    #[error("runtime library digest mismatch at {path}: expected {expected}, got {actual}")]
+    RuntimeLibraryDigest {
+        /// The runtime jar whose bytes did not match.
+        path: PathBuf,
+        /// The authoritative manifest digest.
+        expected: String,
+        /// The digest computed from the configured runtime jar.
+        actual: String,
+    },
+    /// The checked-in manifest itself cannot describe an exact pinned set.
+    #[error("the pinned runtime library manifest is invalid: {0}")]
+    InvalidLibraryManifest(String),
+    /// A runtime jar could not be read while validating its digest.
+    #[error("runtime library cannot be read at {0}: {1}")]
+    RuntimeLibraryIo(PathBuf, #[source] io::Error),
     /// Something went wrong on the Java side of the boundary.
     #[error("the plugin host failed: {0}")]
     Java(#[from] JniError),
@@ -119,6 +151,21 @@ pub struct PluginHostConfig {
 }
 
 impl PluginHostConfig {
+    /// The pinned dependencies referenced by the public plugin API.
+    #[must_use]
+    pub fn resolved_library_directory(&self) -> PathBuf {
+        self.library_directories
+            .first()
+            .cloned()
+            .unwrap_or_else(|| {
+                self.api_jar
+                    .parent()
+                    .and_then(Path::parent)
+                    .unwrap_or_else(|| Path::new("."))
+                    .join("lib")
+            })
+    }
+
     /// The shared library holding the runtime, for this platform's layout.
     fn runtime_library(&self) -> PathBuf {
         let name = if cfg!(target_os = "windows") {
@@ -152,8 +199,22 @@ impl PluginHostConfig {
             return Err(PluginHostError::NoApiJar(self.api_jar.clone()));
         }
         let mut entries = vec![jvm_path(&self.api_jar)];
-        for directory in &self.library_directories {
-            entries.extend(jars_in(directory)?);
+        entries.extend(validated_jars_in(&self.resolved_library_directory())?);
+        let pinned: BTreeSet<String> = pinned_libraries()?
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        for directory in self.library_directories.iter().skip(1) {
+            for jar in jars_in(directory)? {
+                // Pinned API/runtime types always come from the verified first directory.
+                if Path::new(&jar)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_none_or(|name| !pinned.contains(name))
+                {
+                    entries.push(jar);
+                }
+            }
         }
         Ok(entries.join(if cfg!(target_os = "windows") {
             ";"
@@ -194,6 +255,119 @@ fn is_regular_file(path: &Path) -> bool {
     symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_file())
 }
 
+fn reject_nested_jars(directory: &Path) -> Result<(), PluginHostError> {
+    for entry in read_dir(directory)
+        .map_err(|error| PluginHostError::NoLibraryDirectory(directory.to_owned(), error))?
+    {
+        let entry = entry
+            .map_err(|error| PluginHostError::NoLibraryDirectory(directory.to_owned(), error))?;
+        let path = entry.path();
+        let kind = entry
+            .file_type()
+            .map_err(|error| PluginHostError::RuntimeLibraryIo(path.clone(), error))?;
+        if kind.is_symlink() || path.extension().is_some_and(|extension| extension == "jar") {
+            return Err(PluginHostError::ExtraRuntimeLibrary(path));
+        }
+        if kind.is_dir() {
+            reject_nested_jars(&path)?;
+        }
+    }
+    Ok(())
+}
+
+fn validated_jars_in(directory: &Path) -> Result<Vec<String>, PluginHostError> {
+    let entries = read_dir(directory)
+        .map_err(|error| PluginHostError::NoLibraryDirectory(directory.to_owned(), error))?;
+    let manifest = pinned_libraries()?;
+    let expected_names: BTreeSet<String> =
+        manifest.iter().map(|(name, _)| name.to_owned()).collect();
+    let mut found_names = BTreeSet::new();
+    for entry in entries {
+        let path = entry
+            .map_err(|error| PluginHostError::NoLibraryDirectory(directory.to_owned(), error))?
+            .path();
+        if symlink_metadata(&path).is_ok_and(|metadata| metadata.file_type().is_dir()) {
+            reject_nested_jars(&path)?;
+        }
+        if path.extension().is_some_and(|extension| extension == "jar") {
+            if !is_regular_file(&path) {
+                return Err(PluginHostError::ExtraRuntimeLibrary(path));
+            }
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                return Err(PluginHostError::ExtraRuntimeLibrary(path));
+            };
+            if !expected_names.contains(name) {
+                return Err(PluginHostError::ExtraRuntimeLibrary(path));
+            }
+            found_names.insert(name.to_owned());
+        }
+    }
+
+    let mut jars = Vec::with_capacity(manifest.len());
+    for (name, expected) in manifest {
+        let path = directory.join(&name);
+        if !found_names.contains(&name) {
+            return Err(PluginHostError::MissingRuntimeLibrary(path));
+        }
+        let bytes = match read(&path) {
+            Ok(bytes) => bytes,
+            Err(error) => return Err(PluginHostError::RuntimeLibraryIo(path, error)),
+        };
+        let actual = sha256_hex(&bytes);
+        if actual != expected {
+            return Err(PluginHostError::RuntimeLibraryDigest {
+                path,
+                expected,
+                actual,
+            });
+        }
+        jars.push(jvm_path(&path));
+    }
+    Ok(jars)
+}
+
+fn pinned_libraries() -> Result<Vec<(String, String)>, PluginHostError> {
+    let mut libraries = Vec::new();
+    let mut names = BTreeSet::new();
+    for (index, line) in LIBRARY_MANIFEST.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.len() != 4 || fields[3].len() != 64 {
+            return Err(PluginHostError::InvalidLibraryManifest(format!(
+                "line {} has the wrong shape",
+                index + 1
+            )));
+        }
+        let name = format!("{}-{}.jar", fields[1], fields[2]);
+        if !names.insert(name.clone()) {
+            return Err(PluginHostError::InvalidLibraryManifest(format!(
+                "duplicate filename {name}"
+            )));
+        }
+        libraries.push((name, fields[3].to_owned()));
+    }
+    if libraries.is_empty() {
+        return Err(PluginHostError::InvalidLibraryManifest(
+            "no libraries are pinned".to_owned(),
+        ));
+    }
+    Ok(libraries)
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let digest = Sha256::digest(bytes);
+    let mut result = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        result.push(char::from(HEX[usize::from(byte >> 4)]));
+        result.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    result
+}
+
 /// A running Java runtime with Foton's plugin host inside it.
 ///
 /// Dropping this does not stop the runtime: a JVM cannot be started twice in
@@ -201,6 +375,57 @@ fn is_regular_file(path: &Path) -> bool {
 /// [`Self::disable_all`] to stop the plugins.
 pub struct PluginHost {
     vm: Arc<JavaVM>,
+    lifecycle: HostLifecycle<Server>,
+}
+
+/// The host-side association whose lifecycle must not keep a server alive.
+///
+/// `T` is generic only so the ownership and exactly-once behavior can be
+/// exercised without constructing a complete server or JVM.
+struct HostLifecycle<T> {
+    server: SyncMutex<Weak<T>>,
+    shutdown: AtomicBool,
+}
+
+impl<T> HostLifecycle<T> {
+    const fn new() -> Self {
+        Self {
+            server: SyncMutex::new(Weak::new()),
+            shutdown: AtomicBool::new(false),
+        }
+    }
+
+    fn bind<U, S>(&self, server: &Weak<T>, unsubscribe: U, subscribe: S)
+    where
+        U: FnOnce(&Arc<T>),
+        S: FnOnce(&Arc<T>),
+    {
+        let mut current = self.server.lock();
+        if self.shutdown.load(Ordering::Acquire) {
+            return;
+        }
+        if let Some(previous) = current.upgrade() {
+            unsubscribe(&previous);
+        }
+        *current = server.clone();
+        if let Some(server) = current.upgrade() {
+            subscribe(&server);
+        }
+    }
+
+    fn shutdown<U, D, E>(&self, unsubscribe: U, disable: D) -> Result<(), E>
+    where
+        U: FnOnce(&Arc<T>),
+        D: FnOnce() -> Result<(), E>,
+    {
+        if self.shutdown.swap(true, Ordering::AcqRel) {
+            return Ok(());
+        }
+        if let Some(server) = mem::take(&mut *self.server.lock()).upgrade() {
+            unsubscribe(&server);
+        }
+        disable()
+    }
 }
 
 /// The entry point every Java runtime exports.
@@ -290,17 +515,15 @@ impl PluginHost {
             JavaVM::from_raw(raw_vm)?
         };
 
-        natives::bind(server.clone());
-        let host = Self { vm: Arc::new(vm) };
+        let host = Self {
+            vm: Arc::new(vm),
+            lifecycle: HostLifecycle::new(),
+        };
         if let Err(error) = host.register_natives() {
             eprintln!("native registration failed: {error:?}");
             return Err(error);
         }
-        // Foton's events reach plugins only once this is done, which is why it
-        // happens before any plugin is loaded rather than after.
-        if let Some(server) = server.upgrade() {
-            forward::subscribe(&server, Arc::clone(&host.vm));
-        }
+        host.bind_server(server);
         Ok(host)
     }
 
@@ -311,9 +534,9 @@ impl PluginHost {
     /// that access gameplay state must only observe the completed server.
     pub fn bind_server(&self, server: &Weak<Server>) {
         natives::bind(server.clone());
-        if let Some(server) = server.upgrade() {
-            forward::subscribe(&server, Arc::clone(&self.vm));
-        }
+        self.lifecycle.bind(server, forward::unsubscribe, |server| {
+            forward::subscribe(server, Arc::clone(&self.vm));
+        });
     }
 
     /// Opens a per-connection Via pipeline when a plugin registered Paper's hook.
@@ -426,7 +649,7 @@ impl PluginHost {
             .z()?)
     }
 
-    /// Stops delivering Foton's events to plugins.
+    /// Stops Rust event delivery, then disables every loaded plugin newest first.
     ///
     /// Separate from [`Self::disable_all`] on purpose: a plugin being disabled
     /// should stop hearing about the world before it is asked to shut down, or
@@ -448,6 +671,11 @@ impl PluginHost {
     ///
     /// Returns an error when the Java side cannot be reached at all.
     pub fn disable_all(&self) -> Result<(), PluginHostError> {
+        self.lifecycle
+            .shutdown(forward::unsubscribe, || self.disable_java())
+    }
+
+    fn disable_java(&self) -> Result<(), PluginHostError> {
         let mut env = self.vm.attach_current_thread()?;
         env.call_static_method(HOST_CLASS, "disableAll", "()V", &[])?;
         Ok(())

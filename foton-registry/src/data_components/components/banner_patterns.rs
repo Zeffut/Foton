@@ -1,5 +1,9 @@
 //! Vanilla `minecraft:banner_patterns` item component.
 
+use foton_utils::serial::budget;
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 
 use foton_utils::codec::VarInt;
@@ -154,7 +158,8 @@ impl ReadFrom for BannerPatternLayers {
         let count = VarInt::read(data)?.0;
         let count = usize::try_from(count)
             .map_err(|_| Error::other("Negative banner pattern layer count"))?;
-        let mut layers = Vec::with_capacity(count.min(65_536));
+        budget::check_collection_input(data, count, 2)?;
+        let mut layers = budget::read_vec(count, count.min(65_536))?;
         for _ in 0..count {
             layers.push(BannerPatternLayer::read(data)?);
         }
@@ -199,6 +204,32 @@ fn push_hash_entry<T: HashComponent + ?Sized>(entries: &mut Vec<HashEntry>, key:
     let mut value_hasher = ComponentHasher::new();
     value.hash_component(&mut value_hasher);
     entries.push(HashEntry::new(key_hasher, value_hasher));
+}
+
+impl nbt_encode::NbtEncode for BannerPatternLayer {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+
+        field("pattern", &(self.pattern), writer, depth)?;
+        field("color", &(self.color), writer, depth)?;
+        end(writer)
+    }
+}
+
+impl nbt_encode::NbtEncode for BannerPatternLayers {
+    fn nbt_id(&self) -> u8 {
+        9
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        if self.layers.is_empty() {
+            return writer.write_all(&[0, 0, 0, 0, 0]);
+        }
+        nbt_encode::list(&self.layers, writer, depth)
+    }
 }
 
 #[cfg(test)]

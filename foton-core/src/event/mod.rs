@@ -62,7 +62,7 @@ pub use block::{
 };
 pub use command::{AsyncTabCompleteEvent, CommandEvent};
 pub use command_preprocess::PlayerCommandPreprocessEvent;
-pub use cooking::{BrewEvent, FurnaceBurnEvent, FurnaceSmeltEvent, FurnaceStartSmeltEvent};
+pub use cooking::{FurnaceBurnEvent, FurnaceSmeltEvent, FurnaceStartSmeltEvent};
 pub use damage::EntityDamageEvent;
 pub use drops::{BlockDropItemEvent, PlayerHarvestBlockEvent};
 pub use entity::{
@@ -79,8 +79,8 @@ pub use entity_lifecycle::{
 pub use equipment::{PlayerArmorChangeEvent, PlayerItemConsumeEvent};
 pub use fertilize::BlockFertilizeEvent;
 pub use inventory::{
-    CrafterCraftEvent, CraftingClick, InventoryClickEvent, InventoryCloseEvent, InventoryDragEvent,
-    InventoryOpenEvent, PrepareGrindstoneEvent, PrepareItemCraftEvent,
+    BrewEvent, CrafterCraftEvent, CraftingClick, InventoryClickEvent, InventoryCloseEvent,
+    InventoryDragEvent, InventoryOpenEvent, PrepareGrindstoneEvent, PrepareItemCraftEvent,
 };
 pub use lectern::PlayerTakeLecternBookEvent;
 pub use menus::{EnchantOffer, PlayerPurchaseEvent, PrepareItemEnchantEvent, PrepareSmithingEvent};

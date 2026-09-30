@@ -1,4 +1,8 @@
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use foton_utils::text::from_nbt as decode_text_nbt;
 use std::fmt::{self, Display, Formatter};
+use std::io;
 use std::io::{Cursor, Error, Result as IoResult, Write};
 
 use foton_utils::Identifier;
@@ -115,7 +119,7 @@ impl WriteTo for InstrumentValue {
         self.sound_event.write(writer)?;
         self.use_duration.write(writer)?;
         self.range.write(writer)?;
-        WriteTo::write(&self.description.to_codec_nbt(), writer)
+        self.description.write(writer)
     }
 }
 
@@ -140,7 +144,7 @@ impl ToNbtTag for InstrumentValue {
 impl FromNbtTag for InstrumentValue {
     fn from_nbt_tag(tag: simdnbt::borrow::NbtTag) -> Option<Self> {
         let compound = tag.compound()?;
-        let description = TextComponent::from_nbt(&compound.get("description")?.to_owned())?;
+        let description = decode_text_nbt(&compound.get("description")?.to_owned())?;
         Self::new(
             SoundEventHolder::from_nbt_tag(compound.get("sound_event")?)?,
             compound.get("use_duration")?.codec_f32()?,
@@ -273,6 +277,22 @@ impl RegistryHolderEntry for Instrument {
 
     fn holder_by_key(key: &Identifier) -> Option<&'static Self> {
         REGISTRY.instruments.by_key(key)
+    }
+}
+
+impl nbt_encode::NbtEncode for InstrumentValue {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+
+        field("sound_event", &(self.sound_event), writer, depth)?;
+        field("use_duration", &(self.use_duration), writer, depth)?;
+        field("range", &(self.range), writer, depth)?;
+        field("description", &(self.description), writer, depth)?;
+        end(writer)
     }
 }
 

@@ -1,0 +1,4 @@
+name: PaperTraversal
+main: fixture.libraries.MalformedLibraryPlugin
+version: '1.0'
+api-version: '26.2'

@@ -75,6 +75,15 @@ public interface Registry<T extends Keyed> extends Iterable<T> {
         @Override public Stream<org.bukkit.attribute.Attribute> stream() { return Arrays.stream(org.bukkit.attribute.Attribute.values()); }
     };
 
+    Registry<org.bukkit.potion.PotionEffectType> MOB_EFFECT = new Registry<>() {
+        @Override public org.bukkit.potion.PotionEffectType get(NamespacedKey key) {
+            return org.bukkit.potion.PotionEffectType.getByKey(key);
+        }
+        @Override public Stream<org.bukkit.potion.PotionEffectType> stream() {
+            return Arrays.stream(org.bukkit.potion.PotionEffectType.values());
+        }
+    };
+
     Registry<Material> MATERIAL = new Registry<>() {
         @Override public Material get(NamespacedKey key) { return key == null ? null : Material.matchMaterial(key.toString()); }
         @Override public Stream<Material> stream() { return Arrays.stream(Material.values()); }

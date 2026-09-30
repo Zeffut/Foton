@@ -1,5 +1,8 @@
 //! Vanilla `minecraft:lodestone_tracker` item component.
 
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Result, Write};
 use std::str::FromStr;
 
@@ -197,6 +200,43 @@ fn hash_entries(hasher: &mut ComponentHasher, entries: &mut [HashEntry]) {
         hasher.put_raw_bytes(&entry.value_bytes);
     }
     hasher.end_map();
+}
+
+impl nbt_encode::NbtEncode for LodestoneTracker {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+
+        if let Some(target) = &self.target {
+            field("target", &(target), writer, depth)?;
+        }
+        if !self.tracked {
+            field("tracked", &(false), writer, depth)?;
+        }
+        end(writer)
+    }
+}
+
+impl nbt_encode::NbtEncode for GlobalPos {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+        field("dimension", &self.dimension, writer, depth)?;
+        nbt_encode::field_with("pos", 11, writer, |writer| {
+            writer.write_all(&3_i32.to_be_bytes())?;
+            for value in [self.pos.x(), self.pos.y(), self.pos.z()] {
+                writer.write_all(&value.to_be_bytes())?;
+            }
+            Ok(())
+        })?;
+        end(writer)
+    }
 }
 
 #[cfg(test)]

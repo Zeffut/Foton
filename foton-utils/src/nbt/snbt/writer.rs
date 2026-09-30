@@ -135,7 +135,7 @@ fn quote_and_escape(value: &str, output: &mut String) {
     output.push(quote);
 }
 
-fn java_float_string(value: f32) -> String {
+pub(super) fn java_float_string(value: f32) -> String {
     java_floating_string(
         value.is_sign_negative(),
         value.is_nan(),
@@ -148,7 +148,7 @@ fn java_float_string(value: f32) -> String {
     )
 }
 
-fn java_double_string(value: f64) -> String {
+pub(super) fn java_double_string(value: f64) -> String {
     java_floating_string(
         value.is_sign_negative(),
         value.is_nan(),

@@ -1,0 +1,4 @@
+name: EventDisabledDependent
+version: 1
+main: example.EventDisabledDependentPlugin
+depend: [EventDisabled]

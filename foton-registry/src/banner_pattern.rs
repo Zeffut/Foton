@@ -1,6 +1,9 @@
 //! Banner pattern registry values.
 
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
 use std::borrow::Cow;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 
 use foton_utils::Identifier;
@@ -212,6 +215,24 @@ impl RegistryHolderEntry for BannerPattern {
 
     fn holder_by_key(key: &Identifier) -> Option<&'static Self> {
         REGISTRY.banner_patterns.by_key(key)
+    }
+}
+
+impl nbt_encode::NbtEncode for BannerPatternValue {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+        field("asset_id", &self.asset_id, writer, depth)?;
+        field(
+            "translation_key",
+            &self.translation_key.as_ref(),
+            writer,
+            depth,
+        )?;
+        end(writer)
     }
 }
 

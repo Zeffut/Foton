@@ -4,6 +4,44 @@ use serde::Deserialize;
 use simdnbt::owned::{NbtCompound, NbtTag};
 use std::io::Cursor;
 
+struct OneMiBWriter {
+    written: usize,
+}
+
+impl std::io::Write for OneMiBWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if self.written.saturating_add(bytes.len()) > 1024 * 1024 {
+            return Err(std::io::Error::other("component exceeds one MiB"));
+        }
+        self.written += bytes.len();
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn registered_component_network_codec_writes_directly_to_a_bounded_sink() {
+    let mut registry = DataComponentRegistry::new();
+    register_vanilla_data_components(&mut registry);
+    let entry = registry
+        .by_key(ITEM_NAME.key())
+        .expect("item name should be registered");
+    let data = ComponentData::new(text_components::TextComponent::plain(
+        "x".repeat(1024 * 1024),
+    ));
+    let mut writer = OneMiBWriter { written: 0 };
+
+    let error = entry
+        .write_network_to(&data, &mut writer)
+        .expect_err("the bounded sink must reject the oversized component");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    assert_eq!(writer.written, 0);
+}
+
 #[derive(Deserialize)]
 struct ExtractedComponentCatalog {
     components: Vec<ExtractedComponent>,

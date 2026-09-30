@@ -1,5 +1,9 @@
 //! Vanilla `minecraft:recipes` item component.
 
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_preflight;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 use std::str::FromStr;
 
@@ -59,14 +63,13 @@ impl Recipes {
 
 impl WriteTo for Recipes {
     fn write(&self, writer: &mut impl Write) -> Result<()> {
-        let mut encoded = Vec::new();
-        self.to_nbt_tag_ref().write(&mut encoded);
-        writer.write_all(&encoded)
+        nbt_encode::write_bounded(self, usize::MAX, writer)
     }
 }
 
 impl ReadFrom for Recipes {
     fn read(data: &mut Cursor<&[u8]>) -> Result<Self> {
+        nbt_preflight::check(data, true)?;
         let tag =
             read_tag(data).map_err(|error| Error::other(format!("Invalid NBT: {error:?}")))?;
         let Some(heap_size) = vanilla_nbt_heap_size(&tag) else {
@@ -101,6 +104,18 @@ impl HashComponent for Recipes {
             hasher.put_component_hash(key);
         }
         hasher.end_list();
+    }
+}
+
+impl nbt_encode::NbtEncode for Recipes {
+    fn nbt_id(&self) -> u8 {
+        9
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        if self.keys.is_empty() {
+            return writer.write_all(&[0, 0, 0, 0, 0]);
+        }
+        nbt_encode::list(&self.keys, writer, depth)
     }
 }
 

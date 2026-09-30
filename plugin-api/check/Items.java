@@ -155,6 +155,13 @@ final class Items {
             "removing an enchantment returns its old level");
         Checks.same(enchanted.getEnchantmentLevel(org.bukkit.enchantments.Enchantment.LOOTING), 0,
             "removed enchantment is absent");
+        ItemStack damaged = new ItemStack(Material.DIAMOND_SWORD);
+        damaged.setDurability((short) 37);
+        String damagedEncoded = foton.FotonInventory.encode(damaged);
+        Checks.expect(damagedEncoded.contains("\u001ddamage=37"),
+            "slot damage uses the shared codec field");
+        Checks.same(foton.FotonInventory.decode(damagedEncoded).getDurability(), (short) 37,
+            "slot damage survives encoding");
         boolean rejected = false;
         try { enchanted.addEnchantment(org.bukkit.enchantments.Enchantment.LOOTING, 4); }
         catch (IllegalArgumentException expected) { rejected = true; }
@@ -183,15 +190,37 @@ final class Items {
         potionMeta.setDisplayName("potion");
         potionMeta.setLore(java.util.List.of("line"));
         potion.setItemMeta(potionMeta);
+        potion.setOpaqueNbt("{foton_opaque:1b}");
         org.bukkit.inventory.meta.PotionMeta potionData = (org.bukkit.inventory.meta.PotionMeta) potion.getItemMeta();
-        potionData.addCustomEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.SPEED, 20, 1), true);
+        potionData.addCustomEffect(new org.bukkit.potion.PotionEffect(
+            org.bukkit.potion.PotionEffectType.SPEED, 20, 1, true, false, false), true);
         potion.setItemMeta(potionData);
-        org.bukkit.inventory.meta.PotionMeta potionRead = (org.bukkit.inventory.meta.PotionMeta)
-            foton.FotonInventory.decode(foton.FotonInventory.encode(potion)).getItemMeta();
-        Checks.expect(potionRead.getCustomEffects().size() == 1
+        String potionEncoded = foton.FotonInventory.encode(potion);
+        ItemStack potionDecoded = foton.FotonInventory.decode(potionEncoded);
+        org.bukkit.inventory.meta.PotionMeta potionRead = (org.bukkit.inventory.meta.PotionMeta) potionDecoded.getItemMeta();
+        org.bukkit.potion.PotionEffect potionEffect = potionRead.getCustomEffects().isEmpty()
+            ? null : potionRead.getCustomEffects().get(0);
+        Checks.expect(potionEncoded.contains("\u001dpotioneffects=speed,20,1,true,false,false;")
+            && potionRead.getCustomEffects().size() == 1
+            && potionEffect != null
+            && potionEffect.getType().equals(org.bukkit.potion.PotionEffectType.SPEED)
+            && potionEffect.getDuration() == 20
+            && potionEffect.getAmplifier() == 1
+            && potionEffect.isAmbient()
+            && !potionEffect.hasParticles()
+            && !potionEffect.hasIcon()
+            && potionDecoded.getOpaqueNbt().equals("{foton_opaque:1b}")
             && potionRead.getDisplayName().equals("potion")
             && potionRead.getLore().equals(java.util.List.of("line")),
-            "slot metadata fields coexist with potion effects");
+            "slot metadata fields and exact potion flags coexist with opaque NBT");
+        ItemStack legacyPotion = foton.FotonInventory.decode(
+            "minecraft:potion 1\u001dnbthex=7b666f6f3a31627d\u001dSPEED,20,1;");
+        org.bukkit.potion.PotionEffect legacyEffect =
+            ((org.bukkit.inventory.meta.PotionMeta) legacyPotion.getItemMeta()).getCustomEffects().get(0);
+        Checks.expect(legacyPotion.getOpaqueNbt().equals("{foo:1b}")
+            && legacyEffect.equals(new org.bukkit.potion.PotionEffect(
+                org.bukkit.potion.PotionEffectType.SPEED, 20, 1, false, true, true)),
+            "legacy unlabeled potion effects remain distinct from opaque NBT");
         Checks.same(read.getAmount(), 32, "decoded amount");
 
         // Empty and unreadable are different answers. An empty slot is the

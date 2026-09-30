@@ -2,10 +2,14 @@ use crate::{REGISTRY, RegistryExt, RegistryHolderEntry, RegistryTags};
 use foton_utils::Identifier;
 use foton_utils::hash::{ComponentHasher, HashComponent};
 use foton_utils::nbt::NbtNumeric as _;
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
 use foton_utils::serial::{ReadFrom, WriteTo};
+use foton_utils::text::from_nbt as decode_text_nbt;
 use rustc_hash::FxHashMap;
 use simdnbt::owned::{NbtCompound, NbtTag};
 use simdnbt::{FromNbtTag, ToNbtTag};
+use std::io;
 use std::io::{Cursor, Result, Write};
 use text_components::TextComponent;
 
@@ -69,11 +73,11 @@ impl FromNbtTag for PaintingVariantValue {
             height,
             asset_id: Identifier::from_nbt_tag(compound.get("asset_id")?)?,
             title: match compound.get("title") {
-                Some(tag) => Some(TextComponent::from_nbt(&tag.to_owned())?),
+                Some(tag) => Some(decode_text_nbt(&tag.to_owned())?),
                 None => None,
             },
             author: match compound.get("author") {
-                Some(tag) => Some(TextComponent::from_nbt(&tag.to_owned())?),
+                Some(tag) => Some(decode_text_nbt(&tag.to_owned())?),
                 None => None,
             },
         })
@@ -163,5 +167,24 @@ impl RegistryHolderEntry for PaintingVariant {
     }
     fn holder_by_key(key: &Identifier) -> Option<&'static Self> {
         REGISTRY.painting_variants.by_key(key)
+    }
+}
+impl nbt_encode::NbtEncode for PaintingVariantValue {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+        field("asset_id", &self.asset_id, writer, depth)?;
+        field("width", &self.width, writer, depth)?;
+        field("height", &self.height, writer, depth)?;
+        if let Some(value) = &self.title {
+            field("title", value, writer, depth)?;
+        }
+        if let Some(value) = &self.author {
+            field("author", value, writer, depth)?;
+        }
+        end(writer)
     }
 }

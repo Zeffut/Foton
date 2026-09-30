@@ -1,7 +1,10 @@
 //! Vanilla `minecraft:enchantable` item component.
 
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
+use std::io;
 use std::io::{Cursor, Error as IoError, Result as IoResult, Write};
 
 use foton_utils::codec::VarInt;
@@ -84,6 +87,19 @@ impl FromNbtTag for Enchantable {
 impl HashComponent for Enchantable {
     fn hash_component(&self, hasher: &mut ComponentHasher) {
         self.to_nbt_tag().hash_component(hasher);
+    }
+}
+
+impl nbt_encode::NbtEncode for Enchantable {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+
+        field("value", &(self.value), writer, depth)?;
+        end(writer)
     }
 }
 

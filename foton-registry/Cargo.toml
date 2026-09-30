@@ -56,8 +56,12 @@ simdnbt.workspace = true
 flate2.workspace = true
 
 [features]
+codec-test-support = []
 fmt = []
 minecraft-src = []
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+allocation-counter = "0.8.1"

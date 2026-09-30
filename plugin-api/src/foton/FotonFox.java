@@ -3,7 +3,7 @@ package foton;
 import java.util.UUID;
 
 /** Live Bukkit view of a Steel fox. */
-public final class FotonFox extends FotonLivingEntity implements org.bukkit.entity.Fox {
+public final class FotonFox extends FotonAnimals implements org.bukkit.entity.Fox {
     public FotonFox(UUID id) { super(id); }
 
     @Override public Type getFoxType() {

@@ -1,0 +1,4 @@
+name: OptionalA
+version: 1
+main: fixture.dependencies.DependencyPlugins$OptionalA
+softdepend: [OptionalB]

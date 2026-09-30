@@ -10,8 +10,8 @@ command -v jar >/dev/null 2>&1 || { echo 'jar is required' >&2; exit 1; }
 
 bash dev/fetch-plugin-api-libs.sh --check
 mapfile -t jars < <(find plugin-api/lib -maxdepth 1 -type f -name '*.jar' -print | LC_ALL=C sort)
-[ "${#jars[@]}" -eq 30 ] || {
-  echo "plugin runtime must contain exactly 30 dependency jars; found ${#jars[@]}" >&2
+[ "${#jars[@]}" -eq 31 ] || {
+  echo "plugin runtime must contain exactly 31 dependency jars; found ${#jars[@]}" >&2
   exit 1
 }
 
@@ -31,11 +31,12 @@ jdeps --multi-release base --missing-deps "$scratch/extracted" \
   > "$scratch/jdeps.log" 2>&1 || true
 if grep -q -- '-> not found' "$scratch/jdeps.log"; then
   # Netty deliberately ships adapters for logging frameworks, BlockHound and
-  # GraalVM native-image even when those optional tools are absent. Keep that
+  # GraalVM native-image even when those optional tools are absent. SQLite also
+  # ships its native-image build-time Feature; the normal JVM driver does not use it. Keep that
   # list narrow and visible; every other missing class still breaks the build.
   while read -r missing; do
     case "$missing" in
-      com.oracle.svm.core.annotate.*|reactor.blockhound.*|\
+      com.oracle.svm.core.annotate.*|org.graalvm.nativeimage.hosted.*|reactor.blockhound.*|\
       org.apache.commons.logging.*|org.apache.logging.log4j.*|org.apache.log4j.*) ;;
       *)
         cat "$scratch/jdeps.log" >&2

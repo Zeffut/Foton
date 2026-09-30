@@ -642,14 +642,20 @@ impl World {
             .or_else(|| self.pending_spawn_entities.lock().get(uuid).cloned())
     }
 
-    pub(crate) fn begin_pending_spawn(&self, entity: SharedEntity) {
+    /// Makes an unpublished entity addressable to callbacks by UUID.
+    pub fn begin_pending_spawn(&self, entity: SharedEntity) {
         self.pending_spawn_entities
             .lock()
             .insert(entity.uuid(), entity);
     }
 
     pub(crate) fn end_pending_spawn(&self, uuid: &uuid::Uuid) {
-        self.pending_spawn_entities.lock().remove(uuid);
+        let _ = self.take_pending_spawn(uuid);
+    }
+
+    /// Removes and returns an unpublished callback entity.
+    pub fn take_pending_spawn(&self, uuid: &uuid::Uuid) -> Option<SharedEntity> {
+        self.pending_spawn_entities.lock().remove(uuid)
     }
 
     /// Gets all entities intersecting the given bounding box.

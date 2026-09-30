@@ -45,8 +45,11 @@ impl NetworkConnection for TestConnection {
 /// A broadcast only reaches a player through their connection, so a test that
 /// has to see one records it here rather than trying to read it back off the
 /// world.
+type PacketObserver = Arc<dyn Fn(&EncodedPacket) + Send + Sync>;
+
 pub(crate) struct RecordingConnection {
     sent: Arc<SyncMutex<Vec<EncodedPacket>>>,
+    observer: Option<PacketObserver>,
     closed: AtomicBool,
 }
 
@@ -55,8 +58,15 @@ impl RecordingConnection {
     pub(crate) fn new(sent: Arc<SyncMutex<Vec<EncodedPacket>>>) -> Self {
         Self {
             sent,
+            observer: None,
             closed: AtomicBool::new(false),
         }
+    }
+
+    /// Observes a packet synchronously at the moment the connection receives it.
+    pub(crate) fn with_observer(mut self, observer: PacketObserver) -> Self {
+        self.observer = Some(observer);
+        self
     }
 }
 
@@ -66,11 +76,16 @@ impl NetworkConnection for RecordingConnection {
     }
 
     fn send_encoded(&self, packet: EncodedPacket) {
+        if let Some(observer) = &self.observer {
+            observer(&packet);
+        }
         self.sent.lock().push(packet);
     }
 
     fn send_encoded_bundle(&self, packets: Vec<EncodedPacket>) {
-        self.sent.lock().extend(packets);
+        for packet in packets {
+            self.send_encoded(packet);
+        }
     }
 
     fn disconnect_with_reason(&self, _reason: TextComponent) {

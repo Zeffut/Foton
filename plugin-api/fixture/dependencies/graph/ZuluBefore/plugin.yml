@@ -1,0 +1,4 @@
+name: ZuluBefore
+version: 1
+main: fixture.dependencies.DependencyPlugins$ZuluBefore
+loadbefore: [AlphaTarget]

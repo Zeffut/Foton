@@ -8,7 +8,7 @@ public final class FotonAreaEffectCloud extends FotonEntity implements org.bukki
 
     @Override public boolean addCustomEffect(org.bukkit.potion.PotionEffect effect, boolean override) {
         if (effect == null || effect.getType() == null) return false;
-        return Native.addAreaEffectCloudEffect(getUniqueId().toString(), effect.getType().getName(), effect.getDuration(), effect.getAmplifier(), effect.isAmbient(), effect.hasParticles(), effect.hasIcon(), override);
+        return Native.addAreaEffectCloudEffect(getUniqueId().toString(), effect.getType().getKey().getKey(), effect.getDuration(), effect.getAmplifier(), effect.isAmbient(), effect.hasParticles(), effect.hasIcon(), override);
     }
     @Override public void clearCustomEffects() { Native.clearAreaEffectCloudEffects(getUniqueId().toString()); }
 

@@ -1,5 +1,8 @@
 //! Vanilla `minecraft:painting/variant` item component.
 
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 use std::str::FromStr;
 
@@ -73,6 +76,19 @@ impl PaintingVariantComponent {
             ));
         };
         Ok(NbtTag::String(variant.key.to_string().into()))
+    }
+}
+
+impl nbt_encode::NbtEncode for PaintingVariantComponent {
+    fn nbt_id(&self) -> u8 {
+        8
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        self.variant
+            .as_reference()
+            .ok_or_else(|| Error::other("Direct painting variant holder is not persistent"))?
+            .key
+            .write_nbt_payload(writer, depth)
     }
 }
 

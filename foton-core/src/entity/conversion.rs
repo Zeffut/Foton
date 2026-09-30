@@ -48,9 +48,11 @@ pub enum ConversionReason {
     /// Struck by lightning -- a pig becoming a zombified piglin, a villager a
     /// witch.
     Lightning,
+    /// Sheared -- a mooshroom becoming a cow.
+    Sheared,
     /// Carried into the overworld -- a piglin becoming a zombified piglin.
     PiglinZombification,
-    /// Poisoned -- a mooshroom changing variant.
+    /// A type-specific metamorphosis.
     Poison,
     /// A slime or magma cube splitting on death.
     Split,

@@ -3,7 +3,7 @@ package foton;
 import java.util.UUID;
 
 /** Live Bukkit view of a vanilla panda. */
-public final class FotonPanda extends FotonLivingEntity implements org.bukkit.entity.Panda {
+public final class FotonPanda extends FotonAnimals implements org.bukkit.entity.Panda {
     public FotonPanda(UUID id) { super(id); }
     private static Gene gene(String value) {
         if (value == null) return Gene.NORMAL;

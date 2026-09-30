@@ -1,5 +1,9 @@
 //! Vanilla `minecraft:container_loot` item component.
 
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_preflight;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 use std::str::FromStr;
 
@@ -58,14 +62,13 @@ impl SeededContainerLoot {
 
 impl WriteTo for SeededContainerLoot {
     fn write(&self, writer: &mut impl Write) -> Result<()> {
-        let mut encoded = Vec::new();
-        self.to_nbt_tag_ref().write(&mut encoded);
-        writer.write_all(&encoded)
+        nbt_encode::write_bounded(self, usize::MAX, writer)
     }
 }
 
 impl ReadFrom for SeededContainerLoot {
     fn read(data: &mut Cursor<&[u8]>) -> Result<Self> {
+        nbt_preflight::check(data, true)?;
         let tag =
             read_tag(data).map_err(|error| Error::other(format!("Invalid NBT: {error:?}")))?;
         let Some(heap_size) = vanilla_nbt_heap_size(&tag) else {
@@ -128,6 +131,22 @@ fn push_hash_entry<T: HashComponent + ?Sized>(entries: &mut Vec<HashEntry>, key:
     let mut value_hasher = ComponentHasher::new();
     value.hash_component(&mut value_hasher);
     entries.push(HashEntry::new(key_hasher, value_hasher));
+}
+
+impl nbt_encode::NbtEncode for SeededContainerLoot {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+
+        field("loot_table", &(self.loot_table), writer, depth)?;
+        if self.seed != 0 {
+            field("seed", &(self.seed), writer, depth)?;
+        }
+        end(writer)
+    }
 }
 
 #[cfg(test)]

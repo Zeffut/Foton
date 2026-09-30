@@ -1,0 +1,3 @@
+name: EventDisabled
+version: 1
+main: example.EventDisabledPlugin

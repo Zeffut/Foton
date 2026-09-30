@@ -1,117 +1,297 @@
 #!/usr/bin/env python3
-"""Generate Bukkit's PotionEffectType from Foton's extracted mob effect registry.
+"""Generate Paper's mob-effect API from FotonExtractor's registry data."""
 
-Paper names each constant after its vanilla key, upper-cased, so the modern
-names (JUMP_BOOST, HASTE, RESISTANCE, STRENGTH, ...) are the registry itself.
-The pre-1.20.5 Bukkit names are kept as aliases of the same object, so that a
-plugin comparing `type == PotionEffectType.JUMP` against `JUMP_BOOST` sees one
-effect, not two.
-"""
+from __future__ import annotations
+
 import json
-import sys
+import math
 from pathlib import Path
+import re
+import sys
 
-repo = Path(__file__).resolve().parents[1]
-source = repo / "foton-registry/build_assets/mob_effects.json"
-out = Path(sys.argv[1]) / "org/bukkit/potion/PotionEffectType.java"
 
-effects = sorted(json.loads(source.read_text()), key=lambda entry: entry["id"])
-if not effects:
-    raise SystemExit(f"no mob effects found in {source}")
-names = [effect["name"] for effect in effects]
-
-# Bukkit's legacy spellings that Foton's API already exposed, each naming the
-# vanilla key it always meant.
-legacy = {
-    "SLOW": "slowness",
-    "FAST_DIGGING": "haste",
-    "SLOW_DIGGING": "mining_fatigue",
-    "INCREASE_DAMAGE": "strength",
-    "HEAL": "instant_health",
-    "HARM": "instant_damage",
-    "JUMP": "jump_boost",
-    "CONFUSION": "nausea",
-    "DAMAGE_RESISTANCE": "resistance",
+NAME = re.compile(r"[a-z][a-z0-9_]*\Z")
+OPERATIONS = {
+    "ADD_VALUE": "ADD_NUMBER",
+    "ADD_MULTIPLIED_BASE": "ADD_SCALAR",
+    "ADD_MULTIPLIED_TOTAL": "MULTIPLY_SCALAR_1",
 }
-missing = sorted(key for key in legacy.values() if key not in names)
-if missing:
-    raise SystemExit(f"legacy aliases name effects the registry lacks: {missing}")
+LEGACY_NAMES = {
+    "slowness": "SLOW",
+    "haste": "FAST_DIGGING",
+    "mining_fatigue": "SLOW_DIGGING",
+    "strength": "INCREASE_DAMAGE",
+    "instant_health": "HEAL",
+    "instant_damage": "HARM",
+    "jump_boost": "JUMP",
+    "nausea": "CONFUSION",
+    "resistance": "DAMAGE_RESISTANCE",
+}
 
-lines = [
-    "package org.bukkit.potion;",
-    "",
-    "import java.util.Locale;",
-    "",
-    "/** A vanilla mob effect, generated from Foton's mob effect registry.",
-    " *",
-    " * <p>One object per effect: {@link #getByName}, {@link #getByKey} and the",
-    " * legacy aliases all answer the constant itself, so identity comparison",
-    " * works the way it does on Paper. */",
-    "public final class PotionEffectType implements org.bukkit.Keyed {",
-]
-for effect in effects:
-    constant = effect["name"].upper()
-    lines.append(
-        f'    public static final PotionEffectType {constant} = new PotionEffectType('
-        f'"{effect["name"]}", {effect["id"] + 1}, {effect["color"]}, "{effect["category"]}");'
-    )
-lines.append("")
-for alias, key in sorted(legacy.items()):
-    lines.append(f"    /** Bukkit's name before 1.20.5; the same effect as {{@link #{key.upper()}}}. */")
-    lines.append(f"    @Deprecated public static final PotionEffectType {alias} = {key.upper()};")
-lines += [
-    "",
-    "    private static final PotionEffectType[] VALUES = {",
-    "        " + ", ".join(name.upper() for name in names),
-    "    };",
-    "",
-    "    private final String name;",
-    "    private final int id;",
-    "    private final int color;",
-    "    private final String category;",
-    "",
-    "    private PotionEffectType(String name, int id, int color, String category) {",
-    "        this.name = name;",
-    "        this.id = id;",
-    "        this.color = color;",
-    "        this.category = category;",
-    "    }",
-    "",
-    "    /** Every effect, in registry order. */",
-    "    public static PotionEffectType[] values() { return VALUES.clone(); }",
-    "",
-    "    /** Paper's network id: the registry index plus one. */",
-    "    public static PotionEffectType getById(int id) {",
-    "        return id >= 1 && id <= VALUES.length ? VALUES[id - 1] : null;",
-    "    }",
-    "",
-    "    /** The effect for a key such as {@code jump_boost} or {@code minecraft:jump_boost}. */",
-    "    public static PotionEffectType getByName(String name) {",
-    "        if (name == null || name.isEmpty()) return null;",
-    "        String normalized = name.toLowerCase(Locale.ROOT);",
-    "        if (normalized.startsWith(\"minecraft:\")) normalized = normalized.substring(10);",
-    "        for (PotionEffectType type : VALUES) if (type.name.equals(normalized)) return type;",
-    "        return null;",
-    "    }",
-    "",
-    "    public static PotionEffectType getByKey(org.bukkit.NamespacedKey key) {",
-    "        return key == null || !key.getNamespace().equals(\"minecraft\") ? null : getByName(key.getKey());",
-    "    }",
-    "",
-    "    @Override public org.bukkit.NamespacedKey getKey() { return org.bukkit.NamespacedKey.minecraft(name); }",
-    "    /** The vanilla key path, which is also what crosses to Foton. */",
-    "    public String getName() { return name; }",
-    "    @Deprecated public int getId() { return id; }",
-    "    /** The effect's particle colour, as vanilla registers it. */",
-    "    public org.bukkit.Color getColor() { return org.bukkit.Color.fromRGB(color & 0xFFFFFF); }",
-    "    /** {@code BENEFICIAL}, {@code HARMFUL} or {@code NEUTRAL}, as vanilla registers it. */",
-    "    public String getCategoryName() { return category; }",
-    "    public PotionEffect createEffect(int duration, int amplifier) {",
-    "        return new PotionEffect(this, duration, amplifier);",
-    "    }",
-    "    @Override public String toString() { return name; }",
-    "}",
-    "",
-]
-out.parent.mkdir(parents=True, exist_ok=True)
-out.write_text("\n".join(lines), encoding="utf-8")
+
+def java_double(value: object) -> str:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"effect modifier amount must be numeric, got {value!r}")
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError(f"effect modifier amount must be finite, got {value!r}")
+    literal = repr(value)
+    return literal if "." in literal or "e" in literal.lower() else literal + ".0"
+
+
+def load_effects(path: Path) -> list[dict[str, object]]:
+    effects = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(effects, list) or not effects:
+        raise ValueError("mob_effects.json must contain a non-empty array")
+    effects.sort(key=lambda effect: effect["id"])
+    for registry_id, effect in enumerate(effects):
+        missing = {"id", "name", "category", "color"} - effect.keys()
+        if missing:
+            raise ValueError(f"mob effect is missing {sorted(missing)}")
+        if effect["id"] != registry_id:
+            raise ValueError(
+                f"mob effect ids must be contiguous: expected {registry_id}, got {effect['id']}"
+            )
+        name = effect["name"]
+        if not isinstance(name, str) or NAME.fullmatch(name) is None:
+            raise ValueError(f"invalid mob effect name {name!r}")
+        if effect["category"] not in {"BENEFICIAL", "HARMFUL", "NEUTRAL"}:
+            raise ValueError(f"invalid category for {name}: {effect['category']!r}")
+        color = effect["color"]
+        if not isinstance(color, int) or color < 0 or color > 0xFFFFFF:
+            raise ValueError(f"invalid color for {name}: {color!r}")
+        for modifier in effect.get("attribute_modifiers", []):
+            missing_modifier = {"attribute", "id", "amount", "operation"} - modifier.keys()
+            if missing_modifier:
+                raise ValueError(
+                    f"mob effect {name} modifier is missing {sorted(missing_modifier)}"
+                )
+            if modifier["operation"] not in OPERATIONS:
+                raise ValueError(
+                    f"invalid modifier operation for {name}: {modifier['operation']!r}"
+                )
+            java_double(modifier["amount"])
+    return effects
+
+
+def render(effects: list[dict[str, object]]) -> str:
+    lines = [
+        "package org.bukkit.potion;",
+        "",
+        "/** Registry-backed Paper 26.2 mob-effect surface.",
+        " *",
+        " * Generated by dev/gen-potion-effect-type.py from FotonExtractor's mob_effects.json.",
+        " * Do not edit this generated source.",
+        " */",
+        "public abstract class PotionEffectType implements org.bukkit.Keyed, org.bukkit.Translatable,",
+        "        net.kyori.adventure.translation.Translatable,",
+        "        io.papermc.paper.world.flag.FeatureDependant {",
+    ]
+    for effect in effects:
+        constant = str(effect["name"]).upper()
+        lines.append(
+            f"    public static final PotionEffectType {constant} = FotonPotionEffectTypes.{constant};"
+        )
+    lines += [
+        "",
+        "    public PotionEffectType() {}",
+        "",
+        "    @org.jetbrains.annotations.NotNull",
+        "    public abstract PotionEffect createEffect(int duration, int amplifier);",
+        "    public abstract boolean isInstant();",
+        "    @org.jetbrains.annotations.NotNull",
+        "    public abstract PotionEffectTypeCategory getCategory();",
+        "    public String getCategoryName() { return getCategory().name(); }",
+        "    @org.jetbrains.annotations.NotNull",
+        "    public abstract org.bukkit.Color getColor();",
+        "    @Deprecated(since = \"1.14\", forRemoval = true)",
+        "    public abstract double getDurationModifier();",
+        "    @Deprecated(since = \"1.6.2\", forRemoval = true)",
+        "    public abstract int getId();",
+        "    @Deprecated(since = \"1.20.3\")",
+        "    @org.jetbrains.annotations.NotNull",
+        "    public abstract String getName();",
+        "",
+        "    @Deprecated(since = \"1.20.3\")",
+        "    @org.jetbrains.annotations.Contract(\"null -> null\")",
+        "    @org.jetbrains.annotations.Nullable",
+        "    public static PotionEffectType getByKey(",
+        "            @org.jetbrains.annotations.Nullable org.bukkit.NamespacedKey key) {",
+        "        return key == null ? null : FotonPotionEffectTypes.BY_KEY.get(key);",
+        "    }",
+        "",
+        "    @org.jetbrains.annotations.ApiStatus.Internal",
+        "    @org.jetbrains.annotations.Nullable",
+        "    public static PotionEffectType getById(int id) {",
+        "        return FotonPotionEffectTypes.BY_ID.get(id);",
+        "    }",
+        "",
+        "    @Deprecated(since = \"1.20.3\")",
+        "    @org.jetbrains.annotations.Nullable",
+        "    public static PotionEffectType getByName(",
+        "            @org.jetbrains.annotations.NotNull String name) {",
+        "        if (name == null) throw new IllegalArgumentException(\"name cannot be null\");",
+        "        org.bukkit.NamespacedKey key = org.bukkit.NamespacedKey.fromString(",
+        "            name.toLowerCase(java.util.Locale.ROOT));",
+        "        return key == null ? null : FotonPotionEffectTypes.BY_KEY.get(key);",
+        "    }",
+        "",
+        "    @Deprecated(since = \"1.20.3\")",
+        "    @org.jetbrains.annotations.NotNull",
+        "    public static PotionEffectType[] values() {",
+        "        return FotonPotionEffectTypes.VALUES.clone();",
+        "    }",
+        "",
+        "    @org.jetbrains.annotations.NotNull",
+        "    public abstract java.util.Map<org.bukkit.attribute.Attribute,",
+        "        org.bukkit.attribute.AttributeModifier> getEffectAttributes();",
+        "    public abstract double getAttributeModifierAmount(",
+        "        @org.jetbrains.annotations.NotNull org.bukkit.attribute.Attribute attribute,",
+        "        int effectAmplifier);",
+        "    @org.jetbrains.annotations.NotNull",
+        "    public abstract Category getEffectCategory();",
+        "",
+        "    public enum Category {",
+        "        BENEFICIAL(net.kyori.adventure.text.format.NamedTextColor.BLUE),",
+        "        HARMFUL(net.kyori.adventure.text.format.NamedTextColor.RED),",
+        "        NEUTRAL(net.kyori.adventure.text.format.NamedTextColor.BLUE);",
+        "",
+        "        private final net.kyori.adventure.text.format.TextColor color;",
+        "        Category(net.kyori.adventure.text.format.TextColor color) { this.color = color; }",
+        "        @org.jetbrains.annotations.NotNull",
+        "        public net.kyori.adventure.text.format.TextColor getColor() { return color; }",
+        "    }",
+        "}",
+        "",
+        "final class FotonPotionEffectType extends PotionEffectType {",
+        "    private final org.bukkit.NamespacedKey key;",
+        "    private final int id;",
+        "    private final String name;",
+        "    private final String legacyName;",
+        "    private final PotionEffectTypeCategory category;",
+        "    private final org.bukkit.Color color;",
+        "    private final java.util.Map<org.bukkit.attribute.Attribute,",
+        "        org.bukkit.attribute.AttributeModifier> attributes;",
+        "",
+        "    FotonPotionEffectType(int id, String name, String legacyName,",
+        "            PotionEffectTypeCategory category,",
+        "            int color,",
+        "            java.util.Map<org.bukkit.attribute.Attribute,",
+        "                org.bukkit.attribute.AttributeModifier> attributes) {",
+        "        this.id = id;",
+        "        this.name = name;",
+        "        this.legacyName = legacyName;",
+        "        this.key = org.bukkit.NamespacedKey.minecraft(name);",
+        "        this.category = category;",
+        "        this.color = org.bukkit.Color.fromRGB(color);",
+        "        this.attributes = java.util.Collections.unmodifiableMap(",
+        "            new java.util.LinkedHashMap<>(attributes));",
+        "    }",
+        "",
+        "    @Override public PotionEffect createEffect(int duration, int amplifier) {",
+        "        return new PotionEffect(this, isInstant() ? 1 : (int) (duration * getDurationModifier()),",
+        "            amplifier);",
+        "    }",
+        "    @Override public boolean isInstant() { return foton.Native.mobEffectInstant(name); }",
+        "    @Override public PotionEffectTypeCategory getCategory() { return category; }",
+        "    @Override public org.bukkit.Color getColor() { return color; }",
+        "    @Override public double getDurationModifier() { return 1.0; }",
+        "    @Override public int getId() { return id; }",
+        "    @Override public String getName() { return legacyName; }",
+        "    @Override public org.bukkit.NamespacedKey getKey() { return key; }",
+        "    @Override public String getTranslationKey() { return translationKey(); }",
+        "    @Override public String translationKey() { return \"effect.minecraft.\" + name; }",
+        "    @Override public java.util.Map<org.bukkit.attribute.Attribute,",
+        "            org.bukkit.attribute.AttributeModifier> getEffectAttributes() {",
+        "        return attributes;",
+        "    }",
+        "    @Override public double getAttributeModifierAmount(",
+        "            org.bukkit.attribute.Attribute attribute, int effectAmplifier) {",
+        "        org.bukkit.attribute.AttributeModifier modifier = attributes.get(attribute);",
+        "        if (modifier == null) throw new IllegalArgumentException(",
+        "            \"Attribute \" + attribute + \" is not present on \" + key);",
+        "        return modifier.getAmount() * (effectAmplifier + 1);",
+        "    }",
+        "    @Override public Category getEffectCategory() {",
+        "        return Category.valueOf(category.name());",
+        "    }",
+        "    @Override public String toString() { return name; }",
+        "}",
+        "",
+        "final class FotonPotionEffectTypes {",
+    ]
+
+    constants: list[str] = []
+    for effect in effects:
+        name = str(effect["name"])
+        constant = name.upper()
+        constants.append(constant)
+        modifiers = effect.get("attribute_modifiers", [])
+        if modifiers:
+            entries = []
+            for modifier in modifiers:
+                attribute = str(modifier["attribute"]).upper()
+                key = str(modifier["id"])
+                amount = java_double(modifier["amount"])
+                operation = OPERATIONS[str(modifier["operation"])]
+                entries.append(
+                    "java.util.Map.entry(org.bukkit.attribute.Attribute."
+                    f"{attribute}, new org.bukkit.attribute.AttributeModifier("
+                    f"org.bukkit.NamespacedKey.minecraft(\"{key}\"), {amount}, "
+                    f"org.bukkit.attribute.AttributeModifier.Operation.{operation}, "
+                    "org.bukkit.inventory.EquipmentSlotGroup.ANY))"
+                )
+            attributes = "java.util.Map.ofEntries(" + ", ".join(entries) + ")"
+        else:
+            attributes = "java.util.Map.of()"
+        legacy_name = (
+            LEGACY_NAMES.get(name, name.upper())
+            if int(effect["id"]) < 33
+            else f"minecraft:{name}"
+        )
+        paper_id = int(effect["id"]) + 1
+        lines += [
+            f"    static final PotionEffectType {constant} = new FotonPotionEffectType(",
+            f'        {paper_id}, "{name}", "{legacy_name}",',
+            f"        PotionEffectTypeCategory.{effect['category']}, {effect['color']}, {attributes});",
+        ]
+
+    lines += [
+        "",
+        "    static final PotionEffectType[] VALUES = {",
+        "        " + ", ".join(constants),
+        "    };",
+        "    static final java.util.Map<org.bukkit.NamespacedKey, PotionEffectType> BY_KEY;",
+        "    static final java.util.Map<Integer, PotionEffectType> BY_ID;",
+        "",
+        "    static {",
+        "        java.util.Map<org.bukkit.NamespacedKey, PotionEffectType> byKey =",
+        "            new java.util.LinkedHashMap<>();",
+        "        java.util.Map<Integer, PotionEffectType> byId = new java.util.LinkedHashMap<>();",
+        "        for (PotionEffectType value : VALUES) {",
+        "            byKey.put(value.getKey(), value);",
+        "            byId.put(value.getId(), value);",
+        "        }",
+        "        BY_KEY = java.util.Collections.unmodifiableMap(byKey);",
+        "        BY_ID = java.util.Collections.unmodifiableMap(byId);",
+        "    }",
+        "",
+        "    private FotonPotionEffectTypes() {}",
+        "}",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def main() -> None:
+    if len(sys.argv) != 3:
+        raise SystemExit("usage: gen-potion-effect-type.py MOB_EFFECTS_JSON OUTPUT_ROOT")
+    effects = load_effects(Path(sys.argv[1]))
+    destination = Path(sys.argv[2]) / "org/bukkit/potion/PotionEffectType.java"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(render(effects), encoding="utf-8")
+    print(f"generated {len(effects)} potion effect types")
+
+
+if __name__ == "__main__":
+    main()

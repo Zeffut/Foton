@@ -13,7 +13,8 @@ use tokio::{spawn, sync::oneshot, task::yield_now, time::sleep};
 use uuid::Uuid;
 
 use crate::behavior::init_behaviors;
-use crate::block_entity::init_block_entities;
+use crate::block_entity::entities::BrewingStandBlockEntity;
+use crate::block_entity::{SharedBlockEntity, init_block_entities};
 use crate::chunk::chunk_ticket_manager::{ChunkTicket, ChunkTicketLevel};
 use crate::entity::{
     ENTITIES, EntityBaseSaveData, EntityFireFreezeState, EntityLoadRequest, Mob, init_entities,
@@ -708,6 +709,70 @@ fn breaking_a_chest_scatters_what_it_held() {
         dropped.iter().any(|key| key == "minecraft:diamond"),
         "breaking a chest must scatter its contents, dropped: {dropped:?}"
     );
+}
+
+#[test]
+fn conditional_block_entity_replacement_installs_the_exact_prepared_instance() {
+    init_vanilla_registry();
+    init_behaviors();
+    init_block_entities();
+    let world = fresh_test_world("conditional_block_entity_replacement");
+    let pos = BlockPos::new(8, 64, 8);
+    insert_ready_full_chunk(&world, ChunkPos::from_block_pos(pos));
+    let dirt = vanilla_blocks::DIRT.default_state();
+    let brewing = vanilla_blocks::BREWING_STAND.default_state();
+    assert!(world.set_block(pos, dirt, UpdateFlags::UPDATE_NONE));
+    let replacement: SharedBlockEntity = Arc::new(BrewingStandBlockEntity::new(
+        Arc::downgrade(&world),
+        pos,
+        brewing,
+    ));
+
+    assert!(world.replace_block_with_entity_if_unchanged(
+        pos,
+        dirt,
+        None,
+        brewing,
+        Arc::clone(&replacement),
+        UpdateFlags::UPDATE_NONE,
+    ));
+
+    assert_eq!(world.get_block_state(pos), brewing);
+    assert!(
+        world
+            .get_block_entity(pos)
+            .is_some_and(|installed| Arc::ptr_eq(&installed, &replacement))
+    );
+}
+
+#[test]
+fn conditional_block_entity_replacement_failure_leaves_state_and_owner_untouched() {
+    init_vanilla_registry();
+    init_behaviors();
+    init_block_entities();
+    let world = fresh_test_world("conditional_block_entity_replacement_failure");
+    let pos = BlockPos::new(8, 64, 8);
+    insert_ready_full_chunk(&world, ChunkPos::from_block_pos(pos));
+    let dirt = vanilla_blocks::DIRT.default_state();
+    let brewing = vanilla_blocks::BREWING_STAND.default_state();
+    assert!(world.set_block(pos, dirt, UpdateFlags::UPDATE_NONE));
+    let invalid: SharedBlockEntity = Arc::new(BrewingStandBlockEntity::new(
+        Arc::downgrade(&world),
+        pos,
+        brewing,
+    ));
+
+    assert!(!world.replace_block_with_entity_if_unchanged(
+        pos,
+        dirt,
+        None,
+        dirt,
+        invalid,
+        UpdateFlags::UPDATE_NONE,
+    ));
+
+    assert_eq!(world.get_block_state(pos), dirt);
+    assert!(world.get_block_entity(pos).is_none());
 }
 #[test]
 fn keep_spawn_in_memory_toggle_updates_world_state() {

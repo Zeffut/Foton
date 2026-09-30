@@ -4,6 +4,7 @@ use super::{
     collection_field_nbt, decode_optional, hash_entries, hash_optional_collection_field,
     owned_string, push_hash_entry,
 };
+use foton_utils::text::from_nbt as decode_text_nbt;
 
 /// Predicate for one writable-book page.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,7 +102,7 @@ impl WrittenBookPagePredicate {
     }
 
     fn from_nbt_value(tag: &NbtTag) -> Option<Self> {
-        TextComponent::from_nbt(tag).map(Self)
+        decode_text_nbt(tag).map(Self)
     }
 
     fn to_nbt_value(&self) -> NbtTag {

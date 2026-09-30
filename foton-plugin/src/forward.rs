@@ -16,6 +16,7 @@ use crate::natives::describe_slot;
 use crate::natives::parse_slot;
 use crate::relay::{self, component};
 use foton_core::entity::Entity as _;
+use foton_core::entity::PluginSpawnReason;
 use foton_core::entity::conversion::ConversionReason;
 use foton_core::event::AsyncTabCompleteEvent;
 use foton_core::event::EntityTargetEvent;
@@ -25,23 +26,23 @@ use foton_core::event::{
     AsyncPlayerPreLoginEvent, AsyncPlayerPreLoginResult, BlockBurnEvent, BlockDamageEvent,
     BlockDispenseEvent, BlockExpEvent, BlockExplodeEvent, BlockFadeEvent, BlockFertilizeEvent,
     BlockFromToEvent, BlockGrowEvent, BlockIgniteEvent, BlockPlaceEvent, BlockPreDispenseEvent,
-    BlockSpreadEvent, ChunkLoadEvent, ChunkPopulateEvent, ChunkUnloadEvent, CommandEvent,
-    CrafterCraftEvent, CreatureSpawnEvent, EntityChangeBlockEvent, EntityDamageByEntityEvent,
-    EntityDeathEvent, EntityExplodeEvent, EntityMountEvent, EntityPickupItemEvent,
-    EntityPortalEvent, EntityPushedByEntityAttackEvent, EntityRegainHealthEvent,
-    EntityRemoveFromWorldEvent, EntityResurrectEvent, EntityTransformEvent, ExpBottleEvent,
-    FoodLevelChangeEvent, HangingBreakEvent, HangingPlaceEvent, InventoryClickEvent,
-    InventoryCloseEvent, InventoryDragEvent, InventoryOpenEvent, ItemSpawnEvent, LeavesDecayEvent,
-    LightningStrikeEvent, PistonEvent, PlayerAdvancementCriterionGrantEvent,
-    PlayerAdvancementDoneEvent, PlayerBucketEmptyEvent, PlayerBucketFillEvent, PlayerChatEvent,
-    PlayerClientLoadedWorldEvent, PlayerCommandPreprocessEvent, PlayerCustomPayloadEvent,
-    PlayerDeathEvent, PlayerDropItemEvent, PlayerFishEvent, PlayerInteractEntityEvent,
-    PlayerInteractEvent, PlayerItemBreakEvent, PlayerJoinEvent, PlayerLocaleChangeEvent,
-    PlayerLoginAbortEvent, PlayerLoginEvent, PlayerMoveEvent, PlayerOpenSignCause,
-    PlayerOpenSignEvent, PlayerPortalEvent, PlayerQuitEvent, PlayerRespawnEvent,
-    PlayerSpawnLocationEvent, PlayerTakeLecternBookEvent, PortalCreateEvent, PreCreatureSpawnEvent,
-    PrepareItemCraftEvent, ProjectileLaunchEvent, ServerTickEvent, SignChangeEvent,
-    ThunderChangeEvent, WeatherChangeEvent,
+    BlockSpreadEvent, BrewEvent, ChunkLoadEvent, ChunkPopulateEvent, ChunkUnloadEvent,
+    CommandEvent, CrafterCraftEvent, CreatureSpawnEvent, EntityChangeBlockEvent,
+    EntityDamageByEntityEvent, EntityDeathEvent, EntityExplodeEvent, EntityMountEvent,
+    EntityPickupItemEvent, EntityPortalEvent, EntityPushedByEntityAttackEvent,
+    EntityRegainHealthEvent, EntityRemoveFromWorldEvent, EntityResurrectEvent,
+    EntityTransformEvent, ExpBottleEvent, FoodLevelChangeEvent, HangingBreakEvent,
+    HangingPlaceEvent, InventoryClickEvent, InventoryCloseEvent, InventoryDragEvent,
+    InventoryOpenEvent, ItemSpawnEvent, LeavesDecayEvent, LightningStrikeEvent, PistonEvent,
+    PlayerAdvancementCriterionGrantEvent, PlayerAdvancementDoneEvent, PlayerBucketEmptyEvent,
+    PlayerBucketFillEvent, PlayerChatEvent, PlayerClientLoadedWorldEvent,
+    PlayerCommandPreprocessEvent, PlayerCustomPayloadEvent, PlayerDeathEvent, PlayerDropItemEvent,
+    PlayerFishEvent, PlayerInteractEntityEvent, PlayerInteractEvent, PlayerItemBreakEvent,
+    PlayerJoinEvent, PlayerLocaleChangeEvent, PlayerLoginAbortEvent, PlayerLoginEvent,
+    PlayerMoveEvent, PlayerOpenSignCause, PlayerOpenSignEvent, PlayerPortalEvent, PlayerQuitEvent,
+    PlayerRespawnEvent, PlayerSpawnLocationEvent, PlayerTakeLecternBookEvent, PortalCreateEvent,
+    PreCreatureSpawnEvent, PrepareItemCraftEvent, ProjectileLaunchEvent, ServerTickEvent,
+    SignChangeEvent, ThunderChangeEvent, WeatherChangeEvent,
 };
 use foton_core::event::{
     PlayerChangedWorldEvent, PlayerCommandSendEvent, PlayerGameModeChangeEvent, PlayerItemHeldEvent,
@@ -297,6 +298,33 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
         if let Some(remaining) = remaining {
             event.set_remaining_items(remaining);
         }
+    });
+
+    let jvm = Arc::clone(&vm);
+    events.on::<BrewEvent, _>(owner(), move |event| {
+        let contents = event
+            .contents()
+            .iter()
+            .map(natives::describe_slot)
+            .collect::<Vec<_>>()
+            .join("\u{001e}");
+        let results = event
+            .results()
+            .iter()
+            .map(natives::describe_slot)
+            .collect::<Vec<_>>()
+            .join("\u{001e}");
+        let Some(answer) = brew_call(
+            &jvm,
+            event.world(),
+            event.position(),
+            &contents,
+            &results,
+            event.fuel_level(),
+        ) else {
+            return;
+        };
+        apply_brew_reply(event, &answer);
     });
 
     let jvm = Arc::clone(&vm);
@@ -559,7 +587,9 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
 
     let jvm = Arc::clone(&vm);
     events.on::<EntityRemoveFromWorldEvent, _>(owner(), move |event| {
-        remove_call(&jvm, &event.entity().to_string());
+        let entity = event.entity();
+        remove_call(&jvm, &entity.to_string());
+        natives::remove_projectile_source(&entity);
     });
 
     let jvm = Arc::clone(&vm);
@@ -1521,6 +1551,73 @@ fn crafter_craft_call(
     })
 }
 
+fn apply_brew_reply(event: &mut BrewEvent, answer: &str) {
+    let mut fields = answer.splitn(3, '\u{001f}');
+    let cancelled = fields.next() == Some("1");
+    event.set_cancelled(cancelled);
+    if cancelled {
+        return;
+    }
+    let Some(contents) = fields.next() else {
+        return;
+    };
+    let Some(results) = fields.next() else {
+        return;
+    };
+    let contents = contents
+        .split('\u{001e}')
+        .map(natives::parse_slot)
+        .collect::<Option<Vec<_>>>();
+    let results = if results.is_empty() {
+        Some(Vec::new())
+    } else {
+        results
+            .split('\u{001e}')
+            .map(natives::parse_slot)
+            .collect::<Option<Vec<_>>>()
+    };
+    if let (Some(contents), Some(results)) = (contents, results) {
+        *event.contents_mut() = contents;
+        *event.results_mut() = results;
+    }
+}
+
+fn brew_call(
+    vm: &JavaVM,
+    world: &str,
+    position: BlockPos,
+    contents: &str,
+    results: &str,
+    fuel_level: i32,
+) -> Option<String> {
+    let mut env = BridgeEnv::attach(vm)?;
+    let world = env.new_string(world).ok()?;
+    let contents = env.new_string(contents).ok()?;
+    let results = env.new_string(results).ok()?;
+    env.call_static_method(
+        BRIDGE,
+        "fireBrew",
+        "(Ljava/lang/String;IIILjava/lang/String;Ljava/lang/String;I)Ljava/lang/String;",
+        &[
+            JValue::Object(&world),
+            JValue::from(position.x()),
+            JValue::from(position.y()),
+            JValue::from(position.z()),
+            JValue::Object(&contents),
+            JValue::Object(&results),
+            JValue::from(fuel_level),
+        ],
+    )
+    .ok()?
+    .l()
+    .ok()
+    .and_then(|value| {
+        let binding = JString::from(value);
+        let text = env.get_string(&binding).ok()?;
+        Some(text.to_string_lossy().into_owned())
+    })
+}
+
 fn inventory_click_call(
     vm: &JavaVM,
     player_uuid: &str,
@@ -1818,7 +1915,7 @@ fn pre_creature_spawn_call(
     y: f64,
     z: f64,
     entity_type: &str,
-    reason: &str,
+    reason: PluginSpawnReason,
 ) -> bool {
     let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
@@ -1829,13 +1926,13 @@ fn pre_creature_spawn_call(
     let Ok(entity_type) = env.new_string(entity_type) else {
         return true;
     };
-    let Ok(reason) = env.new_string(reason) else {
+    let Ok(reason) = env.new_string(reason.as_str()) else {
         return true;
     };
     env.call_static_method(
         BRIDGE,
         "firePreCreatureSpawn",
-        "(Ljava/lang/String;DDDDLjava/lang/String;Ljava/lang/String;)Z",
+        "(Ljava/lang/String;DDDLjava/lang/String;Ljava/lang/String;)Z",
         &[
             JValue::Object(&world),
             JValue::Double(x),
@@ -1855,7 +1952,7 @@ fn creature_spawn_call(
     x: f64,
     y: f64,
     z: f64,
-    reason: &str,
+    reason: PluginSpawnReason,
 ) -> bool {
     let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
@@ -1866,13 +1963,13 @@ fn creature_spawn_call(
     let Ok(world) = env.new_string(world) else {
         return true;
     };
-    let Ok(reason) = env.new_string(reason) else {
+    let Ok(reason) = env.new_string(reason.as_str()) else {
         return true;
     };
     env.call_static_method(
         BRIDGE,
         "fireCreatureSpawn",
-        "(Ljava/lang/String;Ljava/lang/String;DDDDLjava/lang/String;)Z",
+        "(Ljava/lang/String;Ljava/lang/String;DDDLjava/lang/String;)Z",
         &[
             JValue::Object(&entity),
             JValue::Object(&world),
@@ -3027,17 +3124,7 @@ fn transform_call(
     let Ok(transformed) = env.new_string(transformed.to_string()) else {
         return true;
     };
-    let reason = match reason {
-        ConversionReason::Cured => "CURED",
-        ConversionReason::Drowned => "DROWNED",
-        ConversionReason::Frozen => "FROZEN",
-        ConversionReason::Infection => "INFECTION",
-        ConversionReason::Lightning => "LIGHTNING",
-        ConversionReason::PiglinZombification => "PIGLIN_ZOMBIFICATION",
-        ConversionReason::Poison => "POISON",
-        ConversionReason::Split => "SPLIT",
-        ConversionReason::Unknown => "UNKNOWN",
-    };
+    let reason = conversion_reason_name(reason);
     let Ok(reason) = env.new_string(reason) else {
         return true;
     };
@@ -3054,6 +3141,21 @@ fn transform_call(
     .ok()
     .and_then(|value| value.z().ok())
     .unwrap_or(true)
+}
+
+const fn conversion_reason_name(reason: ConversionReason) -> &'static str {
+    match reason {
+        ConversionReason::Cured => "CURED",
+        ConversionReason::Drowned => "DROWNED",
+        ConversionReason::Frozen => "FROZEN",
+        ConversionReason::Infection => "INFECTION",
+        ConversionReason::Lightning => "LIGHTNING",
+        ConversionReason::Sheared => "SHEARED",
+        ConversionReason::PiglinZombification => "PIGLIN_ZOMBIFIED",
+        ConversionReason::Poison => "METAMORPHOSIS",
+        ConversionReason::Split => "SPLIT",
+        ConversionReason::Unknown => "UNKNOWN",
+    }
 }
 
 fn pre_login_call(
@@ -3643,4 +3745,36 @@ fn plugin_message_call(vm: &JavaVM, uuid: &str, channel: &str, payload: &[u8]) {
             JValue::Object(&payload),
         ],
     );
+}
+
+#[cfg(test)]
+pub(crate) mod spawn_bridge_tests;
+
+#[cfg(test)]
+mod brewing_union_tests {
+    use super::*;
+    use foton_registry::{init_vanilla_registry, item_stack::ItemStack, vanilla_items};
+
+    #[test]
+    fn cancellation_survives_undecodable_inventory_and_results() {
+        init_vanilla_registry();
+        let sugar = ItemStack::new(&vanilla_items::SUGAR);
+        let mut event = BrewEvent::new(
+            "minecraft:overworld".into(),
+            BlockPos::new(0, 64, 0),
+            vec![sugar.clone(); 5],
+            vec![sugar.clone()],
+            7,
+        );
+        apply_brew_reply(&mut event, "1\x1fnot-an-item\x1fnot-an-item");
+        assert!(event.is_cancelled());
+        assert_eq!(event.contents().len(), 5);
+        assert!(
+            event
+                .contents()
+                .iter()
+                .all(|item| ItemStack::matches(item, &sugar))
+        );
+        assert!(ItemStack::matches(&event.results()[0], &sugar));
+    }
 }

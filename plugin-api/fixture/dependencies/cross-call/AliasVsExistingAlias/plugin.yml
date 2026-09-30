@@ -1,0 +1,4 @@
+name: AliasVsExistingAlias
+version: 1
+main: fixture.dependencies.DependencyPlugins$AliasVsExistingAlias
+provides: [existingalias]

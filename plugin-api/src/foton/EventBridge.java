@@ -7,6 +7,7 @@ import org.bukkit.Location;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.event.inventory.PrepareGrindstoneEvent;
 import org.bukkit.event.inventory.PrepareItemCraftEvent;
+import org.bukkit.event.inventory.BrewEvent;
 import org.bukkit.event.block.CrafterCraftEvent;
 
 import java.lang.reflect.Method;
@@ -391,6 +392,42 @@ public final class EventBridge {
         return out.toString();
     }
 
+    /** Dispatches a completed brew against a detached five-slot snapshot. */
+    public static String fireBrew(String world, int x, int y, int z, String contents,
+            String results, int fuelLevel) {
+        String[] encodedContents = contents == null ? new String[0] : contents.split("\u001e", -1);
+        ItemStack[] slots = new ItemStack[5];
+        for (int slot = 0; slot < slots.length; slot++) {
+            slots[slot] = FotonInventory.decode(
+                slot < encodedContents.length ? encodedContents[slot] : "");
+        }
+        FotonBlock block = new FotonBlock(new FotonWorld(world), x, y, z);
+        FotonBrewingStand holder = FotonBrewingStand.eventSnapshot(block, slots, fuelLevel);
+        FotonBrewerInventory inventory = holder.getInventory();
+        java.util.List<ItemStack> mutableResults = new java.util.ArrayList<>();
+        if (results != null && !results.isEmpty()) {
+            for (String encoded : results.split("\u001e", -1)) {
+                mutableResults.add(FotonInventory.decode(encoded));
+            }
+        }
+        BrewEvent event = new BrewEvent(block, inventory, mutableResults, fuelLevel);
+        dispatch(event);
+
+        StringBuilder out = new StringBuilder(event.isCancelled() ? "1" : "0");
+        out.append('\u001f');
+        ItemStack[] changedContents = inventory.getContents();
+        for (int slot = 0; slot < changedContents.length; slot++) {
+            if (slot > 0) out.append('\u001e');
+            out.append(FotonInventory.encode(changedContents[slot]));
+        }
+        out.append('\u001f');
+        for (int slot = 0; slot < event.getResults().size(); slot++) {
+            if (slot > 0) out.append('\u001e');
+            out.append(FotonInventory.encode(event.getResults().get(slot)));
+        }
+        return out.toString();
+    }
+
     public static boolean fireInventoryClick(String uuid, String item, String click) {
         return fireInventoryClick(uuid, item, "", click, -1, "", "");
     }
@@ -499,18 +536,18 @@ public final class EventBridge {
         return !event.isCancelled();
     }
 
-    private static org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason spawnReason(String reason) {
+    static org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason spawnReason(String reason) {
         if (reason == null) return org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.DEFAULT;
         try {
             return org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.valueOf(
                 reason.toUpperCase(java.util.Locale.ROOT));
         } catch (IllegalArgumentException error) {
-            return org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.CUSTOM;
+            return org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.DEFAULT;
         }
     }
 
     public static boolean firePreCreatureSpawn(String world, double x, double y, double z, String type, String reason) {
-        org.bukkit.entity.EntityType entityType = org.bukkit.entity.EntityType.fromName(type);
+        org.bukkit.entity.EntityType entityType = org.bukkit.Registry.ENTITY_TYPE.get(org.bukkit.NamespacedKey.fromString(type));
         if (entityType == null) return true;
         org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason spawnReason = spawnReason(reason);
         com.destroystokyo.paper.event.entity.PreCreatureSpawnEvent event =
@@ -1225,6 +1262,14 @@ public final class EventBridge {
     /** How many distinct event-type keys are retained. For lifecycle diagnostics. */
     public static int handlerTypeCount() {
         return handlers.size();
+    }
+
+    static int eventTypeCount(String className) {
+        int count = 0;
+        for (Class<?> event : handlers.keySet()) {
+            if (event.getName().equals(className)) count++;
+        }
+        return count;
     }
 
     /** One handler, however the plugin gave it to us.

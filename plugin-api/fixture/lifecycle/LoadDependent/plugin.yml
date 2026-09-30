@@ -1,0 +1,4 @@
+name: LoadDependent
+version: 1
+main: example.LoadDependentPlugin
+depend: [FailingLoad]

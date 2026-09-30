@@ -176,6 +176,8 @@ impl WrappedGoal {
 
 pub struct GoalSelector {
     available_goals: Vec<WrappedGoal>,
+    mob_disabled_controls: GoalControls,
+    externally_disabled_controls: GoalControls,
     disabled_controls: GoalControls,
 }
 
@@ -184,6 +186,8 @@ impl GoalSelector {
     pub const fn new() -> Self {
         Self {
             available_goals: Vec::new(),
+            mob_disabled_controls: GoalControls::EMPTY,
+            externally_disabled_controls: GoalControls::EMPTY,
             disabled_controls: GoalControls::EMPTY,
         }
     }
@@ -263,11 +267,13 @@ impl GoalSelector {
     }
 
     pub const fn disable_control(&mut self, control: GoalControl) {
-        self.disabled_controls.insert(control);
+        self.externally_disabled_controls.insert(control);
+        self.refresh_disabled_controls();
     }
 
     pub const fn enable_control(&mut self, control: GoalControl) {
-        self.disabled_controls.remove(control);
+        self.externally_disabled_controls.remove(control);
+        self.refresh_disabled_controls();
     }
 
     pub const fn set_control(&mut self, control: GoalControl, enabled: bool) {
@@ -276,6 +282,51 @@ impl GoalSelector {
         } else {
             self.disable_control(control);
         }
+    }
+
+    /// Replaces the controls disabled by `Mob.updateControlFlags`.
+    ///
+    /// Transient rider controls remain separate from API-owned controls, so a
+    /// per-tick mob update cannot undo a persistent external setting.
+    pub const fn set_mob_controls(&mut self, enabled_controls: GoalControls) {
+        self.mob_disabled_controls = GoalControls(
+            (GoalControls::MOVE.0
+                | GoalControls::JUMP.0
+                | GoalControls::LOOK.0
+                | GoalControls::TARGET.0)
+                & !enabled_controls.0,
+        );
+        self.refresh_disabled_controls();
+    }
+
+    /// Enables or disables an external set of controls and immediately stops
+    /// running goals that use newly disabled controls.
+    pub fn set_external_controls(
+        &mut self,
+        mob: &dyn PathfinderMob,
+        controls: GoalControls,
+        enabled: bool,
+    ) {
+        for control in controls.iter() {
+            if enabled {
+                self.externally_disabled_controls.remove(control);
+            } else {
+                self.externally_disabled_controls.insert(control);
+            }
+        }
+        self.refresh_disabled_controls();
+        if !enabled {
+            for goal in &mut self.available_goals {
+                if goal.controls().intersects(controls) {
+                    goal.stop(mob);
+                }
+            }
+        }
+    }
+
+    const fn refresh_disabled_controls(&mut self) {
+        self.disabled_controls =
+            GoalControls(self.mob_disabled_controls.0 | self.externally_disabled_controls.0);
     }
 
     #[must_use]
@@ -365,6 +416,11 @@ impl fmt::Debug for GoalSelector {
             .field("available_goals", &self.available_goals.len())
             .field("running_goals", &self.running_goal_count())
             .field("disabled_controls", &self.disabled_controls)
+            .field("mob_disabled_controls", &self.mob_disabled_controls)
+            .field(
+                "externally_disabled_controls",
+                &self.externally_disabled_controls,
+            )
             .finish()
     }
 }

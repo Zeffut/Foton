@@ -1,8 +1,13 @@
 //! Non-empty item stack templates used by recursive Vanilla codecs.
 
+use crate::data_components::PersistentValidationScope;
+use foton_utils::serial::budget;
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
 use std::cell::Cell;
 use std::io::{Cursor, Error, Result, Write};
 use std::str::FromStr;
+use std::sync::OnceLock;
 
 use foton_utils::codec::VarInt;
 use foton_utils::hash::{ComponentHasher, HashComponent, HashEntry, sort_map_entries};
@@ -29,10 +34,10 @@ thread_local! {
     static TEMPLATE_CODEC_DEPTH: Cell<usize> = const { Cell::new(0) };
 }
 
-struct TemplateDepthGuard;
+pub(crate) struct TemplateDepthGuard;
 
 impl TemplateDepthGuard {
-    fn enter() -> Result<Self> {
+    pub(crate) fn enter() -> Result<Self> {
         TEMPLATE_CODEC_DEPTH.with(|depth| {
             let current = depth.get();
             if current >= MAX_TEMPLATE_CODEC_DEPTH {
@@ -53,12 +58,18 @@ impl Drop for TemplateDepthGuard {
 }
 
 /// A persistable, non-empty item identity, count, and component patch.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct ItemStackTemplate {
     item: ItemRef,
     count: i32,
     components: DataComponentPatch,
-    components_hash: Option<i32>,
+    components_hash: OnceLock<Option<i32>>,
+}
+
+impl PartialEq for ItemStackTemplate {
+    fn eq(&self, other: &Self) -> bool {
+        self.item == other.item && self.count == other.count && self.components == other.components
+    }
 }
 
 impl ItemStackTemplate {
@@ -76,7 +87,7 @@ impl ItemStackTemplate {
             item,
             count: 1,
             components: DataComponentPatch::new(),
-            components_hash: Some(empty_map_hash()),
+            components_hash: OnceLock::from(Some(empty_map_hash())),
         }
     }
 
@@ -96,13 +107,24 @@ impl ItemStackTemplate {
                 Self::MAX_COUNT
             )));
         }
+        if budget::is_active() {
+            if !PersistentValidationScope::is_deferred() {
+                components.validate_borrowed()?;
+            }
+            return Ok(Self {
+                item,
+                count,
+                components,
+                components_hash: OnceLock::new(),
+            });
+        }
         components.try_to_nbt_tag_ref()?;
         let components_hash = components.compute_persistent_hash()?;
         Ok(Self {
             item,
             count,
             components,
-            components_hash: Some(components_hash),
+            components_hash: OnceLock::from(Some(components_hash)),
         })
     }
 
@@ -115,10 +137,14 @@ impl ItemStackTemplate {
     }
 
     pub(crate) fn validate_persistent_encoding(&self) -> Result<()> {
+        let _depth = TemplateDepthGuard::enter()?;
         if self.item == &*vanilla_items::AIR
             || !(Self::MIN_COUNT..=Self::MAX_COUNT).contains(&self.count)
         {
             return Err(Error::other("Item stack template is not persistable"));
+        }
+        if budget::is_active() {
+            return self.components.validate_borrowed();
         }
         self.components.try_to_nbt_tag_ref().map(|_| ())
     }
@@ -151,10 +177,10 @@ impl ItemStackTemplate {
 
     /// Creates the Vanilla hover event for this item template.
     pub fn to_hover_event(&self) -> Result<HoverEvent> {
-        let components = if self.components.is_empty() {
-            None
-        } else {
+        let components = if self.components.has_persistent_entries() {
             Some(EncodedNbt::encode(&self.components)?)
+        } else {
+            None
         };
         Ok(HoverEvent::show_item(
             self.item.key.to_string(),
@@ -169,7 +195,7 @@ impl ItemStackTemplate {
         if self.count != 1 {
             compound.insert("count", self.count);
         }
-        if !self.components.is_empty() {
+        if self.components.has_persistent_entries() {
             compound.insert("components", self.components.to_nbt_tag_ref());
         }
         NbtTag::Compound(compound)
@@ -192,10 +218,36 @@ impl ItemStackTemplate {
             Some(count) => count.codec_i32()?,
             None => 1,
         };
+        let scope = PersistentValidationScope::enter();
         let components = match compound.get("components") {
             Some(components) => DataComponentPatch::from_nbt_tag(components)?,
             None => DataComponentPatch::new(),
         };
+        drop(scope);
+        Self::try_with_count_and_patch(item, count, components).ok()
+    }
+
+    pub(crate) fn from_owned_nbt(tag: &NbtTag) -> Option<Self> {
+        if let Some(value) = tag.string() {
+            return Self::from_nbt_identifier(&value.to_str());
+        }
+        Self::from_owned_compound(tag.compound()?)
+    }
+
+    pub(crate) fn from_owned_compound(compound: &NbtCompound) -> Option<Self> {
+        let _depth = TemplateDepthGuard::enter().ok()?;
+        let key = Identifier::from_str(&compound.get("id")?.string()?.to_str()).ok()?;
+        let item = REGISTRY.items.by_key(&key)?;
+        let count = match compound.get("count") {
+            Some(count) => count.codec_i32()?,
+            None => 1,
+        };
+        let scope = PersistentValidationScope::enter();
+        let components = match compound.get("components") {
+            Some(components) => DataComponentPatch::from_owned_nbt(components)?,
+            None => DataComponentPatch::new(),
+        };
+        drop(scope);
         Self::try_with_count_and_patch(item, count, components).ok()
     }
 
@@ -203,7 +255,11 @@ impl ItemStackTemplate {
         if item == &*vanilla_items::AIR || count == 0 {
             return Err(Error::other("Item stack template must be non-empty"));
         }
-        let components_hash = components.compute_persistent_hash().ok();
+        let components_hash = if budget::is_active() {
+            OnceLock::new()
+        } else {
+            OnceLock::from(components.compute_persistent_hash().ok())
+        };
         Ok(Self {
             item,
             count,
@@ -245,6 +301,15 @@ impl WriteTo for ItemStackTemplate {
     }
 }
 
+impl ItemStackTemplate {
+    pub(crate) fn write_bounded(&self, mut writer: &mut dyn NbtWrite) -> Result<()> {
+        let _depth = TemplateDepthGuard::enter()?;
+        VarInt(i32::try_from(self.item.id()).map_err(Error::other)?).write(&mut writer)?;
+        VarInt(self.count).write(&mut writer)?;
+        self.components.write_bounded(writer)
+    }
+}
+
 impl ReadFrom for ItemStackTemplate {
     fn read(data: &mut Cursor<&[u8]>) -> Result<Self> {
         let _depth = TemplateDepthGuard::enter()?;
@@ -264,6 +329,28 @@ impl ReadFrom for ItemStackTemplate {
 impl ToNbtTag for ItemStackTemplate {
     fn to_nbt_tag(self) -> NbtTag {
         self.to_nbt_tag_ref()
+    }
+}
+
+impl nbt_encode::NbtEncode for ItemStackTemplate {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+        if self.item == &*vanilla_items::AIR
+            || !(Self::MIN_COUNT..=Self::MAX_COUNT).contains(&self.count)
+        {
+            return Err(Error::other("Item stack template is not persistable"));
+        }
+        field("id", &self.item.key, writer, depth)?;
+        if self.count != 1 {
+            field("count", &self.count, writer, depth)?;
+        }
+        self.components.write_optional_nbt_field(writer, depth)?;
+        end(writer)
     }
 }
 
@@ -290,8 +377,11 @@ impl HashComponent for ItemStackTemplate {
         if self.count != 1 {
             push_hash_entry(&mut entries, "count", self.count.compute_hash());
         }
-        if !self.components.is_empty() {
-            let Some(components_hash) = self.components_hash else {
+        if self.components.has_persistent_entries() {
+            let Some(components_hash) = *self
+                .components_hash
+                .get_or_init(|| self.components.compute_persistent_hash().ok())
+            else {
                 panic!("stream-only item stack template must validate before persistent hashing");
             };
             push_hash_entry(&mut entries, "components", components_hash);

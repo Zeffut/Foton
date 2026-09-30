@@ -1,0 +1,6 @@
+name: ArtifactTraversal
+main: fixture.libraries.MalformedLibraryPlugin
+version: '1.0'
+api-version: '26.2'
+libraries:
+  - example.fixture:..:1.0

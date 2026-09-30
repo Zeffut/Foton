@@ -3,7 +3,7 @@ package foton;
 import java.util.UUID;
 
 /** Live Bukkit view of a Steel goat. */
-public final class FotonGoat extends FotonLivingEntity implements org.bukkit.entity.Goat {
+public final class FotonGoat extends FotonAnimals implements org.bukkit.entity.Goat {
     public FotonGoat(UUID id) { super(id); }
     @Override public boolean isScreaming() { return Native.goatScreaming(getUniqueId().toString()); }
     @Override public void setScreaming(boolean screaming) { Native.setGoatScreaming(getUniqueId().toString(), screaming); }

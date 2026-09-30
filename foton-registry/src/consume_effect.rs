@@ -1,6 +1,10 @@
 //! Registry-dispatched effects applied after consuming or saving an item from death.
 
+use foton_utils::serial::budget;
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
 use std::fmt::{self, Debug, Formatter};
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 
 use foton_utils::codec::VarInt;
@@ -24,7 +28,7 @@ pub trait ConsumeEffectCodec:
     fn read_fields(compound: &NbtCompound) -> Option<Self>;
     fn write_fields(&self, compound: &mut NbtCompound);
     fn read_network(data: &mut Cursor<&[u8]>) -> Result<Self>;
-    fn write_network(&self, writer: &mut Vec<u8>) -> Result<()>;
+    fn write_network(&self, writer: &mut dyn Write) -> Result<()>;
     fn hash_fields(&self, entries: &mut Vec<HashEntry>);
 }
 
@@ -46,7 +50,7 @@ impl<T: ConsumeEffectCodec> ErasedConsumeEffect for T {
 type PersistentReader = fn(&NbtCompound) -> Option<Box<dyn ErasedConsumeEffect>>;
 type PersistentWriter = fn(&dyn ErasedConsumeEffect, &mut NbtCompound);
 type NetworkReader = fn(&mut Cursor<&[u8]>) -> Result<Box<dyn ErasedConsumeEffect>>;
-type NetworkWriter = fn(&dyn ErasedConsumeEffect, &mut Vec<u8>) -> Result<()>;
+type NetworkWriter = fn(&dyn ErasedConsumeEffect, &mut dyn Write) -> Result<()>;
 type FieldsHasher = fn(&dyn ErasedConsumeEffect, &mut Vec<HashEntry>);
 
 /// A registered consume-effect discriminator and its typed codecs.
@@ -160,18 +164,14 @@ impl PartialEq for ConsumeEffectData {
 
 impl WriteTo for ConsumeEffectData {
     fn write(&self, writer: &mut impl Write) -> Result<()> {
-        let id = self.effect_type.try_id().ok_or_else(|| {
-            Error::other(format!(
-                "Unknown consume effect type: {}",
-                self.effect_type.key
-            ))
-        })?;
+        let id = self
+            .effect_type
+            .try_id()
+            .ok_or_else(|| Error::other("Unknown consume effect type"))?;
         let id = i32::try_from(id)
             .map_err(|_| Error::other(format!("Consume effect type id out of range: {id}")))?;
         VarInt(id).write(writer)?;
-        let mut payload = Vec::new();
-        (self.effect_type.network_writer)(self.value.as_ref(), &mut payload)?;
-        writer.write_all(&payload)
+        (self.effect_type.network_writer)(self.value.as_ref(), writer)
     }
 }
 
@@ -320,19 +320,20 @@ impl ConsumeEffectCodec for ApplyStatusEffectsConsumeEffect {
 
     fn read_network(data: &mut Cursor<&[u8]>) -> Result<Self> {
         let count = read_count(data, "mob effect")?;
-        let mut effects = Vec::with_capacity(count.min(65_536));
+        budget::check_collection_input(data, count, 4)?;
+        let mut effects = budget::read_vec(count, count.min(65_536))?;
         for _ in 0..count {
             effects.push(MobEffectInstance::read(data)?);
         }
         Self::new(effects, f32::read(data)?)
     }
 
-    fn write_network(&self, writer: &mut Vec<u8>) -> Result<()> {
-        write_count(self.effects.len(), writer, "mob effect")?;
+    fn write_network(&self, mut writer: &mut dyn Write) -> Result<()> {
+        write_count(self.effects.len(), &mut writer, "mob effect")?;
         for effect in &self.effects {
-            effect.write(writer)?;
+            effect.write(&mut writer)?;
         }
-        self.probability.write(writer)
+        self.probability.write(&mut writer)
     }
 
     fn hash_fields(&self, entries: &mut Vec<HashEntry>) {
@@ -381,8 +382,8 @@ impl ConsumeEffectCodec for RemoveStatusEffectsConsumeEffect {
         Ok(Self::new(RegistryHolderSet::read(data)?))
     }
 
-    fn write_network(&self, writer: &mut Vec<u8>) -> Result<()> {
-        self.effects.write(writer)
+    fn write_network(&self, mut writer: &mut dyn Write) -> Result<()> {
+        self.effects.write(&mut writer)
     }
 
     fn hash_fields(&self, entries: &mut Vec<HashEntry>) {
@@ -410,7 +411,7 @@ impl ConsumeEffectCodec for ClearAllStatusEffectsConsumeEffect {
         Ok(Self)
     }
 
-    fn write_network(&self, _writer: &mut Vec<u8>) -> Result<()> {
+    fn write_network(&self, _writer: &mut dyn Write) -> Result<()> {
         Ok(())
     }
 
@@ -484,8 +485,8 @@ impl ConsumeEffectCodec for TeleportRandomlyConsumeEffect {
         Self::new(f32::read(data)?)
     }
 
-    fn write_network(&self, writer: &mut Vec<u8>) -> Result<()> {
-        self.diameter.write(writer)
+    fn write_network(&self, mut writer: &mut dyn Write) -> Result<()> {
+        self.diameter.write(&mut writer)
     }
 
     fn hash_fields(&self, entries: &mut Vec<HashEntry>) {
@@ -532,8 +533,8 @@ impl ConsumeEffectCodec for PlaySoundConsumeEffect {
         Ok(Self::new(SoundEventHolder::read(data)?))
     }
 
-    fn write_network(&self, writer: &mut Vec<u8>) -> Result<()> {
-        self.sound.write(writer)
+    fn write_network(&self, mut writer: &mut dyn Write) -> Result<()> {
+        self.sound.write(&mut writer)
     }
 
     fn hash_fields(&self, entries: &mut Vec<HashEntry>) {
@@ -603,12 +604,13 @@ fn write_persistent<T: ConsumeEffectCodec>(
 fn read_network<T: ConsumeEffectCodec>(
     data: &mut Cursor<&[u8]>,
 ) -> Result<Box<dyn ErasedConsumeEffect>> {
+    budget::charge::<T>(1)?;
     Ok(Box::new(T::read_network(data)?))
 }
 
 fn write_network<T: ConsumeEffectCodec>(
     value: &dyn ErasedConsumeEffect,
-    writer: &mut Vec<u8>,
+    writer: &mut dyn Write,
 ) -> Result<()> {
     value
         .downcast_ref::<T>()
@@ -664,7 +666,7 @@ fn optional_f32(tag: Option<&NbtTag>, default: f32) -> Option<f32> {
     }
 }
 
-fn write_count(count: usize, writer: &mut Vec<u8>, name: &str) -> Result<()> {
+fn write_count(count: usize, writer: &mut impl Write, name: &str) -> Result<()> {
     let count = i32::try_from(count).map_err(|_| Error::other(format!("{name} list too large")))?;
     VarInt(count).write(writer)
 }
@@ -690,4 +692,37 @@ fn hash_entries(hasher: &mut ComponentHasher, entries: &mut [HashEntry]) {
         hasher.put_raw_bytes(&entry.value_bytes);
     }
     hasher.end_map();
+}
+impl nbt_encode::NbtEncode for ConsumeEffectData {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+        field("type", &self.effect_type.key, writer, depth)?;
+        if let Some(value) = self.downcast_ref::<ApplyStatusEffectsConsumeEffect>() {
+            field("effects", &value.effects, writer, depth)?;
+            if !float_equals(value.probability, 1.0) {
+                field("probability", &value.probability, writer, depth)?;
+            }
+        } else if let Some(value) = self.downcast_ref::<RemoveStatusEffectsConsumeEffect>() {
+            field("effects", &value.effects, writer, depth)?;
+        } else if let Some(value) = self.downcast_ref::<TeleportRandomlyConsumeEffect>() {
+            if !float_equals(
+                value.diameter,
+                TeleportRandomlyConsumeEffect::DEFAULT_DIAMETER,
+            ) {
+                field("diameter", &value.diameter, writer, depth)?;
+            }
+        } else if let Some(value) = self.downcast_ref::<PlaySoundConsumeEffect>() {
+            field("sound", &value.sound, writer, depth)?;
+        } else if self
+            .downcast_ref::<ClearAllStatusEffectsConsumeEffect>()
+            .is_none()
+        {
+            return Err(Error::other("Unsupported consume effect"));
+        }
+        end(writer)
+    }
 }

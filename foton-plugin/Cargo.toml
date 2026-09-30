@@ -28,12 +28,21 @@ libloading = "0.8"
 rustc-hash.workspace = true
 # Adventure components and book pages cross as vanilla JSON text.
 serde.workspace = true
+sha2.workspace = true
 simdnbt.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+foton-registry = { path = "../foton-registry", features = ["codec-test-support"] }
+serde_json.workspace = true
+allocation-counter = "0.8.1"
+foton-core = { path = "../foton-core", features = ["test-support"] }
+foton-utils = { path = "../foton-utils", features = ["codec-test-support"] }
+rayon.workspace = true
 tempfile = "3"
+tokio.workspace = true
+toml.workspace = true
 
 [lints]
 workspace = true

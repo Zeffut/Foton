@@ -5,6 +5,27 @@ blocks it, and how the surface gets bounded. Written 2026-08-31. The measured
 API bridge and event foundation are now under active implementation; the
 staging notes below remain the architecture and coverage baseline.
 
+## Current generated evidence
+
+The final Wave 1 branch produces `build/plugin-compatibility.json` from the
+built API and Java fixture run. It reports four separate measurements:
+
+- binary: 2,478 of 2,487 shared referenced members resolve;
+- ceiling: currently unknown because the legacy 59-plugin ledger lacks the
+  per-plugin class incidence and entrypoint reachability needed to distinguish
+  load-bearing internals from optional adapters; 41 public-API-only and 18
+  internals-reaching plugins remain labeled historical values;
+- events: 96 of 199 listened-for event types have a Java construction path
+  reached by an exact compiled-signature-valid Rust JNI call;
+- fixtures: all eight executable suites discover 49 jars, load 29, enable 27,
+  and reject 22 with phase-specific causal diagnostics.
+
+These numbers cannot be collapsed into a plugin success percentage. Shared
+symbol coverage is not runtime behavior, the legacy 18-plugin NMS/CraftBukkit
+slice is historical rather than a current exact ceiling, event declarations
+count only with an exact Rust JNI triple that resolves against compiled Java,
+and fixtures prove only the paths they execute.
+
 ## What is actually being asked for
 
 A Bukkit-family plugin is a JVM jar compiled against `org.bukkit.*`, discovered
@@ -17,16 +38,14 @@ implemented in terms of Foton's game state.
 Two things have to be said before anything else, because they bound the whole
 problem.
 
-**Thirty percent of them reach past the API.** Measured, not estimated: of the
-fifty-nine most-downloaded server plugins, eighteen reference `net.minecraft.*`
-or a server implementation's internals. Those cannot ever work here — the
-classes they reach for do not exist, and making them exist would mean shipping
-Mojang's server inside Foton.
-
-So the honest ceiling on this whole effort is around seventy percent of the
-popular ecosystem, before a single line is written. That number belongs beside
-every coverage claim this project ever makes about plugins, the way `PARITY.md`
-keeps its caveat beside its percentages.
+**The original scan found eighteen internals-reaching plugins.** That is useful
+historical evidence, but the old ledger retained neither class-to-plugin
+incidence nor whether those classes were reachable from a plugin entrypoint. An
+optional NMS adapter must not make the whole plugin unreachable. The current
+ceiling is therefore unknown until the original corpus is regenerated with the
+v2 ledger. References that are entrypoint-reachable still cannot work here: the
+classes do not exist, and making them exist would mean shipping Mojang's server
+inside Foton.
 
 **"Compatibility" is a spectrum, not a state.** Nobody will implement all of
 `org.bukkit` — it is on the order of fifteen hundred public types before Paper's
@@ -142,9 +161,12 @@ What this produces, beyond a work queue:
 - **A per-plugin verdict.** For any given jar, the references it makes are known
   and so is which of them exist. "This plugin needs eleven things Foton does not
   have, and here they are" is answerable before the plugin is ever run.
-- **An early, quantified answer to the NMS question.** The proportion of the
-  corpus that reaches past the public API is measurable rather than asserted,
-  and it is the honest ceiling on how much of the ecosystem can ever work.
+- **An early, quantified answer to the NMS question.** A v2 ledger records each
+  plugin's entrypoints, reachable classes and optional adapters. Only
+  load-bearing internal references lower the current ceiling. Any unreadable
+  class makes that plugin's reachability evidence unknown, preserves the class
+  entry and parser reason, and prevents an incomplete ledger from publishing a
+  current ceiling.
 
 This is the repository's existing discipline — nothing is guessed, facts are
 generated, coverage is published with its caveats — applied to a second
@@ -159,8 +181,8 @@ what the API is.
 `dev/plugin_api_usage.py` reads the constant pool of every class in every jar of
 a corpus and ranks what it finds; `dev/plugin-api-usage.json` is the committed
 ledger from a first run over the fifty-nine most-downloaded server plugins.
-6,345 distinct API members are referenced; 2,509 of them by more than one
-plugin.
+5,973 distinct API members are referenced; 2,487 of them by more than one
+plugin. These are the counts emitted from the current committed ledger.
 
 Three findings change the plan that was written above them.
 
@@ -224,11 +246,11 @@ kind of decision:
   `AGENTS.md` forbids.
 
 **What the number does not say.** 99% of the ledger is not 99% of the
-ecosystem. The ledger is 59 plugins, and eighteen of them reach past the API
-into server internals -- so the ceiling this document opens with, around seventy
-percent, still stands and is unaffected by anything above. Moving past the
-ledger needs a *larger corpus*, which means fetching more plugin jars and
-re-running `--write`; it does not need more implementation against this one.
+ecosystem. The 59-plugin legacy ledger historically classified eighteen as
+internals-reaching, but cannot prove whether those references are load-bearing.
+Its current ceiling is intentionally `null`. Re-running `--write` over the
+original corpus produces v2 per-plugin incidence and reachability evidence; a
+larger corpus is still needed to say anything about broader ecosystem coverage.
 
 **And a resolving member is not a working one.** Some of what was added answers
 honestly and does nothing: `World.setBiome` records no biome, `Bukkit.createMap`
@@ -261,11 +283,11 @@ thread affinity, and then the API surface, publishing coverage as it goes.
 
 ## What this costs, measured
 
-The question "how much of the ecosystem runs" now has a curve rather than an
-opinion. `dev/plugin_api_usage.py --write` computes it and
-`dev/plugin-api-usage.json` carries it.
+The legacy scan produced the following historical symbol-coverage curve.
+`dev/plugin_api_usage.py --write` now emits a versioned ledger with the
+incidence and reachability needed to regenerate it honestly.
 
-| API members implemented | Plugins that run whole | Median plugin covered |
+| API members implemented | Plugins whose references are covered | Median plugin covered |
 |---|---|---|
 | 100 | 1 / 59 | 37 % |
 | 500 | 1 / 59 | 76 % |
@@ -286,10 +308,9 @@ it without running the plugins.
 
 Three things follow.
 
-**Getting past half the ecosystem costs about 3 500 API members.** Not a
-category and not a milestone: a countable list, already ranked, sitting in
-`dev/plugin-api-usage.json`. Sixty-nine percent is the ceiling, and 3 500 buys
-most of the way there because the curve is nearly vertical at the end.
+Historically, 3,500 members covered every recorded reference for 33 of 59
+plugins. That is a symbol-resolution planning point, not evidence that those
+plugins run and not a current ecosystem ceiling.
 
 **The curve is flat for a long time and that is not a reason to stop.** One
 plugin runs whole at five hundred members while the median plugin is already

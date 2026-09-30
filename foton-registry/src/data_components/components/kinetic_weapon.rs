@@ -1,5 +1,8 @@
 //! Vanilla `minecraft:kinetic_weapon` item component.
 
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 
 use foton_utils::codec::VarInt;
@@ -453,6 +456,84 @@ fn hash_entries(hasher: &mut ComponentHasher, entries: &mut [HashEntry]) {
         hasher.put_raw_bytes(&entry.value_bytes);
     }
     hasher.end_map();
+}
+
+impl nbt_encode::NbtEncode for KineticWeapon {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+
+        if self.contact_cooldown_ticks != 10 {
+            field(
+                "contact_cooldown_ticks",
+                &(self.contact_cooldown_ticks),
+                writer,
+                depth,
+            )?;
+        }
+        if self.delay_ticks != 0 {
+            field("delay_ticks", &(self.delay_ticks), writer, depth)?;
+        }
+        if let Some(condition) = &self.dismount_conditions {
+            field("dismount_conditions", &(condition), writer, depth)?;
+        }
+        if let Some(condition) = &self.knockback_conditions {
+            field("knockback_conditions", &(condition), writer, depth)?;
+        }
+        if let Some(condition) = &self.damage_conditions {
+            field("damage_conditions", &(condition), writer, depth)?;
+        }
+        if self.forward_movement.to_bits() != 0.0_f32.to_bits() {
+            field("forward_movement", &(self.forward_movement), writer, depth)?;
+        }
+        if self.damage_multiplier.to_bits() != 1.0_f32.to_bits() {
+            field(
+                "damage_multiplier",
+                &(self.damage_multiplier),
+                writer,
+                depth,
+            )?;
+        }
+        if let Some(sound) = &self.sound {
+            field("sound", &(sound), writer, depth)?;
+        }
+        if let Some(sound) = &self.hit_sound {
+            field("hit_sound", &(sound), writer, depth)?;
+        }
+        end(writer)
+    }
+}
+
+impl nbt_encode::NbtEncode for KineticWeaponCondition {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+
+        field(
+            "max_duration_ticks",
+            &(self.max_duration_ticks),
+            writer,
+            depth,
+        )?;
+        if self.min_speed.to_bits() != 0.0_f32.to_bits() {
+            field("min_speed", &(self.min_speed), writer, depth)?;
+        }
+        if self.min_relative_speed.to_bits() != 0.0_f32.to_bits() {
+            field(
+                "min_relative_speed",
+                &(self.min_relative_speed),
+                writer,
+                depth,
+            )?;
+        }
+        end(writer)
+    }
 }
 
 #[cfg(test)]

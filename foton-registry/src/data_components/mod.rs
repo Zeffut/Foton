@@ -28,6 +28,7 @@
 mod component_data;
 pub mod components;
 mod registry;
+pub(crate) use registry::PersistentValidationScope;
 pub mod vanilla_components;
 
 // Re-export core types

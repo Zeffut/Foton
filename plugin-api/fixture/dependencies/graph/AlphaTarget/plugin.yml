@@ -1,0 +1,3 @@
+name: AlphaTarget
+version: 1
+main: fixture.dependencies.DependencyPlugins$AlphaTarget

@@ -1,4 +1,8 @@
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use foton_utils::text::from_nbt as decode_text_nbt;
 use rustc_hash::FxHashMap;
+use std::io;
 use std::io::{Cursor, Result, Write};
 
 use foton_utils::Identifier;
@@ -74,7 +78,7 @@ impl FromNbtTag for JukeboxSongValue {
         }
         Some(Self {
             sound_event: SoundEventHolder::from_nbt_tag(compound.get("sound_event")?)?,
-            description: TextComponent::from_nbt(&compound.get("description")?.to_owned())?,
+            description: decode_text_nbt(&compound.get("description")?.to_owned())?,
             length_in_seconds,
             comparator_output,
         })
@@ -160,5 +164,19 @@ impl RegistryHolderEntry for JukeboxSong {
     }
     fn holder_by_key(key: &Identifier) -> Option<&'static Self> {
         REGISTRY.jukebox_songs.by_key(key)
+    }
+}
+impl nbt_encode::NbtEncode for JukeboxSongValue {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+        field("sound_event", &self.sound_event, writer, depth)?;
+        field("description", &self.description, writer, depth)?;
+        field("length_in_seconds", &self.length_in_seconds, writer, depth)?;
+        field("comparator_output", &self.comparator_output, writer, depth)?;
+        end(writer)
     }
 }

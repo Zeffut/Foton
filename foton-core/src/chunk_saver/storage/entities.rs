@@ -1,5 +1,6 @@
 use super::*;
 use crate::chunk_saver::nesting::MAX_NESTING_DEPTH;
+use crate::entity::PluginSpawnReason;
 
 impl ChunkStorage {
     pub(super) fn entities_to_persistent(entities: &[SharedEntity]) -> Vec<PersistentEntity> {
@@ -206,6 +207,9 @@ impl ChunkStorage {
             living.save_living(&mut nbt);
         }
         entity.save_additional(&mut nbt);
+        if let Some(plugin_spawn_reason) = entity.base().plugin_spawn_reason() {
+            nbt.insert("Paper.SpawnReason", plugin_spawn_reason.as_str());
+        }
         let mut nbt_bytes = Vec::new();
         nbt.write(&mut nbt_bytes);
 
@@ -444,7 +448,13 @@ impl ChunkStorage {
             return None;
         };
 
-        Some(ENTITIES.create_and_load_or_raw(
+        let nbt_view = simdnbt::borrow::NbtCompound::from(&nbt);
+        let plugin_spawn_reason = nbt_view
+            .string("Paper.SpawnReason")
+            .and_then(|name| PluginSpawnReason::from_paper_name(name.to_str().as_ref()))
+            .unwrap_or_default();
+
+        let entity = ENTITIES.create_and_load_or_raw(
             EntityLoadRequest {
                 entity_type,
                 position: pos,
@@ -464,6 +474,8 @@ impl ChunkStorage {
                 world: Weak::clone(level),
             },
             &nbt,
-        ))
+        );
+        entity.base().set_plugin_spawn_reason(plugin_spawn_reason);
+        Some(entity)
     }
 }

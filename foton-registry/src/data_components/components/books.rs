@@ -1,17 +1,26 @@
 //! Writable and written book item components.
 
+use foton_utils::serial::budget;
+use foton_utils::serial::nbt_stream::{self, NbtWrite};
+use foton_utils::serial::text_stream;
+use foton_utils::text::from_nbt as decode_text_nbt;
 use std::io::{Cursor, Error, Result, Write};
 
 use foton_utils::codec::VarInt;
 use foton_utils::hash::{ComponentHasher, HashComponent, HashEntry, sort_map_entries};
 use foton_utils::nbt::NbtNumeric as _;
-use foton_utils::serial::{PrefixedRead, PrefixedWrite, ReadFrom, WriteTo};
+use foton_utils::serial::{
+    PrefixedRead, PrefixedWrite, ReadFrom, WriteTo,
+    budget::{DEFAULT_COLLECTION_ALLOCATION_BUDGET, collection_capacity, read_collection_count},
+    write::write_nbt_tag_bounded,
+};
 use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
 use simdnbt::{FromNbtTag, ToNbtTag};
 use text_components::TextComponent;
 
 const MAX_NETWORK_STRING_LENGTH: usize = 32_767;
 const MAX_NETWORK_STRING_BYTES: usize = MAX_NETWORK_STRING_LENGTH * 3;
+const MAX_NETWORK_NBT_TEMPORARY_BYTES: usize = 1024 * 1024;
 
 /// Raw text paired with the optional server-filtered projection.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,7 +132,10 @@ impl WriteTo for WritableBookContent {
 impl ReadFrom for WritableBookContent {
     fn read(data: &mut Cursor<&[u8]>) -> Result<Self> {
         let count = read_bounded_count(data, Self::MAX_PAGES)?;
-        let mut pages = Vec::with_capacity(count);
+        let mut pages = budget::read_vec(
+            count,
+            collection_capacity::<Filterable<String>>(count, DEFAULT_COLLECTION_ALLOCATION_BUDGET)?,
+        )?;
         for _ in 0..count {
             pages.push(read_filterable_string(data, Self::PAGE_EDIT_LENGTH)?);
         }
@@ -319,13 +331,75 @@ impl WriteTo for WrittenBookContent {
     }
 }
 
+impl WrittenBookContent {
+    pub(crate) fn validate_page(
+        value: &TextComponent,
+        writer: &dyn NbtWrite,
+        depth: usize,
+    ) -> Result<()> {
+        // Bound string/list classification before serde_json's escaping pass.
+        let mut sink = std::io::sink();
+        let mut preflight = nbt_stream::LimitedWriter::persistent(&mut sink, writer.remaining());
+        text_stream::write_payload(value, &mut preflight, depth)?;
+        struct JsonLength(usize);
+        impl Write for JsonLength {
+            fn write(&mut self, bytes: &[u8]) -> Result<usize> {
+                // serde_json emits UTF-8. Count leading bytes; astral scalars
+                // occupy two Java UTF-16 units, even across write boundaries.
+                for &byte in bytes {
+                    self.0 +=
+                        usize::from(!(0x80..0xc0).contains(&byte)) + usize::from(byte >= 0xf0);
+                    if self.0 > WrittenBookContent::PAGE_LENGTH {
+                        return Err(Error::other(
+                            "Written book page JSON exceeds persistent limit",
+                        ));
+                    }
+                }
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> Result<()> {
+                Ok(())
+            }
+        }
+        serde_json::to_writer(JsonLength(0), value).map_err(Error::other)
+    }
+    pub(crate) fn write_bounded(&self, budget: usize, writer: &mut dyn Write) -> Result<()> {
+        let mut writer = nbt_stream::LimitedWriter::new(writer, budget);
+        writer.ensure_remaining(
+            self.title
+                .raw()
+                .len()
+                .saturating_add(self.title.filtered().map_or(0, String::len))
+                .saturating_add(self.author.len()),
+        )?;
+        write_filterable_string(&self.title, Self::TITLE_MAX_LENGTH, &mut writer)?;
+        write_network_string(&self.author, MAX_NETWORK_STRING_LENGTH, &mut writer)?;
+        VarInt(self.generation).write(&mut writer)?;
+        write_count(self.pages.len(), &mut writer)?;
+        for page in &self.pages {
+            text_stream::write_bounded(page.raw(), writer.remaining(), &mut writer)?;
+            page.filtered().is_some().write(&mut writer)?;
+            if let Some(filtered) = page.filtered() {
+                text_stream::write_bounded(filtered, writer.remaining(), &mut writer)?;
+            }
+        }
+        self.resolved.write(&mut writer)
+    }
+}
+
 impl ReadFrom for WrittenBookContent {
     fn read(data: &mut Cursor<&[u8]>) -> Result<Self> {
         let title = read_filterable_string(data, Self::TITLE_MAX_LENGTH)?;
         let author = read_network_string(data, MAX_NETWORK_STRING_LENGTH)?;
         let generation = VarInt::read(data)?.0;
         let count = read_count(data)?;
-        let mut pages = Vec::with_capacity(count.min(65_536));
+        let mut pages = budget::read_vec(
+            count,
+            collection_capacity::<Filterable<TextComponent>>(
+                count,
+                DEFAULT_COLLECTION_ALLOCATION_BUDGET,
+            )?,
+        )?;
         for _ in 0..count {
             pages.push(read_filterable_component(data)?);
         }
@@ -437,7 +511,7 @@ fn filterable_component_from_nbt(tag: &NbtTag) -> Option<Filterable<TextComponen
 }
 
 fn restricted_component_from_nbt(tag: &NbtTag) -> Option<TextComponent> {
-    let component = TextComponent::from_nbt(tag)?;
+    let component = decode_text_nbt(tag)?;
     let encoded = serde_json::to_string(&component).ok()?;
     (encoded.encode_utf16().count() <= WrittenBookContent::PAGE_LENGTH).then_some(component)
 }
@@ -491,9 +565,11 @@ fn read_filterable_component(data: &mut Cursor<&[u8]>) -> Result<Filterable<Text
 }
 
 fn write_component_network(component: &TextComponent, writer: &mut impl Write) -> Result<()> {
-    let mut encoded = Vec::new();
-    component.to_codec_nbt().write(&mut encoded);
-    writer.write_all(&encoded)
+    write_nbt_tag_bounded(
+        &component.to_codec_nbt(),
+        MAX_NETWORK_NBT_TEMPORARY_BYTES,
+        writer,
+    )
 }
 
 fn write_network_string(value: &str, max_length: usize, writer: &mut impl Write) -> Result<()> {
@@ -534,18 +610,11 @@ fn write_count(count: usize, writer: &mut impl Write) -> Result<()> {
 }
 
 fn read_bounded_count(data: &mut Cursor<&[u8]>, max: usize) -> Result<usize> {
-    let count = read_count(data)?;
-    if count > max {
-        return Err(Error::other(format!(
-            "Collection size {count} exceeds {max}"
-        )));
-    }
-    Ok(count)
+    read_collection_count(data, Some(max), 1)
 }
 
 fn read_count(data: &mut Cursor<&[u8]>) -> Result<usize> {
-    let count = VarInt::read(data)?.0;
-    usize::try_from(count).map_err(|_| Error::other(format!("Negative collection size: {count}")))
+    read_collection_count(data, None, 1)
 }
 
 struct FilterableStringHash<'a>(&'a Filterable<String>);
@@ -618,13 +687,19 @@ fn hash_entries(hasher: &mut ComponentHasher, entries: &mut [HashEntry]) {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
+    use std::io::{Cursor, Error, ErrorKind, Result, Write};
 
-    use foton_utils::serial::{ReadFrom as _, WriteTo as _};
+    use foton_utils::{
+        codec::VarInt,
+        serial::{ReadFrom as _, WriteTo as _},
+    };
     use simdnbt::ToNbtTag as _;
     use text_components::TextComponent;
 
-    use super::{Filterable, WritableBookContent, WrittenBookContent};
+    use super::{
+        Filterable, WritableBookContent, WrittenBookContent, write_component_network,
+        write_filterable_string, write_network_string,
+    };
     use crate::data_components::vanilla_components::WRITABLE_BOOK_CONTENT;
     use crate::init_vanilla_registry;
     use crate::{REGISTRY, RegistryExt};
@@ -634,6 +709,18 @@ mod tests {
         tag.write(&mut bytes);
         let borrowed = simdnbt::borrow::read_tag(&mut Cursor::new(bytes.as_slice())).ok()?;
         T::from_nbt_tag(borrowed.as_tag())
+    }
+
+    #[test]
+    fn writable_book_tiny_declared_pages_allocate_only_input_scale() {
+        let mut encoded = Vec::new();
+        VarInt(100).write(&mut encoded).expect("count");
+        let stats = allocation_counter::measure(|| {
+            let error = WritableBookContent::read(&mut Cursor::new(encoded.as_slice()))
+                .expect_err("missing pages");
+            assert_eq!(error.kind(), ErrorKind::InvalidData);
+        });
+        assert!(stats.bytes_max < 4096, "{stats:?}");
     }
 
     #[test]
@@ -699,5 +786,61 @@ mod tests {
             item.components.get(WRITABLE_BOOK_CONTENT),
             Some(WritableBookContent::empty())
         );
+    }
+
+    #[test]
+    fn written_book_huge_page_count_is_rejected_before_the_truncated_body() {
+        let mut encoded = Vec::new();
+        write_filterable_string(
+            &Filterable::pass_through(String::new()),
+            WrittenBookContent::TITLE_MAX_LENGTH,
+            &mut encoded,
+        )
+        .expect("empty title should encode");
+        write_network_string("", 32_767, &mut encoded).expect("empty author should encode");
+        VarInt(0)
+            .write(&mut encoded)
+            .expect("generation should encode");
+        VarInt(i32::MAX)
+            .write(&mut encoded)
+            .expect("page count should encode");
+
+        let error = WrittenBookContent::read(&mut Cursor::new(encoded.as_slice()))
+            .expect_err("a count with no remaining page bytes must fail preflight");
+
+        assert_eq!(error.kind(), ErrorKind::InvalidData);
+    }
+
+    struct OneMiBWriter {
+        written: usize,
+    }
+
+    impl Write for OneMiBWriter {
+        fn write(&mut self, bytes: &[u8]) -> Result<usize> {
+            if self.written.saturating_add(bytes.len()) > 1024 * 1024 {
+                return Err(Error::new(
+                    ErrorKind::WriteZero,
+                    "component exceeds one MiB",
+                ));
+            }
+            self.written += bytes.len();
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn oversized_text_component_is_preflighted_before_writing_to_a_one_mib_sink() {
+        let component = TextComponent::plain("x".repeat(1024 * 1024));
+        let mut writer = OneMiBWriter { written: 0 };
+
+        let error = write_component_network(&component, &mut writer)
+            .expect_err("oversized text must be rejected before a bounded sink is touched");
+
+        assert_eq!(error.kind(), ErrorKind::InvalidData);
+        assert_eq!(writer.written, 0);
     }
 }

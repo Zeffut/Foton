@@ -1,5 +1,7 @@
 use foton_utils::codec::VarInt;
 use foton_utils::hash::{ComponentHasher, HashComponent, HashEntry, sort_map_entries};
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
 use foton_utils::serial::{ReadFrom, WriteTo};
 use foton_utils::{DowncastType, DowncastTypeKey, Identifier};
 use rustc_hash::FxHashMap;
@@ -126,7 +128,7 @@ impl WriteTo for SoundEventHolder {
             Self::Registry(sound) => {
                 let id = sound
                     .try_id()
-                    .ok_or_else(|| Error::other(format!("Unknown sound event: {}", sound.key)))?;
+                    .ok_or_else(|| Error::other("Unknown sound event"))?;
                 let id = i32::try_from(id).map_err(|_| {
                     Error::other(format!("Sound event id out of protocol range: {id}"))
                 })?;
@@ -257,6 +259,31 @@ crate::impl_registry!(
     sound_events_by_key,
     sound_events
 );
+
+impl nbt_encode::NbtEncode for SoundEventHolder {
+    fn nbt_id(&self) -> u8 {
+        match self {
+            Self::Registry(_) => 8,
+            Self::Direct { .. } => 10,
+        }
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> Result<()> {
+        use foton_utils::serial::nbt_encode::{end, field};
+        match self {
+            Self::Registry(value) => value.key.write_nbt_payload(writer, depth),
+            Self::Direct {
+                sound_id,
+                fixed_range,
+            } => {
+                field("sound_id", sound_id, writer, depth)?;
+                if let Some(range) = fixed_range {
+                    field("range", range, writer, depth)?;
+                }
+                end(writer)
+            }
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

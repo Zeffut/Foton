@@ -532,3 +532,6 @@ pub mod vanilla_configured_features;
 #[rustfmt::skip]
 #[path = "generated/vanilla_placed_features.rs"]
 pub mod vanilla_placed_features;
+
+#[cfg(feature = "codec-test-support")]
+pub mod codec_work;

@@ -1,5 +1,9 @@
 //! Vanilla `minecraft:ominous_bottle_amplifier` item component.
 
+use crate::data_components::registry::ValidatePersistentComponent;
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Result, Write};
 
 use foton_utils::codec::VarInt;
@@ -60,6 +64,27 @@ impl FromNbtTag for OminousBottleAmplifier {
 impl HashComponent for OminousBottleAmplifier {
     fn hash_component(&self, hasher: &mut ComponentHasher) {
         hasher.put_int(self.value);
+    }
+}
+
+impl ValidatePersistentComponent for OminousBottleAmplifier {
+    fn validate_persistent(&self) -> io::Result<()> {
+        if !(Self::MIN_AMPLIFIER..=Self::MAX_AMPLIFIER).contains(&self.value) {
+            return Err(io::Error::other(
+                "Invalid persistent ominous bottle amplifier",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl nbt_encode::NbtEncode for OminousBottleAmplifier {
+    fn nbt_id(&self) -> u8 {
+        (self.value).nbt_id()
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        self.validate_persistent()?;
+        (self.value).write_nbt_payload(writer, depth)
     }
 }
 

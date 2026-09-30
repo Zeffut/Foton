@@ -13,13 +13,17 @@ use foton_registry::blocks::block_state_ext::BlockStateExt as _;
 use foton_registry::blocks::properties::Direction;
 use foton_registry::blocks::shapes::is_face_full;
 use foton_registry::entity_type::EntityTypeRef;
+use foton_registry::potion::PotionRef;
 use foton_registry::vanilla_block_tags::BlockTag;
-use foton_registry::{REGISTRY, RegistryExt as _, TaggedRegistryExt as _, vanilla_blocks};
+use foton_registry::{
+    REGISTRY, RegistryExt as _, TaggedRegistryExt as _, vanilla_blocks, vanilla_entities,
+};
 use foton_utils::Identifier;
 use foton_utils::{BlockPos, BlockStateId, WorldAabb};
 use glam::DVec3;
 
-use crate::entity::{ENTITIES, EntitySpawnReason, SharedEntity, next_entity_id};
+use crate::entity::entities::ArrowEntity;
+use crate::entity::{AddEntityError, ENTITIES, EntitySpawnReason, SharedEntity, next_entity_id};
 use crate::physics::WorldCollisionProvider;
 use crate::physics::collision::CollisionWorld as _;
 use crate::world::World;
@@ -44,6 +48,39 @@ pub enum SpawnStrategy {
     LegacyIronGolem,
 }
 
+/// State that must exist on an entity before it becomes observable in a world.
+#[derive(Debug, Clone, Copy)]
+pub enum SpawnEntityInitialization {
+    /// Creates a vanilla arrow carrying the given base potion.
+    ArrowPotion(PotionRef),
+}
+
+/// A failure before or during publication of a freshly constructed entity.
+#[derive(Debug)]
+pub enum PreparedPublicationError<E> {
+    /// The caller could not prepare its return value, so insertion was never attempted.
+    Preparation(E),
+    /// The return value was ready, but the world refused the entity.
+    Publication(AddEntityError),
+}
+
+/// Runs a fallible preparation step before making `entity` world-visible.
+///
+/// This ordering is important for JNI callers: a Java return object must exist
+/// before insertion, otherwise an allocation failure can strand an entity the
+/// caller can never identify.
+pub fn prepare_then_publish<T, E>(
+    world: &Arc<World>,
+    entity: SharedEntity,
+    prepare: impl FnOnce(&SharedEntity) -> Result<T, E>,
+) -> Result<T, PreparedPublicationError<E>> {
+    let prepared = prepare(&entity).map_err(PreparedPublicationError::Preparation)?;
+    world
+        .try_add_entity(entity)
+        .map_err(PreparedPublicationError::Publication)?;
+    Ok(prepared)
+}
+
 /// Creates and inserts an entity at an exact Bukkit-requested position.
 #[must_use]
 pub fn spawn_entity_at(
@@ -51,15 +88,69 @@ pub fn spawn_entity_at(
     key: &Identifier,
     position: DVec3,
 ) -> Option<SharedEntity> {
+    let entity = create_entity_at(world, key, position)?;
+    world.try_add_entity(Arc::clone(&entity)).ok()?;
+    Some(entity)
+}
+
+/// Creates an entity at an exact position without publishing it.
+#[must_use]
+pub fn create_entity_at(
+    world: &Arc<World>,
+    key: &Identifier,
+    position: DVec3,
+) -> Option<SharedEntity> {
+    if !position.is_finite() {
+        return None;
+    }
     let entity_type = REGISTRY.entity_types.by_key(key)?;
-    let entity = ENTITIES.create(
+    ENTITIES.create(
         entity_type,
         next_entity_id(),
         position,
         Arc::downgrade(world),
-    )?;
+    )
+}
+
+/// Creates and inserts an entity whose requested state must precede publication.
+#[must_use]
+pub fn spawn_entity_at_initialized(
+    world: &Arc<World>,
+    key: &Identifier,
+    position: DVec3,
+    initialization: SpawnEntityInitialization,
+) -> Option<SharedEntity> {
+    let entity = create_entity_at_initialized(world, key, position, initialization)?;
     world.try_add_entity(Arc::clone(&entity)).ok()?;
     Some(entity)
+}
+
+/// Creates an initialized entity without making it world-visible.
+#[must_use]
+pub fn create_entity_at_initialized(
+    world: &Arc<World>,
+    key: &Identifier,
+    position: DVec3,
+    initialization: SpawnEntityInitialization,
+) -> Option<SharedEntity> {
+    if !position.is_finite() {
+        return None;
+    }
+    let entity_type = REGISTRY.entity_types.by_key(key)?;
+    match initialization {
+        SpawnEntityInitialization::ArrowPotion(potion)
+            if entity_type == &vanilla_entities::ARROW =>
+        {
+            Some(Arc::new(ArrowEntity::new_with_base_potion(
+                entity_type,
+                next_entity_id(),
+                position,
+                Arc::downgrade(world),
+                potion,
+            )))
+        }
+        SpawnEntityInitialization::ArrowPotion(_) => None,
+    }
 }
 
 impl SpawnStrategy {
@@ -121,6 +212,175 @@ fn is_refused_underfoot(state: BlockStateId) -> bool {
     REGISTRY.blocks.is_in_tag(block, &BlockTag::LEAVES)
         || REGISTRY.blocks.is_in_tag(block, &BlockTag::IMPERMEABLE)
         || REGISTRY.blocks.is_in_tag(block, &BlockTag::C_GLASS_PANES)
+}
+
+#[cfg(test)]
+mod initialized_spawn_tests {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::sync::Arc;
+
+    use foton_registry::data_components::components::PotionContents;
+    use foton_registry::{init_vanilla_registry, vanilla_entities, vanilla_items, vanilla_potions};
+    use foton_utils::{ChunkPos, Downcast as _};
+
+    use super::*;
+    use crate::entity::entities::ArrowEntity;
+    use crate::entity::init_entities;
+    use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
+
+    #[test]
+    fn non_finite_spawn_coordinates_never_construct_entities() {
+        init_vanilla_registry();
+        init_entities();
+        let world = fresh_test_world("non_finite_spawn");
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+        let mut rejected = 0;
+        for axis in 0..3 {
+            for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                let mut position = DVec3::new(8.5, 64.0, 8.5);
+                position[axis] = value;
+                for initialized in [false, true] {
+                    let result = catch_unwind(AssertUnwindSafe(|| {
+                        if initialized {
+                            create_entity_at_initialized(
+                                &world,
+                                &vanilla_entities::ARROW.key,
+                                position,
+                                SpawnEntityInitialization::ArrowPotion(&vanilla_potions::WATER),
+                            )
+                        } else {
+                            create_entity_at(&world, &vanilla_entities::ARROW.key, position)
+                        }
+                    }));
+                    if matches!(result, Ok(None)) {
+                        rejected += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            rejected, 18,
+            "all invalid inputs must return None without panicking"
+        );
+        assert!(world.accessible_entities().is_empty());
+        assert!(
+            create_entity_at(
+                &world,
+                &vanilla_entities::ARROW.key,
+                DVec3::new(8.5, 64.0, 8.5)
+            )
+            .is_some()
+        );
+    }
+
+    #[test]
+    fn tipped_arrow_is_water_before_publication() {
+        init_vanilla_registry();
+        let world = fresh_test_world("initialized_tipped_arrow");
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+
+        let entity = create_entity_at_initialized(
+            &world,
+            &vanilla_entities::ARROW.key,
+            DVec3::new(8.5, 64.0, 8.5),
+            SpawnEntityInitialization::ArrowPotion(&vanilla_potions::WATER),
+        )
+        .unwrap_or_else(|| panic!("the initialized arrow must construct"));
+        assert!(world.get_entity_by_uuid(&entity.uuid()).is_none());
+        let arrow = entity
+            .as_ref()
+            .downcast_ref::<ArrowEntity>()
+            .unwrap_or_else(|| panic!("the constructed entity must be an arrow"));
+        assert_eq!(arrow.pickup_item().item(), &*vanilla_items::TIPPED_ARROW);
+        assert!(
+            arrow
+                .ammo_potion_contents()
+                .is_some_and(|contents| contents.is(&vanilla_potions::WATER))
+        );
+        assert_eq!(
+            arrow.ammo_potion_color(),
+            Some(PotionContents::BASE_POTION_COLOR)
+        );
+
+        world
+            .try_add_entity(Arc::clone(&entity))
+            .unwrap_or_else(|error| panic!("initialized entity must publish: {error}"));
+        let published = world
+            .get_entity_by_uuid(&entity.uuid())
+            .unwrap_or_else(|| panic!("the initialized entity must be observable after insertion"));
+        assert!(Arc::ptr_eq(&published, &entity));
+    }
+
+    #[test]
+    fn failed_return_value_preparation_never_publishes_the_entity() {
+        init_vanilla_registry();
+        let world = fresh_test_world("failed_spawn_return_preparation");
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+        let entity: SharedEntity = Arc::new(ArrowEntity::new(
+            &vanilla_entities::ARROW,
+            next_entity_id(),
+            DVec3::new(8.5, 64.0, 8.5),
+            Arc::downgrade(&world),
+        ));
+        let uuid = entity.uuid();
+
+        let result = prepare_then_publish(&world, entity, |_| Err::<(), _>("new string failed"));
+
+        assert!(matches!(
+            result,
+            Err(PreparedPublicationError::Preparation("new string failed"))
+        ));
+        assert!(world.get_entity_by_uuid(&uuid).is_none());
+        assert!(world.accessible_entities().is_empty());
+    }
+
+    #[test]
+    fn rejected_publication_drops_the_prepared_unpublished_entity() {
+        init_vanilla_registry();
+        let world = fresh_test_world("rejected_spawn_publication");
+        let entity: SharedEntity = Arc::new(ArrowEntity::new(
+            &vanilla_entities::ARROW,
+            next_entity_id(),
+            DVec3::new(512.5, 64.0, 512.5),
+            Arc::downgrade(&world),
+        ));
+        let uuid = entity.uuid();
+        let mut prepared = false;
+
+        let result = prepare_then_publish(&world, entity, |_| {
+            prepared = true;
+            Ok::<_, ()>(uuid.to_string())
+        });
+
+        assert!(
+            prepared,
+            "the return value must be prepared before insertion"
+        );
+        assert!(matches!(
+            result,
+            Err(PreparedPublicationError::Publication(_))
+        ));
+        assert!(world.get_entity_by_uuid(&uuid).is_none());
+        assert!(world.accessible_entities().is_empty());
+    }
+
+    #[test]
+    fn arrow_initialization_mismatch_cannot_publish_an_entity() {
+        init_vanilla_registry();
+        let world = fresh_test_world("invalid_initialized_arrow");
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+        let before = world.accessible_entities().len();
+
+        let entity = spawn_entity_at_initialized(
+            &world,
+            &vanilla_entities::COW.key,
+            DVec3::new(8.5, 64.0, 8.5),
+            SpawnEntityInitialization::ArrowPotion(&vanilla_potions::WATER),
+        );
+
+        assert!(entity.is_none());
+        assert_eq!(world.accessible_entities().len(), before);
+    }
 }
 
 /// Tries to put one mob of `entity_type` on the ground near `start`.

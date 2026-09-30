@@ -1,12 +1,22 @@
 //! This module contains traits for serializing and deserializing data.
 use std::io::{Cursor, Result, Write};
 
+/// Budget and preflight helpers for bounded decoding.
+pub mod budget;
+/// Borrowed persistent NBT codec interface.
+pub mod nbt_encode;
+/// Preflight for allocation-bounded NBT component decoding.
+pub mod nbt_preflight;
+/// Borrowed NBT streaming with bounded canonical sorting.
+pub mod nbt_stream;
 /// A module for reading prefixed data.
 pub mod prefixed_read;
 /// A module for writing prefixed data.
 pub mod prefixed_write;
 /// A module for reading data.
 pub mod read;
+/// Borrowed text codec streaming.
+pub mod text_stream;
 /// A module for writing data.
 pub mod write;
 

@@ -85,7 +85,8 @@ location with `FOTON_PLUGIN_API_JAR` or `FOTON_PLUGIN_LIBRARY_DIRECTORY` when
 running a custom build. The library override is a platform path list.
 Source builds also load `plugin-api/build/runtime-libs`, populated by
 `bash dev/fetch-plugin-runtime-libs.sh`, for Paper's additional runtime
-libraries such as the SQLite and MySQL drivers. With no FOTON_PLUGIN_DIRECTORY, Foton neither opens
+libraries such as the MySQL driver. SQLite is included in the 31 pinned primary dependencies;
+duplicate pinned names in additional directories do not enter the classpath. With no FOTON_PLUGIN_DIRECTORY, Foton neither opens
 the runtime bundle nor starts a JVM, so the normal server path is unchanged.
 
 Direct ViaVersion and ViaBackwards 5.11.0 support is opt-in: download their
@@ -127,6 +128,29 @@ What differs from a Netty server, on purpose:
   in PacketEvents that Adventure 5 no longer answers, all in its text
   serializers (click events, show-item hovers, translation arguments, SNBT).
   A packet carrying such a component fails to convert; nothing else does.
+
+Compatibility evidence is regenerated and combined with:
+
+```sh
+bash dev/build-plugin-api.sh --check
+python3 dev/plugin_api_usage.py --covered plugin-api/build/foton-plugin-api.jar
+python3 dev/plugin_api_usage.py --covered plugin-api/build/foton-plugin-api.jar --events plugin-api/src
+python3 dev/plugin_compatibility.py --api-report build/plugin-api-evidence.json --fixture-report plugin-api/build/fixture-evidence.json --output build/plugin-compatibility.json
+```
+
+The combined JSON deliberately separates binary symbols, the corpus ceiling,
+Rust-reachable events and executable fixtures. Shared symbol coverage is not a
+plugin success rate. The current legacy corpus ledger has no per-plugin class
+incidence or entrypoint reachability, so its present ceiling is `null`; its old
+41-of-59 public-API figure is retained only as historical evidence. A v2 corpus
+regeneration distinguishes load-bearing internal references from optional
+adapters; any unreadable plugin class keeps that plugin's reachability evidence
+unknown with the unreadable entry and reason retained. An event counts only
+when an exact Rust JNI owner, method and descriptor resolves in the compiled
+Java API and reaches its construction path through the exact compiled method
+graph. Current event evidence is 96 of 199 listened-for types.
+The executable fixture report covers 49 jars across all eight suites; it loads
+29, enables 27 and rejects 22 with phase-specific causal diagnostics.
 
 ## License
 

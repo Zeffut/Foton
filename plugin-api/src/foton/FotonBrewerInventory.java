@@ -1,18 +1,22 @@
 package foton;
 
+import org.bukkit.block.BrewingStand;
 import org.bukkit.inventory.BrewerInventory;
-import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 
-/** The live slots of a brewing stand: three bottles, ingredient, fuel.
- *
- * Foton has no {@code BrewingStand} block state yet, so there is no holder
- * to answer with. */
-final class FotonBrewerInventory extends FotonHopperInventory implements BrewerInventory {
-    FotonBrewerInventory(FotonBlockState stand) { super(stand, 5); }
+/** Detached five-slot inventory used for BrewEvent's lock-free snapshot. */
+public final class FotonBrewerInventory extends FotonMenuInventory implements BrewerInventory {
+    private final BrewingStand holder;
 
-    @Override public InventoryHolder getHolder() { return null; }
-    @Override public org.bukkit.event.inventory.InventoryType getType() { return org.bukkit.event.inventory.InventoryType.BREWING; }
+    FotonBrewerInventory(BrewingStand holder, ItemStack[] contents) {
+        super("", contents == null ? new ItemStack[5] : contents);
+        this.holder = holder;
+    }
+
+    @Override public org.bukkit.event.inventory.InventoryType getType() {
+        return org.bukkit.event.inventory.InventoryType.BREWING;
+    }
+    @Override public BrewingStand getHolder() { return holder; }
     @Override public ItemStack getIngredient() { return getItem(3); }
     @Override public void setIngredient(ItemStack ingredient) { setItem(3, ingredient); }
     @Override public ItemStack getFuel() { return getItem(4); }

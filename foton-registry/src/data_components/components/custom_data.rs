@@ -1,5 +1,10 @@
 //! Vanilla `CustomData` item component value.
 
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_preflight;
+use foton_utils::serial::nbt_stream;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 
 use foton_utils::{
@@ -103,9 +108,12 @@ impl PartialEq for CustomData {
 
 impl WriteTo for CustomData {
     fn write(&self, writer: &mut impl Write) -> Result<()> {
-        let mut encoded = Vec::new();
-        NbtTag::Compound(self.tag.clone()).write(&mut encoded);
-        writer.write_all(&encoded)
+        writer.write_all(&[10])?;
+        nbt_stream::write_compound(
+            &self.tag,
+            &mut nbt_stream::LimitedWriter::new(writer, usize::MAX),
+            0,
+        )
     }
 }
 
@@ -122,6 +130,7 @@ impl ReadFrom for CustomData {
 }
 
 fn read_network_tag(data: &mut Cursor<&[u8]>) -> Result<NbtTag> {
+    nbt_preflight::check(data, false)?;
     let tag = read_tag(data).map_err(|error| Error::other(format!("Invalid NBT: {error:?}")))?;
     let Some(heap_size) = vanilla_nbt_heap_size(&tag) else {
         return Err(Error::other("NBT contains malformed modified UTF-8"));
@@ -149,6 +158,15 @@ impl FromNbtTag for CustomData {
 impl HashComponent for CustomData {
     fn hash_component(&self, hasher: &mut ComponentHasher) {
         NbtTag::Compound(self.tag.clone()).hash_component(hasher);
+    }
+}
+
+impl nbt_encode::NbtEncode for CustomData {
+    fn nbt_id(&self) -> u8 {
+        (self.as_compound()).nbt_id()
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        (self.as_compound()).write_nbt_payload(writer, depth)
     }
 }
 

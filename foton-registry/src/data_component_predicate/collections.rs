@@ -12,6 +12,24 @@ pub struct CollectionPredicate<P> {
 }
 
 impl<P> CollectionPredicate<P> {
+    pub(super) fn from_compounds(
+        tag: &NbtTag,
+        decode: impl Fn(&NbtCompound) -> Option<P> + Copy,
+    ) -> Option<Self> {
+        let compound = tag.compound()?;
+        Some(Self::new(
+            decode_optional(compound, "contains", |tag| decode_compounds(tag, decode))?,
+            decode_optional(compound, "count", |tag| {
+                decode_compounds(tag, |entry| {
+                    Some(CollectionCountPredicate::new(
+                        decode(entry.get("test")?.compound()?)?,
+                        IntBounds::from_owned_nbt(entry.get("count")?)?,
+                    ))
+                })
+            })?,
+            decode_optional(compound, "size", IntBounds::from_owned_nbt)?,
+        ))
+    }
     #[must_use]
     pub const fn new(
         contains: Option<Vec<P>>,
@@ -154,6 +172,20 @@ pub(super) fn decode_list<T>(
     decode: impl Fn(&NbtTag) -> Option<T>,
 ) -> Option<Vec<T>> {
     tag.list()?.as_nbt_tags().iter().map(decode).collect()
+}
+
+fn decode_compounds<T>(tag: &NbtTag, decode: impl Fn(&NbtCompound) -> Option<T>) -> Option<Vec<T>> {
+    let list = tag.list()?;
+    if foton_utils::nbt::nbt_list_len(list) == 0 {
+        return Some(Vec::new());
+    }
+    let compounds = list.compounds()?;
+    let mut values =
+        foton_utils::serial::budget::read_vec(compounds.len(), compounds.len()).ok()?;
+    for compound in compounds {
+        values.push(decode(compound)?);
+    }
+    Some(values)
 }
 
 pub(super) fn encode_list<T>(values: &[T], encode: impl Fn(&T) -> NbtTag) -> NbtTag {

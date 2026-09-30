@@ -1,6 +1,13 @@
 //! Armor trim material registry values.
 
+use foton_utils::serial::budget;
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::LimitedWriter;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use foton_utils::serial::text_stream;
+use foton_utils::text::from_nbt as decode_text_nbt;
 use std::fmt::{self, Display, Formatter};
+use std::io;
 use std::io::{Cursor, Error, Result as IoResult, Write};
 
 use foton_utils::Identifier;
@@ -12,7 +19,26 @@ use simdnbt::owned::{NbtCompound, NbtTag};
 use simdnbt::{FromNbtTag, ToNbtTag};
 use text_components::TextComponent;
 
-use crate::{REGISTRY, RegistryExt, RegistryHolderEntry, RegistryTags};
+use crate::{REGISTRY, RegistryExt, RegistryHolder, RegistryHolderEntry, RegistryTags};
+
+/// Test-support observations of override entries scanned before canonical sorting.
+#[cfg(feature = "codec-test-support")]
+pub mod canonical_override_work {
+    use std::cell::Cell;
+
+    thread_local! { static VISITS: Cell<usize> = const { Cell::new(0) }; }
+
+    pub(super) fn visit() {
+        VISITS.set(VISITS.get() + 1);
+    }
+
+    /// Counts override entries inspected by an actual bounded codec route.
+    pub fn measure(operation: impl FnOnce()) -> usize {
+        VISITS.set(0);
+        operation();
+        VISITS.get()
+    }
+}
 
 /// Texture suffix used by an armor trim material.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,6 +184,62 @@ impl WriteTo for MaterialAssetGroup {
     }
 }
 
+impl MaterialAssetGroup {
+    fn canonical_overrides(
+        &self,
+        writer: &dyn NbtWrite,
+    ) -> IoResult<Vec<(&Identifier, &MaterialAssetInfo)>> {
+        writer.ensure_remaining(self.overrides.len().saturating_mul(2))?;
+        let mut minimum = 0usize;
+        for (key, asset) in &self.overrides {
+            #[cfg(feature = "codec-test-support")]
+            canonical_override_work::visit();
+            minimum = minimum
+                .saturating_add(key.namespace.len())
+                .saturating_add(key.path.len())
+                .saturating_add(asset.suffix().len())
+                .saturating_add(3);
+            writer.ensure_remaining(minimum)?;
+        }
+        budget::collection_capacity::<(&Identifier, &MaterialAssetInfo)>(
+            self.overrides.len(),
+            writer.scratch_remaining(),
+        )?;
+        let mut entries: Vec<_> = self.overrides.iter().collect();
+        entries.sort_unstable_by(|(a, _), (b, _)| {
+            a.namespace
+                .bytes()
+                .chain(*b":")
+                .chain(a.path.bytes())
+                .cmp(b.namespace.bytes().chain(*b":").chain(b.path.bytes()))
+        });
+        Ok(entries)
+    }
+}
+
+impl RegistryHolder<TrimMaterial> {
+    pub(crate) fn write_bounded(&self, maximum: usize, writer: &mut dyn Write) -> IoResult<()> {
+        let mut writer = LimitedWriter::new(writer, maximum);
+        let Self::Direct(value) = self else {
+            return self.write(&mut writer);
+        };
+        VarInt(0).write(&mut writer)?;
+        value.assets.base.write(&mut writer)?;
+        VarInt(i32::try_from(value.assets.overrides.len()).map_err(Error::other)?)
+            .write(&mut writer)?;
+        let entries = value.assets.canonical_overrides(&writer)?;
+        let used = entries
+            .capacity()
+            .saturating_mul(size_of::<(&Identifier, &MaterialAssetInfo)>());
+        let mut writer = foton_utils::serial::nbt_stream::ScratchWriter::new(&mut writer, used)?;
+        for (key, asset) in entries {
+            key.write(&mut writer)?;
+            asset.write(&mut writer)?;
+        }
+        text_stream::write(&value.description, &mut *writer)
+    }
+}
+
 impl ReadFrom for MaterialAssetGroup {
     fn read(data: &mut Cursor<&[u8]>) -> IoResult<Self> {
         let base = MaterialAssetInfo::read(data)?;
@@ -167,6 +249,8 @@ impl ReadFrom for MaterialAssetGroup {
                 "negative trim material override count: {encoded_count}"
             ))
         })?;
+        budget::check_collection_input(data, count, 2)?;
+        budget::charge_map::<Identifier, MaterialAssetInfo>(count)?;
         let mut overrides = FxHashMap::default();
         for _ in 0..count {
             overrides.insert(Identifier::read(data)?, MaterialAssetInfo::read(data)?);
@@ -212,7 +296,7 @@ impl TrimMaterialValue {
 impl WriteTo for TrimMaterialValue {
     fn write(&self, writer: &mut impl Write) -> IoResult<()> {
         self.assets.write(writer)?;
-        WriteTo::write(&self.description.to_codec_nbt(), writer)
+        self.description.write(writer)
     }
 }
 
@@ -244,7 +328,7 @@ impl FromNbtTag for TrimMaterialValue {
                 );
             }
         }
-        let description = TextComponent::from_nbt(&compound.get("description")?.to_owned())?;
+        let description = decode_text_nbt(&compound.get("description")?.to_owned())?;
         Some(Self::new(
             MaterialAssetGroup::new(base, overrides),
             description,
@@ -379,6 +463,33 @@ impl RegistryHolderEntry for TrimMaterial {
 
     fn holder_by_key(key: &Identifier) -> Option<&'static Self> {
         REGISTRY.trim_materials.by_key(key)
+    }
+}
+
+impl nbt_encode::NbtEncode for TrimMaterialValue {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+
+        field("asset_name", &self.assets.base.suffix(), writer, depth)?;
+        if !self.assets.overrides.is_empty() {
+            nbt_encode::field_with("override_armor_assets", 10, writer, |writer| {
+                let entries = self.assets.canonical_overrides(writer)?;
+                let used = entries
+                    .capacity()
+                    .saturating_mul(size_of::<(&Identifier, &MaterialAssetInfo)>());
+                let mut writer = foton_utils::serial::nbt_stream::ScratchWriter::new(writer, used)?;
+                for (key, value) in entries {
+                    nbt_encode::identifier_field(key, &value.suffix(), &mut *writer, depth + 1)?;
+                }
+                end(&mut *writer)
+            })?;
+        }
+        field("description", &(self.description), writer, depth)?;
+        end(writer)
     }
 }
 

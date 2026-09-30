@@ -1,0 +1,4 @@
+name: BrokenRequired
+version: 1
+main: fixture.dependencies.DependencyPlugins$BrokenRequired
+depend: [Absent]

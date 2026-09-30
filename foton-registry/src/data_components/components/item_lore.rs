@@ -1,12 +1,14 @@
 //! Vanilla `minecraft:lore` item component.
 
+use foton_utils::serial::nbt_stream::NbtWrite;
+use foton_utils::text::from_nbt as decode_text_nbt;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::io::{Cursor, Result as IoResult, Write};
 
 use foton_utils::codec::VarInt;
 use foton_utils::hash::{ComponentHasher, HashComponent};
-use foton_utils::serial::{PrefixedRead, PrefixedWrite, ReadFrom, WriteTo};
+use foton_utils::serial::{PrefixedWrite, ReadFrom, WriteTo, budget};
 use simdnbt::owned::{NbtList, NbtTag};
 use simdnbt::{FromNbtTag, ToNbtTag};
 use text_components::TextComponent;
@@ -97,9 +99,35 @@ impl WriteTo for ItemLore {
     }
 }
 
+impl ItemLore {
+    pub(crate) fn write_bounded(&self, budget: usize, writer: &mut dyn Write) -> IoResult<()> {
+        let mut writer = foton_utils::serial::nbt_stream::LimitedWriter::new(writer, budget);
+        VarInt(i32::try_from(self.lines.len()).map_err(std::io::Error::other)?)
+            .write(&mut writer)?;
+        for line in &self.lines {
+            foton_utils::serial::text_stream::write_bounded(line, writer.remaining(), &mut writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl foton_utils::serial::nbt_encode::NbtEncode for ItemLore {
+    fn nbt_id(&self) -> u8 {
+        9
+    }
+
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> IoResult<()> {
+        foton_utils::serial::nbt_encode::list(&self.lines, writer, depth)
+    }
+}
+
 impl ReadFrom for ItemLore {
     fn read(data: &mut Cursor<&[u8]>) -> IoResult<Self> {
-        let lines = Vec::<TextComponent>::read_prefixed_bound::<VarInt>(data, Self::MAX_LINES)?;
+        let count = budget::read_collection_count(data, Some(Self::MAX_LINES), 1)?;
+        let mut lines = budget::read_vec(count, count)?;
+        for _ in 0..count {
+            lines.push(TextComponent::read(data)?);
+        }
         Self::new(lines).map_err(std::io::Error::other)
     }
 }
@@ -124,7 +152,7 @@ impl FromNbtTag for ItemLore {
         }
         let lines = tags
             .iter()
-            .map(TextComponent::from_nbt)
+            .map(decode_text_nbt)
             .collect::<Option<Vec<_>>>()?;
         Self::new(lines).ok()
     }

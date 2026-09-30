@@ -298,17 +298,17 @@ public final class EventRelay {
     /** Answers `cancelled, results`, the results slot by slot. */
     public static String fireBrew(String world, String block, String results, String fuel) {
         FotonBlock at = block(world, block);
-        org.bukkit.event.inventory.BrewEvent event = new org.bukkit.event.inventory.BrewEvent(
-            at, new FotonBrewerInventory(new FotonBlockState(at, at.getBlockData())), slots(results),
-            Integer.parseInt(fuel));
-        EventBridge.dispatch(event);
-        StringBuilder out = new StringBuilder();
-        java.util.List<org.bukkit.inventory.ItemStack> brewed = event.getResults();
-        for (int slot = 0; slot < 3; slot++) {
-            if (slot > 0) out.append(ITEM);
-            if (slot < brewed.size()) out.append(FotonInventory.encode(brewed.get(slot)));
+        FotonBrewingStand holder = FotonBrewingStand.placedSnapshot(at, at.getBlockData());
+        StringBuilder contents = new StringBuilder();
+        org.bukkit.inventory.ItemStack[] items = holder.getInventory().getContents();
+        for (int slot = 0; slot < items.length; slot++) {
+            if (slot > 0) contents.append(ITEM);
+            contents.append(FotonInventory.encode(items[slot]));
         }
-        return answer(event.isCancelled(), out);
+        String response = EventBridge.fireBrew(world, at.getX(), at.getY(), at.getZ(),
+            contents.toString(), results, Integer.parseInt(fuel));
+        String[] fields = response.split("\\u001f", -1);
+        return answer("1".equals(fields[0]), fields[2]);
     }
 
     /** Answers `cancelled, offers`, each offer `key level cost` or empty. */

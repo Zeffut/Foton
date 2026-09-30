@@ -66,6 +66,14 @@ run "plugin runtime dependency closure"            bash dev/plugin-runtime-test.
 # workflow without actually creating a tag or contacting GitHub during CI.
 run "manual release packaging"                    bash dev/release-test.sh
 run "POSIX installer transactions"                bash dev/install-test.sh
+# Registry-backed Java APIs may run from legal plugin onLoad callbacks, before
+# core publishes the registry. Each needs its own process because the global
+# registry and JVM cannot be reset within the ordinary Rust test process.
+run "pre-publication registry JNI defaults"         cargo test -p foton-plugin --lib generated_java_apis_are_safe_before_registry_publication -- --ignored
+run "published registry JNI bridge"                 cargo test -p foton-plugin --lib generated_java_apis_reach_live_registry_natives -- --ignored
+# This test needs the built API and runs in its own process because a JVM
+# cannot be restarted inside the ordinary Rust test process.
+run "spawn events cross JNI"                       cargo test -p foton-plugin --lib spawn_bridge_dispatches -- --ignored
 # RegisterNatives is all-or-nothing: one registered method the class does
 # not declare and no plugin loads at all, one declared method left
 # unregistered and the first plugin to call it takes an

@@ -2,8 +2,11 @@
 //!
 //! This module defines all vanilla Minecraft data components and provides
 //! the registration function to add them to the registry.
+use foton_utils::serial::nbt_preflight;
+use foton_utils::text::from_nbt as decode_text_nbt;
 use foton_utils::{Identifier, nbt::NbtNumeric as _};
 use simdnbt::FromNbtTag as _;
+use std::io;
 use text_components::TextComponent;
 
 use super::component_data::ComponentData;
@@ -390,119 +393,110 @@ pub const SHULKER_COLOR: DataComponentType<DyeColor> =
     DataComponentType::new(Identifier::vanilla_static("shulker/color"));
 
 /// Network reader for VarInt-encoded i32 components.
-fn varint_reader(cursor: &mut std::io::Cursor<&[u8]>) -> std::io::Result<ComponentData> {
+fn varint_reader(cursor: &mut std::io::Cursor<&[u8]>) -> io::Result<ComponentData> {
     use foton_utils::{codec::VarInt, serial::ReadFrom};
     let value = VarInt::read(cursor)?;
     Ok(ComponentData::new(value.0))
 }
 
 /// Network writer for VarInt-encoded i32 components.
-fn varint_writer(data: &ComponentData, writer: &mut Vec<u8>) -> std::io::Result<()> {
-    use foton_utils::{codec::VarInt, serial::WriteTo};
+fn varint_writer(data: &ComponentData, writer: &mut dyn io::Write) -> io::Result<()> {
+    use foton_utils::codec::VarInt;
     if let Some(v) = data.downcast_ref::<i32>() {
-        VarInt(*v).write(writer)
+        crate::data_components::registry::codecs::write_to_network(&VarInt(*v), writer)
     } else {
-        Err(std::io::Error::other("Component type mismatch"))
+        Err(io::Error::other("Component type mismatch"))
     }
 }
 
-fn float_reader(cursor: &mut std::io::Cursor<&[u8]>) -> std::io::Result<ComponentData> {
+fn float_reader(cursor: &mut std::io::Cursor<&[u8]>) -> io::Result<ComponentData> {
     use foton_utils::serial::ReadFrom;
     Ok(ComponentData::new(f32::read(cursor)?))
 }
 
-fn float_writer(data: &ComponentData, writer: &mut Vec<u8>) -> std::io::Result<()> {
-    use foton_utils::serial::WriteTo;
+fn float_writer(data: &ComponentData, writer: &mut dyn io::Write) -> io::Result<()> {
     let Some(value) = data.downcast_ref::<f32>() else {
-        return Err(std::io::Error::other("Component type mismatch"));
+        return Err(io::Error::other("Component type mismatch"));
     };
-    value.write(writer)
+    crate::data_components::registry::codecs::write_to_network(value, writer)
 }
 
-fn bool_reader(cursor: &mut std::io::Cursor<&[u8]>) -> std::io::Result<ComponentData> {
+fn bool_reader(cursor: &mut std::io::Cursor<&[u8]>) -> io::Result<ComponentData> {
     use foton_utils::serial::ReadFrom;
     Ok(ComponentData::new(bool::read(cursor)?))
 }
 
-fn bool_writer(data: &ComponentData, writer: &mut Vec<u8>) -> std::io::Result<()> {
-    use foton_utils::serial::WriteTo;
+fn bool_writer(data: &ComponentData, writer: &mut dyn io::Write) -> io::Result<()> {
     let Some(value) = data.downcast_ref::<bool>() else {
-        return Err(std::io::Error::other("Component type mismatch"));
+        return Err(io::Error::other("Component type mismatch"));
     };
-    value.write(writer)
+    crate::data_components::registry::codecs::write_to_network(value, writer)
 }
 
-fn text_component_network_reader(
-    cursor: &mut std::io::Cursor<&[u8]>,
-) -> std::io::Result<ComponentData> {
+fn text_component_network_reader(cursor: &mut std::io::Cursor<&[u8]>) -> io::Result<ComponentData> {
     use foton_utils::serial::ReadFrom as _;
     TextComponent::read(cursor).map(ComponentData::new)
 }
 
 fn text_component_network_writer(
     data: &ComponentData,
-    writer: &mut Vec<u8>,
-) -> std::io::Result<()> {
-    use foton_utils::serial::WriteTo as _;
+    writer: &mut dyn io::Write,
+) -> io::Result<()> {
     let Some(value) = data.downcast_ref::<TextComponent>() else {
-        return Err(std::io::Error::other("Component type mismatch"));
+        return Err(io::Error::other("Component type mismatch"));
     };
-    value.write(writer)
+    foton_utils::serial::write::write_nbt_tag_bounded(&value.to_codec_nbt(), 1024 * 1024, writer)
 }
 
 fn text_component_nbt_reader(tag: simdnbt::borrow::NbtTag) -> Option<ComponentData> {
-    use simdnbt::FromNbtTag as _;
-    TextComponent::from_nbt_tag(tag).map(ComponentData::new)
+    decode_text_nbt(&tag.to_owned()).map(ComponentData::new)
 }
 
-fn text_component_nbt_writer(data: &ComponentData) -> std::io::Result<simdnbt::owned::NbtTag> {
+fn text_component_nbt_writer(data: &ComponentData) -> io::Result<simdnbt::owned::NbtTag> {
     let Some(value) = data.downcast_ref::<TextComponent>() else {
-        return Err(std::io::Error::other("Component type mismatch"));
+        return Err(io::Error::other("Component type mismatch"));
     };
     Ok(value.to_codec_nbt())
 }
 
-fn custom_data_codec_reader(cursor: &mut std::io::Cursor<&[u8]>) -> std::io::Result<ComponentData> {
+fn custom_data_codec_reader(cursor: &mut std::io::Cursor<&[u8]>) -> io::Result<ComponentData> {
     CustomData::read_codec_network(cursor).map(ComponentData::new)
 }
 
-fn custom_data_writer(data: &ComponentData, writer: &mut Vec<u8>) -> std::io::Result<()> {
-    use foton_utils::serial::WriteTo as _;
+fn custom_data_writer(data: &ComponentData, writer: &mut dyn io::Write) -> io::Result<()> {
     let Some(value) = data.downcast_ref::<CustomData>() else {
-        return Err(std::io::Error::other("Component type mismatch"));
+        return Err(io::Error::other("Component type mismatch"));
     };
-    value.write(writer)
+    crate::data_components::registry::codecs::write_to_network(value, writer)
 }
 
 #[expect(
     clippy::unnecessary_wraps,
     reason = "network reader function pointers return io::Result"
 )]
-fn unit_reader(_cursor: &mut std::io::Cursor<&[u8]>) -> std::io::Result<ComponentData> {
+fn unit_reader(_cursor: &mut std::io::Cursor<&[u8]>) -> io::Result<ComponentData> {
     Ok(ComponentData::new(()))
 }
 
-fn unit_writer(data: &ComponentData, _writer: &mut Vec<u8>) -> std::io::Result<()> {
+fn unit_writer(data: &ComponentData, _writer: &mut dyn io::Write) -> io::Result<()> {
     if data.downcast_ref::<()>().is_some() {
         Ok(())
     } else {
-        Err(std::io::Error::other("Component type mismatch"))
+        Err(io::Error::other("Component type mismatch"))
     }
 }
 
-fn codec_unit_network_reader(
-    cursor: &mut std::io::Cursor<&[u8]>,
-) -> std::io::Result<ComponentData> {
+fn codec_unit_network_reader(cursor: &mut std::io::Cursor<&[u8]>) -> io::Result<ComponentData> {
+    nbt_preflight::check(cursor, false)?;
     let tag = simdnbt::owned::read_tag(cursor)
-        .map_err(|error| std::io::Error::other(format!("Invalid NBT: {error:?}")))?;
+        .map_err(|error| io::Error::other(format!("Invalid NBT: {error:?}")))?;
     tag.compound()
         .map(|_| ComponentData::new(()))
-        .ok_or_else(|| std::io::Error::other("Unit codec network value is not a compound"))
+        .ok_or_else(|| io::Error::other("Unit codec network value is not a compound"))
 }
 
-fn codec_unit_network_writer(data: &ComponentData, writer: &mut Vec<u8>) -> std::io::Result<()> {
-    unit_nbt_writer(data)?.write(writer);
-    Ok(())
+fn codec_unit_network_writer(data: &ComponentData, writer: &mut dyn io::Write) -> io::Result<()> {
+    crate::data_components::registry::codecs::write_to_network(&unit_nbt_writer(data)?, writer)
 }
 
 fn ranged_i32_nbt_reader<const MIN: i32, const MAX: i32>(
@@ -516,12 +510,12 @@ fn ranged_i32_nbt_reader<const MIN: i32, const MAX: i32>(
 
 fn ranged_i32_nbt_writer<const MIN: i32, const MAX: i32>(
     data: &ComponentData,
-) -> std::io::Result<simdnbt::owned::NbtTag> {
+) -> io::Result<simdnbt::owned::NbtTag> {
     let Some(value) = data.downcast_ref::<i32>() else {
-        return Err(std::io::Error::other("Component type mismatch"));
+        return Err(io::Error::other("Component type mismatch"));
     };
     if !(MIN..=MAX).contains(value) {
-        return Err(std::io::Error::other(format!(
+        return Err(io::Error::other(format!(
             "Value {value} outside of range [{MIN}:{MAX}]"
         )));
     }
@@ -539,28 +533,24 @@ fn potion_duration_scale_nbt_reader(tag: simdnbt::borrow::NbtTag) -> Option<Comp
     (value.is_finite() && !value.is_sign_negative()).then(|| ComponentData::new(value))
 }
 
-fn minimum_attack_charge_nbt_writer(
-    data: &ComponentData,
-) -> std::io::Result<simdnbt::owned::NbtTag> {
+fn minimum_attack_charge_nbt_writer(data: &ComponentData) -> io::Result<simdnbt::owned::NbtTag> {
     let Some(value) = data.downcast_ref::<f32>() else {
-        return Err(std::io::Error::other("Component type mismatch"));
+        return Err(io::Error::other("Component type mismatch"));
     };
     if !value.is_finite() || value.is_sign_negative() || *value > 1.0 {
-        return Err(std::io::Error::other(format!(
+        return Err(io::Error::other(format!(
             "Value {value} outside of range [0:1]"
         )));
     }
     Ok(simdnbt::owned::NbtTag::Float(*value))
 }
 
-fn potion_duration_scale_nbt_writer(
-    data: &ComponentData,
-) -> std::io::Result<simdnbt::owned::NbtTag> {
+fn potion_duration_scale_nbt_writer(data: &ComponentData) -> io::Result<simdnbt::owned::NbtTag> {
     let Some(value) = data.downcast_ref::<f32>() else {
-        return Err(std::io::Error::other("Component type mismatch"));
+        return Err(io::Error::other("Component type mismatch"));
     };
     if !value.is_finite() || value.is_sign_negative() {
-        return Err(std::io::Error::other(format!(
+        return Err(io::Error::other(format!(
             "Value {value} must be non-negative and finite"
         )));
     }
@@ -571,9 +561,9 @@ fn bool_nbt_reader(tag: simdnbt::borrow::NbtTag) -> Option<ComponentData> {
     tag.codec_bool().map(ComponentData::new)
 }
 
-fn bool_nbt_writer(data: &ComponentData) -> std::io::Result<simdnbt::owned::NbtTag> {
+fn bool_nbt_writer(data: &ComponentData) -> io::Result<simdnbt::owned::NbtTag> {
     let Some(value) = data.downcast_ref::<bool>() else {
-        return Err(std::io::Error::other("Component type mismatch"));
+        return Err(io::Error::other("Component type mismatch"));
     };
     Ok(simdnbt::owned::NbtTag::Byte(i8::from(*value)))
 }
@@ -582,9 +572,9 @@ fn unit_nbt_reader(tag: simdnbt::borrow::NbtTag) -> Option<ComponentData> {
     tag.compound().map(|_| ComponentData::new(()))
 }
 
-fn unit_nbt_writer(data: &ComponentData) -> std::io::Result<simdnbt::owned::NbtTag> {
+fn unit_nbt_writer(data: &ComponentData) -> io::Result<simdnbt::owned::NbtTag> {
     if data.downcast_ref::<()>().is_none() {
-        return Err(std::io::Error::other("Component type mismatch"));
+        return Err(io::Error::other("Component type mismatch"));
     }
     Ok(simdnbt::owned::NbtTag::Compound(
         simdnbt::owned::NbtCompound::new(),
@@ -593,29 +583,28 @@ fn unit_nbt_writer(data: &ComponentData) -> std::io::Result<simdnbt::owned::NbtT
 
 fn jukebox_playable_network_reader(
     cursor: &mut std::io::Cursor<&[u8]>,
-) -> std::io::Result<ComponentData> {
+) -> io::Result<ComponentData> {
     use foton_utils::serial::ReadFrom;
     JukeboxPlayable::read(cursor).map(ComponentData::new)
 }
 
 fn jukebox_playable_network_writer(
     data: &ComponentData,
-    writer: &mut Vec<u8>,
-) -> std::io::Result<()> {
-    use foton_utils::serial::WriteTo;
+    writer: &mut dyn io::Write,
+) -> io::Result<()> {
     let Some(value) = data.downcast_ref::<JukeboxPlayable>() else {
-        return Err(std::io::Error::other("Component type mismatch"));
+        return Err(io::Error::other("Component type mismatch"));
     };
-    value.write(writer)
+    crate::data_components::registry::codecs::write_to_network(value, writer)
 }
 
 fn jukebox_playable_nbt_reader(tag: simdnbt::borrow::NbtTag) -> Option<ComponentData> {
     JukeboxPlayable::from_persistent_nbt(tag).map(ComponentData::new)
 }
 
-fn jukebox_playable_nbt_writer(data: &ComponentData) -> std::io::Result<simdnbt::owned::NbtTag> {
+fn jukebox_playable_nbt_writer(data: &ComponentData) -> io::Result<simdnbt::owned::NbtTag> {
     let Some(value) = data.downcast_ref::<JukeboxPlayable>() else {
-        return Err(std::io::Error::other("Component type mismatch"));
+        return Err(io::Error::other("Component type mismatch"));
     };
     value.to_persistent_nbt()
 }
@@ -624,51 +613,49 @@ fn fireworks_nbt_reader(tag: simdnbt::borrow::NbtTag) -> Option<ComponentData> {
     Fireworks::from_nbt_tag(tag).map(ComponentData::new)
 }
 
-fn fireworks_network_reader(cursor: &mut std::io::Cursor<&[u8]>) -> std::io::Result<ComponentData> {
+fn fireworks_network_reader(cursor: &mut std::io::Cursor<&[u8]>) -> io::Result<ComponentData> {
     use foton_utils::serial::ReadFrom as _;
     Fireworks::read(cursor).map(ComponentData::new)
 }
 
-fn fireworks_network_writer(data: &ComponentData, writer: &mut Vec<u8>) -> std::io::Result<()> {
-    use foton_utils::serial::WriteTo as _;
+fn fireworks_network_writer(data: &ComponentData, writer: &mut dyn io::Write) -> io::Result<()> {
     let Some(value) = data.downcast_ref::<Fireworks>() else {
-        return Err(std::io::Error::other("Component type mismatch"));
+        return Err(io::Error::other("Component type mismatch"));
     };
-    value.write(writer)
+    crate::data_components::registry::codecs::write_to_network(value, writer)
 }
 
-fn fireworks_nbt_writer(data: &ComponentData) -> std::io::Result<simdnbt::owned::NbtTag> {
+fn fireworks_nbt_writer(data: &ComponentData) -> io::Result<simdnbt::owned::NbtTag> {
     let Some(value) = data.downcast_ref::<Fireworks>() else {
-        return Err(std::io::Error::other("Component type mismatch"));
+        return Err(io::Error::other("Component type mismatch"));
     };
     value.try_to_persistent_nbt()
 }
 
 fn painting_variant_network_reader(
     cursor: &mut std::io::Cursor<&[u8]>,
-) -> std::io::Result<ComponentData> {
+) -> io::Result<ComponentData> {
     use foton_utils::serial::ReadFrom as _;
     PaintingVariantComponent::read(cursor).map(ComponentData::new)
 }
 
 fn painting_variant_network_writer(
     data: &ComponentData,
-    writer: &mut Vec<u8>,
-) -> std::io::Result<()> {
-    use foton_utils::serial::WriteTo as _;
+    writer: &mut dyn io::Write,
+) -> io::Result<()> {
     let Some(value) = data.downcast_ref::<PaintingVariantComponent>() else {
-        return Err(std::io::Error::other("Component type mismatch"));
+        return Err(io::Error::other("Component type mismatch"));
     };
-    value.write(writer)
+    crate::data_components::registry::codecs::write_to_network(value, writer)
 }
 
 fn painting_variant_nbt_reader(tag: simdnbt::borrow::NbtTag) -> Option<ComponentData> {
     PaintingVariantComponent::from_nbt_tag(tag).map(ComponentData::new)
 }
 
-fn painting_variant_nbt_writer(data: &ComponentData) -> std::io::Result<simdnbt::owned::NbtTag> {
+fn painting_variant_nbt_writer(data: &ComponentData) -> io::Result<simdnbt::owned::NbtTag> {
     let Some(value) = data.downcast_ref::<PaintingVariantComponent>() else {
-        return Err(std::io::Error::other("Component type mismatch"));
+        return Err(io::Error::other("Component type mismatch"));
     };
     value.try_to_persistent_nbt()
 }
@@ -714,7 +701,7 @@ pub fn register_vanilla_data_components(registry: &mut DataComponentRegistry) {
     // 4: unbreakable
     register_stream_unit!(registry, UNBREAKABLE);
     // 5: use_effects
-    registry.register(USE_EFFECTS);
+    registry.register_validated(USE_EFFECTS);
     // 6: custom_name
     registry.register_with_codecs(
         CUSTOM_NAME,
@@ -748,7 +735,7 @@ pub fn register_vanilla_data_components(registry: &mut DataComponentRegistry) {
     // 12: rarity
     registry.register(RARITY);
     // 13: enchantments
-    registry.register(ENCHANTMENTS);
+    registry.register_validated(ENCHANTMENTS);
     // 14: can_place_on
     registry.register(CAN_PLACE_ON);
     // 15: can_break
@@ -786,15 +773,15 @@ pub fn register_vanilla_data_components(registry: &mut DataComponentRegistry) {
     // 25: use_remainder
     registry.register_validated(USE_REMAINDER);
     // 26: use_cooldown
-    registry.register(USE_COOLDOWN);
+    registry.register_validated(USE_COOLDOWN);
     // 27: damage_resistant
     registry.register(DAMAGE_RESISTANT);
     // 28: tool
-    registry.register(TOOL);
+    registry.register_validated(TOOL);
     // 29: weapon
-    registry.register(WEAPON);
+    registry.register_validated(WEAPON);
     // 30: attack_range
-    registry.register(ATTACK_RANGE);
+    registry.register_validated(ATTACK_RANGE);
     // 31: enchantable
     registry.register(ENCHANTABLE);
     // 32: equippable
@@ -814,11 +801,11 @@ pub fn register_vanilla_data_components(registry: &mut DataComponentRegistry) {
     // 39: kinetic_weapon
     registry.register(KINETIC_WEAPON);
     // 40: swing_animation
-    registry.register(SWING_ANIMATION);
+    registry.register_validated(SWING_ANIMATION);
     // 41: additional_trade_cost
     registry.register_transient_with_codecs(ADDITIONAL_TRADE_COST, varint_reader, varint_writer);
     // 42: stored_enchantments
-    registry.register(STORED_ENCHANTMENTS);
+    registry.register_validated(STORED_ENCHANTMENTS);
     // 43: dye
     registry.register(DYE);
     // 44: dyed_color
@@ -866,7 +853,7 @@ pub fn register_vanilla_data_components(registry: &mut DataComponentRegistry) {
     // 62: provides_trim_material
     registry.register(PROVIDES_TRIM_MATERIAL);
     // 63: ominous_bottle_amplifier
-    registry.register(OMINOUS_BOTTLE_AMPLIFIER);
+    registry.register_validated(OMINOUS_BOTTLE_AMPLIFIER);
     // 64: jukebox_playable
     registry.register_with_codecs(
         JUKEBOX_PLAYABLE,

@@ -1,12 +1,16 @@
 //! Item components whose codecs recursively contain item stack templates.
 
+use foton_utils::serial::budget;
 use std::cmp::Ordering;
 use std::io::{Cursor, Error, Result, Write};
 
 use foton_utils::codec::VarInt;
 use foton_utils::hash::{ComponentHasher, HashComponent, HashEntry, sort_map_entries};
-use foton_utils::nbt::NbtNumeric as _;
-use foton_utils::serial::{ReadFrom, WriteTo};
+use foton_utils::nbt::{NbtNumeric as _, nbt_list_len};
+use foton_utils::serial::{
+    ReadFrom, WriteTo,
+    budget::{DEFAULT_COLLECTION_ALLOCATION_BUDGET, collection_capacity, read_collection_count},
+};
 use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
 use simdnbt::{FromNbtTag, ToNbtTag};
 
@@ -105,6 +109,10 @@ impl ChargedProjectiles {
     pub fn items(&self) -> &[ItemStackTemplate] {
         &self.items
     }
+
+    pub(crate) fn from_owned_nbt(tag: &NbtTag) -> Option<Self> {
+        Self::new(template_list_from_owned(tag, Some(Self::MAX_SIZE))?).ok()
+    }
 }
 
 impl WriteTo for ChargedProjectiles {
@@ -156,6 +164,9 @@ pub struct BundleContents {
 }
 
 impl BundleContents {
+    pub(crate) fn from_owned_nbt(tag: &NbtTag) -> Option<Self> {
+        Some(Self::new(template_list_from_owned(tag, None)?))
+    }
     /// Vanilla parity: `BundleContents.NO_SELECTED_ITEM_INDEX`.
     pub const NO_SELECTED_ITEM_INDEX: i32 = -1;
 
@@ -547,11 +558,35 @@ impl ItemContainerContents {
         &self.items
     }
 
+    pub(crate) fn from_owned_nbt(tag: &NbtTag) -> Option<Self> {
+        let list = tag.list()?;
+        if nbt_list_len(list) == 0 {
+            return Some(Self::empty());
+        }
+        let compounds = list.compounds()?;
+        if compounds.len() > Self::MAX_SIZE {
+            return None;
+        }
+        let mut slots = budget::read_vec(compounds.len(), compounds.len()).ok()?;
+        for compound in compounds {
+            let index = usize::try_from(compound.get("slot")?.codec_i32()?).ok()?;
+            if index >= Self::MAX_SIZE {
+                return None;
+            }
+            slots.push(ContainerSlot {
+                index,
+                item: ItemStackTemplate::from_owned_nbt(compound.get("item")?)?,
+            });
+        }
+        Self::from_slots(slots)
+    }
+
     fn from_slots(slots: Vec<ContainerSlot>) -> Option<Self> {
         if slots.len() > Self::MAX_SIZE {
             return None;
         }
         let size = slots.iter().map(|slot| slot.index + 1).max().unwrap_or(0);
+        budget::charge::<Option<ItemStackTemplate>>(size).ok()?;
         let mut items = vec![None; size];
         for slot in slots {
             items[slot.index] = Some(slot.item);
@@ -583,7 +618,13 @@ impl WriteTo for ItemContainerContents {
 impl ReadFrom for ItemContainerContents {
     fn read(data: &mut Cursor<&[u8]>) -> Result<Self> {
         let count = read_count(data, Some(Self::MAX_SIZE))?;
-        let mut items = Vec::with_capacity(count);
+        let mut items = budget::read_vec(
+            count,
+            collection_capacity::<Option<ItemStackTemplate>>(
+                count,
+                DEFAULT_COLLECTION_ALLOCATION_BUDGET,
+            )?,
+        )?;
         for _ in 0..count {
             items.push(if bool::read(data)? {
                 Some(ItemStackTemplate::read(data)?)
@@ -612,7 +653,7 @@ impl ToNbtTag for ItemContainerContents {
 impl FromNbtTag for ItemContainerContents {
     fn from_nbt_tag(tag: simdnbt::borrow::NbtTag) -> Option<Self> {
         let list = tag.list()?;
-        if list.to_owned().as_nbt_tags().is_empty() {
+        if borrowed_list_is_empty(&list) {
             return Some(Self::empty());
         }
         let compounds = list.compounds()?;
@@ -738,7 +779,10 @@ fn read_template_list(
     max: Option<usize>,
 ) -> Result<Vec<ItemStackTemplate>> {
     let count = read_count(data, max)?;
-    let mut items = Vec::with_capacity(count.min(65_536));
+    let mut items = budget::read_vec(
+        count,
+        collection_capacity::<ItemStackTemplate>(count, DEFAULT_COLLECTION_ALLOCATION_BUDGET)?,
+    )?;
     for _ in 0..count {
         items.push(ItemStackTemplate::read(data)?);
     }
@@ -758,16 +802,7 @@ fn write_count(count: usize, max: Option<usize>, writer: &mut impl Write) -> Res
 }
 
 fn read_count(data: &mut Cursor<&[u8]>, max: Option<usize>) -> Result<usize> {
-    let count = VarInt::read(data)?.0;
-    let count = usize::try_from(count).map_err(|_| Error::other("Negative list length"))?;
-    if let Some(max) = max
-        && count > max
-    {
-        return Err(Error::other(format!(
-            "{count} elements exceeded max size of {max}"
-        )));
-    }
-    Ok(count)
+    read_collection_count(data, max, 1)
 }
 
 #[cfg_attr(
@@ -792,12 +827,32 @@ fn template_list_nbt(items: &[ItemStackTemplate]) -> NbtTag {
     ))
 }
 
+// simdnbt's borrowed `empty` tests the element type, not the length.
+fn borrowed_list_is_empty(list: &simdnbt::borrow::NbtList<'_, '_>) -> bool {
+    match list.id() {
+        0 => true,
+        1 => list.bytes().is_some_and(<[i8]>::is_empty),
+        2 => list.shorts().is_some_and(|values| values.is_empty()),
+        3 => list.ints().is_some_and(|values| values.is_empty()),
+        4 => list.longs().is_some_and(|values| values.is_empty()),
+        5 => list.floats().is_some_and(|values| values.is_empty()),
+        6 => list.doubles().is_some_and(|values| values.is_empty()),
+        7 => list.byte_arrays().is_some_and(<[_]>::is_empty),
+        8 => list.strings().is_some_and(<[_]>::is_empty),
+        9 => list.lists().is_some_and(|values| values.is_empty()),
+        10 => list.compounds().is_some_and(|values| values.is_empty()),
+        11 => list.int_arrays().is_some_and(<[_]>::is_empty),
+        12 => list.long_arrays().is_some_and(<[_]>::is_empty),
+        _ => false,
+    }
+}
+
 fn template_list_from_nbt(
     tag: simdnbt::borrow::NbtTag,
     max: Option<usize>,
 ) -> Option<Vec<ItemStackTemplate>> {
     let list = tag.list()?;
-    if list.to_owned().as_nbt_tags().is_empty() {
+    if borrowed_list_is_empty(&list) {
         return Some(Vec::new());
     }
 
@@ -821,6 +876,27 @@ fn template_list_from_nbt(
         .collect()
 }
 
+fn template_list_from_owned(tag: &NbtTag, max: Option<usize>) -> Option<Vec<ItemStackTemplate>> {
+    let list = tag.list()?;
+    if nbt_list_len(list) == 0 {
+        return Some(Vec::new());
+    }
+    if max.is_some_and(|max| nbt_list_len(list) > max) {
+        return None;
+    }
+    let mut items = budget::read_vec(nbt_list_len(list), nbt_list_len(list)).ok()?;
+    if let Some(values) = list.strings() {
+        for value in values {
+            items.push(ItemStackTemplate::from_nbt_identifier(&value.to_str())?);
+        }
+    } else {
+        for value in list.compounds()? {
+            items.push(ItemStackTemplate::from_owned_compound(value)?);
+        }
+    }
+    Some(items)
+}
+
 fn hash_template_list(items: &[ItemStackTemplate], hasher: &mut ComponentHasher) {
     hasher.start_list();
     for item in items {
@@ -841,6 +917,7 @@ fn push_hash_entry<T: HashComponent + ?Sized>(entries: &mut Vec<HashEntry>, key:
 mod tests {
     use std::io::Cursor;
 
+    use foton_utils::codec::VarInt;
     use foton_utils::hash::HashComponent;
     use foton_utils::serial::{ReadFrom, WriteTo};
     use simdnbt::borrow::read_tag;
@@ -849,6 +926,7 @@ mod tests {
 
     use super::{
         BundleContents, ChargedProjectiles, ItemContainerContents, SulfurCubeContent, UseRemainder,
+        read_template_list,
     };
     use crate::data_components::DataComponentPatch;
     use crate::data_components::components::{BeehiveOccupant, Bees, CustomData, EntityData};
@@ -857,6 +935,32 @@ mod tests {
     };
     use crate::init_vanilla_registry;
     use crate::{ItemStackTemplate, REGISTRY, vanilla_entities, vanilla_items};
+
+    #[test]
+    fn container_and_recursive_template_tiny_counts_preflight_before_allocation() {
+        for count in [256, i32::MAX] {
+            let mut encoded = Vec::new();
+            VarInt(count).write(&mut encoded).expect("count");
+            let stats = allocation_counter::measure(|| {
+                assert!(ItemContainerContents::read(&mut Cursor::new(encoded.as_slice())).is_err());
+                assert!(BundleContents::read(&mut Cursor::new(encoded.as_slice())).is_err());
+            });
+            assert!(stats.bytes_max < 4096, "{stats:?}");
+        }
+    }
+
+    #[test]
+    fn template_list_huge_count_is_rejected_before_the_truncated_body() {
+        let mut encoded = Vec::new();
+        VarInt(i32::MAX)
+            .write(&mut encoded)
+            .expect("count should encode");
+
+        let error = read_template_list(&mut Cursor::new(encoded.as_slice()), None)
+            .expect_err("a count with no remaining template bytes must fail preflight");
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    }
 
     fn round_trip<T>(value: T)
     where

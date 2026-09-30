@@ -47,7 +47,7 @@ function New-Runtime {
         'kotlin-stdlib-jdk8-1.8.20.jar',
         'netty-buffer-4.2.15.Final.jar', 'netty-codec-base-4.2.15.Final.jar',
         'netty-common-4.2.15.Final.jar', 'netty-resolver-4.2.15.Final.jar',
-        'netty-transport-4.2.15.Final.jar', 'slf4j-api-2.0.17.jar', 'snakeyaml-2.2.jar'
+        'netty-transport-4.2.15.Final.jar', 'slf4j-api-2.0.17.jar', 'snakeyaml-2.2.jar', 'sqlite-jdbc-3.49.1.0.jar'
     )
     foreach ($name in $libraries) {
         [System.IO.File]::WriteAllText((Join-Path $Path "lib\$name"), "library $Marker $name`n")

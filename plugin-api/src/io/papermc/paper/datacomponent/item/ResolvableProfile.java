@@ -3,6 +3,7 @@ package io.papermc.paper.datacomponent.item;
 import com.destroystokyo.paper.profile.PlayerProfile;
 import com.destroystokyo.paper.profile.ProfileProperty;
 import io.papermc.paper.datacomponent.DataComponentBuilder;
+
 import java.util.Collection;
 import java.util.UUID;
 import net.kyori.adventure.key.Key;

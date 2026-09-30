@@ -6,15 +6,21 @@
 //! Bottles it does not apply to are left alone rather than blocking the brew.
 
 use std::{
-    mem,
+    mem, ptr,
     sync::{
         Arc, Weak,
-        atomic::{AtomicI32, Ordering},
+        atomic::{AtomicI32, AtomicU64, Ordering},
     },
 };
 
+#[cfg(test)]
+use foton_utils::Downcast as _;
+#[cfg(test)]
+use std::cell::Cell;
+
 use foton_registry::blocks::block_state_ext::BlockStateExt;
 use foton_registry::blocks::properties::{BlockStateProperties, BoolProperty};
+use foton_registry::item_predicate::LockCode;
 use foton_registry::item_stack::ItemStack;
 use foton_registry::level_events::SOUND_BREWING_STAND_BREW;
 use foton_registry::{potion_brewing, vanilla_block_entity_types, vanilla_items};
@@ -22,16 +28,21 @@ use foton_utils::types::UpdateFlags;
 use foton_utils::{
     BlockPos, BlockStateId, Direction, DowncastType, DowncastTypeKey, locks::SyncMutex,
 };
-use simdnbt::ToNbtTag;
 use simdnbt::borrow::{BaseNbtCompound as BorrowedNbtCompound, NbtCompound as NbtCompoundView};
 use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
+use simdnbt::{FromNbtTag, ToNbtTag};
 
-use crate::block_entity::{BlockEntity, BlockEntityBase, BlockEntityName, ImplicitComponentInput};
-use crate::event::{BrewEvent, Event as _};
+use crate::block_entity::{
+    BlockEntity, BlockEntityBase, ImplicitComponentInput, SharedBlockEntity,
+};
+use crate::event::BrewEvent;
 use crate::inventory::container::{Container, SlotsForFace};
-use crate::inventory::lock::{ContainerRef, SharedContainer};
+use crate::inventory::lock::{ContainerLockGuard, ContainerRef, SharedContainer};
 use crate::world::World;
-use foton_registry::data_components::DataComponentMap;
+use foton_registry::data_components::{
+    DataComponentMap,
+    vanilla_components::{CUSTOM_NAME, LOCK},
+};
 use std::array;
 use text_components::TextComponent;
 
@@ -45,6 +56,12 @@ pub const SLOT_FUEL: usize = 4;
 pub const BREWING_STAND_SLOTS: usize = 5;
 /// Bottles a stand brews at once.
 pub const BOTTLE_SLOTS: usize = 3;
+/// Vanilla and Paper default brewing duration.
+pub const DEFAULT_RECIPE_BREW_TIME: i32 = 400;
+
+const CUSTOM_NAME_TAG: &str = "CustomName";
+const LOCK_TAG: &str = "lock";
+static NEXT_BREWING_STAND_IDENTITY: AtomicU64 = AtomicU64::new(1);
 
 /// The three bottle-occupied flags on the block.
 ///
@@ -88,12 +105,10 @@ fn clamp_to_i16(value: i32) -> i16 {
 /// Brewing stand block entity.
 pub struct BrewingStandBlockEntity {
     base: Arc<BlockEntityBase>,
+    identity: u64,
     container: Arc<SyncMutex<BrewingStandContainer>>,
     container_ref: ContainerRef,
     data: Arc<BrewingStandDataSlots>,
-    /// Vanilla parity: the `name` of `BaseContainerBlockEntity`, the anvil
-    /// name this block was placed with.
-    name: BlockEntityName,
 }
 
 /// Items and brewing state, held under one lock because a tick mutates both.
@@ -103,6 +118,10 @@ struct BrewingStandContainer {
     brew_time: i32,
     /// Brews left in the blaze powder already consumed.
     fuel: i32,
+    /// Paper's mutable duration for the next brew; not persisted by Vanilla.
+    recipe_brew_time: i32,
+    custom_name: Option<TextComponent>,
+    lock: LockCode,
     /// The ingredient the current brew started with.
     ///
     /// Vanilla keeps this to notice a player swapping the ingredient mid-brew,
@@ -110,6 +129,104 @@ struct BrewingStandContainer {
     brewing_ingredient: Option<ItemStack>,
     /// Which bottle slots were filled when the block state was last written.
     last_bottle_flags: [bool; BOTTLE_SLOTS],
+}
+
+/// State whose identity must survive the unlocked plugin callback.
+#[derive(Clone, PartialEq)]
+struct BrewCompletionSnapshot {
+    items: Vec<ItemStack>,
+    brew_time: i32,
+    fuel: i32,
+    recipe_brew_time: i32,
+    custom_name: Option<TextComponent>,
+    lock: LockCode,
+    brewing_ingredient: Option<ItemStack>,
+    last_bottle_flags: [bool; BOTTLE_SLOTS],
+}
+
+/// A coherent borrowed bridge view, valid only while the container is locked.
+pub struct BrewingStandStateView<'a> {
+    /// Instance identity used to reject wrappers captured before replacement.
+    pub identity: u64,
+    /// The five live container slots.
+    pub items: &'a [ItemStack],
+    /// Remaining ticks in the current brew.
+    pub brew_time: i32,
+    /// Duration assigned to the next brew.
+    pub recipe_brew_time: i32,
+    /// Remaining fuel uses.
+    pub fuel: i32,
+    /// Optional custom display name.
+    pub custom_name: Option<&'a TextComponent>,
+    /// Vanilla item predicate lock.
+    pub lock: &'a LockCode,
+}
+
+/// Complete block-entity snapshot exposed to the Paper bridge.
+#[derive(Clone)]
+pub struct BrewingStandStateSnapshot {
+    /// Instance identity used to reject wrappers captured before replacement.
+    pub identity: u64,
+    /// The five live container slots.
+    pub items: Vec<ItemStack>,
+    /// Remaining ticks in the current brew.
+    pub brew_time: i32,
+    /// Duration assigned to the next brew.
+    pub recipe_brew_time: i32,
+    /// Remaining fuel uses.
+    pub fuel: i32,
+    /// Optional custom display name.
+    pub custom_name: Option<TextComponent>,
+    /// Vanilla item predicate lock.
+    pub lock: LockCode,
+}
+
+struct BrewCompletionEffects {
+    remainder: Option<ItemStack>,
+    completed: bool,
+    flags: [bool; BOTTLE_SLOTS],
+    flags_changed: bool,
+}
+
+#[cfg(test)]
+thread_local! {
+    static BREW_SNAPSHOT_CAPTURES: Cell<usize> = const { Cell::new(0) };
+    static BREW_WORLD_EFFECTS: Cell<usize> = const { Cell::new(0) };
+    static BREW_PRE_REMOVE_OBSERVED_IDENTITY: Cell<Option<u64>> = const { Cell::new(None) };
+    static BREW_REENTER_STATE_CALLBACK: Cell<bool> = const { Cell::new(false) };
+    static BREW_STATE_CALLBACK_COUNT: Cell<usize> = const { Cell::new(0) };
+    static BREW_STATE_CALLBACK_OBSERVED_STATE: Cell<Option<BlockStateId>> = const { Cell::new(None) };
+    static BREW_STATE_CALLBACK_OBSERVED_IDENTITY: Cell<Option<u64>> = const { Cell::new(None) };
+    static BREW_STATE_CALLBACK_OBSERVED_DIAMOND: Cell<bool> = const { Cell::new(false) };
+    static BREW_STATE_CALLBACK_STILL_CURRENT: Cell<bool> = const { Cell::new(false) };
+}
+
+impl BrewCompletionSnapshot {
+    fn capture(container: &BrewingStandContainer) -> Self {
+        #[cfg(test)]
+        BREW_SNAPSHOT_CAPTURES.with(|count| count.set(count.get() + 1));
+        Self {
+            items: container.items.clone(),
+            brew_time: container.brew_time,
+            fuel: container.fuel,
+            recipe_brew_time: container.recipe_brew_time,
+            custom_name: container.custom_name.clone(),
+            lock: container.lock.clone(),
+            brewing_ingredient: container.brewing_ingredient.clone(),
+            last_bottle_flags: container.last_bottle_flags,
+        }
+    }
+
+    fn still_matches(&self, container: &BrewingStandContainer) -> bool {
+        self.items == container.items
+            && self.brew_time == container.brew_time
+            && self.fuel == container.fuel
+            && self.recipe_brew_time == container.recipe_brew_time
+            && self.custom_name == container.custom_name
+            && self.lock == container.lock
+            && self.brewing_ingredient == container.brewing_ingredient
+            && self.last_bottle_flags == container.last_bottle_flags
+    }
 }
 
 // SAFETY: This key is owned by Foton and uniquely identifies `BrewingStandBlockEntity`.
@@ -148,6 +265,15 @@ impl BrewingStandContainer {
     fn brew(&mut self, results: &[ItemStack]) -> Option<ItemStack> {
         for (slot, result) in results.iter().take(BOTTLE_SLOTS).enumerate() {
             self.items[slot] = result.clone();
+        }
+
+        self.consume_ingredient()
+    }
+
+    /// Spends the ingredient currently in the event-mutated snapshot.
+    fn consume_ingredient(&mut self) -> Option<ItemStack> {
+        if self.items[SLOT_INGREDIENT].is_empty() {
+            return None;
         }
 
         let remainder = self.items[SLOT_INGREDIENT].item().get_crafting_remainder();
@@ -198,6 +324,9 @@ impl BrewingStandBlockEntity {
             items: vec![ItemStack::empty(); BREWING_STAND_SLOTS],
             brew_time: 0,
             fuel: 0,
+            recipe_brew_time: DEFAULT_RECIPE_BREW_TIME,
+            custom_name: None,
+            lock: LockCode::NO_LOCK,
             brewing_ingredient: None,
             last_bottle_flags: [false; BOTTLE_SLOTS],
         }));
@@ -205,10 +334,16 @@ impl BrewingStandBlockEntity {
         Self {
             container_ref: ContainerRef::owned_by_block_entity(shared_container, Arc::clone(&base)),
             base,
+            identity: NEXT_BREWING_STAND_IDENTITY.fetch_add(1, Ordering::Relaxed),
             container,
             data: Arc::new(BrewingStandDataSlots::default()),
-            name: BlockEntityName::new(),
         }
+    }
+
+    /// Returns this placed instance's stable bridge identity without cloning its state.
+    #[must_use]
+    pub const fn identity(&self) -> u64 {
+        self.identity
     }
 
     /// Returns the progress values shared with open menus.
@@ -217,21 +352,194 @@ impl BrewingStandBlockEntity {
         Arc::clone(&self.data)
     }
 
+    /// Atomically snapshots every value exposed by Bukkit's block state.
+    #[must_use]
+    pub fn state_snapshot(&self) -> BrewingStandStateSnapshot {
+        let container = self.container.lock();
+        BrewingStandStateSnapshot {
+            identity: self.identity,
+            items: container.items.clone(),
+            brew_time: container.brew_time,
+            recipe_brew_time: container.recipe_brew_time,
+            fuel: container.fuel,
+            custom_name: container.custom_name.clone(),
+            lock: container.lock.clone(),
+        }
+    }
+
+    /// Reads a coherent state under the container lock without cloning payloads.
+    /// The callback must not re-enter the container or call plugin code.
+    pub fn with_state<R>(&self, read: impl FnOnce(BrewingStandStateView<'_>) -> R) -> R {
+        let container = self.container.lock();
+        read(BrewingStandStateView {
+            identity: self.identity,
+            items: &container.items,
+            brew_time: container.brew_time,
+            recipe_brew_time: container.recipe_brew_time,
+            fuel: container.fuel,
+            custom_name: container.custom_name.as_ref(),
+            lock: &container.lock,
+        })
+    }
+
+    /// Reads a live slot under its lock after the same identity checks as `live_item`.
+    /// The callback must not re-enter the container or call plugin code.
+    pub fn with_live_item<R>(
+        &self,
+        identity: u64,
+        slot: usize,
+        read: impl FnOnce(&ItemStack) -> R,
+    ) -> Option<R> {
+        if identity != self.identity || slot >= BREWING_STAND_SLOTS {
+            return None;
+        }
+        let world = self.get_level()?;
+        if !self.is_current_in(&world, self.get_block_pos()) {
+            return None;
+        }
+        let container = self.container.lock();
+        Some(read(&container.items[slot]))
+    }
+
+    /// Reads one live slot only while this exact placed instance is current.
+    #[must_use]
+    pub fn live_item(&self, identity: u64, slot: usize) -> Option<ItemStack> {
+        if identity != self.identity || slot >= BREWING_STAND_SLOTS {
+            return None;
+        }
+        let world = self.get_level()?;
+        if !self.is_current_in(&world, self.get_block_pos()) {
+            return None;
+        }
+        Some(self.container.lock().items[slot].clone())
+    }
+
+    /// Writes one live slot only while this exact placed instance is current.
+    #[must_use]
+    pub fn set_live_item(&self, identity: u64, slot: usize, item: ItemStack) -> bool {
+        if identity != self.identity || slot >= BREWING_STAND_SLOTS {
+            return false;
+        }
+        let Some(world) = self.get_level() else {
+            return false;
+        };
+        if !self.is_current_in(&world, self.get_block_pos()) {
+            return false;
+        }
+        {
+            let mut container = self.container.lock();
+            container.items[slot] = item;
+        }
+        self.set_changed();
+        world.send_block_updated(self.get_block_pos());
+        true
+    }
+
+    /// Applies one complete Bukkit snapshot under the block entity's state lock.
+    #[must_use]
+    pub fn apply_state_snapshot(&self, snapshot: BrewingStandStateSnapshot) -> bool {
+        if snapshot.identity != self.identity || !Self::is_valid_state_snapshot(&snapshot) {
+            return false;
+        }
+        let Some(world) = self.get_level() else {
+            return false;
+        };
+        if !self.is_current_in(&world, self.get_block_pos()) {
+            return false;
+        }
+        self.commit_visible_state_snapshot(snapshot);
+        self.set_changed();
+        world.send_block_updated(self.get_block_pos());
+        true
+    }
+
+    const fn is_valid_state_snapshot(snapshot: &BrewingStandStateSnapshot) -> bool {
+        snapshot.items.len() == BREWING_STAND_SLOTS && snapshot.recipe_brew_time > 0
+    }
+
+    /// Commits a snapshot immediately after this stand was created by a validated replacement.
+    ///
+    /// The replacement path has already checked the payload and the registered brewing-stand
+    /// factory before changing the block state. Keeping this narrow lifecycle commit separate
+    /// prevents a replacement from acquiring a later rejectable snapshot-validation step.
+    pub fn apply_replacement_snapshot(&self, snapshot: BrewingStandStateSnapshot) {
+        let mut container = self.container.lock();
+        container.items = snapshot.items;
+        container.brew_time = snapshot.brew_time;
+        container.recipe_brew_time = snapshot.recipe_brew_time;
+        container.fuel = snapshot.fuel;
+        container.custom_name = snapshot.custom_name;
+        container.lock = snapshot.lock;
+        container.brewing_ingredient =
+            (container.brew_time > 0).then(|| container.items[SLOT_INGREDIENT].clone());
+        self.publish_data(&container);
+    }
+
+    /// Applies a snapshot together with a property-only block-state change.
+    #[must_use]
+    pub fn apply_state_snapshot_with_state(
+        &self,
+        world: &Arc<World>,
+        current_entity: &SharedBlockEntity,
+        state: BlockStateId,
+        snapshot: BrewingStandStateSnapshot,
+        flags: UpdateFlags,
+    ) -> bool {
+        if snapshot.identity != self.identity
+            || !Self::is_valid_state_snapshot(&snapshot)
+            || !ptr::eq(current_entity.base(), self.base())
+        {
+            return false;
+        }
+        let pos = self.get_block_pos();
+        let current_state = self.get_block_state();
+        world.update_block_with_entity_if_unchanged(
+            pos,
+            current_state,
+            current_entity,
+            state,
+            flags,
+            || self.commit_visible_state_snapshot(snapshot),
+        )
+    }
+
+    fn commit_visible_state_snapshot(&self, snapshot: BrewingStandStateSnapshot) {
+        {
+            let mut container = self.container.lock();
+            container.items = snapshot.items;
+            container.brew_time = snapshot.brew_time;
+            container.recipe_brew_time = snapshot.recipe_brew_time;
+            container.fuel = snapshot.fuel;
+            container.custom_name = snapshot.custom_name;
+            container.lock = snapshot.lock;
+            self.publish_data(&container);
+        }
+    }
+
     /// Returns the name an anvil gave this brewing stand, if any.
     ///
     /// Vanilla parity: `Nameable.getCustomName`.
     #[must_use]
     pub fn custom_name(&self) -> Option<TextComponent> {
-        self.name.custom_name()
-    }
-}
-
-impl BlockEntity for BrewingStandBlockEntity {
-    fn base(&self) -> &BlockEntityBase {
-        &self.base
+        self.container.lock().custom_name.clone()
     }
 
-    fn tick(&self, world: &Arc<World>) {
+    fn is_current_in(&self, world: &World, pos: BlockPos) -> bool {
+        world
+            .get_block_entity(pos)
+            .is_some_and(|current| ptr::eq(current.base(), self.base()))
+    }
+
+    /// Runs one vanilla brewing tick with an optional owner callback.
+    ///
+    /// The ordinary path keeps the existing direct mutex and allocation-free
+    /// tick. Only a completed, owned brew enters `ContainerLockGuard`, whose
+    /// unlocked callback boundary lets listeners inspect the same stand.
+    fn tick_with_brew_dispatch<H, D>(&self, world: &Arc<World>, mut has_owner: H, mut dispatch: D)
+    where
+        H: FnMut() -> bool,
+        D: FnMut(&mut BrewEvent),
+    {
         let pos = self.get_block_pos();
         let mut container = self.container.lock();
 
@@ -246,6 +554,8 @@ impl BlockEntity for BrewingStandBlockEntity {
 
         let brewable = container.is_brewable();
         let mut remainder = None;
+        let mut completed = false;
+        let mut pending_completion = None;
 
         if container.brew_time > 0 {
             container.brew_time -= 1;
@@ -255,49 +565,204 @@ impl BlockEntity for BrewingStandBlockEntity {
                 .is_none_or(|started| !container.items[SLOT_INGREDIENT].is(started.item()));
 
             if container.brew_time == 0 && brewable {
-                // Paper parity: `BrewEvent`, fired with the stand unlocked
-                // because its listener is handed the stand's inventory.
-                let results = container.brew_results();
-                let fuel = container.fuel;
-                drop(container);
-                let mut event = BrewEvent::new(world.key.to_string(), pos, results, fuel);
-                world.fire_event(&mut event);
-                container = self.container.lock();
-                if !event.is_cancelled() && container.is_brewable() {
-                    remainder = container.brew(event.results());
-                    world.level_event(SOUND_BREWING_STAND_BREW, pos, 0, None);
+                if has_owner() {
+                    pending_completion = Some(BrewCompletionSnapshot::capture(&container));
+                } else {
+                    let results = container.brew_results();
+                    remainder = container.brew(&results);
+                    completed = true;
                 }
             } else if !brewable || ingredient_swapped {
                 container.brew_time = 0;
             }
         } else if brewable && container.fuel > 0 {
             container.fuel -= 1;
-            container.brew_time = potion_brewing::BREWING_TIME_TICKS;
+            container.brew_time = container.recipe_brew_time;
             container.brewing_ingredient = Some(container.items[SLOT_INGREDIENT].clone());
         }
 
-        self.data
-            .brew_time
-            .store(container.brew_time, Ordering::Relaxed);
-        self.data.fuel.store(container.fuel, Ordering::Relaxed);
-
-        let flags = container.bottle_flags();
-        let flags_changed = flags != container.last_bottle_flags;
-        if flags_changed {
-            container.last_bottle_flags = flags;
+        let mut flags = container.bottle_flags();
+        let mut flags_changed = false;
+        if pending_completion.is_none() {
+            flags_changed = flags != container.last_bottle_flags;
+            if flags_changed {
+                container.last_bottle_flags = flags;
+            }
         }
+        self.publish_data(&container);
         drop(container);
 
-        if let Some(remainder) = remainder {
-            world.drop_item_stack(pos, remainder);
+        if let Some(snapshot) = pending_completion {
+            let Some(effects) = self.finish_owned_brew(world, pos, snapshot, &mut dispatch) else {
+                return;
+            };
+            remainder = effects.remainder;
+            completed = effects.completed;
+            flags = effects.flags;
+            flags_changed = effects.flags_changed;
         }
 
+        if let Some(remainder) = remainder {
+            #[cfg(test)]
+            BREW_WORLD_EFFECTS.with(|count| count.set(count.get() + 1));
+            world.drop_item_stack(pos, remainder);
+        }
+        if completed {
+            #[cfg(test)]
+            BREW_WORLD_EFFECTS.with(|count| count.set(count.get() + 1));
+            world.level_event(SOUND_BREWING_STAND_BREW, pos, 0, None);
+        }
         if flags_changed {
+            #[cfg(test)]
+            BREW_WORLD_EFFECTS.with(|count| count.set(count.get() + 1));
             let mut state = self.get_block_state();
             for (property, filled) in HAS_BOTTLE.iter().zip(flags) {
                 state = state.set_value(*property, filled);
             }
             world.set_block(pos, state, UpdateFlags::UPDATE_CLIENTS);
+        }
+    }
+
+    fn publish_data(&self, container: &BrewingStandContainer) {
+        self.data
+            .brew_time
+            .store(container.brew_time, Ordering::Relaxed);
+        self.data.fuel.store(container.fuel, Ordering::Relaxed);
+    }
+
+    fn finish_owned_brew<D>(
+        &self,
+        world: &World,
+        pos: BlockPos,
+        snapshot: BrewCompletionSnapshot,
+        dispatch: &mut D,
+    ) -> Option<BrewCompletionEffects>
+    where
+        D: FnMut(&mut BrewEvent),
+    {
+        let mut guard = ContainerLockGuard::lock_all(&[&self.container_ref]);
+        let id = self.container_ref.container_id();
+        if !guard
+            .get_typed::<BrewingStandContainer>(id)
+            .is_some_and(|current| snapshot.still_matches(current))
+        {
+            return None;
+        }
+        let results = (0..BOTTLE_SLOTS)
+            .map(|slot| {
+                potion_brewing::mix_with(&snapshot.items[SLOT_INGREDIENT], &snapshot.items[slot])
+            })
+            .collect();
+        let mut event = BrewEvent::new(
+            world.key.to_string(),
+            pos,
+            snapshot.items.clone(),
+            results,
+            snapshot.fuel,
+        );
+        guard.run_unlocked(|| dispatch(&mut event));
+        drop(guard);
+
+        // A listener may remove or replace the stand while no container lock is
+        // held. The detached Rust object must never commit into that position.
+        if !self.is_current_in(world, pos) {
+            return None;
+        }
+
+        let mut guard = ContainerLockGuard::lock_all(&[&self.container_ref]);
+        let snapshot_is_current = guard
+            .get_typed::<BrewingStandContainer>(id)
+            .is_some_and(|current| snapshot.still_matches(current));
+        if snapshot_is_current && event.is_cancelled() {
+            if let Some(current) = guard.get_typed::<BrewingStandContainer>(id) {
+                self.publish_data(current);
+            }
+            return None;
+        }
+        let mut remainder = None;
+        let mut completed = false;
+        if snapshot_is_current
+            && event.contents().len() == BREWING_STAND_SLOTS
+            && let Some(current) = guard.get_typed_mut::<BrewingStandContainer>(id)
+        {
+            current.items.clone_from_slice(event.contents());
+            for slot in 0..BOTTLE_SLOTS {
+                current.items[slot] = event
+                    .results()
+                    .get(slot)
+                    .cloned()
+                    .unwrap_or_else(ItemStack::empty);
+            }
+            remainder = current.consume_ingredient();
+            completed = true;
+        }
+
+        let current = guard.get_typed_mut::<BrewingStandContainer>(id)?;
+        self.publish_data(current);
+        let flags = current.bottle_flags();
+        let flags_changed = flags != current.last_bottle_flags;
+        if flags_changed {
+            current.last_bottle_flags = flags;
+        }
+        Some(BrewCompletionEffects {
+            remainder,
+            completed,
+            flags,
+            flags_changed,
+        })
+    }
+}
+
+impl BlockEntity for BrewingStandBlockEntity {
+    fn base(&self) -> &BlockEntityBase {
+        &self.base
+    }
+
+    fn tick(&self, world: &Arc<World>) {
+        self.tick_with_brew_dispatch(
+            world,
+            || {
+                world
+                    .server()
+                    .is_some_and(|server| server.events().listener_count::<BrewEvent>() > 0)
+            },
+            |event| world.fire_event(event),
+        );
+    }
+
+    fn on_block_state_changed(&self, _state: BlockStateId) {
+        #[cfg(test)]
+        {
+            if !BREW_REENTER_STATE_CALLBACK.with(|enabled| enabled.replace(false)) {
+                return;
+            }
+            BREW_STATE_CALLBACK_COUNT.with(|count| count.set(count.get() + 1));
+            let Some(world) = self.get_level() else {
+                return;
+            };
+            let pos = self.get_block_pos();
+            BREW_STATE_CALLBACK_OBSERVED_STATE.with(|observed| {
+                observed.set(Some(world.get_block_state(pos)));
+            });
+            let Some(current) = world.get_block_entity(pos) else {
+                return;
+            };
+            let Some(brewing) = current.downcast_ref::<Self>() else {
+                return;
+            };
+            BREW_STATE_CALLBACK_OBSERVED_IDENTITY
+                .with(|identity| identity.set(Some(brewing.identity())));
+            BREW_STATE_CALLBACK_OBSERVED_DIAMOND.with(|observed| {
+                observed.set(brewing.state_snapshot().items[0].is(&vanilla_items::DIAMOND));
+            });
+            let _ = world.set_block_entity(Arc::clone(&current));
+            BREW_STATE_CALLBACK_STILL_CURRENT.with(|observed| {
+                observed.set(
+                    world
+                        .get_block_entity(pos)
+                        .is_some_and(|after| Arc::ptr_eq(&after, &current)),
+                );
+            });
         }
     }
 
@@ -312,6 +777,14 @@ impl BlockEntity for BrewingStandBlockEntity {
         let Some(world) = self.get_level() else {
             return;
         };
+        #[cfg(test)]
+        BREW_PRE_REMOVE_OBSERVED_IDENTITY.with(|observed| {
+            observed.set(world.get_block_entity(pos).and_then(|entity| {
+                entity
+                    .downcast_ref::<BrewingStandBlockEntity>()
+                    .map(Self::identity)
+            }));
+        });
         for item in items {
             world.drop_item_stack(pos, item);
         }
@@ -319,9 +792,17 @@ impl BlockEntity for BrewingStandBlockEntity {
 
     fn load_additional(&self, nbt: &BorrowedNbtCompound<'_>) {
         let nbt_view: NbtCompoundView<'_, '_> = nbt.into();
-        self.name.load(&nbt_view);
         let mut container = self.container.lock();
         container.items.fill(ItemStack::empty());
+        container.custom_name = nbt_view
+            .get(CUSTOM_NAME_TAG)
+            .map(|tag| tag.to_owned())
+            .as_ref()
+            .and_then(TextComponent::from_nbt);
+        container.lock = nbt_view
+            .get(LOCK_TAG)
+            .and_then(LockCode::from_nbt_tag)
+            .unwrap_or(LockCode::NO_LOCK);
 
         if let Some(items_list) = nbt_view.list("Items")
             && let Some(compounds) = items_list.compounds()
@@ -340,6 +821,7 @@ impl BlockEntity for BrewingStandBlockEntity {
 
         container.brew_time = nbt_view.short("BrewTime").unwrap_or(0).into();
         container.fuel = nbt_view.byte("Fuel").unwrap_or(0).into();
+        container.recipe_brew_time = DEFAULT_RECIPE_BREW_TIME;
         // Vanilla reloads the in-progress ingredient from the slot, so a brew
         // interrupted by a save resumes instead of cancelling on the next tick.
         container.brewing_ingredient =
@@ -348,8 +830,15 @@ impl BlockEntity for BrewingStandBlockEntity {
     }
 
     fn save_additional(&self, nbt: &mut NbtCompound) {
-        self.name.save(nbt);
         let container = self.container.lock();
+        while nbt.remove(CUSTOM_NAME_TAG).is_some() {}
+        if let Some(name) = &container.custom_name {
+            nbt.insert(CUSTOM_NAME_TAG, name.to_codec_nbt());
+        }
+        while nbt.remove(LOCK_TAG).is_some() {}
+        if container.lock != LockCode::NO_LOCK {
+            nbt.insert(LOCK_TAG, container.lock.clone().to_nbt_tag());
+        }
         let mut items: Vec<NbtCompound> = Vec::new();
         for (slot, item) in container.items.iter().enumerate() {
             if !item.is_empty()
@@ -375,21 +864,26 @@ impl BlockEntity for BrewingStandBlockEntity {
     /// Vanilla parity: `BaseContainerBlockEntity.getName`, which falls back to
     /// the block's own name.
     fn display_name(&self, default_name: TextComponent) -> TextComponent {
-        self.name.display_name(default_name)
+        self.custom_name().unwrap_or(default_name)
     }
 
-    /// Vanilla parity: the `CUSTOM_NAME` half of
-    /// `BaseContainerBlockEntity.collectImplicitComponents`. `CONTAINER` and
-    /// `LOCK` are not collected: no vanilla loot table asks this block for
-    /// either, and Foton has no lock on a container yet.
+    /// Vanilla parity: the name and lock fields of
+    /// `BaseContainerBlockEntity.collectImplicitComponents`.
     fn collect_implicit_components(&self, components: &mut DataComponentMap) {
-        self.name.collect_implicit_components(components);
+        let container = self.container.lock();
+        components.set(CUSTOM_NAME, container.custom_name.clone());
+        components.set(
+            LOCK,
+            (container.lock != LockCode::NO_LOCK).then(|| container.lock.clone()),
+        );
     }
 
-    /// Vanilla parity: the `CUSTOM_NAME` half of
+    /// Vanilla parity: the name and lock fields of
     /// `BaseContainerBlockEntity.applyImplicitComponents`.
     fn apply_implicit_components(&self, input: &ImplicitComponentInput<'_>) {
-        self.name.apply_implicit_components(input);
+        let mut container = self.container.lock();
+        container.custom_name = input.get(CUSTOM_NAME);
+        container.lock = input.get(LOCK).unwrap_or(LockCode::NO_LOCK);
     }
 }
 
@@ -473,13 +967,20 @@ impl Container for BrewingStandContainer {
 
 #[cfg(test)]
 mod tests {
+    use crate::behavior::init_behaviors;
+    use crate::block_entity::{SharedBlockEntity, init_block_entities};
+    use crate::chunk::Chunk;
+    use crate::chunk::chunk_holder::ChunkHolder;
+    use crate::chunk::status::ChunkStatus;
+    use crate::event::BrewEvent;
+    use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
     use foton_registry::potion_brewing::potion_item;
-    use foton_registry::{init_vanilla_registry, vanilla_potions};
+    use foton_registry::{init_vanilla_registry, vanilla_blocks, vanilla_potions};
 
     use super::*;
     use foton_registry::data_components::PotionContents;
     use foton_registry::data_components::vanilla_components::POTION_CONTENTS;
-    use std::ptr;
+    use foton_utils::ChunkPos;
 
     fn container() -> BrewingStandContainer {
         init_vanilla_registry();
@@ -487,6 +988,9 @@ mod tests {
             items: vec![ItemStack::empty(); BREWING_STAND_SLOTS],
             brew_time: 0,
             fuel: 0,
+            recipe_brew_time: DEFAULT_RECIPE_BREW_TIME,
+            custom_name: None,
+            lock: LockCode::NO_LOCK,
             brewing_ingredient: None,
             last_bottle_flags: [false; BOTTLE_SLOTS],
         }
@@ -494,6 +998,497 @@ mod tests {
 
     fn water_bottle() -> ItemStack {
         potion_item(&vanilla_items::POTION, &vanilla_potions::WATER)
+    }
+
+    fn ready_stand(
+        key: &'static str,
+    ) -> (Arc<World>, Arc<BrewingStandBlockEntity>, Arc<ChunkHolder>) {
+        init_vanilla_registry();
+        init_behaviors();
+        init_block_entities();
+        let world = fresh_test_world(key);
+        let pos = BlockPos::new(3, 64, -2);
+        let holder = insert_ready_full_chunk(&world, ChunkPos::from_block_pos(pos));
+        assert!(world.set_block(
+            pos,
+            vanilla_blocks::BREWING_STAND.default_state(),
+            UpdateFlags::UPDATE_NONE,
+        ));
+        let stand = Arc::new(BrewingStandBlockEntity::new(
+            Arc::downgrade(&world),
+            pos,
+            vanilla_blocks::BREWING_STAND.default_state(),
+        ));
+        {
+            let mut container = stand.container.lock();
+            container.items[0] = water_bottle();
+            container.items[1] = water_bottle();
+            container.items[2] = water_bottle();
+            container.items[SLOT_INGREDIENT] = ItemStack::new(&vanilla_items::NETHER_WART);
+            container.items[SLOT_FUEL] = ItemStack::new(&vanilla_items::BLAZE_POWDER);
+            container.brew_time = 1;
+            container.fuel = 7;
+            container.brewing_ingredient = Some(container.items[SLOT_INGREDIENT].clone());
+        }
+        let entity: SharedBlockEntity = stand.clone();
+        assert!(world.set_block_entity(entity));
+        (world, stand, holder)
+    }
+
+    fn reset_brew_test_counters() {
+        BREW_SNAPSHOT_CAPTURES.with(|count| count.set(0));
+        BREW_WORLD_EFFECTS.with(|count| count.set(0));
+    }
+
+    fn brew_test_counters() -> (usize, usize) {
+        (
+            BREW_SNAPSHOT_CAPTURES.with(Cell::get),
+            BREW_WORLD_EFFECTS.with(Cell::get),
+        )
+    }
+
+    fn assert_stack_matches(actual: &ItemStack, expected: &ItemStack) {
+        assert!(
+            ItemStack::matches(actual, expected),
+            "expected {:?} x{}, got {:?} x{}",
+            expected.item().key,
+            expected.count(),
+            actual.item().key,
+            actual.count()
+        );
+    }
+
+    #[test]
+    fn brew_event_exposes_mutable_snapshot_results_fuel_and_cancellation() {
+        let contents = vec![
+            water_bottle(),
+            water_bottle(),
+            water_bottle(),
+            ItemStack::new(&vanilla_items::NETHER_WART),
+            ItemStack::new(&vanilla_items::BLAZE_POWDER),
+        ];
+        let results = vec![
+            potion_item(&vanilla_items::POTION, &vanilla_potions::AWKWARD),
+            potion_item(&vanilla_items::POTION, &vanilla_potions::AWKWARD),
+            potion_item(&vanilla_items::POTION, &vanilla_potions::AWKWARD),
+        ];
+        let mut event = BrewEvent::new(
+            "minecraft:overworld".to_owned(),
+            BlockPos::new(3, 64, -2),
+            contents,
+            results,
+            7,
+        );
+
+        event.contents_mut()[SLOT_FUEL] = ItemStack::empty();
+        event.results_mut().truncate(1);
+        event.set_cancelled(true);
+
+        assert_eq!(event.contents().len(), BREWING_STAND_SLOTS);
+        assert!(event.contents()[SLOT_FUEL].is_empty());
+        assert_eq!(event.results().len(), 1);
+        assert_eq!(event.fuel_level(), 7);
+        assert!(event.is_cancelled());
+    }
+
+    #[test]
+    fn cancelled_completion_preserves_inventory_fuel_and_can_restart_next_tick() {
+        let (world, stand, _) = ready_stand("cancelled_brew_event");
+        let before = stand.container.lock().items.clone();
+        let unlocked_container = Arc::clone(&stand.container);
+        let mut listener = |event: &mut BrewEvent| {
+            assert!(
+                unlocked_container.try_lock().is_some(),
+                "the brewing container lock must be released during listeners"
+            );
+            event.contents_mut()[SLOT_FUEL] = ItemStack::empty();
+            event.results_mut().clear();
+            event.set_cancelled(true);
+        };
+
+        stand.tick_with_brew_dispatch(&world, || true, &mut listener);
+
+        {
+            let container = stand.container.lock();
+            for (actual, expected) in container.items.iter().zip(&before) {
+                assert_stack_matches(actual, expected);
+            }
+            assert_eq!(container.fuel, 7);
+            assert_eq!(container.brew_time, 0);
+        }
+
+        stand.tick_with_brew_dispatch(&world, || false, |_| {});
+        let container = stand.container.lock();
+        assert_eq!(container.fuel, 6);
+        assert_eq!(container.brew_time, potion_brewing::BREWING_TIME_TICKS);
+    }
+
+    #[test]
+    fn successful_completion_applies_snapshot_mutations_and_short_results() {
+        let (world, stand, _) = ready_stand("mutable_brew_event");
+        let mut listener = |event: &mut BrewEvent| {
+            let mut ingredient = ItemStack::new(&vanilla_items::REDSTONE);
+            ingredient.set_count(2);
+            event.contents_mut()[SLOT_INGREDIENT] = ingredient;
+            event.contents_mut()[SLOT_FUEL] = ItemStack::new(&vanilla_items::DIRT);
+            event.results_mut()[0] = ItemStack::new(&vanilla_items::SUGAR);
+            event.results_mut().truncate(1);
+        };
+
+        stand.tick_with_brew_dispatch(&world, || true, &mut listener);
+
+        let container = stand.container.lock();
+        assert!(container.items[0].is(&vanilla_items::SUGAR));
+        assert!(container.items[1].is_empty());
+        assert!(container.items[2].is_empty());
+        assert!(container.items[SLOT_INGREDIENT].is(&vanilla_items::REDSTONE));
+        assert_eq!(container.items[SLOT_INGREDIENT].count(), 1);
+        assert!(container.items[SLOT_FUEL].is(&vanilla_items::DIRT));
+        assert_eq!(
+            container.fuel, 7,
+            "completion does not consume another fuel use"
+        );
+    }
+
+    #[test]
+    fn reentrant_inventory_change_is_not_overwritten_by_stale_completion() {
+        let (world, stand, _) = ready_stand("stale_brew_event");
+        let reentrant_container = Arc::clone(&stand.container);
+        let mut listener = move |_event: &mut BrewEvent| {
+            reentrant_container.lock().items[SLOT_FUEL] = ItemStack::new(&vanilla_items::DIAMOND);
+        };
+
+        stand.tick_with_brew_dispatch(&world, || true, &mut listener);
+
+        let container = stand.container.lock();
+        assert!(container.items[SLOT_FUEL].is(&vanilla_items::DIAMOND));
+        for slot in 0..BOTTLE_SLOTS {
+            let potion = container.items[slot]
+                .get(POTION_CONTENTS)
+                .and_then(PotionContents::potion)
+                .expect("stale completion should leave each water bottle intact");
+            assert!(ptr::eq(potion.value(), &raw const vanilla_potions::WATER));
+        }
+        assert!(container.items[SLOT_INGREDIENT].is(&vanilla_items::NETHER_WART));
+    }
+
+    #[test]
+    fn ownerless_completion_commits_vanilla_without_dispatch() {
+        let (world, stand, _) = ready_stand("ownerless_brew_event");
+
+        reset_brew_test_counters();
+        let mut dispatches = 0;
+
+        stand.tick_with_brew_dispatch(&world, || false, |_| dispatches += 1);
+
+        let container = stand.container.lock();
+        for slot in 0..BOTTLE_SLOTS {
+            let potion = container.items[slot]
+                .get(POTION_CONTENTS)
+                .and_then(PotionContents::potion)
+                .expect("brewed bottle should retain potion identity");
+            assert!(ptr::eq(potion.value(), &raw const vanilla_potions::AWKWARD));
+        }
+        assert!(container.items[SLOT_INGREDIENT].is_empty());
+        assert_eq!(container.fuel, 7);
+        assert_eq!(dispatches, 0);
+        assert_eq!(
+            brew_test_counters().0,
+            0,
+            "the direct path must not allocate an event snapshot"
+        );
+    }
+
+    #[test]
+    fn listener_removing_stand_aborts_detached_commit_and_world_effects() {
+        let (world, stand, _) = ready_stand("removed_during_brew_event");
+        let pos = stand.get_block_pos();
+        reset_brew_test_counters();
+
+        stand.tick_with_brew_dispatch(
+            &world,
+            || true,
+            |_| {
+                assert!(world.remove_block_entity(pos));
+            },
+        );
+
+        let recreated = world
+            .get_block_entity(pos)
+            .expect("the live brewing-stand block recreates its missing block entity");
+        assert!(!ptr::eq(recreated.base(), stand.base()));
+        assert_eq!(brew_test_counters(), (1, 0));
+        let container = stand.container.lock();
+        assert!(container.items[0].is(&vanilla_items::POTION));
+        assert!(container.items[SLOT_INGREDIENT].is(&vanilla_items::NETHER_WART));
+    }
+
+    #[test]
+    fn listener_replacing_stand_cannot_commit_or_touch_replacement_block() {
+        let (world, stand, _) = ready_stand("replaced_during_brew_event");
+        let pos = stand.get_block_pos();
+        let replacement = Arc::new(BrewingStandBlockEntity::new(
+            Arc::downgrade(&world),
+            pos,
+            vanilla_blocks::BREWING_STAND.default_state(),
+        ));
+        let replacement_entity: SharedBlockEntity = replacement.clone();
+        reset_brew_test_counters();
+
+        stand.tick_with_brew_dispatch(
+            &world,
+            || true,
+            |_| {
+                assert!(world.set_block_entity(replacement_entity.clone()));
+            },
+        );
+
+        let current = world
+            .get_block_entity(pos)
+            .expect("replacement should remain installed");
+        assert!(Arc::ptr_eq(&current, &replacement_entity));
+        assert_eq!(brew_test_counters(), (1, 0));
+        assert!(
+            replacement
+                .container
+                .lock()
+                .items
+                .iter()
+                .all(ItemStack::is_empty)
+        );
+        let detached = stand.container.lock();
+        assert!(detached.items[0].is(&vanilla_items::POTION));
+        assert!(detached.items[SLOT_INGREDIENT].is(&vanilla_items::NETHER_WART));
+    }
+
+    #[test]
+    fn stale_identity_cannot_read_write_or_apply_after_replacement() {
+        let (world, stand, _) = ready_stand("stale_plugin_snapshot");
+        let pos = stand.get_block_pos();
+        let snapshot = stand.state_snapshot();
+        let replacement = Arc::new(BrewingStandBlockEntity::new(
+            Arc::downgrade(&world),
+            pos,
+            vanilla_blocks::BREWING_STAND.default_state(),
+        ));
+        let replacement_entity: SharedBlockEntity = replacement.clone();
+        assert!(world.set_block_entity(replacement_entity));
+
+        assert!(stand.live_item(snapshot.identity, 0).is_none());
+        assert!(!stand.set_live_item(
+            snapshot.identity,
+            0,
+            ItemStack::new(&vanilla_items::DIAMOND),
+        ));
+        assert!(!stand.apply_state_snapshot(snapshot));
+        assert!(
+            replacement
+                .live_item(replacement.identity, 0)
+                .is_some_and(|item| item.is_empty())
+        );
+    }
+
+    #[test]
+    fn live_slot_write_marks_storage_dirty_and_queues_client_update() {
+        let (_world, stand, holder) = ready_stand("live_plugin_inventory_write");
+        holder
+            .try_chunk(ChunkStatus::Full)
+            .expect("brewing stand chunk should remain loaded")
+            .clear_dirty();
+        let _ = holder.take_changed_blocks();
+        holder.clear_broadcast_queued();
+        let identity = stand.state_snapshot().identity;
+
+        assert!(stand.set_live_item(identity, SLOT_FUEL, ItemStack::new(&vanilla_items::DIAMOND),));
+
+        assert!(
+            holder
+                .try_chunk(ChunkStatus::Full)
+                .is_some_and(Chunk::is_dirty),
+            "a live inventory mutation must be persisted"
+        );
+        assert!(
+            holder.has_changes_to_broadcast(),
+            "a live inventory mutation must notify tracking clients"
+        );
+    }
+
+    #[test]
+    fn applied_inventory_keeps_bottle_flags_pending_until_the_world_updates() {
+        let (world, stand, _) = ready_stand("plugin_snapshot_bottle_flags");
+        let pos = stand.get_block_pos();
+        let mut filled_state = vanilla_blocks::BREWING_STAND.default_state();
+        for property in HAS_BOTTLE {
+            filled_state = filled_state.set_value(property, true);
+        }
+        assert!(world.set_block(pos, filled_state, UpdateFlags::UPDATE_NONE));
+        stand.container.lock().last_bottle_flags = [true; BOTTLE_SLOTS];
+        let mut snapshot = stand.state_snapshot();
+        snapshot.items[..BOTTLE_SLOTS].fill(ItemStack::empty());
+        snapshot.brew_time = 0;
+
+        assert!(stand.apply_state_snapshot(snapshot));
+        stand.tick_with_brew_dispatch(&world, || false, |_| {});
+
+        let updated = world.get_block_state(pos);
+        assert!(
+            HAS_BOTTLE
+                .iter()
+                .all(|property| !updated.get_value(*property)),
+            "the next tick must publish bottle occupancy from the applied inventory"
+        );
+    }
+
+    #[test]
+    fn snapshot_ingredient_swap_preserves_the_active_brew_guard() {
+        let (world, stand, _) = ready_stand("plugin_snapshot_ingredient_guard");
+        let mut snapshot = stand.state_snapshot();
+        snapshot.items[SLOT_INGREDIENT] = ItemStack::new(&vanilla_items::REDSTONE);
+        snapshot.brew_time = 10;
+
+        assert!(stand.apply_state_snapshot(snapshot));
+        stand.tick_with_brew_dispatch(&world, || false, |_| {});
+
+        assert_eq!(stand.container.lock().brew_time, 0);
+    }
+
+    #[test]
+    fn active_replacement_snapshot_reconstructs_the_ingredient_guard_for_the_next_tick() {
+        let world = fresh_test_world("replacement_snapshot_ingredient_guard");
+        let pos = BlockPos::new(3, 64, -2);
+        let stand = BrewingStandBlockEntity::new(
+            Arc::downgrade(&world),
+            pos,
+            vanilla_blocks::BREWING_STAND.default_state(),
+        );
+        let mut snapshot = stand.state_snapshot();
+        snapshot.items[0] = water_bottle();
+        snapshot.items[SLOT_INGREDIENT] = ItemStack::new(&vanilla_items::NETHER_WART);
+        snapshot.brew_time = 10;
+
+        stand.apply_replacement_snapshot(snapshot);
+        stand.tick_with_brew_dispatch(&world, || false, |_| {});
+
+        let container = stand.container.lock();
+        assert_eq!(container.brew_time, 9);
+        assert!(
+            container
+                .brewing_ingredient
+                .as_ref()
+                .is_some_and(|ingredient| ingredient.is(&vanilla_items::NETHER_WART))
+        );
+    }
+
+    #[test]
+    fn property_transaction_exposes_state_and_snapshot_before_reentrant_callback() {
+        let (world, stand, _) = ready_stand("property_transaction_callback");
+        let pos = stand.get_block_pos();
+        let old_state = world.get_block_state(pos);
+        let new_state = old_state.set_value(&BlockStateProperties::HAS_BOTTLE_0, true);
+        let expected: SharedBlockEntity = stand.clone();
+        let mut snapshot = stand.state_snapshot();
+        snapshot.items[0] = ItemStack::new(&vanilla_items::DIAMOND);
+        BREW_REENTER_STATE_CALLBACK.with(|enabled| enabled.set(true));
+        BREW_STATE_CALLBACK_COUNT.with(|count| count.set(0));
+        BREW_STATE_CALLBACK_OBSERVED_STATE.with(|state| state.set(None));
+        BREW_STATE_CALLBACK_OBSERVED_IDENTITY.with(|identity| identity.set(None));
+        BREW_STATE_CALLBACK_OBSERVED_DIAMOND.with(|observed| observed.set(false));
+        BREW_STATE_CALLBACK_STILL_CURRENT.with(|current| current.set(false));
+
+        assert!(stand.apply_state_snapshot_with_state(
+            &world,
+            &expected,
+            new_state,
+            snapshot,
+            UpdateFlags::UPDATE_CLIENTS,
+        ));
+
+        assert_eq!(BREW_STATE_CALLBACK_COUNT.with(Cell::get), 1);
+        assert_eq!(
+            BREW_STATE_CALLBACK_OBSERVED_STATE.with(Cell::get),
+            Some(new_state)
+        );
+        assert_eq!(
+            BREW_STATE_CALLBACK_OBSERVED_IDENTITY.with(Cell::get),
+            Some(stand.identity())
+        );
+        assert!(BREW_STATE_CALLBACK_OBSERVED_DIAMOND.with(Cell::get));
+        assert!(BREW_STATE_CALLBACK_STILL_CURRENT.with(Cell::get));
+        assert!(
+            world
+                .get_block_entity(pos)
+                .is_some_and(|current| Arc::ptr_eq(&current, &expected))
+        );
+    }
+
+    #[test]
+    fn conditional_replacement_is_visible_before_removal_callbacks() {
+        let (world, stand, _) = ready_stand("replacement_visible_to_removal_callback");
+        let pos = stand.get_block_pos();
+        let old_state = world.get_block_state(pos);
+        let new_state = old_state.set_value(&BlockStateProperties::HAS_BOTTLE_0, true);
+        let replacement = Arc::new(BrewingStandBlockEntity::new(
+            Arc::downgrade(&world),
+            pos,
+            new_state,
+        ));
+        let expected: SharedBlockEntity = stand;
+        let replacement_entity: SharedBlockEntity = replacement.clone();
+        BREW_PRE_REMOVE_OBSERVED_IDENTITY.with(|observed| observed.set(None));
+
+        assert!(world.replace_block_with_entity_if_unchanged(
+            pos,
+            old_state,
+            Some(&expected),
+            new_state,
+            Arc::clone(&replacement_entity),
+            UpdateFlags::UPDATE_CLIENTS,
+        ));
+
+        assert_eq!(
+            BREW_PRE_REMOVE_OBSERVED_IDENTITY.with(Cell::get),
+            Some(replacement.identity())
+        );
+        assert!(
+            world
+                .get_block_entity(pos)
+                .is_some_and(|current| Arc::ptr_eq(&current, &replacement_entity))
+        );
+    }
+
+    #[test]
+    fn conditional_replacement_rejects_a_stale_owner_without_mutation() {
+        let (world, stand, _) = ready_stand("stale_conditional_replacement_owner");
+        let pos = stand.get_block_pos();
+        let state = world.get_block_state(pos);
+        let intervening: SharedBlockEntity = Arc::new(BrewingStandBlockEntity::new(
+            Arc::downgrade(&world),
+            pos,
+            state,
+        ));
+        assert!(world.set_block_entity(Arc::clone(&intervening)));
+        let stale_owner: SharedBlockEntity = stand;
+        let replacement: SharedBlockEntity = Arc::new(BrewingStandBlockEntity::new(
+            Arc::downgrade(&world),
+            pos,
+            state.set_value(&BlockStateProperties::HAS_BOTTLE_0, true),
+        ));
+
+        assert!(!world.replace_block_with_entity_if_unchanged(
+            pos,
+            state,
+            Some(&stale_owner),
+            state.set_value(&BlockStateProperties::HAS_BOTTLE_0, true),
+            replacement,
+            UpdateFlags::UPDATE_NONE,
+        ));
+
+        assert_eq!(world.get_block_state(pos), state);
+        assert!(
+            world
+                .get_block_entity(pos)
+                .is_some_and(|current| Arc::ptr_eq(&current, &intervening))
+        );
     }
 
     #[test]

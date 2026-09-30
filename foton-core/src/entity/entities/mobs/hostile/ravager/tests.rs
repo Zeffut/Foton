@@ -6,6 +6,7 @@ use foton_registry::{init_vanilla_registry, vanilla_entities};
 use glam::DVec3;
 
 use super::*;
+use crate::entity::ai::goal::GoalControl;
 use crate::entity::next_entity_id;
 
 const TEST_POSITION: DVec3 = DVec3::new(8.5, 64.0, 8.5);
@@ -87,4 +88,20 @@ fn a_ravager_refuses_the_captains_banner() {
     let ravager = ravager();
 
     assert!(!ravager.can_be_leader());
+}
+
+#[test]
+fn rider_control_updates_preserve_external_disables() {
+    let ravager = ravager();
+    {
+        let mut selector = ravager.mob_base().goal_selector().lock();
+        selector.disable_control(GoalControl::Move);
+        selector.disable_control(GoalControl::Target);
+    }
+
+    ravager.update_control_flags();
+
+    let selector = ravager.mob_base().goal_selector().lock();
+    assert!(selector.is_control_disabled(GoalControl::Move));
+    assert!(selector.is_control_disabled(GoalControl::Target));
 }

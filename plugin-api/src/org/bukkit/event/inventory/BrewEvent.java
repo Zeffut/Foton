@@ -7,9 +7,9 @@ import org.bukkit.event.HandlerList;
 import org.bukkit.event.block.BlockEvent;
 import org.bukkit.inventory.BrewerInventory;
 import org.bukkit.inventory.ItemStack;
+import org.jetbrains.annotations.NotNull;
 
-/** A brewing stand finished a brew. The three results may be changed;
- * cancelling leaves the ingredient and the bottles as they were. */
+/** Fired when a brewing stand has calculated a completed brew. */
 public class BrewEvent extends BlockEvent implements Cancellable {
     private static final HandlerList HANDLERS = new HandlerList();
     private final BrewerInventory contents;
@@ -17,18 +17,20 @@ public class BrewEvent extends BlockEvent implements Cancellable {
     private final int fuelLevel;
     private boolean cancelled;
 
-    public BrewEvent(Block brewer, BrewerInventory contents, List<ItemStack> results, int fuelLevel) {
+    @org.jetbrains.annotations.ApiStatus.Internal
+    public BrewEvent(@NotNull Block brewer, @NotNull BrewerInventory contents,
+            @NotNull List<ItemStack> results, int fuelLevel) {
         super(brewer);
         this.contents = contents;
         this.results = results;
         this.fuelLevel = fuelLevel;
     }
 
-    public BrewerInventory getContents() { return contents; }
-    public List<ItemStack> getResults() { return results; }
+    @NotNull public BrewerInventory getContents() { return contents; }
+    @NotNull public List<ItemStack> getResults() { return results; }
     public int getFuelLevel() { return fuelLevel; }
     @Override public boolean isCancelled() { return cancelled; }
-    @Override public void setCancelled(boolean cancel) { cancelled = cancel; }
-    @Override public HandlerList getHandlers() { return HANDLERS; }
-    public static HandlerList getHandlerList() { return HANDLERS; }
+    @Override public void setCancelled(boolean cancelled) { this.cancelled = cancelled; }
+    @Override @NotNull public HandlerList getHandlers() { return HANDLERS; }
+    @NotNull public static HandlerList getHandlerList() { return HANDLERS; }
 }

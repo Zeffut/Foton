@@ -121,13 +121,6 @@ public interface World extends org.bukkit.generator.WorldInfo, RegionAccessor, o
     default org.bukkit.entity.LightningStrike strikeLightningEffect(Location location) { return null; }
     default <T extends org.bukkit.entity.Entity> T spawn(Location location, Class<T> clazz) { return null; }
 
-    /** Every entity in this world that is a {@code cls}. */
-    default <T extends org.bukkit.entity.Entity> java.util.Collection<T> getEntitiesByClass(Class<T> cls) {
-        java.util.ArrayList<T> found = new java.util.ArrayList<>();
-        if (cls != null) for (org.bukkit.entity.Entity entity : getEntities()) if (cls.isInstance(entity)) found.add(cls.cast(entity));
-        return found;
-    }
-
     @SuppressWarnings("unchecked")
     default <T extends org.bukkit.entity.Entity> java.util.Collection<T> getEntitiesByClass(Class<T>... classes) {
         return (java.util.Collection<T>) getEntitiesByClasses(classes);
@@ -234,7 +227,7 @@ public interface World extends org.bukkit.generator.WorldInfo, RegionAccessor, o
     }
 
     default void playSound(Location location, Sound sound, float volume, float pitch) {
-        if (location != null) playSound(location, sound == null ? null : sound.key(), volume, pitch);
+        if (location != null) playSound(location, sound == null ? null : sound.getKey().toString(), volume, pitch);
     }
     default void playSound(org.bukkit.entity.Entity entity, Sound sound, float volume, float pitch) {
         if (entity != null) playSound(entity.getLocation(), sound, volume, pitch);
@@ -336,7 +329,7 @@ public interface World extends org.bukkit.generator.WorldInfo, RegionAccessor, o
     }
     default void playSound(Location location, String sound, float volume, float pitch) { }
     default void playSound(Location location, Sound sound, SoundCategory category, float volume, float pitch) {
-        if (location != null) playSound(location, sound == null ? null : sound.key(), category, volume, pitch);
+        if (location != null) playSound(location, sound == null ? null : sound.getKey().toString(), category, volume, pitch);
     }
     default void playSound(Location location, String sound, SoundCategory category, float volume, float pitch) { }
 
@@ -347,6 +340,17 @@ public interface World extends org.bukkit.generator.WorldInfo, RegionAccessor, o
             for (Class<?> type : classes) {
                 if (type != null && type.isInstance(entity)) { result.add(entity); break; }
             }
+        }
+        return result;
+    }
+
+    /** Filters this world's current entity collection by one concrete entity type. */
+    default <T extends org.bukkit.entity.Entity> java.util.Collection<T> getEntitiesByClass(
+            Class<T> entityClass) {
+        if (entityClass == null) throw new IllegalArgumentException("entityClass cannot be null");
+        java.util.ArrayList<T> result = new java.util.ArrayList<>();
+        for (org.bukkit.entity.Entity entity : getEntities()) {
+            if (entityClass.isInstance(entity)) result.add(entityClass.cast(entity));
         }
         return result;
     }

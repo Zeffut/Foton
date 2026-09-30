@@ -1,5 +1,8 @@
 //! Closed Vanilla entity variants shared by item components and entities.
 
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Result, Write};
 
 use foton_utils::codec::VarInt;
@@ -22,6 +25,14 @@ macro_rules! impl_variant_codecs {
             }
         }
 
+        impl nbt_encode::NbtEncode for $type {
+            fn nbt_id(&self) -> u8 {
+                (self.serialized_name()).nbt_id()
+            }
+            fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+                (self.serialized_name()).write_nbt_payload(writer, depth)
+            }
+        }
         impl ToNbtTag for $type {
             fn to_nbt_tag(self) -> NbtTag {
                 self.serialized_name().to_nbt_tag()

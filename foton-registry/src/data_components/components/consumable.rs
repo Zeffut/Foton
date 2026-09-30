@@ -1,5 +1,9 @@
 //! Vanilla consumable and death-protection item components.
 
+use foton_utils::serial::budget;
+use foton_utils::serial::nbt_encode;
+use foton_utils::serial::nbt_stream::NbtWrite;
+use std::io;
 use std::io::{Cursor, Error, Result, Write};
 
 use foton_utils::codec::VarInt;
@@ -466,7 +470,8 @@ fn read_effect_list(data: &mut Cursor<&[u8]>) -> Result<Vec<ConsumeEffectData>> 
     let count = VarInt::read(data)?.0;
     let count = usize::try_from(count)
         .map_err(|_| Error::other(format!("Negative consume effect count: {count}")))?;
-    let mut effects = Vec::with_capacity(count.min(65_536));
+    budget::check_collection_input(data, count, 1)?;
+    let mut effects = budget::read_vec(count, count.min(65_536))?;
     for _ in 0..count {
         effects.push(ConsumeEffectData::read(data)?);
     }
@@ -504,6 +509,55 @@ fn hash_entries(hasher: &mut ComponentHasher, entries: &mut [HashEntry]) {
         hasher.put_raw_bytes(&entry.value_bytes);
     }
     hasher.end_map();
+}
+
+impl nbt_encode::NbtEncode for Consumable {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+        if !float_equals(self.consume_seconds, Self::DEFAULT_CONSUME_SECONDS) {
+            field("consume_seconds", &self.consume_seconds, writer, depth)?;
+        }
+        if self.animation != ItemUseAnimation::Eat {
+            field(
+                "animation",
+                &self.animation.serialized_name(),
+                writer,
+                depth,
+            )?;
+        }
+        if !is_default_eat_sound(&self.sound) {
+            field("sound", &self.sound, writer, depth)?;
+        }
+        if !self.has_consume_particles {
+            field("has_consume_particles", &false, writer, depth)?;
+        }
+        if !self.on_consume_effects.is_empty() {
+            field(
+                "on_consume_effects",
+                &self.on_consume_effects,
+                writer,
+                depth,
+            )?;
+        }
+        end(writer)
+    }
+}
+impl nbt_encode::NbtEncode for DeathProtection {
+    fn nbt_id(&self) -> u8 {
+        10
+    }
+    fn write_nbt_payload(&self, writer: &mut dyn NbtWrite, depth: usize) -> io::Result<()> {
+        use foton_utils::serial::nbt_encode::{check_depth, end, field};
+        check_depth(depth)?;
+        if !self.death_effects.is_empty() {
+            field("death_effects", &self.death_effects, writer, depth)?;
+        }
+        end(writer)
+    }
 }
 
 #[cfg(test)]

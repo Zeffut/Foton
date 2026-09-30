@@ -10,11 +10,11 @@ public interface Plugin extends org.bukkit.command.TabExecutor {
         java.io.File file = new java.io.File(getDataFolder(), "config.yml");
         return org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(file);
     }
-    java.io.File getDataFolder();
-    /** Writes the in-memory config.yml back to the data folder. */
-    void saveConfig();
-    /** Discards the in-memory config.yml and reads it again from disk. */
+    /** Reloads this plugin's existing configuration from its data folder. */
     void reloadConfig();
+    /** Saves this plugin's existing configuration to its data folder. */
+    void saveConfig();
+    java.io.File getDataFolder();
     PluginDescriptionFile getDescription();
     org.bukkit.Server getServer();
     java.util.logging.Logger getLogger();

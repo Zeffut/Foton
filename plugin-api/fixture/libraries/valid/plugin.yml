@@ -1,0 +1,6 @@
+name: LibraryFixture
+main: fixture.libraries.LibraryPlugin
+version: '1.0'
+api-version: '26.2'
+libraries:
+  - example.fixture:descriptor-library:1.2.3

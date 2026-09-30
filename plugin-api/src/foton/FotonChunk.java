@@ -49,7 +49,11 @@ public final class FotonChunk implements Chunk {
             int entityChunkX = ((int) Math.floor(position[0])) >> 4;
             int entityChunkZ = ((int) Math.floor(position[2])) >> 4;
             if (entityChunkX != x || entityChunkZ != z) continue;
-            try { result.add(FotonWorld.wrapEntity(java.util.UUID.fromString(id), id)); }
+            try {
+                java.util.UUID uuid = java.util.UUID.fromString(id);
+                String type = Native.entityType(id);
+                result.add(FotonWorld.wrapEntity(uuid, type));
+            }
             catch (IllegalArgumentException ignored) { }
         }
         return result.toArray(new org.bukkit.entity.Entity[0]);

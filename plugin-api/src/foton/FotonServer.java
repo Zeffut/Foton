@@ -476,16 +476,10 @@ public final class FotonServer implements Server {
             EventBridge.register(listener, plugin);
         }
 
-        /** Paper refuses a listener from a plugin that is not enabled: it
-         * would be registered after the plugin's handlers were already
-         * dropped, and outlive it. */
+        /** Loading registrations are legal; retired identities cannot publish again. */
         private static void requireEnabled(Plugin plugin, Object what) {
-            if (plugin == null) {
-                throw new IllegalArgumentException("Plugin cannot be null");
-            }
-            if (!plugin.isEnabled()) {
-                throw new org.bukkit.plugin.IllegalPluginAccessException(
-                    "Plugin attempted to register " + what + " while not enabled");
+            synchronized (PluginHost.lifecycleLock()) {
+                PluginHost.requireEnabled(plugin, "register " + what);
             }
         }
 

@@ -35,7 +35,8 @@ use crate::behavior::blocks::building::campfire_block::is_smokey_pos;
 use crate::block_entity::{BlockEntity, BlockEntityBase, ImplicitComponentInput};
 use crate::entity::entities::BeeEntity;
 use crate::entity::{
-    AgeableMob, Animal, ENTITIES, Entity, Mob, RemovalReason, SharedEntity, next_entity_id,
+    AgeableMob, Animal, ENTITIES, Entity, EntitySpawnReason, Mob, PluginSpawnReason, RemovalReason,
+    SharedEntity, next_entity_id,
 };
 use crate::event::CreatureSpawnEvent;
 use crate::player::Player;
@@ -576,33 +577,33 @@ fn release_occupant(
     let bee = entity.downcast_ref::<BeeEntity>()?;
     load_stored_bee(bee, &occupant.entity_data);
 
-    if let Some(flower_pos) = saved_flower_pos
-        && !bee.has_saved_flower_pos()
-        && rand::random::<f32>() < INHERIT_FLOWER_CHANCE
-    {
-        bee.set_saved_flower_pos(flower_pos);
-    }
-
     bee.set_hive_pos(pos);
     bee.set_no_gravity(true);
     set_bee_release_data(occupant.ticks_in_hive, bee);
-
-    // Paper parity: CraftBukkit adds the bee with `SpawnReason.BEEHIVE` before
-    // the honey is delivered, so a refused bee stays in the hive with its
-    // nectar and the hive's level does not rise.
-    let mut spawn_event = CreatureSpawnEvent::new(
+    entity.base().set_spawn_reason(EntitySpawnReason::Load);
+    entity
+        .base()
+        .set_plugin_spawn_reason(PluginSpawnReason::Beehive);
+    let mut event = CreatureSpawnEvent::new(
         entity.uuid(),
         world.key.to_string(),
         spawn.x,
         spawn.y,
         spawn.z,
-        "Beehive".to_owned(),
+        PluginSpawnReason::Beehive,
     );
     world.begin_pending_spawn(Arc::clone(&entity));
-    world.fire_event(&mut spawn_event);
+    world.fire_event(&mut event);
     world.end_pending_spawn(&entity.uuid());
-    if spawn_event.is_cancelled() {
+    if event.is_cancelled() || world.try_add_entity(Arc::clone(&entity)).is_err() {
         return None;
+    }
+
+    if let Some(flower_pos) = saved_flower_pos
+        && !bee.has_saved_flower_pos()
+        && rand::random::<f32>() < INHERIT_FLOWER_CHANCE
+    {
+        bee.set_saved_flower_pos(flower_pos);
     }
 
     if release_status == BeeReleaseStatus::HoneyDelivered {
@@ -625,9 +626,6 @@ fn release_occupant(
         &GameEventContext::new(Some(bee), None),
     );
 
-    if world.try_add_entity(Arc::clone(&entity)).is_err() {
-        return None;
-    }
     Some(entity)
 }
 

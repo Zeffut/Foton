@@ -7,6 +7,8 @@ asset installs the same pinned set beside `foton-plugin-api.jar`. Foton puts
 that complete directory on the embedded JVM classpath so plugins can resolve
 the server-provided API and its transitive types at runtime.
 
+SQLite JDBC is additionally pinned as a Paper host-runtime dependency.
+
 They are committed rather than fetched. The alternative makes a build step
 depend on Maven Central being reachable, and this repository has just spent an
 evening removing exactly that kind of dependency -- a check that passes or
@@ -14,9 +16,11 @@ fails for reasons that are not the code.
 
 ## Which versions, and why these
 
-Every version below is the one `io.papermc.paper:paper-api:26.2.build.121-stable`
-declares, read from its published POM and -- for the Adventure artifacts, whose
-versions the POM leaves to a BOM -- from `net.kyori:adventure-bom:5.2.0`.
+Compile-time versions below are the ones
+`io.papermc.paper:paper-api:26.2.build.121-stable` declares, read from its
+published POM and -- for the Adventure artifacts, whose versions the POM
+leaves to a BOM -- from `net.kyori:adventure-bom:5.2.0`. SQLite JDBC 3.49.1.0
+matches the target Paper server's host-runtime dependency.
 
 That matters more than it looks. A plugin is compiled against real Paper, so
 the signatures it references are Paper's. Compiling our `org.bukkit` against a
@@ -67,8 +71,9 @@ ViaVersion links that signature during bootstrap. Only the Java transports
 needed by the in-process compatibility channel are included; native epoll and
 kqueue transports are deliberately outside this portable runtime set.
 
-`dev/fetch-plugin-api-libs.sh` holds the SHA-256 of each jar. The build runs it
-with `--check`, so a jar that is edited, swapped or added is a build failure
+`plugin-api/lib/manifest.txt` holds the URL and SHA-256 of each jar.
+The build runs `dev/fetch-plugin-api-libs.sh --check` against that manifest,
+so a jar that is edited, swapped or added is a build failure
 rather than a surprise in the bytecode. Run it without `--check` to download a
 missing or changed jar from Maven.
 
@@ -102,6 +107,7 @@ POM, not from memory and not carried over from the previous version.
 | kotlin-stdlib-jdk7 | 1.8.20 | Apache-2.0 | Maven Central POM |
 | kotlin-stdlib | 1.8.20 | Apache-2.0 | Maven Central POM |
 | kotlin-stdlib-common | 1.8.20 | Apache-2.0 | Maven Central POM |
+| sqlite-jdbc | 3.49.1.0 | Apache-2.0; bundled Zentus BSD license | POM and `META-INF/LICENSE.zentus` inside the jar |
 | slf4j-api | 2.0.17 | MIT | `META-INF/LICENSE.txt` inside the jar |
 | snakeyaml | 2.2 | Apache-2.0 | POM inside the jar |
 | netty-common | 4.2.15.Final | Apache-2.0 | Netty repository `LICENSE.txt` at tag `netty-4.2.15.Final` |
@@ -122,12 +128,12 @@ Minecraft's own dependency set. An unused jar is not worth a license question.
 
 ## When a version changes
 
-Take the new version from paper-api's POM rather than from what is newest.
-Replace the jar, update its SHA-256 in `dev/fetch-plugin-api-libs.sh`, and
-update the row above including where you read the license. A row that says a
-license without saying where it was read is a row that will be wrong
-eventually.
+Take compile-time versions from paper-api's POM rather than from what is
+newest. Take host-runtime versions from the target Paper server build. Replace
+the jar, update its SHA-256 in `manifest.txt`, and update the row above,
+including where you read the license. A row that says a license without saying
+where it was read is a row that will be wrong eventually.
 
 `dev/plugin-runtime-test.sh` checks the whole pinned classpath with `jdeps` and
-executes a Guava `SettableFuture`. This catches both a missing transitive jar
-and a bundle that merely looks complete by filename.
+executes Guava, Netty and an in-memory SQLite JDBC query. This catches both a
+missing transitive jar and a bundle that merely looks complete by filename.

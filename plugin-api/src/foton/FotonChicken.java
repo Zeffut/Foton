@@ -3,7 +3,7 @@ package foton;
 import java.util.UUID;
 
 /** Live Bukkit view of a vanilla chicken. */
-public final class FotonChicken extends FotonLivingEntity implements org.bukkit.entity.Chicken {
+public final class FotonChicken extends FotonAnimals implements org.bukkit.entity.Chicken {
     public FotonChicken(UUID id) { super(id); }
     @Override public Variant getVariant() {
         String value = Native.chickenVariant(getUniqueId().toString());

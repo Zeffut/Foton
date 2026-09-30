@@ -5,11 +5,15 @@
 //! without starting anything.
 
 use std::env;
-use std::fs::write;
+use std::fs::{copy, create_dir_all, read_dir, remove_file, write};
 use std::path::PathBuf;
-use std::sync::Weak;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Weak};
 
+use super::HostLifecycle;
 use super::{JVM_RUNTIMES, PluginHost, PluginHostConfig, PluginHostError, forward};
+use foton_core::event::{EventBus, ServerTickEvent};
+use foton_utils::Identifier;
 
 fn config() -> PluginHostConfig {
     PluginHostConfig {
@@ -18,6 +22,66 @@ fn config() -> PluginHostConfig {
         library_directories: Vec::new(),
         plugin_directory: PathBuf::from("/nowhere/plugins"),
     }
+}
+
+fn pinned_runtime_config() -> (tempfile::TempDir, PluginHostConfig) {
+    let directory = tempfile::tempdir().expect("a temporary directory");
+    let api_jar = directory.path().join("build/foton-plugin-api.jar");
+    let libraries = directory.path().join("lib");
+    create_dir_all(api_jar.parent().expect("the API jar has a parent"))
+        .expect("the fixture build directory should exist");
+    create_dir_all(&libraries).expect("the fixture library directory should exist");
+    write(&api_jar, b"not really a jar").expect("the fixture API should write");
+    let committed = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../plugin-api/lib");
+    for entry in read_dir(committed).expect("the committed library directory should exist") {
+        let path = entry
+            .expect("the committed entry should be readable")
+            .path();
+        if path.extension().is_some_and(|extension| extension == "jar") {
+            copy(
+                &path,
+                libraries.join(path.file_name().expect("a committed jar has a name")),
+            )
+            .expect("the pinned jar should copy");
+        }
+    }
+    let config = PluginHostConfig {
+        api_jar,
+        library_directories: vec![libraries],
+        ..config()
+    };
+    (directory, config)
+}
+
+/// An API jar moved as one unit with its pinned dependencies keeps working
+/// without another hidden configuration value.
+#[test]
+fn resolved_library_directory_defaults_to_api_sibling_lib() {
+    let config = PluginHostConfig {
+        api_jar: PathBuf::from("/server/plugin-api/build/foton-plugin-api.jar"),
+        ..config()
+    };
+
+    assert_eq!(
+        config.resolved_library_directory(),
+        PathBuf::from("/server/plugin-api/lib")
+    );
+}
+
+/// Operators can place the pinned runtime jars elsewhere without the default
+/// derived from the API jar taking precedence.
+#[test]
+fn resolved_library_directory_prefers_the_explicit_override() {
+    let config = PluginHostConfig {
+        api_jar: PathBuf::from("/server/plugin-api/build/foton-plugin-api.jar"),
+        library_directories: vec![PathBuf::from("/srv/foton/runtime-libraries")],
+        ..config()
+    };
+
+    assert_eq!(
+        config.resolved_library_directory(),
+        PathBuf::from("/srv/foton/runtime-libraries")
+    );
 }
 
 /// A missing API jar is named, not discovered as a class-loading failure later.
@@ -49,19 +113,8 @@ fn a_missing_api_jar_is_reported_before_anything_starts() {
 /// filesystem's mood.
 #[test]
 fn the_class_path_is_ordered() {
-    let directory = tempfile::tempdir().expect("a temporary directory");
-    let jar = directory.path().join("api.jar");
-    write(&jar, b"not really a jar").expect("the fixture should write");
-    for name in ["zebra.jar", "alpha.jar", "middle.jar", "ignored.txt"] {
-        write(directory.path().join(name), b"x").expect("the fixture should write");
-    }
-
-    let config = PluginHostConfig {
-        api_jar: jar,
-        library_directories: vec![directory.path().to_owned()],
-        ..config()
-    };
-    let class_path = config.class_path().expect("the jar exists");
+    let (_directory, config) = pinned_runtime_config();
+    let class_path = config.class_path().expect("the pinned set should validate");
 
     let names: Vec<&str> = class_path
         .split(if cfg!(target_os = "windows") {
@@ -73,12 +126,41 @@ fn the_class_path_is_ordered() {
         .collect();
     assert_eq!(
         names,
-        ["api.jar", "alpha.jar", "api.jar", "middle.jar", "zebra.jar"],
-        "the API jar leads, then the libraries in a fixed order"
-    );
-    assert!(
-        !class_path.contains("ignored.txt"),
-        "only jars belong on a class path: {class_path}"
+        [
+            "foton-plugin-api.jar",
+            "adventure-api-5.2.0.jar",
+            "adventure-key-5.2.0.jar",
+            "adventure-text-minimessage-5.2.0.jar",
+            "adventure-text-logger-slf4j-5.2.0.jar",
+            "adventure-text-serializer-plain-5.2.0.jar",
+            "adventure-text-serializer-legacy-5.2.0.jar",
+            "adventure-text-serializer-gson-5.2.0.jar",
+            "adventure-text-serializer-json-5.2.0.jar",
+            "adventure-text-serializer-commons-5.2.0.jar",
+            "option-1.1.0.jar",
+            "annotations-26.1.0.jar",
+            "brigadier-1.3.10.jar",
+            "gson-2.14.0.jar",
+            "guava-33.6.0-jre.jar",
+            "failureaccess-1.0.3.jar",
+            "jspecify-1.0.0.jar",
+            "error_prone_annotations-2.47.0.jar",
+            "j2objc-annotations-3.1.jar",
+            "joml-1.10.8.jar",
+            "kotlin-stdlib-jdk8-1.8.20.jar",
+            "kotlin-stdlib-jdk7-1.8.20.jar",
+            "kotlin-stdlib-1.8.20.jar",
+            "kotlin-stdlib-common-1.8.20.jar",
+            "slf4j-api-2.0.17.jar",
+            "snakeyaml-2.2.jar",
+            "netty-common-4.2.15.Final.jar",
+            "netty-buffer-4.2.15.Final.jar",
+            "netty-transport-4.2.15.Final.jar",
+            "netty-resolver-4.2.15.Final.jar",
+            "netty-codec-base-4.2.15.Final.jar",
+            "sqlite-jdbc-3.49.1.0.jar",
+        ],
+        "the API jar leads, then the manifest order is stable"
     );
 }
 
@@ -120,5 +202,195 @@ fn login_attempt_lifecycle_crosses_the_rust_java_bridge() {
     assert!(
         !JVM_RUNTIMES.lock().is_empty(),
         "dropping the host must not unmap the process-lifetime JVM runtime"
+    );
+}
+/// Public API signatures refer to classes in the pinned library set, so an
+/// absent directory is a startup error rather than a later linkage surprise.
+#[test]
+fn a_missing_runtime_library_directory_is_reported_before_startup() {
+    let directory = tempfile::tempdir().expect("a temporary directory");
+    let api_jar = directory.path().join("build/foton-plugin-api.jar");
+    create_dir_all(api_jar.parent().expect("the API jar has a parent"))
+        .expect("the fixture build directory should exist");
+    write(&api_jar, b"not really a jar").expect("the fixture should write");
+
+    let config = PluginHostConfig {
+        api_jar,
+        ..config()
+    };
+    let error = config
+        .class_path()
+        .expect_err("the derived sibling lib directory is absent");
+
+    assert!(
+        matches!(error, PluginHostError::NoLibraryDirectory(..)),
+        "expected the missing runtime library directory, got {error}"
+    );
+    assert!(
+        error
+            .to_string()
+            .contains(directory.path().join("lib").to_string_lossy().as_ref()),
+        "the startup error should name the missing directory: {error}"
+    );
+}
+
+#[test]
+fn the_exact_pinned_runtime_library_set_is_accepted() {
+    let (_directory, config) = pinned_runtime_config();
+
+    let class_path = config.class_path().expect("the pinned set should validate");
+
+    assert!(class_path.contains("adventure-api-5.2.0.jar"));
+    assert!(class_path.contains("snakeyaml-2.2.jar"));
+}
+
+#[test]
+fn a_missing_pinned_runtime_library_is_rejected_with_its_path() {
+    let (_directory, config) = pinned_runtime_config();
+    let missing = config
+        .resolved_library_directory()
+        .join("snakeyaml-2.2.jar");
+    remove_file(&missing).expect("the temporary jar should be removable");
+
+    let error = config
+        .class_path()
+        .expect_err("a missing pin must be rejected");
+
+    assert!(
+        error
+            .to_string()
+            .contains(missing.to_string_lossy().as_ref())
+    );
+    assert!(error.to_string().contains("missing"));
+}
+
+#[test]
+fn an_extra_runtime_jar_is_rejected_with_its_path() {
+    let (_directory, config) = pinned_runtime_config();
+    let extra = config.resolved_library_directory().join("decoy.jar");
+    write(&extra, b"decoy").expect("the decoy should write");
+
+    let error = config
+        .class_path()
+        .expect_err("an extra jar must be rejected");
+
+    assert!(error.to_string().contains(extra.to_string_lossy().as_ref()));
+    assert!(error.to_string().contains("not in the pinned manifest"));
+}
+
+#[test]
+fn a_tampered_runtime_jar_is_rejected_with_its_path_and_digests() {
+    let (_directory, config) = pinned_runtime_config();
+    let tampered = config
+        .resolved_library_directory()
+        .join("snakeyaml-2.2.jar");
+    write(&tampered, b"tampered").expect("the temporary jar should be replaceable");
+
+    let error = config
+        .class_path()
+        .expect_err("a changed digest must be rejected");
+    let message = error.to_string();
+
+    assert!(message.contains(tampered.to_string_lossy().as_ref()));
+    assert!(message.contains("expected 1467931448a0817696ae2805b7b8b20"));
+    assert!(message.contains("got d121be3103007b41edf96f8262925f8c"));
+}
+
+/// Rebinding must replace the owner's complete subscription set without
+/// retaining the server through an `Arc` cycle.
+#[test]
+fn repeated_binding_does_not_duplicate_owner_subscriptions_and_is_weak() {
+    let lifecycle = HostLifecycle::new();
+    let events = Arc::new(EventBus::new());
+    let owner = Identifier::from_foton("plugins");
+    let resets = AtomicUsize::new(0);
+    let subscriptions = AtomicUsize::new(0);
+
+    for _ in 0..2 {
+        lifecycle.bind(
+            &Arc::downgrade(&events),
+            |events| {
+                resets.fetch_add(1, Ordering::Relaxed);
+                events.forget(&owner);
+            },
+            |events| {
+                subscriptions.fetch_add(1, Ordering::Relaxed);
+                events.on::<ServerTickEvent, _>(owner.clone(), |_| {});
+            },
+        );
+    }
+
+    assert_eq!(events.listener_count::<ServerTickEvent>(), 1);
+    assert_eq!(resets.load(Ordering::Relaxed), 1);
+    assert_eq!(subscriptions.load(Ordering::Relaxed), 2);
+    assert_eq!(
+        Arc::strong_count(&events),
+        1,
+        "the host must store only Weak"
+    );
+}
+
+/// Graceful shutdown and startup rollback share the same exactly-once gate.
+#[test]
+fn graceful_and_startup_failure_unsubscribe_and_disable_once() {
+    for path in ["graceful shutdown", "startup failure"] {
+        let lifecycle = HostLifecycle::new();
+        let events = Arc::new(EventBus::new());
+        let owner = Identifier::from_foton("plugins");
+        lifecycle.bind(
+            &Arc::downgrade(&events),
+            |_| {},
+            |events| events.on::<ServerTickEvent, _>(owner.clone(), |_| {}),
+        );
+
+        let java_disables = AtomicUsize::new(0);
+        let rust_unsubscribes = AtomicUsize::new(0);
+        for _ in 0..2 {
+            lifecycle
+                .shutdown(
+                    |events| {
+                        rust_unsubscribes.fetch_add(1, Ordering::Relaxed);
+                        events.forget(&owner);
+                    },
+                    || {
+                        java_disables.fetch_add(1, Ordering::Relaxed);
+                        Ok::<(), ()>(())
+                    },
+                )
+                .expect("the test disable action cannot fail");
+        }
+
+        assert_eq!(events.listener_count::<ServerTickEvent>(), 0, "{path}");
+        assert_eq!(rust_unsubscribes.load(Ordering::Relaxed), 1, "{path}");
+        assert_eq!(java_disables.load(Ordering::Relaxed), 1, "{path}");
+    }
+}
+
+#[test]
+fn nested_runtime_jars_cannot_bypass_the_primary_manifest() {
+    let (_directory, config) = pinned_runtime_config();
+    let nested = config.resolved_library_directory().join("nested");
+    create_dir_all(&nested).unwrap();
+    write(nested.join("injected.jar"), b"not pinned").unwrap();
+    assert!(
+        config.class_path().is_err(),
+        "a nested jar must fail closed"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinked_runtime_pin_cannot_escape_the_validated_directory() {
+    let (directory, config) = pinned_runtime_config();
+    let pin = config
+        .resolved_library_directory()
+        .join("sqlite-jdbc-3.49.1.0.jar");
+    let outside = directory.path().join("outside.jar");
+    copy(&pin, &outside).unwrap();
+    remove_file(&pin).unwrap();
+    std::os::unix::fs::symlink(outside, &pin).unwrap();
+    assert!(
+        config.class_path().is_err(),
+        "even matching symlink bytes must be rejected"
     );
 }

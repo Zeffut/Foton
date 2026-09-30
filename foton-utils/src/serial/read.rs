@@ -129,6 +129,8 @@ impl ReadFrom for Uuid {
 
 impl ReadFrom for Identifier {
     fn read(data: &mut Cursor<&[u8]>) -> Result<Self> {
-        Identifier::from_str(&String::read_prefixed::<VarInt>(data)?).map_err(Error::other)
+        let value = String::read_prefixed::<VarInt>(data)?;
+        super::budget::charge::<u8>(value.len())?;
+        Identifier::from_str(&value).map_err(Error::other)
     }
 }
