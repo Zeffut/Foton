@@ -129,7 +129,7 @@ public final class FotonScheduler implements BukkitScheduler {
                 task.finishRun();
                 return;
             }
-            PluginHost.Invocation invocation = PluginHost.beginInvocation(plugin);
+            PluginHost.Invocation invocation = PluginHost.beginTaskInvocation(generation);
             if (invocation == null) {
                 task.cancel();
                 task.finishRun();
@@ -354,7 +354,7 @@ public final class FotonScheduler implements BukkitScheduler {
                 ready.finishRun();
                 continue;
             }
-            PluginHost.Invocation invocation = PluginHost.beginInvocation(ready.plugin);
+            PluginHost.Invocation invocation = PluginHost.beginTaskInvocation(ready.generation);
             if (invocation == null) {
                 ready.cancel();
                 ready.finishRun();
@@ -429,7 +429,7 @@ public final class FotonScheduler implements BukkitScheduler {
     }
 
     /** One plugin instance's lifecycle generation. */
-    private static final class PluginGeneration {
+    static final class PluginGeneration {
         private static final int OPEN = 0;
         private static final int CLOSED = 1;
         private static final VarHandle STATE;

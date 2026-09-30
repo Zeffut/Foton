@@ -298,7 +298,7 @@ impl Server {
     ///
     /// Vanilla parity: the team half of `PlayerList.updateEntireScoreboard`,
     /// sent on login; on a domain switch the client still holds the previous
-    /// domain's teams, which would otherwise keep colouring names there.
+    /// domain's teams, which would otherwise keep coloring names there.
     fn send_domain_teams(&self, player: &Player, left: Option<&str>, entered: &str) {
         if let Some(scoreboard) = left.and_then(|domain| self.scoreboards.get(domain)) {
             for removal in scoreboard.team_removals() {

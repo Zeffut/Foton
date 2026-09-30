@@ -26,7 +26,7 @@ public final class FotonTextDisplay extends FotonDisplay implements org.bukkit.e
     }
     @Override public void setText(String text) { text(net.kyori.adventure.text.Component.text(text == null ? "" : text)); }
 
-    /** The text's content; the colours and formatting it was given reach
+    /** The text's content; the colors and formatting it was given reach
      * players but are not read back. */
     @Override public net.kyori.adventure.text.Component text() { return net.kyori.adventure.text.Component.text(getText()); }
     @Override public void text(net.kyori.adventure.text.Component text) {

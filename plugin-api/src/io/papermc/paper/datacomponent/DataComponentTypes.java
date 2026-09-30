@@ -21,7 +21,7 @@ public final class DataComponentTypes {
     /** A banner's or shield's pattern layers. */
     public static final DataComponentType.Valued<io.papermc.paper.datacomponent.item.BannerPatternLayers> BANNER_PATTERNS =
         new DataComponentType.Valued<io.papermc.paper.datacomponent.item.BannerPatternLayers>() { };
-    /** The base colour of a painted shield. */
+    /** The base color of a painted shield. */
     public static final DataComponentType.Valued<org.bukkit.DyeColor> BASE_COLOR =
         new DataComponentType.Valued<org.bukkit.DyeColor>() { };
     /** An armor piece's trim. */

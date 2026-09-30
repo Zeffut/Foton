@@ -3,7 +3,7 @@ use foton_registry::packets::status::C_STATUS_RESPONSE;
 use serde::Serialize;
 use text_components::TextComponent;
 
-/// Writes a component in Minecraft's JSON text form, hex colours included.
+/// Writes a component in Minecraft's JSON text form, hex colors included.
 fn minecraft_json<S: serde::Serializer>(
     component: &TextComponent,
     serializer: S,
@@ -35,7 +35,7 @@ pub struct Version {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Status {
-    /// The MOTD, as a text component so it may carry colours.
+    /// The MOTD, as a text component so it may carry colors.
     #[serde(serialize_with = "minecraft_json")]
     pub description: TextComponent,
     pub players: Option<Players>,

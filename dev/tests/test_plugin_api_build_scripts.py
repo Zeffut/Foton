@@ -21,6 +21,11 @@ GENERATED_REGISTRY_INPUTS = (
     "vanilla_entities.rs",
     "vanilla_enchantments.rs",
     "vanilla_potions.rs",
+    "vanilla_banner_patterns.rs",
+    "vanilla_biomes.rs",
+    "vanilla_trim_materials.rs",
+    "vanilla_trim_patterns.rs",
+    "vanilla_instruments.rs",
 )
 
 
@@ -73,6 +78,7 @@ def export_tracked_checkout(destination: Path) -> None:
         "foton-registry/build_assets/attributes.json",
         "foton-registry/build_assets/mob_effects.json",
         "plugin-api/check/Checks.java",
+        "plugin-api/check/LoadingTasksCheck.java",
         "plugin-api/check/BrewingCheck.java",
         "plugin-api/check/EntityCheck.java",
         "plugin-api/check/FotonPotionLookupRunner.java",
@@ -97,6 +103,8 @@ def export_tracked_checkout(destination: Path) -> None:
         "plugin-api/src/foton/FotonPlayer.java",
         "plugin-api/src/foton/FotonProjectile.java",
         "plugin-api/src/foton/Native.java",
+        "plugin-api/src/foton/FotonScheduler.java",
+        "plugin-api/src/foton/PluginHost.java",
         "plugin-api/src/io/papermc/paper/block/LockableTileState.java",
         "plugin-api/src/io/papermc/paper/block/TileStateInventoryHolder.java",
         "plugin-api/src/io/papermc/paper/entity/Shearable.java",
@@ -149,7 +157,7 @@ class PluginApiBuildScriptTests(unittest.TestCase):
             generated = (output / "org/bukkit/potion/PotionEffectType.java").read_text(
                 encoding="utf-8"
             )
-            self.assertEqual(generated.count("static final PotionEffectType "), 80)
+            self.assertEqual(generated.count("static final PotionEffectType "), 89)
             self.assertIn('35, "raid_omen", "minecraft:raid_omen"', generated)
             self.assertIn('2, "slowness", "SLOW"', generated)
             self.assertIn("foton.Native.mobEffectInstant(name)", generated)
@@ -356,6 +364,37 @@ exit 0
             for filename in GENERATED_REGISTRY_INPUTS:
                 self.assertIn(filename, output)
 
+    def test_missing_additional_registry_input_triggers_refresh_and_clear_failure(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="foton missing registry input ", dir="/tmp") as temporary:
+            root = Path(temporary)
+            checkout = root / "existing checkout"
+            checkout.mkdir()
+            export_tracked_checkout(checkout)
+            generated = checkout / "foton-registry/src/generated"
+            generated.mkdir(parents=True, exist_ok=True)
+            for filename in GENERATED_REGISTRY_INPUTS:
+                if filename != "vanilla_banner_patterns.rs":
+                    shutil.copy2(ROOT / "foton-registry/src/generated" / filename, generated / filename)
+            fake_bin = root / "fake-bin"
+            fake_bin.mkdir()
+            marker = root / "cargo-invoked"
+            fake_cargo = fake_bin / "cargo"
+            fake_cargo.write_text('#!/bin/sh\n: > "$FOTON_TEST_CARGO_INVOKED"\n', encoding="utf-8")
+            fake_cargo.chmod(0o755)
+            environment = interpreter_environment()
+            environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
+            environment["FOTON_TEST_CARGO_INVOKED"] = str(marker)
+            result = subprocess.run(
+                ["bash", "dev/build-plugin-api.sh"], cwd=checkout, env=environment,
+                capture_output=True, text=True, timeout=30,
+            )
+            output = result.stdout + result.stderr
+            self.assertTrue(marker.is_file(), "missing new input did not trigger registry refresh: " + output)
+            self.assertNotEqual(result.returncode, 0, output)
+            self.assertIn("foton-registry build did not generate required plugin API inputs", output)
+            self.assertIn("vanilla_banner_patterns.rs", output)
+            self.assertNotIn("Traceback", output)
+
     def test_existing_stale_entity_registry_is_refreshed_before_java_generation(self) -> None:
         with tempfile.TemporaryDirectory(prefix="foton stale entity registry ", dir="/tmp") as temporary:
             root = Path(temporary)
@@ -370,6 +409,13 @@ exit 0
             for filename in GENERATED_REGISTRY_INPUTS:
                 shutil.copy2(ROOT / "foton-registry/src/generated" / filename, backups / filename)
                 shutil.copy2(backups / filename, generated / filename)
+            # The real build also extracts these ignored data-pack inputs. Reuse
+            # its actual output in this cached-build fixture; never invent data.
+            datapack = Path("foton-utils/build_assets/builtin_datapacks/minecraft")
+            for directory in ("banner_pattern", "worldgen/biome", "trim_material",
+                              "trim_pattern", "instrument", "tags/item"):
+                shutil.copytree(ROOT / datapack / directory, checkout / datapack / directory,
+                                dirs_exist_ok=True)
             stale_marker = "pub static STALE_CHECKOUT_ENTITY: u8 = 0;\n"
             (generated / "vanilla_entities.rs").write_text(stale_marker, encoding="utf-8")
 

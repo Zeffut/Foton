@@ -148,8 +148,8 @@ final class ModernAliasesCheck {
                 (org.bukkit.potion.PotionEffectType) field.get(null);
             String name = value.getKey().getKey();
             org.bukkit.potion.PotionEffectType existing = canonicalByName.putIfAbsent(name, value);
-            Checks.expect(existing == null,
-                "Paper 26.2 potion fields must be one-to-one for " + name);
+            Checks.expect(existing == null || existing == value,
+                "potion alias fields must share the canonical identity for " + name);
             Checks.expect(org.bukkit.Registry.MOB_EFFECT.get(value.getKey()) == value,
                 "mob effect registry must retain canonical identity for " + name);
         }

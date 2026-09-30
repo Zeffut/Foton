@@ -40,9 +40,9 @@ fn conversion_reasons_use_exact_paper_names() {
 #[test]
 #[ignore = "requires the built plugin API; dev/ci.sh runs this after the Java build"]
 fn spawn_bridge_dispatches_cancellation_and_queries_released_bee() -> Result<(), Box<dyn Error>> {
-    let (_scratch, host) = spawn_check_host()?;
+    let (scratch, host) = spawn_check_host()?;
     let mut env = host.vm.attach_current_thread()?;
-    let plugins = env.new_string(_scratch.path().join("plugins").to_string_lossy())?;
+    let plugins = env.new_string(scratch.path().join("plugins").to_string_lossy())?;
     env.call_static_method(
         "SpawnBridgeCheck",
         "install",

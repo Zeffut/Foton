@@ -370,8 +370,8 @@ fn graceful_and_startup_failure_unsubscribe_and_disable_once() {
 fn nested_runtime_jars_cannot_bypass_the_primary_manifest() {
     let (_directory, config) = pinned_runtime_config();
     let nested = config.resolved_library_directory().join("nested");
-    create_dir_all(&nested).unwrap();
-    write(nested.join("injected.jar"), b"not pinned").unwrap();
+    create_dir_all(&nested).expect("nested runtime fixture directory");
+    write(nested.join("injected.jar"), b"not pinned").expect("nested runtime fixture jar");
     assert!(
         config.class_path().is_err(),
         "a nested jar must fail closed"
@@ -381,14 +381,15 @@ fn nested_runtime_jars_cannot_bypass_the_primary_manifest() {
 #[cfg(unix)]
 #[test]
 fn symlinked_runtime_pin_cannot_escape_the_validated_directory() {
+    use std::os::unix::fs::symlink;
     let (directory, config) = pinned_runtime_config();
     let pin = config
         .resolved_library_directory()
         .join("sqlite-jdbc-3.49.1.0.jar");
     let outside = directory.path().join("outside.jar");
-    copy(&pin, &outside).unwrap();
-    remove_file(&pin).unwrap();
-    std::os::unix::fs::symlink(outside, &pin).unwrap();
+    copy(&pin, &outside).expect("copy pinned runtime fixture");
+    remove_file(&pin).expect("replace fixture pin with a symlink");
+    symlink(outside, &pin).expect("symlink runtime fixture pin");
     assert!(
         config.class_path().is_err(),
         "even matching symlink bytes must be rejected"

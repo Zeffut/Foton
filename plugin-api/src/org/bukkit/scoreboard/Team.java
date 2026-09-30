@@ -33,7 +33,7 @@ public interface Team {
 
     boolean hasColor();
 
-    /** The colour of members' names; throws when the team has none, as Paper does. */
+    /** The color of members' names; throws when the team has none, as Paper does. */
     TextColor color();
 
     void color(NamedTextColor color);

@@ -11,7 +11,7 @@ import org.bukkit.util.OldEnum;
  * {@code dev/gen-registry-values.py}.</p>
  *
  * <p>It declares no default method, on purpose. A default method would make
- * creating a {@link foton.FotonPatternType} initialise this interface, whose
+ * creating a {@link foton.FotonPatternType} initialize this interface, whose
  * constants read the registry that is creating it.</p>
  */
 public interface PatternType extends OldEnum<PatternType>, Keyed {

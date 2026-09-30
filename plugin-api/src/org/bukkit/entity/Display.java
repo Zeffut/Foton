@@ -34,7 +34,7 @@ public interface Display extends Entity {
     Billboard getBillboard();
     void setBillboard(Billboard billboard);
 
-    /** The glow outline colour, or null for the team colour. */
+    /** The glow outline color, or null for the team color. */
     Color getGlowColorOverride();
     void setGlowColorOverride(Color color);
 

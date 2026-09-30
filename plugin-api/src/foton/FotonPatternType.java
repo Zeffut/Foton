@@ -17,7 +17,7 @@ public final class FotonPatternType extends FotonOldEnum implements PatternType 
         return getKey().toString();
     }
 
-    /** The client's name for the pattern, before the colour is prefixed to it. */
+    /** The client's name for the pattern, before the color is prefixed to it. */
     public String translationKey() {
         return translationKey;
     }

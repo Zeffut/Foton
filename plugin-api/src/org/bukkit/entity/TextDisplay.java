@@ -13,7 +13,7 @@ public interface TextDisplay extends Display {
     int getLineWidth();
     void setLineWidth(int width);
 
-    /** The background colour, or null for the default one. */
+    /** The background color, or null for the default one. */
     Color getBackgroundColor();
     void setBackgroundColor(Color color);
 

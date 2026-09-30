@@ -17,7 +17,7 @@ import org.bukkit.inventory.meta.trim.TrimPattern;
  * <p>Stateless on purpose. The registries live in {@code Registry}'s own
  * fields, which every constant of {@code PatternType}, {@code Biome} and the
  * rest reads: a second copy here would be a class that the constants and
- * {@code Registry} each need initialised before the other, and whichever a
+ * {@code Registry} each need initialized before the other, and whichever a
  * plugin touched first would see the other's fields still null.</p>
  */
 public final class FotonRegistries {
@@ -51,7 +51,7 @@ public final class FotonRegistries {
         return value;
     }
 
-    /** A data pack {@code description}: a translation, coloured when the pack colours it. */
+    /** A data pack {@code description}: a translation, colored when the pack colors it. */
     static Component describe(String translationKey, String color) {
         Component description = Component.translatable(translationKey);
         TextColor textColor = color == null ? null : TextColor.fromHexString(color);

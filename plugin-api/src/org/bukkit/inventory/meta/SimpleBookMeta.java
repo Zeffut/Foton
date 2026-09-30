@@ -9,7 +9,7 @@ import net.kyori.adventure.text.TextComponent;
 /** The mutable book metadata stored by Foton's API-side ItemStack.
  *
  * <p>Pages are components, as vanilla's written_book_content holds them, so
- * colour and formatting reach the reader. Title and author are the plain
+ * color and formatting reach the reader. Title and author are the plain
  * strings vanilla stores; a component set through {@link #title(Component)}
  * is written as section-sign text, as Paper writes it.</p>
  */

@@ -10207,7 +10207,7 @@ extern "system" fn open_generic_inventory(
         .ok()
         .filter(|size| *size % 9 == 0)
         .map_or(1, |size| size / 9);
-    // JSON text, so a plugin's coloured title reaches the client coloured.
+    // JSON text, so a plugin's colored title reaches the client colored.
     player.open_generic_inventory(relay::component(&title), rows, items);
 }
 
@@ -16313,30 +16313,50 @@ mod integration_union_tests {
             "cooldowngroup=minecraft:union",
             "trim=minecraft:iron,minecraft:sentry",
         ];
-        let original = super::parse_slot(&fields.join("\u{1d}")).unwrap();
+        let original = super::parse_slot(&fields.join("\u{1d}"))
+            .expect("combined component fixture should decode");
         assert_eq!(original.get_damage_value(), 37);
-        let potion = original.get(POTION_CONTENTS).unwrap();
+        let potion = original
+            .get(POTION_CONTENTS)
+            .expect("potion contents should survive");
         assert!(potion.potion().is_some());
         assert!(original.get(CUSTOM_NAME).is_some());
         assert!(original.get(CUSTOM_DATA).is_some());
         assert!(original.get(TRIM).is_some());
-        assert_eq!(original.get(USE_COOLDOWN).unwrap().seconds, 2.5);
+        assert_eq!(
+            original
+                .get(USE_COOLDOWN)
+                .expect("cooldown should survive")
+                .seconds
+                .to_bits(),
+            2.5_f32.to_bits(),
+        );
         let encoded = super::describe_slot(&original);
         assert!(encoded.contains("speed,120,2,true,false,true;"));
         assert!(encoded.contains("namejsonhex="));
         assert!(encoded.contains("customhex="));
         assert!(encoded.contains("trim="));
-        let restored = super::parse_slot(&encoded).unwrap();
+        let restored =
+            super::parse_slot(&encoded).expect("encoded combined components should decode");
         assert!(ItemStack::matches(&restored, &original));
     }
 
     #[test]
     fn native_registration_has_one_implementation_per_java_method() {
-        let mut seen = std::collections::BTreeSet::new();
+        use std::collections::BTreeSet;
+        let mut seen = BTreeSet::new();
         for method in super::bindings() {
             let key = (
-                method.name.to_str().unwrap().to_owned(),
-                method.sig.to_str().unwrap().to_owned(),
+                method
+                    .name
+                    .to_str()
+                    .expect("native method name should be UTF-8")
+                    .to_owned(),
+                method
+                    .sig
+                    .to_str()
+                    .expect("native signature should be UTF-8")
+                    .to_owned(),
             );
             assert!(seen.insert(key.clone()), "ambiguous JNI binding: {key:?}");
         }

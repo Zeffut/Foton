@@ -68,7 +68,7 @@ final class ItemComponentsCheck {
         shield.setData(DataComponentTypes.BASE_COLOR, DyeColor.WHITE);
         shield.setData(DataComponentTypes.BANNER_PATTERNS, BannerPatternLayers.bannerPatternLayers(layers));
         ItemStack shieldRead = roundTrip(shield);
-        Checks.expect(shieldRead.getData(DataComponentTypes.BASE_COLOR) == DyeColor.WHITE, "a shield keeps its base colour");
+        Checks.expect(shieldRead.getData(DataComponentTypes.BASE_COLOR) == DyeColor.WHITE, "a shield keeps its base color");
         Checks.same(shieldRead.getData(DataComponentTypes.BANNER_PATTERNS).patterns(), layers, "and its layers, in order");
         shieldRead.unsetData(DataComponentTypes.BANNER_PATTERNS);
         shieldRead.unsetData(DataComponentTypes.BASE_COLOR);
@@ -120,9 +120,9 @@ final class ItemComponentsCheck {
         gemMeta.lore(List.of(Component.text("précieux", NamedTextColor.GRAY)));
         gem.setItemMeta(gemMeta);
         ItemMeta gemBack = roundTrip(gem).getItemMeta();
-        Checks.same(gemBack.displayName(), gemName, "a coloured name survives the slot string");
+        Checks.same(gemBack.displayName(), gemName, "a colored name survives the slot string");
         Checks.same(gemBack.getDisplayName(), "§cRubis", "and reads as section-sign text");
-        Checks.same(gemBack.lore(), List.of(Component.text("précieux", NamedTextColor.GRAY)), "coloured lore survives");
+        Checks.same(gemBack.lore(), List.of(Component.text("précieux", NamedTextColor.GRAY)), "colored lore survives");
 
         ItemMeta plain = new ItemStack(Material.STONE).getItemMeta();
         plain.addItemFlags(ItemFlag.HIDE_ENCHANTS);

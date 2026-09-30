@@ -82,3 +82,9 @@ valide = "valide"
 
 [default]
 locale = "en-us"
+# JNI: int, boolean -> void. This descriptor is ABI, not English prose.
+extend-ignore-re = ['\(IZ\)V']
+
+[default.extend-identifiers]
+# Paper's public interface name must retain its binary spelling.
+FeatureDependant = "FeatureDependant"

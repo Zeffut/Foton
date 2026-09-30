@@ -24,7 +24,7 @@ final class Events {
 
         String id = "00000000-0000-0000-0000-000000000001";
 
-        // Join messages cross as Minecraft's JSON text, so colours survive.
+        // Join messages cross as Minecraft's JSON text, so colors survive.
         Checks.same(foton.EventBridge.fireJoin(id, "{\"text\":\"original\"}"),
             "{\"text\":\"rewritten by the fixture\"}",
             "a handler's rewrite did not travel back");

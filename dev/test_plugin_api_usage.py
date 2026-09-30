@@ -856,28 +856,31 @@ class CompatibilityEvidence(unittest.TestCase):
             plugin_api_usage.REPO / "foton-plugin/src")
         compiled = plugin_api_usage._compiled_method_signatures(api)
 
-        exact = (
-            "foton/EventBridge",
-            "fireJoin",
-            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
-        )
-        self.assertIn(exact, roots)
-        self.assertIn(exact, compiled)
+        for name, signature in (
+            ("fireJoin", "(Ljava/lang/String;ILjava/lang/String;)Ljava/lang/String;"),
+            ("firePreCreatureSpawn", "(Ljava/lang/String;DDDLjava/lang/String;Ljava/lang/String;)Z"),
+            ("fireCreatureSpawn", "(Ljava/lang/String;Ljava/lang/String;DDDLjava/lang/String;)Z"),
+        ):
+            exact = ("foton/EventBridge", name, signature)
+            self.assertIn(exact, roots)
+            self.assertIn(exact, compiled)
+        # The compatibility overload still exists, but the host must pass the login attempt.
+        old_join = ("foton/EventBridge", "fireJoin",
+                    "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;")
+        self.assertIn(old_join, compiled)
+        self.assertNotIn(old_join, roots)
+        for name, signature in (
+            ("firePreCreatureSpawn", "(Ljava/lang/String;DDDDLjava/lang/String;Ljava/lang/String;)Z"),
+            ("fireCreatureSpawn", "(Ljava/lang/String;Ljava/lang/String;DDDDLjava/lang/String;)Z"),
+        ):
+            obsolete = ("foton/EventBridge", name, signature)
+            self.assertNotIn(obsolete, roots)
+            self.assertNotIn(obsolete, compiled)
         for mismatch in {
             (
                 "foton/EventBridge",
                 "fireBlockExp",
                 "(Ljava/lang/String;IIILjava/lang/String;)Ljava/lang/String;",
-            ),
-            (
-                "foton/EventBridge",
-                "firePreCreatureSpawn",
-                "(Ljava/lang/String;DDDDLjava/lang/String;Ljava/lang/String;)Z",
-            ),
-            (
-                "foton/EventBridge",
-                "fireCreatureSpawn",
-                "(Ljava/lang/String;Ljava/lang/String;DDDDLjava/lang/String;)Z",
             ),
             (
                 "foton/EventBridge",

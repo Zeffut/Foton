@@ -1088,7 +1088,7 @@ mod tests {
             .collect();
         manifest.sort();
         let mut installed = super::PLUGIN_RUNTIME_JARS.to_vec();
-        installed.sort();
+        installed.sort_unstable();
         assert_eq!(manifest.len(), 31);
         assert_eq!(manifest, installed);
     }

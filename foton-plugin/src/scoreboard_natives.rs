@@ -256,9 +256,9 @@ mod tests {
 
     use super::{apply_display, deserialized, serialized};
 
-    /// Java names colours by their snake-case form, and so does the scoreboard's save.
+    /// Java names colors by their snake-case form, and so does the scoreboard's save.
     #[test]
-    fn colours_cross_by_name() {
+    fn colors_cross_by_name() {
         assert_eq!(
             serialized(&TeamColor::DarkPurple).as_deref(),
             Some("dark_purple")

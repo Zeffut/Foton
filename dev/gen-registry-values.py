@@ -11,14 +11,14 @@ The entries come from the vanilla data pack foton-registry itself is built
 from (`foton-utils/build_assets/builtin_datapacks`), and their order from the
 registration order foton-registry generates, which is the id order Foton sends
 to clients. So the Java side cannot name a pattern the server lacks, nor carry
-a value -- a trim colour, a horn's range -- that disagrees with it.
+a value -- a trim color, a horn's range -- that disagrees with it.
 
 Constant names follow Paper's rule, the registry path in upper case.
 
 Two things are written:
 
 - `foton/FotonRegistryData.java`, the entries and their data in registry
-  order, as plain arrays that need nothing else to initialise;
+  order, as plain arrays that need nothing else to initialize;
 - each interface, from `plugin-api/templates/`, with its constants in place of
   the `// @@CONSTANTS@@` line.
 
@@ -91,7 +91,7 @@ def java_float(value):
 
 
 def description(entry):
-    """(translation key, colour or null) of a data pack `description` component."""
+    """(translation key, color or null) of a data pack `description` component."""
     component = entry.get("description")
     if isinstance(component, str):
         return component, None

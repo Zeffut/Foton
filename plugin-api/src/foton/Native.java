@@ -701,7 +701,7 @@ public final class Native {
     public static native boolean mannequinImmovable(String uuid);
     public static native void setMannequinImmovable(String uuid, boolean immovable);
     public static native void setMannequinDescription(String uuid, String json);
-    /** {@code {raw peek, 0, dye colour id or -1}}. */
+    /** {@code {raw peek, 0, dye color id or -1}}. */
     public static native double[] shulkerState(String uuid);
     public static native String shulkerAttachedFace(String uuid);
     public static native void setShulkerAttachedFace(String uuid, String face);

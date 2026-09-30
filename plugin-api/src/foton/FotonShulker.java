@@ -34,7 +34,7 @@ public final class FotonShulker extends FotonLivingEntity implements org.bukkit.
         Native.setShulkerAttachedFace(getUniqueId().toString(), face.name());
     }
 
-    /** The shell's dye colour, or null for the undyed purple one. */
+    /** The shell's dye color, or null for the undyed purple one. */
     @Override public DyeColor getColor() {
         double[] s = state();
         int color = s == null ? -1 : (int) s[2];

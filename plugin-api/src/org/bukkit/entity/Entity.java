@@ -101,7 +101,7 @@ public interface Entity extends CommandSender, org.bukkit.Nameable, org.bukkit.p
         return name == null ? null : net.kyori.adventure.text.Component.text(name);
     }
 
-    /** Sets the custom name, colour and formatting included. */
+    /** Sets the custom name, color and formatting included. */
     @Override default void customName(net.kyori.adventure.text.Component customName) {
         foton.Native.setEntityCustomNameComponent(getUniqueId().toString(), foton.FotonComponents.toJson(customName));
     }

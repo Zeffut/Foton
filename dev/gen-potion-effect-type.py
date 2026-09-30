@@ -92,6 +92,11 @@ def render(effects: list[dict[str, object]]) -> str:
         lines.append(
             f"    public static final PotionEffectType {constant} = FotonPotionEffectTypes.{constant};"
         )
+    for name, alias in LEGACY_NAMES.items():
+        lines += [
+            '    @Deprecated(since = "1.20.3")',
+            f"    public static final PotionEffectType {alias} = {name.upper()};",
+        ]
     lines += [
         "",
         "    public PotionEffectType() {}",

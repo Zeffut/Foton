@@ -14,8 +14,8 @@ import net.kyori.adventure.text.format.TextDecoration;
 
 /** Adventure components as vanilla's JSON text format, for Foton to decode.
  *
- * <p>A component crosses whole -- colour, decorations, translations and
- * children -- because a name tag or a text display that loses its colour on
+ * <p>A component crosses whole -- color, decorations, translations and
+ * children -- because a name tag or a text display that loses its color on
  * the way is not the thing the plugin made. Content vanilla resolves on the
  * server (scores, selectors, NBT) crosses as its plain text. */
 public final class FotonComponents {

@@ -13,7 +13,7 @@ import org.bukkit.Translatable;
 public interface TrimMaterial extends Keyed, Translatable {
     // @@CONSTANTS@@
 
-    /** The name the client shows, coloured as the data pack colours it. */
+    /** The name the client shows, colored as the data pack colors it. */
     net.kyori.adventure.text.Component description();
 
     @Override

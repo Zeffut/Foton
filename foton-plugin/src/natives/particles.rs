@@ -270,7 +270,7 @@ mod tests {
                 .and_then(|data| data.downcast_ref::<ShriekParticleOption>())
                 .is_some()
         );
-        // A flame takes no data, and dust without a colour is not dust.
+        // A flame takes no data, and dust without a color is not dust.
         assert!(particle_data(&vanilla_particle_types::FLAME, "dust:0:1.0").is_none());
         assert!(particle_data(&vanilla_particle_types::DUST, "").is_none());
     }

@@ -62,7 +62,7 @@ fn holder_key<T: RegistryEntry + foton_registry::RegistryHolderEntry>(
 
 /// Appends every component this module carries, in the order Java reads them.
 pub(crate) fn describe(stack: &ItemStack, out: &mut String) {
-    // Name and lore as JSON text, so colour and formatting reach the plugin
+    // Name and lore as JSON text, so color and formatting reach the plugin
     // and come back; `namehex`/`lorehex`, their plain-text forms, are still
     // read.
     if let Some(name) = stack.get(CUSTOM_NAME)
@@ -429,7 +429,7 @@ mod tests {
         assert!(stack.get(POTION_CONTENTS).is_some());
     }
 
-    /// A coloured name set by a plugin is the name the item carries, and
+    /// A colored name set by a plugin is the name the item carries, and
     /// what the server hands back reads as the same component.
     #[test]
     fn a_styled_name_keeps_its_style() {

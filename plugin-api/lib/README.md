@@ -43,7 +43,7 @@ codes and serialized a component as its `toString()` was worse than none.
 `adventure-text-serializer-gson` is here for Foton's own use, and paper-api
 declares it too. A component a plugin hands over -- a join or quit message, a
 kick reason, a server-list MOTD -- crosses to the Rust side as Minecraft's JSON
-text, and that is what this serializer writes and reads, colours and all. It
+text, and that is what this serializer writes and reads, colors and all. It
 pulls in `adventure-text-serializer-json`, `adventure-text-serializer-commons`
 and `net.kyori:option`, at the versions its POM and adventure-bom 5.2.0 name.
 

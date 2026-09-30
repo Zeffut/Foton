@@ -149,7 +149,7 @@ public final class ComponentJson {
     };
 
     /** Section-sign text, as Adventure's legacySection serializer writes it: a
-     * hex colour falls to the nearest named one, and a translation to its key. */
+     * hex color falls to the nearest named one, and a translation to its key. */
     public static String legacy(Component component) {
         StringBuilder out = new StringBuilder();
         legacy(component, Style.empty(), new String[] {""}, out);

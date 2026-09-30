@@ -265,10 +265,6 @@ fn single_thread_pool() -> Arc<rayon::ThreadPool> {
     )
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "one struct literal naming every Server field; splitting it would hide which field a test server sets"
-)]
 async fn test_server_with_worlds(
     default_domain: String,
     domains: &[ResolvedDomainConfig],

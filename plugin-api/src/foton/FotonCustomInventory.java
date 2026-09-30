@@ -17,10 +17,10 @@ public final class FotonCustomInventory implements Inventory {
     private final InventoryHolder holder;
     private final ItemStack[] contents;
     private final String title;
-    /** The title as the client is sent it: JSON text, colours and all. */
+    /** The title as the client is sent it: JSON text, colors and all. */
     private final String titleJson;
     private String viewer;
-    /** A title given as a string, which Bukkit reads with section-sign colours. */
+    /** A title given as a string, which Bukkit reads with section-sign colors. */
     public FotonCustomInventory(InventoryHolder holder, int size, String title) {
         this(holder, size, net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacySection()
             .deserialize(title == null ? "" : title));

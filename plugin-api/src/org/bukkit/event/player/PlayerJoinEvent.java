@@ -21,7 +21,7 @@ public class PlayerJoinEvent extends PlayerEvent {
     }
 
     /** A legacy string becomes a text component holding it: the client draws
-     * its section-sign colour codes itself. */
+     * its section-sign color codes itself. */
     static Component fromLegacy(String text) { return text == null ? null : Component.text(text); }
 
     /** The text a legacy getter answers: a component that is only a string

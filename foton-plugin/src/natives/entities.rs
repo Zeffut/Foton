@@ -569,7 +569,7 @@ fn with_shulker<R>(
     entity.as_ref().downcast_ref::<ShulkerEntity>().map(f)
 }
 
-/// `{raw peek (0-100), 0, dye colour id or -1}`.
+/// `{raw peek (0-100), 0, dye color id or -1}`.
 extern "system" fn shulker_state(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -637,7 +637,7 @@ extern "system" fn set_shulker_peek(
     });
 }
 
-/// A dye colour id, or -1 for the undyed shell.
+/// A dye color id, or -1 for the undyed shell.
 extern "system" fn set_shulker_color(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,

@@ -10,6 +10,7 @@ public final class Checks {
     public static void main(String[] args) throws Exception {
         Services.check();
         Events.check(args[0]);
+        LoadingTasksCheck.check();
         PluginLifecycle.check();
         NetworkHooks.check();
         foton.LibraryCacheChecks.check();

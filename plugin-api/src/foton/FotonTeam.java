@@ -104,7 +104,7 @@ final class FotonTeam implements Team {
         if (color == null) throw new IllegalArgumentException("color cannot be null");
         NamedTextColor named = NamedTextColor.NAMES.value(color.name().toLowerCase(Locale.ROOT));
         if (named == null && color != ChatColor.RESET) {
-            throw new IllegalArgumentException("a team colour must be a colour, not " + color);
+            throw new IllegalArgumentException("a team color must be a color, not " + color);
         }
         color(named);
     }

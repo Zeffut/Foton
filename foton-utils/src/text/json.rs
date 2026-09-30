@@ -1,7 +1,7 @@
 //! Minecraft's JSON text form of a component.
 //!
 //! The component model derives its serde form field by field, and that form
-//! is Minecraft's but for two details: an RGB colour is `{"rgb": [r, g, b]}`
+//! is Minecraft's but for two details: an RGB color is `{"rgb": [r, g, b]}`
 //! where Minecraft writes `"#rrggbb"`, and a child or argument must be an
 //! object where Minecraft also accepts a bare string. These two functions
 //! translate at the border, so the server list and Adventure's Gson
@@ -34,7 +34,7 @@ pub fn from_json(text: &str) -> Option<TextComponent> {
     serde_json::from_value(value).ok()
 }
 
-/// Rewrites every `{"rgb": [r, g, b]}` colour as `"#rrggbb"`.
+/// Rewrites every `{"rgb": [r, g, b]}` color as `"#rrggbb"`.
 fn rgb_to_hex(value: &mut Value) {
     match value {
         Value::Object(map) => {
@@ -52,7 +52,7 @@ fn rgb_to_hex(value: &mut Value) {
     }
 }
 
-/// Rewrites `"#rrggbb"` colours into the model's form and expands bare-string
+/// Rewrites `"#rrggbb"` colors into the model's form and expands bare-string
 /// children and arguments into text components.
 fn to_model(value: &mut Value) {
     match value {
@@ -86,7 +86,7 @@ mod tests {
     use super::{from_json, to_json};
 
     /// What Adventure's Gson serializer writes, as the plugin API configures
-    /// it, for a MOTD like Zelda Civ's: a hex colour, a named one, bold, a
+    /// it, for a MOTD like Zelda Civ's: a hex color, a named one, bold, a
     /// newline child and click and hover events. Taken from its own output.
     const ADVENTURE_MOTD: &str = r##"{"extra":[{"bold":true,"color":"#FDC14B","text":"Zelda "},{"color":"dark_gray","text":"| "},{"text":"\n"},{"click_event":{"action":"run_command","command":"/help"},"hover_event":{"action":"show_text","value":{"text":"hi"}},"text":"x"}],"text":""}"##;
 
@@ -99,7 +99,7 @@ mod tests {
         assert_eq!(
             parsed.children[0].format.color,
             Some(Color::Rgb(0xfd, 0xc1, 0x4b)),
-            "a hex colour is read as the colour it names"
+            "a hex color is read as the color it names"
         );
     }
 
@@ -110,10 +110,10 @@ mod tests {
         assert_eq!(parsed.children[0], TextComponent::plain("a"));
     }
 
-    /// Adventure and the client read a hex colour, and nothing else, for an
+    /// Adventure and the client read a hex color, and nothing else, for an
     /// RGB one.
     #[test]
-    fn an_rgb_colour_is_written_as_hex() {
+    fn an_rgb_color_is_written_as_hex() {
         let parsed = from_json(r##"{"text":"a","color":"#FDC14B"}"##).expect("a component");
         assert_eq!(to_json(&parsed)["color"], "#fdc14b");
     }

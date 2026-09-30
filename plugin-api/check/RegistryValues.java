@@ -36,7 +36,7 @@ final class RegistryValues {
             new Pattern(org.bukkit.DyeColor.RED, PatternType.CROSS), "equal layers are equal");
 
         // Paper plugins hand a NamespacedKey wherever an Adventure Key goes,
-        // and a set built by the server must still recognise it.
+        // and a set built by the server must still recognize it.
         io.papermc.paper.registry.set.RegistryKeySet<org.bukkit.inventory.ItemType> swords =
             io.papermc.paper.registry.set.RegistrySet.keySet(io.papermc.paper.registry.RegistryKey.ITEM,
                 java.util.List.of(io.papermc.paper.registry.TypedKey.create(
@@ -50,6 +50,6 @@ final class RegistryValues {
         Checks.same(TrimMaterial.AMETHYST.getTranslationKey(), "trim_material.minecraft.amethyst",
             "trim material translation from the data pack");
         Checks.expect(TrimMaterial.AMETHYST.description().color() != null,
-            "a trim material description carries the pack's colour");
+            "a trim material description carries the pack's color");
     }
 }

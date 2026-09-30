@@ -8,12 +8,11 @@ so it is written here and committed, the same way `dev/parity-gaps.txt` is.
     python3 dev/count-tests.py --check    # fail when the committed file is stale
 
 `cargo test -- --list` needs the test binaries, so run this after a build,
-and run it on **Linux**. The count is platform-dependent: two tests are
-`#[cfg(unix)]` -- `geyser::tests::a_wedged_java_probe_times_out_instead_of_
-hanging_forever` and `key::tests::the_created_key_file_is_readable_only_by_
-its_owner` -- so a Windows run measures 5397 where a Linux one measures
-5399, and committing the Windows number turns the check red on the runner
-while it stays green for whoever wrote it.
+and prefer **Linux**, the CI platform. The count is platform-dependent: the
+Java-probe timeout, key-file permissions and two plugin-classpath symlink tests
+are `#[cfg(unix)]`. macOS enables these same four tests; Windows omits them.
+Check platform gates before recording a count from a non-Linux host, rather
+than assuming every platform enumerates the same tests.
 """
 
 import argparse

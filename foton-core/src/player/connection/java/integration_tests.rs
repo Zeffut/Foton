@@ -1,14 +1,18 @@
 //! Regressions for the packet tap sharing the hardened transport.
 
+use std::env::temp_dir;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use foton_protocol::packet_traits::PacketTranslator;
+use tokio::fs::remove_dir_all;
 use tokio::io::AsyncReadExt;
+use tokio::runtime::Builder;
 use uuid::Uuid;
 
 use super::*;
 use crate::packet_tap::TapOutcome;
 use crate::permission::PermissionSubjectIndex;
+use crate::server::test_server;
 use crate::test_support::{TestPlayerBuilder, fresh_test_world};
 
 #[derive(Default)]
@@ -72,16 +76,15 @@ impl PacketTranslator for RecordingBridge {
 #[test]
 fn tap_rewrites_before_translation_and_preserves_silent_and_cancelled_packets() {
     let world = fresh_test_world("packet_tap_integration");
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    let runtime = Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("test runtime should initialize");
     runtime.block_on(async {
-        let storage = std::env::temp_dir().join(format!("foton-packet-tap-{}", Uuid::new_v4()));
-        let server =
-            crate::server::test_server(Arc::clone(&world), PermissionSubjectIndex::new(), &storage)
-                .await
-                .expect("test server should initialize");
+        let storage = temp_dir().join(format!("foton-packet-tap-{}", Uuid::new_v4()));
+        let server = test_server(Arc::clone(&world), PermissionSubjectIndex::new(), &storage)
+            .await
+            .expect("test server should initialize");
         let player = TestPlayerBuilder::new(world, "TapTester", 1)
             .server(&server)
             .build();
@@ -135,8 +138,12 @@ fn tap_rewrites_before_translation_and_preserves_silent_and_cancelled_packets() 
         assert_eq!(
             *bridge.translated.lock(),
             vec![
-                packet(9).to_packet_data(None).unwrap(),
-                packet(3).to_packet_data(None).unwrap()
+                packet(9)
+                    .to_packet_data(None)
+                    .expect("rewritten packet should encode"),
+                packet(3)
+                    .to_packet_data(None)
+                    .expect("silent packet should encode")
             ],
         );
 
@@ -167,9 +174,7 @@ fn tap_rewrites_before_translation_and_preserves_silent_and_cancelled_packets() 
         drop(connection);
         drop(player);
         drop(server);
-        tokio::fs::remove_dir_all(storage)
-            .await
-            .expect("remove test storage");
+        remove_dir_all(storage).await.expect("remove test storage");
     });
 }
 

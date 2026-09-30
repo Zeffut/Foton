@@ -149,10 +149,27 @@ public final class PluginHost {
             if (state == null || !state.accepting || !plugin.isEnabled()) {
                 return null;
             }
-            state.active++;
-            threadInvocations.get().merge(state, 1, Integer::sum);
-            return new Invocation(state);
+            return acquireInvocation(state);
         }
+    }
+
+    /** An open managed task generation also runs during onLoad and before enableAll. */
+    static Invocation beginTaskInvocation(FotonScheduler.PluginGeneration generation) {
+        synchronized (lifecycle) {
+            Plugin plugin = generation.plugin;
+            InvocationState state = invocations.get(plugin);
+            if (state == null || !isPublishedLocked(plugin) || !generation.accepting()
+                    || state.disabling || state.disableComplete
+                    || state.disableRequested || state.discardRequested) return null;
+            return acquireInvocation(state);
+        }
+    }
+
+    /** Both callers hold lifecycle, so retirement and admission share one boundary. */
+    private static Invocation acquireInvocation(InvocationState state) {
+        state.active++;
+        threadInvocations.get().merge(state, 1, Integer::sum);
+        return new Invocation(state);
     }
 
     /** Loads and enables every plugin in a directory. Returns how many worked. */
@@ -1328,6 +1345,7 @@ public final class PluginHost {
             if (state == null || state.disabling || state.disableComplete) return;
             if (state.loading || state.enabling) {
                 state.disableRequested = true;
+                FotonScheduler.stopPluginSubmissions(plugin);
                 return;
             }
             state.accepting = false;
@@ -1418,6 +1436,7 @@ public final class PluginHost {
             if (state != null && (state.loading || state.enabling)) {
                 state.discardRequested = true;
                 state.disableRequested = true;
+                FotonScheduler.stopPluginSubmissions(plugin);
                 return;
             }
             if (state != null && state.disabling) {

@@ -15,7 +15,7 @@ import org.bukkit.Registry;
  * <p>Values are created on first use and then kept, so each key has exactly
  * one value and a plugin comparing with {@code ==} gets Paper's answer.</p>
  *
- * <p>No lock is held while a value is created. Creating one can initialise the
+ * <p>No lock is held while a value is created. Creating one can initialize the
  * API type it implements, whose constants read this same registry from the
  * same thread (see {@link org.bukkit.MusicInstrument}); a lock held across that
  * would either deadlock or hand the inner read a half-built registry. Instead

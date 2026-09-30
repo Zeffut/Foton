@@ -63,6 +63,11 @@ REGISTRY_INPUTS=(
   "$REGISTRY_GENERATED/vanilla_entities.rs"
   "$REGISTRY_GENERATED/vanilla_enchantments.rs"
   "$REGISTRY_GENERATED/vanilla_potions.rs"
+  "$REGISTRY_GENERATED/vanilla_banner_patterns.rs"
+  "$REGISTRY_GENERATED/vanilla_biomes.rs"
+  "$REGISTRY_GENERATED/vanilla_trim_materials.rs"
+  "$REGISTRY_GENERATED/vanilla_trim_patterns.rs"
+  "$REGISTRY_GENERATED/vanilla_instruments.rs"
 )
 entity_registry_is_current() {
   python3 - "$REPO/foton-registry/build_assets/entities.json" \

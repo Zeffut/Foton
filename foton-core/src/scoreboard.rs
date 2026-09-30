@@ -3,7 +3,7 @@
 //! This module owns the scoreboard data needed by selectors and command
 //! execution: objective identity and mutability, score values and locks, and
 //! team membership, plus what a team shows the client -- its prefix, suffix,
-//! colour and name-tag rules, which every change queues as a team packet for
+//! color and name-tag rules, which every change queues as a team packet for
 //! the server to send (see [`Scoreboard::take_team_updates`]). Display slots
 //! are outside this scope.
 
@@ -154,7 +154,7 @@ impl Default for TeamOptions {
 /// What a team shows the client around its members' names.
 ///
 /// Vanilla parity: the presentation fields of `PlayerTeam`. Every default is
-/// what vanilla's constructor sets: no prefix or suffix, `RESET` colour, name
+/// what vanilla's constructor sets: no prefix or suffix, `RESET` color, name
 /// tags always shown, pushing everyone, and the team's own name displayed.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -165,7 +165,7 @@ pub struct TeamDisplay {
     pub prefix: Option<TextComponent>,
     /// `PlayerTeam.playerSuffix`, drawn after it.
     pub suffix: Option<TextComponent>,
-    /// `PlayerTeam.color`, the colour of members' names.
+    /// `PlayerTeam.color`, the color of members' names.
     pub color: TeamColor,
     /// `PlayerTeam.nameTagVisibility`.
     pub name_tag_visibility: TeamVisibility,

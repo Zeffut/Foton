@@ -18,6 +18,7 @@ final class PotionEffectCheck {
             "PotionEffectTypeWrapper Paper ABI");
         Checks.same(org.bukkit.potion.PotionEffectType.values().length, 40,
             "Paper 26.2 potion effect count");
+        legacyAliases();
         Checks.same(org.bukkit.potion.PotionEffectType.INSTANT_HEALTH.getId(), 6,
             "instant health registry id");
         Checks.same(org.bukkit.potion.PotionEffectType.RAID_OMEN.getId(), 35,
@@ -70,5 +71,31 @@ final class PotionEffectCheck {
         Checks.expect(visible.toString().startsWith("PotionEffect{amplifier=2, duration=80")
                 && visible.toString().endsWith("}"),
             "PotionEffect Paper toString shape");
+    }
+
+    private static void legacyAliases() {
+        String[] aliases = {"SLOW", "FAST_DIGGING", "SLOW_DIGGING", "INCREASE_DAMAGE",
+            "HEAL", "HARM", "JUMP", "CONFUSION", "DAMAGE_RESISTANCE"};
+        org.bukkit.potion.PotionEffectType[] canonical = {
+            org.bukkit.potion.PotionEffectType.SLOWNESS, org.bukkit.potion.PotionEffectType.HASTE,
+            org.bukkit.potion.PotionEffectType.MINING_FATIGUE, org.bukkit.potion.PotionEffectType.STRENGTH,
+            org.bukkit.potion.PotionEffectType.INSTANT_HEALTH, org.bukkit.potion.PotionEffectType.INSTANT_DAMAGE,
+            org.bukkit.potion.PotionEffectType.JUMP_BOOST, org.bukkit.potion.PotionEffectType.NAUSEA,
+            org.bukkit.potion.PotionEffectType.RESISTANCE};
+        for (int index = 0; index < aliases.length; index++) {
+            try {
+                java.lang.reflect.Field field = org.bukkit.potion.PotionEffectType.class
+                    .getField(aliases[index]);
+                Checks.expect(field.getType() == org.bukkit.potion.PotionEffectType.class
+                        && java.lang.reflect.Modifier.isStatic(field.getModifiers())
+                        && java.lang.reflect.Modifier.isFinal(field.getModifiers())
+                        && field.isAnnotationPresent(Deprecated.class),
+                    "legacy potion field descriptor/modifiers: " + aliases[index]);
+                Checks.expect(field.get(null) == canonical[index],
+                    "legacy potion field must share the canonical instance: " + aliases[index]);
+            } catch (ReflectiveOperationException error) {
+                throw new AssertionError("legacy potion field is missing: " + aliases[index], error);
+            }
+        }
     }
 }

@@ -118,14 +118,14 @@ public final class PacketProbe extends JavaPlugin implements Listener {
                 + place(player.getLocation())), 2L);
     }
 
-    /** Marks a menu as the probe's own, the way plugins recognise their menus. */
+    /** Marks a menu as the probe's own, the way plugins recognize their menus. */
     private static final class MenuHolder implements org.bukkit.inventory.InventoryHolder {
         @Override public Inventory getInventory() { return null; }
     }
     private final MenuHolder menuHolder = new MenuHolder();
     private final AtomicInteger menuClicks = new AtomicInteger();
 
-    /** A click in the probe's menu is recognised by its holder and refused,
+    /** A click in the probe's menu is recognized by its holder and refused,
      * as a plugin's menu refuses its items being taken. */
     @EventHandler
     public void onMenuClick(org.bukkit.event.inventory.InventoryClickEvent event) {
@@ -139,7 +139,7 @@ public final class PacketProbe extends JavaPlugin implements Listener {
         if (ours && event.getRawSlot() == 10) event.setCancelled(true);
     }
 
-    /** What a plugin's menu sees as it closes: whether it is recognised,
+    /** What a plugin's menu sees as it closes: whether it is recognized,
      * and what the player left in its first slot. */
     @EventHandler
     public void onMenuClose(org.bukkit.event.inventory.InventoryCloseEvent event) {

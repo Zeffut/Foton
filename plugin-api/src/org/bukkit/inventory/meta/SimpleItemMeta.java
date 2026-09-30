@@ -8,7 +8,7 @@ import java.util.List;
  * <p>Besides Bukkit's fields it holds the vanilla components Paper exposes on
  * every meta -- glint override, stack size, use cooldown, tooltip display --
  * and those some items carry whatever their meta type (a shield's banner
- * patterns and base colour, an armor trim, a horn's instrument, custom data).
+ * patterns and base color, an armor trim, a horn's instrument, custom data).
  * All of them cross to the server with the item; see
  * {@code foton.FotonInventory#encode}.</p>
  */
@@ -40,7 +40,7 @@ public class SimpleItemMeta implements Damageable {
     }
 
     private foton.FotonPersistentDataContainer persistentData = new foton.FotonPersistentDataContainer();
-    /** custom_name, a component so colour and formatting survive; null when unnamed. */
+    /** custom_name, a component so color and formatting survive; null when unnamed. */
     private net.kyori.adventure.text.Component displayName;
     /** lore, one component per line; null when the item has none. */
     private List<net.kyori.adventure.text.Component> lore;

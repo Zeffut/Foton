@@ -87,8 +87,8 @@ pub(super) fn component(env: &mut JNIEnv<'_>, json: &JString<'_>) -> Option<Text
     parse_component(&text(env, json)?)
 }
 
-/// `text_components` reads an RGB colour as `{"rgb": [r, g, b]}` rather than
-/// vanilla's `"#rrggbb"`, so hex colours are rewritten on the way in.
+/// `text_components` reads an RGB color as `{"rgb": [r, g, b]}` rather than
+/// vanilla's `"#rrggbb"`, so hex colors are rewritten on the way in.
 pub(super) fn parse_component(json: &str) -> Option<TextComponent> {
     let mut value: Value = serde_json::from_str(json).ok()?;
     rewrite_hex_colors(&mut value);
@@ -126,7 +126,7 @@ mod tests {
     use super::parse_component;
 
     #[test]
-    fn vanilla_json_keeps_hex_colours_decorations_and_children() {
+    fn vanilla_json_keeps_hex_colors_decorations_and_children() {
         let parsed = parse_component(
             r##"{"text":"Link","color":"#12ab34","bold":true,"extra":[{"translate":"a.b","with":[{"text":"x"}],"color":"gold"}]}"##,
         );

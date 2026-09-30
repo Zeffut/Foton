@@ -138,7 +138,7 @@ static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 // HotSpot does not support being created on the primordial thread -- the
 // `java` launcher itself never does it -- and on Linux the guard pages it
 // places there land inside the stack Foton still needs: the first deep
-// registry initialisation after the JVM exists faults, with no JVM crash
+// registry initialization after the JVM exists faults, with no JVM crash
 // report and no Rust panic, just SIGSEGV. A spawned thread with an explicit
 // stack is an ordinary thread to HotSpot, and the size below is the same 8 MB
 // Linux gives the primordial one.

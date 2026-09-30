@@ -8,8 +8,8 @@ import java.util.Collection;
  * pack by {@code dev/gen-registry-values.py}, and so are the duration, range
  * and sound each one reports.</p>
  *
- * <p>Initialising this class reads the registry, and the registry creates
- * subclasses of it, whose creation initialises this class. That cycle is safe
+ * <p>Initializing this class reads the registry, and the registry creates
+ * subclasses of it, whose creation initializes this class. That cycle is safe
  * only because the registry lives in {@link Registry}'s fields, which never
  * wait on this class, and because {@link foton.FotonKeyedRegistry} holds no
  * lock while it creates a value and keeps whichever copy was stored first.</p>

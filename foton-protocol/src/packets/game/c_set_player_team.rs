@@ -4,7 +4,7 @@
 //! name selects the operation; adding and changing carry the team's
 //! parameters, and adding, joining and leaving carry a list of entries.
 //! Without it the client never learns a team exists, so a prefix, a suffix or
-//! a coloured name set on the server is never drawn.
+//! a colored name set on the server is never drawn.
 
 use std::io::{Result, Write};
 
@@ -42,9 +42,9 @@ pub enum TeamCollisionRule {
     PushOwnTeam,
 }
 
-/// The colour a team's member names are drawn in.
+/// The color a team's member names are drawn in.
 ///
-/// Vanilla parity: the colour entries of `ChatFormatting`, whose ordinal is
+/// Vanilla parity: the color entries of `ChatFormatting`, whose ordinal is
 /// the wire form; `Reset`, vanilla's default, is ordinal 21, after the five
 /// formatting codes a team cannot take.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,7 +71,7 @@ pub enum TeamColor {
 }
 
 impl TeamColor {
-    /// Every colour, in `ChatFormatting` order.
+    /// Every color, in `ChatFormatting` order.
     pub const VALUES: [Self; 17] = [
         Self::Black,
         Self::DarkBlue,
@@ -214,8 +214,8 @@ mod tests {
         assert_eq!(encoded(&packet), [3, b'r', b'e', b'd', 1]);
     }
 
-    /// The default colour is `ChatFormatting.RESET`, ordinal 21, not 16: the
-    /// five formatting codes sit between the colours and reset.
+    /// The default color is `ChatFormatting.RESET`, ordinal 21, not 16: the
+    /// five formatting codes sit between the colors and reset.
     #[test]
     fn reset_is_ordinal_twenty_one() {
         assert_eq!(TeamColor::Reset.ordinal(), 21);

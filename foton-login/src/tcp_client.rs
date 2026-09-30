@@ -274,7 +274,7 @@ pub struct JavaTcpClient {
     /// Whether the packet tap was told this connection opened, and so must be
     /// told it closed.
     pub(crate) tap_opened: AtomicBool,
-    /// Signalled only after the writer finishes its final atomic envelope.
+    /// Signaled only after the writer finishes its final atomic envelope.
     outgoing_finished: CancellationToken,
     task_tracker: TaskTracker,
 }
@@ -1179,6 +1179,7 @@ impl TextResolutor for JavaTcpClient {
 
 #[cfg(test)]
 mod tests {
+    use foton_core::packet_tap::TapOutcome;
     use tokio::{task::yield_now, time::sleep};
 
     use super::*;
@@ -1194,14 +1195,8 @@ mod tests {
         fn inbound(&self, _: u64, _: TapPhase, _: i32, _: &[u8]) -> TapVerdict {
             TapVerdict::Pass
         }
-        fn outbound(
-            &self,
-            _: u64,
-            _: TapPhase,
-            _: i32,
-            _: &[u8],
-        ) -> foton_core::packet_tap::TapOutcome {
-            foton_core::packet_tap::TapOutcome::pass()
+        fn outbound(&self, _: u64, _: TapPhase, _: i32, _: &[u8]) -> TapOutcome {
+            TapOutcome::pass()
         }
         fn sent(&self, _: u64) {}
     }

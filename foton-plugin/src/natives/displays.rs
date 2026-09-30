@@ -54,7 +54,7 @@ fn display(env: &mut JNIEnv<'_>, uuid: &JString<'_>, f: impl FnOnce(&mut Display
 /// Every `Display` field in one read, so the values belong to one moment:
 /// interpolation duration, interpolation delay, teleport duration, billboard,
 /// packed brightness, view range, shadow radius, shadow strength, width,
-/// height, glow colour, then translation, scale, left and right rotation.
+/// height, glow color, then translation, scale, left and right rotation.
 extern "system" fn display_state(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -166,7 +166,7 @@ extern "system" fn set_display_brightness(
     display(&mut env, &uuid, |data| data.brightness_override.set(packed));
 }
 
-/// The ARGB colour a glowing display outlines in; -1 keeps the team colour.
+/// The ARGB color a glowing display outlines in; -1 keeps the team color.
 extern "system" fn set_display_glow_color(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -377,7 +377,7 @@ extern "system" fn set_text_display_opacity(
     with_text_display(&mut env, &uuid, |display| display.set_text_opacity(opacity));
 }
 
-/// Back to vanilla's default background, what Paper does for a null colour.
+/// Back to vanilla's default background, what Paper does for a null color.
 extern "system" fn reset_text_display_background(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,

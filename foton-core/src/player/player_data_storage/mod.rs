@@ -241,6 +241,15 @@ struct SlotFile {
     item_nbt: Vec<u8>,
 }
 
+impl SlotFile {
+    fn from_persistent(slot: &PersistentSlot) -> io::Result<Self> {
+        Ok(Self {
+            slot: slot.slot,
+            item_nbt: item_to_nbt_bytes(&slot.item)?,
+        })
+    }
+}
+
 #[derive(SchemaWrite, SchemaRead)]
 struct GlobalPlayerDataFile {
     data_version: i32,
@@ -984,21 +993,16 @@ impl FilePlayerDataStorage {
 
 impl PlayerDataFile {
     fn from_persistent(data: &PersistentPlayerData) -> io::Result<Self> {
-        let mut ender_items = Vec::with_capacity(data.ender_items.len());
-        for slot in &data.ender_items {
-            ender_items.push(SlotFile {
-                slot: slot.slot,
-                item_nbt: item_to_nbt_bytes(&slot.item)?,
-            });
-        }
-
-        let mut inventory = Vec::with_capacity(data.inventory.len());
-        for slot in &data.inventory {
-            inventory.push(SlotFile {
-                slot: slot.slot,
-                item_nbt: item_to_nbt_bytes(&slot.item)?,
-            });
-        }
+        let ender_items = data
+            .ender_items
+            .iter()
+            .map(SlotFile::from_persistent)
+            .collect::<io::Result<_>>()?;
+        let inventory = data
+            .inventory
+            .iter()
+            .map(SlotFile::from_persistent)
+            .collect::<io::Result<_>>()?;
 
         let file = Self {
             data_version: data.data_version,
@@ -1607,9 +1611,25 @@ mod tests {
                 .expect("a diamond encodes"),
         }];
 
-        let restored = data
+        let mut restored = data
             .into_persistent()
             .expect("the file reads back at the current version");
+
+        restored.inventory.push(PersistentSlot {
+            slot: 12,
+            item: ItemStack::with_count(&vanilla_items::DIAMOND, 3),
+        });
+        let serialized = PlayerDataFile::from_persistent(&restored)
+            .expect("both slot collections should serialize");
+        let encoded = encode_player_file(&serialized).expect("player file should encode");
+        let restored = decode_player_file(&encoded)
+            .expect("player file should decode")
+            .into_persistent()
+            .expect("both slot collections should restore");
+        assert_eq!(restored.inventory.len(), 1);
+        assert_eq!(restored.inventory[0].slot, 12);
+        assert!(restored.inventory[0].item.is(&vanilla_items::DIAMOND));
+        assert_eq!(restored.inventory[0].item.count(), 3);
 
         assert_eq!(restored.ender_items.len(), 1, "the slot was lost");
         let slot = &restored.ender_items[0];

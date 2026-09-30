@@ -7,6 +7,8 @@ public final class FotonPotionLookupRunner {
 
     public static void main(String[] args) throws IllegalAccessException {
         int checkedEffects = 0;
+        java.util.Set<org.bukkit.potion.PotionEffectType> identities =
+            java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
         for (Field field : org.bukkit.potion.PotionEffectType.class.getFields()) {
             if (field.getType() != org.bukkit.potion.PotionEffectType.class
                     || !Modifier.isStatic(field.getModifiers())) {
@@ -21,9 +23,11 @@ public final class FotonPotionLookupRunner {
                     "potion lookup by id did not return the canonical instance for " + field.getName());
             }
             checkedEffects++;
+            identities.add(canonical);
         }
-        if (checkedEffects != 40) {
-            throw new AssertionError("expected all 40 Paper 26.2 potion effects to be checked");
+        if (checkedEffects != 49 || identities.size() != 40
+                || org.bukkit.potion.PotionEffectType.values().length != 40) {
+            throw new AssertionError("expected 40 canonical potion effects and nine alias fields");
         }
         if (org.bukkit.potion.PotionEffectType.getByName("foton:unknown") != null) {
             throw new AssertionError("unknown potion lookup must return null");
