@@ -131,3 +131,21 @@ The real Paper 1.21.11 build 132 oracle ran four isolated server sessions (two f
 Implementation ruling: reject the empty legacy string explicitly with `IllegalArgumentException` before changing captured or native state. Do not substitute NO_LOCK and do not reproduce an unsavable live predicate. This is an intentional, disclosed safety difference from this pinned Paper bug, not a passing Paper-equivalence case. `setLock(null)` remains the supported unlock operation. Keep the edge visible in the compatibility ledger; no unqualified full-API equivalence claim may hide it. Default vanilla locks and nonempty valid Paper locks must retain exact typed matching and persistence.
 
 No extractor output was identified as missing for this slice. No generated files should be edited. Keep ownership sequential at shared `natives.rs`, `Native.java`, common block-state files and event forwarding touchpoints; unrelated active edits must be preserved.
+
+## Executed item-key oracle
+
+The separate pinned Paper 1.21.11 build 132 item-key fixture confirms predicate construction, snapshot isolation, copy/update and restart using real main-thread block states. Full source, hashes, observations and report are retained at `%TEMP%/Foton-LockItem-Paper-oracle-4ed0ba097ea74ff2b95218a5bd278239/REPORT.md`. Its successful run reports 384 bounded observation comparisons/checks, zero differences or errors, and clean saves/stops. This is Paper reference evidence, not a Foton pass.
+
+- Null removes a previous key lock. Plain keys require the item type, ignore count, and exclude all effective prototype components.
+- Explicit Adventure name/style, typed and nested/array PDC, glint and an overridden maximum stack size become exact component expectations. An extra PDC field fails because it changes the constrained custom-data component; an additional unrelated component still matches. Counts 1, 17 and 64 match the same constrained key even when its explicit maximum-stack-size component is 16.
+- Removing prototype DAMAGE from a diamond-sword key creates no absence requirement: damage absent, zero and seven all match the resulting item-only predicate.
+- Nonnull AIR, `ItemStack.empty()` and an item emptied with `setAmount(0)` all produce a persistent AIR-item lock. They remain locked and their native predicates accept empty candidate stacks; they are not the null unlock operation. Snapshot/copy/update/reload preserve this distinction.
+- Separately, `new ItemStack(Material.TRIPWIRE_HOOK, 0)` throws `IllegalArgumentException` before any lock call. That initial discovery run failed its completion guard and is retained as such, not included in the successful lock result.
+
+Matching was tested by invoking the real runtime's native `LockCode.unlocksWith` and `ItemPredicate.test`. Player interaction, main/off-hand routing, spectator bypass, sound, overlay and menu behavior remain untested by this oracle and must be checked on Foton's actual opening path.
+
+## Native PDC integration risks to cover
+
+Common base storage and normal load/save hooks alone are insufficient. `RawBlockEntity::with_data` bypasses common loading and its `save_without_metadata` preserves unknown components; both owned and borrowed factory paths must retain plugin PDC without discarding unrelated NBT. Falling-block transfer merges custom-only NBT then calls `load_additional` directly: the common plugin-data lifecycle must participate without resetting unrelated component state. An absent incoming PDC key retains the destination value already present in that merge; a present key replaces it.
+
+Filter plugin-private PDC at client egress, not in persistence helpers. Initial chunk `BlockEntityInfo`, shared `World::broadcast_block_entity_update`, direct command/jigsaw/structure editor-open packets, and command/structure edit replies must all omit every top-level `PublicBukkitValues` key while retaining vanilla fields. Some update-tag implementations reuse `save_custom_only`, which must still preserve PDC for disk and server-side inspection. Keep tile PDC outside item `DataComponentMap` and `copy_components`; a client-only sanitizer must not change those semantics.
