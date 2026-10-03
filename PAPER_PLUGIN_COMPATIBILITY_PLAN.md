@@ -163,6 +163,7 @@ These are relative sizes, not calendar promises. Task 1 establishes the denomina
 
 - [ ] Recount the previous 199/113/86 observation from the current corpus and code. For Observer, start with fail move, armor change, velocity, flight toggle, resurrect hand and placement. For Zelda, include block drops, brewing, crafting, entity load/unload/combust/dismount/place, item consume, hand swap, smithing, enchanting, server ping and vehicle move.
 - [ ] For each event, write a Paper trace and an in-world Foton test asserting exact firing count/order, fields, cancellation and mutation propagation. Connect missing core emitters and `forward.rs` subscribers; `PrepareGrindstoneEvent` is an initial case because its core and Java endpoints already exist.
+- [ ] Include Zelda's beehive workflow: `CreatureSpawnEvent(BEEHIVE)` fires before bee insertion, cancellation preserves the occupant and nectar, and honey/sounds change only after successful insertion. The Paper 1.21.11 oracle also emits `EntityChangeBlockEvent` with the new honey-level `BlockData`; Foton's current block-data bridge loses properties, so treating the spawn event alone as complete beehive parity is forbidden.
 - [ ] Fix reflection-based listener registration to match Paper visibility/inheritance rules with private, protected, overridden and bridge-method fixtures. Require zero silent referenced event rows before market certification, with truly unavailable version-specific events classified by an exact version rule.
 
 ## Phase D — packets, PacketEvents and internals
