@@ -11,6 +11,7 @@ final class Items {
     static void check() {
         materials();
         stacks();
+        bookComponents();
         slots();
         potionConstructors();
         skullMeta();
@@ -146,6 +147,43 @@ final class Items {
         Checks.same(book.getPage(1), "one", "a cloned book has its own page list");
         Checks.expect(!new ItemStack(Material.STONE).setItemMeta(book),
             "book metadata should not attach to a stone");
+    }
+
+    private static void bookComponents() {
+        var gold = net.kyori.adventure.text.format.NamedTextColor.GOLD;
+        var dark = net.kyori.adventure.text.format.NamedTextColor.DARK_GREEN;
+        var title = net.kyori.adventure.text.Component.text("Livre de Cuisine", gold)
+            .decoration(net.kyori.adventure.text.format.TextDecoration.ITALIC, false);
+        var page = net.kyori.adventure.text.Component.text("Herbes", dark)
+            .append(net.kyori.adventure.text.Component.newline())
+            .append(net.kyori.adventure.text.Component.text("★ Radis", gold))
+            .append(net.kyori.adventure.text.Component.text("\ue000")
+                .font(net.kyori.adventure.key.Key.key("minecraft", "cuisine"))
+                .color(net.kyori.adventure.text.format.NamedTextColor.WHITE)
+                .decoration(net.kyori.adventure.text.format.TextDecoration.ITALIC, false));
+        ItemStack item = new ItemStack(Material.WRITTEN_BOOK);
+        BookMeta meta = (BookMeta) item.getItemMeta();
+        meta.title(net.kyori.adventure.text.Component.text("Livre de Cuisine"));
+        meta.author(net.kyori.adventure.text.Component.text("Les cuisiniers d'Hyrule"));
+        meta.setGeneration(BookMeta.Generation.ORIGINAL);
+        meta.pages(List.of(page));
+        meta.displayName(title);
+        var marker = new org.bukkit.NamespacedKey("zeldaciv", "livre_cuisine");
+        meta.getPersistentDataContainer().set(marker, org.bukkit.persistence.PersistentDataType.INTEGER, 3);
+        Checks.expect(item.setItemMeta(meta), "written book accepts its metadata");
+
+        ItemStack decoded = foton.FotonInventory.decode(foton.FotonInventory.encode(item));
+        Checks.expect(decoded != null, "rich book decodes from the slot bridge");
+        BookMeta restored = (BookMeta) decoded.getItemMeta();
+        Checks.same(restored.getTitle(), "Livre de Cuisine", "written book title survives");
+        Checks.same(restored.getAuthor(), "Les cuisiniers d'Hyrule", "written book author survives");
+        Checks.same(restored.getGeneration(), BookMeta.Generation.ORIGINAL, "written book generation survives");
+        Checks.same(restored.pages(), List.of(page), "styled book page survives");
+        Checks.same(restored.displayName(), title, "styled book cover survives");
+        Checks.same(restored.getPersistentDataContainer().get(marker,
+            org.bukkit.persistence.PersistentDataType.INTEGER), 3, "book PDC integer survives");
+        Checks.expect(restored.pages(List.of(page)).pages().equals(List.of(page)),
+            "Paper's Book-returning pages method keeps the page");
     }
 
     /** One slot crosses JNI as a string, so the string has to survive. */

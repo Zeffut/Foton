@@ -46,6 +46,7 @@ use tokio::{
 };
 
 mod forward;
+mod item_components;
 mod natives;
 mod via;
 

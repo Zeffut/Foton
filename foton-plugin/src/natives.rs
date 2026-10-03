@@ -182,6 +182,8 @@ use simdnbt::owned::{NbtCompound, read_tag};
 use text_components::{TextComponent, content::Content as TextContent};
 use uuid::Uuid;
 
+use crate::item_components;
+
 /// The server the natives answer about.
 ///
 /// A `static` because a JNI native is a bare function pointer with nowhere to
@@ -7925,12 +7927,8 @@ pub(crate) fn describe_slot(stack: &ItemStack) -> String {
     if !push_pdc_fields(&mut value, stack) {
         return SLOT_METADATA_LIMIT_ERROR.to_owned();
     }
-    if let Some(name) = stack.get(CUSTOM_NAME) {
-        value.push('\u{1d}');
-        value.push_str("namehex=");
-        for byte in name.to_string().as_bytes() {
-            let _ = write!(value, "{byte:02x}");
-        }
+    if item_components::describe_name(stack, &mut value).is_none() {
+        return SLOT_METADATA_LIMIT_ERROR.to_owned();
     }
     if let Some(lore) = stack.get(LORE) {
         for line in lore.lines() {
@@ -8006,6 +8004,9 @@ pub(crate) fn describe_slot(stack: &ItemStack) -> String {
                 level
             );
         }
+    }
+    if item_components::describe(stack, &mut value).is_none() {
+        return SLOT_METADATA_LIMIT_ERROR.to_owned();
     }
     checked_slot_description(value)
 }
@@ -8094,6 +8095,13 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
             use foton_registry::data_components::vanilla_components::CUSTOM_NAME;
             stack.set(CUSTOM_NAME, TextComponent::plain(name));
         }
+    }
+    if let Some(encoded) = metadata
+        .iter()
+        .find_map(|value| value.strip_prefix("namejsonhex="))
+    {
+        let json = String::from_utf8(hex_decode(encoded)).ok()?;
+        stack.set(CUSTOM_NAME, adventure_component_from_json(&json)?);
     }
     let lore_lines = metadata
         .iter()
@@ -8204,6 +8212,7 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
     if !stored.is_empty() {
         stack.set(STORED_ENCHANTMENTS, stored);
     }
+    item_components::parse(&mut stack, &metadata)?;
     if let Some(effects) = metadata.iter().find(|value| {
         !value.starts_with("damage=")
             && !value.starts_with("namehex=")
@@ -11178,14 +11187,14 @@ extern "system" fn world_folder(
     value.into_raw()
 }
 
-fn adventure_component_from_json(encoded: &str) -> Option<TextComponent> {
+pub(crate) fn adventure_component_from_json(encoded: &str) -> Option<TextComponent> {
     let mut value = serde_json::from_str::<serde_json::Value>(encoded).ok()?;
     normalize_adventure_component(&mut value)?;
     normalize_adventure_colors(&mut value, true);
     serde_json::from_value(value).ok()
 }
 
-fn adventure_component_to_json(component: &TextComponent) -> Option<String> {
+pub(crate) fn adventure_component_to_json(component: &TextComponent) -> Option<String> {
     let mut value = serde_json::to_value(component).ok()?;
     normalize_adventure_colors(&mut value, false);
     serde_json::to_string(&value).ok()
@@ -14672,6 +14681,29 @@ mod slot_bridge_tests {
                 assert_eq!(parse_slot(encoded).expect("round trip item"), original);
             }
         }
+    }
+
+    #[test]
+    fn zelda_book_survives_the_actual_java_bridge() {
+        init_vanilla_registry();
+        let page = r#"{"text":"Radis","font":"minecraft:cuisine","color":"gold"}"#;
+        let cover = r#"{"text":"Livre de Cuisine","color":"gold","italic":false}"#;
+        let encoded = format!(
+            "minecraft:written_book 1\u{1d}booktitlehex={}\u{1d}bookauthorhex={}\u{1d}bookgen=0\u{1d}bookpagehex={}\u{1d}namejsonhex={}\u{1d}pdcint={}:3",
+            hex_encode(b"Livre de Cuisine"),
+            hex_encode(b"Les cuisiniers d'Hyrule"),
+            hex_encode(page.as_bytes()),
+            hex_encode(cover.as_bytes()),
+            hex_encode(b"zeldaciv:livre_cuisine"),
+        );
+        let original = parse_slot(&encoded).expect("Zelda book should parse");
+        let returned = java_round_trip("book", &[describe_slot(&original)]);
+        assert_eq!(returned.len(), 1, "Java book check should return one item");
+        let restored = parse_slot(&returned[0]).expect("Java's book should parse again");
+        assert_eq!(
+            restored, original,
+            "Java book bridge changed vanilla components"
+        );
     }
 
     #[test]

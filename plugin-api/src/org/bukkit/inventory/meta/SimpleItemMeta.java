@@ -7,6 +7,7 @@ import java.util.List;
 public class SimpleItemMeta implements Damageable {
     private foton.FotonPersistentDataContainer persistentData = new foton.FotonPersistentDataContainer();
     private String displayName;
+    private net.kyori.adventure.text.Component displayNameComponent;
     private List<String> lore;
     private Integer customModelData;
     private boolean unbreakable;
@@ -35,6 +36,16 @@ public class SimpleItemMeta implements Damageable {
     @Override
     public void setDisplayName(String name) {
         this.displayName = name;
+        this.displayNameComponent = name == null ? null : net.kyori.adventure.text.Component.text(name);
+    }
+
+    @Override public net.kyori.adventure.text.Component displayName() {
+        return displayNameComponent;
+    }
+
+    @Override public void displayName(net.kyori.adventure.text.Component value) {
+        displayNameComponent = value;
+        displayName = value == null ? null : foton.ComponentJson.plain(value);
     }
 
     @Override
@@ -174,6 +185,7 @@ public class SimpleItemMeta implements Damageable {
         }
         SimpleItemMeta meta = (SimpleItemMeta) other;
         return java.util.Objects.equals(displayName, meta.displayName)
+            && java.util.Objects.equals(displayNameComponent, meta.displayNameComponent)
             && java.util.Objects.equals(lore, meta.lore)
             && java.util.Objects.equals(customModelData, meta.customModelData)
             && java.util.Objects.equals(persistentData, meta.persistentData)
@@ -190,7 +202,7 @@ public class SimpleItemMeta implements Damageable {
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(displayName, lore, customModelData, unbreakable, damage,
+        return java.util.Objects.hash(displayName, displayNameComponent, lore, customModelData, unbreakable, damage,
             persistentData, enchantments, itemFlags, attributes, customModelDataComponent,
             itemModel, tooltipStyle, hideTooltip);
     }

@@ -2,7 +2,12 @@ package org.bukkit.inventory.meta;
 
 import java.util.List;
 
-/** Title, author and pages carried by a writable or written book. */
+/** Title, author and pages carried by a writable or written book.
+ *
+ * <p>Paper 1.21.11 also implements Adventure's Book. The pinned Adventure 5
+ * Book is sealed, so Foton declares its required method descriptors here
+ * without an invalid inheritance edge.</p>
+ */
 public interface BookMeta extends ItemMeta {
     boolean hasTitle();
 
@@ -58,6 +63,26 @@ public interface BookMeta extends ItemMeta {
     }
 
     int getPageCount();
+
+    net.kyori.adventure.text.Component title();
+
+    BookMeta title(net.kyori.adventure.text.Component title);
+
+    net.kyori.adventure.text.Component author();
+
+    BookMeta author(net.kyori.adventure.text.Component author);
+
+    java.util.List<net.kyori.adventure.text.Component> pages();
+
+    net.kyori.adventure.inventory.Book pages(java.util.List<net.kyori.adventure.text.Component> pages);
+
+    default net.kyori.adventure.inventory.Book pages(net.kyori.adventure.text.Component... pages) {
+        return pages(java.util.Arrays.asList(pages));
+    }
+
+    net.kyori.adventure.text.Component page(int page);
+
+    void page(int page, net.kyori.adventure.text.Component data);
 
     Generation getGeneration();
 

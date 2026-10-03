@@ -3,6 +3,8 @@ package org.bukkit.inventory.meta;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.TextComponent;
 
 /** The mutable book metadata stored by Foton's API-side ItemStack. */
 public final class SimpleBookMeta extends SimpleItemMeta implements WritableBookMeta {
@@ -10,7 +12,7 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
 
     private String title;
     private String author;
-    private List<String> pages = new ArrayList<>();
+    private List<Component> pages = new ArrayList<>();
     private Generation generation;
 
     @Override
@@ -54,22 +56,23 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
 
     @Override
     public String getPage(int page) {
-        return pages.get(index(page));
+        return text(pages.get(index(page)));
     }
 
     @Override
     public void setPage(int page, String data) {
-        pages.set(index(page), data == null ? "" : data);
+        pages.set(index(page), Component.text(data == null ? "" : data));
     }
 
     @Override
     public List<String> getPages() {
-        return List.copyOf(pages);
+        return pages.stream().map(SimpleBookMeta::text).toList();
     }
 
     @Override
     public void setPages(List<String> value) {
-        pages = clean(value);
+        pages = new ArrayList<>();
+        if (value != null) for (String page : value) pages.add(Component.text(page == null ? "" : page));
     }
 
     @Override
@@ -83,7 +86,7 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
             return;
         }
         for (String page : added) {
-            pages.add(page == null ? "" : page);
+            pages.add(Component.text(page == null ? "" : page));
         }
     }
 
@@ -102,7 +105,61 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
         generation = value;
     }
 
-        @Override
+    @Override
+    public Component title() {
+        return title == null ? null : Component.text(title);
+    }
+
+    @Override
+    public SimpleBookMeta title(Component value) {
+        setTitle(value == null ? null : foton.ComponentJson.plain(value));
+        return this;
+    }
+
+    @Override
+    public Component author() {
+        return author == null ? null : Component.text(author);
+    }
+
+    @Override
+    public SimpleBookMeta author(Component value) {
+        setAuthor(value == null ? null : foton.ComponentJson.plain(value));
+        return this;
+    }
+
+    @Override
+    public List<Component> pages() {
+        return List.copyOf(pages);
+    }
+
+    @Override
+    public net.kyori.adventure.inventory.Book pages(List<Component> value) {
+        List<Component> copy = new ArrayList<>();
+        if (value != null) for (Component page : value) copy.add(page == null ? Component.empty() : page);
+        pages = copy;
+        return net.kyori.adventure.inventory.Book.book(
+            title == null ? Component.empty() : title(),
+            author == null ? Component.empty() : author(), pages);
+    }
+
+    @Override
+    public Component page(int page) {
+        return pages.get(index(page));
+    }
+
+    @Override
+    public void page(int page, Component data) {
+        pages.set(index(page), data == null ? Component.empty() : data);
+    }
+
+    private static String text(Component page) {
+        if (page instanceof TextComponent plain && plain.children().isEmpty() && plain.style().isEmpty()) {
+            return plain.content();
+        }
+        return foton.ComponentJson.plain(page);
+    }
+
+    @Override
     public SimpleBookMeta clone() {
         SimpleBookMeta copy = (SimpleBookMeta) super.clone();
         copy.pages = new ArrayList<>(pages);
@@ -132,13 +189,4 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
         return page - 1;
     }
 
-    private static List<String> clean(List<String> value) {
-        List<String> answer = new ArrayList<>();
-        if (value != null) {
-            for (String page : value) {
-                answer.add(page == null ? "" : page);
-            }
-        }
-        return answer;
-    }
 }

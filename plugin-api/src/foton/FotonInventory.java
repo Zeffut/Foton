@@ -308,9 +308,32 @@ public final class FotonInventory implements PlayerInventory {
                 }
                 if (bytes.size() > 0) meta.setDisplayName(new String(bytes.toByteArray(), java.nio.charset.StandardCharsets.UTF_8));
             }
+            for (String field : encoded) if (field.startsWith("namejsonhex=")) {
+                try { meta.displayName(ComponentJson.parse(new String(hexDecode(field.substring(12)), java.nio.charset.StandardCharsets.UTF_8))); }
+                catch (RuntimeException malformed) { return null; }
+            }
             java.util.ArrayList<String> lore = new java.util.ArrayList<>();
             for (String field : encoded) if (field.startsWith("lorehex=")) lore.add(new String(hexDecode(field.substring(8)), java.nio.charset.StandardCharsets.UTF_8));
             if (!lore.isEmpty()) meta.setLore(lore);
+            if (meta instanceof org.bukkit.inventory.meta.BookMeta book) {
+                java.util.ArrayList<net.kyori.adventure.text.Component> pages = new java.util.ArrayList<>();
+                for (String field : encoded) {
+                    if (field.startsWith("booktitlehex=")) book.setTitle(new String(hexDecode(field.substring(13)), java.nio.charset.StandardCharsets.UTF_8));
+                    else if (field.startsWith("bookauthorhex=")) book.setAuthor(new String(hexDecode(field.substring(14)), java.nio.charset.StandardCharsets.UTF_8));
+                    else if (field.startsWith("bookgen=")) {
+                        try {
+                            int generation = Integer.parseInt(field.substring(8));
+                            if (generation >= 0 && generation < org.bukkit.inventory.meta.BookMeta.Generation.values().length)
+                                book.setGeneration(org.bukkit.inventory.meta.BookMeta.Generation.values()[generation]);
+                        } catch (NumberFormatException malformed) { return null; }
+                    } else if (field.startsWith("bookpagehex=")) {
+                        String page = new String(hexDecode(field.substring(12)), java.nio.charset.StandardCharsets.UTF_8);
+                        try { pages.add(material == Material.WRITTEN_BOOK ? ComponentJson.parse(page) : net.kyori.adventure.text.Component.text(page)); }
+                        catch (RuntimeException malformed) { return null; }
+                    }
+                }
+                if (!pages.isEmpty()) book.pages(pages);
+            }
             for (String field : encoded) if (field.startsWith("enchhex=") || field.startsWith("storedenchhex=")) {
                 boolean stored = field.startsWith("storedenchhex=");
                 String payload = field.substring(stored ? 14 : 8);
@@ -411,6 +434,18 @@ public final class FotonInventory implements PlayerInventory {
             StringBuilder hex = new StringBuilder();
             for (byte byteValue : name.getBytes(java.nio.charset.StandardCharsets.UTF_8)) hex.append(String.format("%02x", byteValue & 0xff));
             value += "\u001dnamehex=" + hex;
+            value += "\u001dnamejsonhex=" + hexEncode(ComponentJson.json(item.getItemMeta().displayName()));
+        }
+        if (item.getItemMeta() instanceof org.bukkit.inventory.meta.BookMeta book) {
+            if (item.getType() == Material.WRITTEN_BOOK) {
+                value += "\u001dbooktitlehex=" + hexEncode(book.hasTitle() ? book.getTitle() : "");
+                value += "\u001dbookauthorhex=" + hexEncode(book.hasAuthor() ? book.getAuthor() : "");
+                value += "\u001dbookgen=" + (book.getGeneration() == null ? 0 : book.getGeneration().ordinal());
+                for (net.kyori.adventure.text.Component page : book.pages())
+                    value += "\u001dbookpagehex=" + hexEncode(ComponentJson.json(page));
+            } else if (item.getType() == Material.WRITABLE_BOOK) {
+                for (String page : book.getPages()) value += "\u001dbookpagehex=" + hexEncode(page);
+            }
         }
         if (item.hasItemMeta()) {
             for (java.util.Map.Entry<org.bukkit.enchantments.Enchantment, Integer> entry : item.getItemMeta().getEnchants().entrySet()) {
