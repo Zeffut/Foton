@@ -38,7 +38,23 @@ if [[ ${1:-} == --isolated ]]; then
   run_dir="$scratch/run"
   plugins_dir="$run_dir/plugins"
   server_pid=""
+  client_pid=""
   console_fd=""
+  stop_client() {
+    [[ -n "$client_pid" ]] || return 0
+    if kill -0 "$client_pid" 2>/dev/null; then
+      kill -TERM "$client_pid" 2>/dev/null || true
+      for _ in $(seq 1 5); do
+        kill -0 "$client_pid" 2>/dev/null || break
+        sleep 1
+      done
+      if kill -0 "$client_pid" 2>/dev/null; then
+        kill -9 "$client_pid" 2>/dev/null || true
+      fi
+    fi
+    wait "$client_pid" 2>/dev/null || true
+    client_pid=""
+  }
   stop_server() {
     [[ -n "$server_pid" ]] || return 0
     if kill -0 "$server_pid" 2>/dev/null; then
@@ -68,6 +84,7 @@ if [[ ${1:-} == --isolated ]]; then
   cleanup_inner() {
     local status=$?
     trap - EXIT INT TERM
+    stop_client
     if [[ -n "$server_pid" ]]; then
       stop_server || status=1
     fi
@@ -132,10 +149,16 @@ if [[ ${1:-} == --isolated ]]; then
   echo '=== Joining through ViaBackwards as Minecraft 1.21.11 ==='
   client_status=0
   NODE_PATH="$client_modules" node "$ROOT/dev/via-client.js" \
-    127.0.0.1 "$PORT" "$CLIENT_TIMEOUT_MS" > "$scratch/client.log" 2>&1 || client_status=$?
+    127.0.0.1 "$PORT" "$CLIENT_TIMEOUT_MS" > "$scratch/client.log" 2>&1 &
+  client_pid=$!
+  wait "$client_pid" || client_status=$?
+  client_pid=""
   echo '=== Joining natively as Minecraft 26.2 ==='
   native_status=0
-  python3 "$ROOT/dev/join.py" "$PORT" > "$scratch/native-client.log" 2>&1 || native_status=$?
+  python3 "$ROOT/dev/join.py" "$PORT" > "$scratch/native-client.log" 2>&1 &
+  client_pid=$!
+  wait "$client_pid" || native_status=$?
+  client_pid=""
   log_status=0
   if ! kill -0 "$server_pid" 2>/dev/null; then
     echo 'Foton stopped before both clients completed' >&2
@@ -209,7 +232,9 @@ cleanup_outer() {
   trap - EXIT INT TERM
   if [[ -n "$isolated_pid" ]] && kill -0 "$isolated_pid" 2>/dev/null; then
     kill -TERM "$isolated_pid" 2>/dev/null || true
-    for _ in $(seq 1 20); do
+    # The inner trap can spend five seconds stopping a client and twenty
+    # stopping Foton; leave room for process handoff and scheduling.
+    for _ in $(seq 1 35); do
       kill -0 "$isolated_pid" 2>/dev/null || break
       sleep 1
     done
