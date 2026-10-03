@@ -22,6 +22,11 @@ import tempfile
 import time
 import urllib.request
 
+if __package__:
+    from .log_diagnostics import find_unexpected_errors
+else:
+    from log_diagnostics import find_unexpected_errors
+
 if os.name == "posix":
     import pty
 
@@ -29,9 +34,6 @@ ROOT = Path(__file__).resolve().parents[2]
 BUILDS = Path(__file__).with_name("paper-builds.json")
 USER_AGENT = "Foton-paper-oracle/0.1 (https://github.com/zeffut/Foton)"
 MARKER = re.compile(r"ORACLE:([A-Za-z0-9_.:-]+)=(.+)")
-# Expected failures require a reviewed, exact scenario and code change. The
-# baseline has no allowed server/plugin errors; do not silently add patterns.
-ALLOWED_LOG_ERRORS = ()
 
 
 def validate_scenario(scenario, generated_fixture=False):
@@ -68,20 +70,6 @@ def validate_scenario(scenario, generated_fixture=False):
     target = scenario["plugin"].split("@", 1)[0]
     if not target or target not in scenario["observations"].get("startup_order", []):
         raise ValueError(f"scenario requires target plugin lifecycle marker for {target!r}")
-
-
-def find_unexpected_errors(lines):
-    pattern = re.compile(
-        r"\[(?:ERROR|SEVERE|FATAL)\]|\b(?:ERROR|SEVERE|FATAL):|"
-        r"\b[A-Za-z_$][\w.$]*(?:Exception|Error)\b(?![-\w])|\bException in thread\b|"
-        r"\b(?:plugin|server) failed to (?:load|enable|start|initialize)\b|"
-        r"\bJNI\b.{0,80}\b(?:error|fail|failed|failure|exception)\b|"
-        r"\b(?:error|fail|failed|failure|exception)\b.{0,80}\bJNI\b|"
-        r"\b(?:decoder|encoder|reference[- ]count|refcnt)\b.{0,80}\b(?:error|fail|failed|failure|exception)\b|"
-        r"\b(?:error|fail|failed|failure|exception)\b.{0,80}\b(?:decoder|encoder|reference[- ]count|refcnt)\b",
-        re.IGNORECASE,
-    )
-    return [line for line in lines if pattern.search(line) and line not in ALLOWED_LOG_ERRORS]
 
 
 def collect_log_observations(lines):
