@@ -69,6 +69,14 @@ Install the unchanged Observer 2.69.3 JAR and unchanged PacketEvents 2.13.0 Spig
 
 Install one selected, pinned Zelda Civ 0.1.0 release JAR, then separately the shaded variant if users distribute it. Verify domain/team display, item PDC after save/restart, custom inventory lifecycle, player/entity events, display entities, merchants, trims/data components, recipes, mounts, region interactions and optional integration behavior against Paper. The 241 remaining binary gaps must reach zero for the selected JAR before declaring linkage complete. Dirty files in the Zelda checkout are user work and are not modified by this program.
 
+Explicit user addition on 2026-10-03: armor is a required Zelda workflow, not
+just item serialization coverage. Trace the pinned plugin's actual armor uses
+and verify equipping/removal, protection, attribute/effect changes, durability,
+enchantments, used appearance metadata, equipment updates to clients and
+death/reconnect/restart behavior against the Paper oracle. Foton must implement
+the required native and API behavior without changing Zelda; translated
+1.21.11 clients and native clients are both in the observation matrix.
+
 ### Market corpus
 
 Freeze the existing 59-plugin corpus with a manifest and add current high-use Paper plugins from categories including permissions, economy, world editing, protection, anticheat, maps, inventories, chat, packets, world generation and cross-version support. Each independently distributed variant is a separate artifact row; variants of one product are grouped for reporting. A dated corpus passes only when every supported entry passes its contract on the target matrix. New releases and newly discovered plugins reopen certification rather than inheriting a prior green label.
