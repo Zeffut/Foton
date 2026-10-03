@@ -31,13 +31,13 @@ fn main() -> ExitCode {
         .unwrap_or_default();
     let config = PluginHostConfig {
         java_home,
-        api_jar: var_os("FOTON_PLUGIN_API_JAR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| repo.join("plugin-api/build/foton-plugin-api.jar")),
+        api_jar: var_os("FOTON_PLUGIN_API_JAR").map_or_else(
+            || repo.join("plugin-api/build/foton-plugin-api.jar"),
+            PathBuf::from,
+        ),
         library_directory: Some(
             var_os("FOTON_PLUGIN_LIBRARY_DIRECTORY")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| repo.join("plugin-api/lib")),
+                .map_or_else(|| repo.join("plugin-api/lib"), PathBuf::from),
         ),
         plugin_directory: plugins.clone(),
     };
