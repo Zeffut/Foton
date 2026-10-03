@@ -37,6 +37,7 @@ Apache License 2.0
 * Netty 4.2.15.Final: netty-common, netty-buffer, netty-transport,
   netty-resolver and netty-codec-base
 * snakeyaml 2.2
+* sqlite-jdbc 3.49.1.0
 * Maven Artifact Resolver 1.9.18: maven-resolver-api, maven-resolver-spi,
   maven-resolver-util, maven-resolver-impl, maven-resolver-named-locks,
   maven-resolver-connector-basic
@@ -52,6 +53,9 @@ Plexus Utils retain their original embedded META-INF/NOTICE files.
 Guava and failureaccess's embedded
 META-INF/LICENSE files and SLF4J's embedded META-INF/LICENSE.txt were also
 checked against the durable texts in this directory.
+SQLite JDBC retains its own Apache license and the separate David Crawshaw
+BSD-style notice at META-INF/maven/org.xerial/sqlite-jdbc/LICENSE and
+META-INF/maven/org.xerial/sqlite-jdbc/LICENSE.zentus inside the unmodified JAR.
 
 Maven resolver provenance and notices
 ------------------------------------

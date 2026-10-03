@@ -85,7 +85,7 @@ runtime_library_is_expected() {
     netty-buffer-4.2.15.Final.jar|netty-codec-base-4.2.15.Final.jar|\
     netty-common-4.2.15.Final.jar|netty-resolver-4.2.15.Final.jar|\
     netty-transport-4.2.15.Final.jar|\
-    slf4j-api-2.0.17.jar|snakeyaml-2.2.jar|\
+    slf4j-api-2.0.17.jar|sqlite-jdbc-3.49.1.0.jar|snakeyaml-2.2.jar|\
     maven-resolver-api-1.9.18.jar|maven-resolver-spi-1.9.18.jar|\
     maven-resolver-util-1.9.18.jar|maven-resolver-impl-1.9.18.jar|\
     maven-resolver-named-locks-1.9.18.jar|maven-resolver-connector-basic-1.9.18.jar|\
@@ -157,7 +157,7 @@ runtime_archive_is_safe() {
       *) return 1 ;;
     esac
   done < "$runtime_archive_list"
-  [ "$runtime_archive_files" -eq 54 ] && [ "$runtime_archive_directories" -eq 3 ]
+  [ "$runtime_archive_files" -eq 55 ] && [ "$runtime_archive_directories" -eq 3 ]
 }
 
 runtime_is_complete() {
@@ -220,9 +220,9 @@ runtime_is_complete() {
       && [ ! -L "$runtime_dir/licenses/$runtime_license" ] || return 1
   done
   [ "$runtime_api_seen" -eq 1 ] \
-    && [ "$runtime_libs_seen" -eq 46 ] \
-    && [ "$runtime_actual_libs" -eq 46 ] \
-    && [ "$runtime_all_lib_files" -eq 46 ] \
+    && [ "$runtime_libs_seen" -eq 47 ] \
+    && [ "$runtime_actual_libs" -eq 47 ] \
+    && [ "$runtime_all_lib_files" -eq 47 ] \
     && [ "$runtime_licenses_seen" -eq 6 ] \
     && [ "$runtime_license_files" -eq 6 ] \
     && [ "$runtime_manifest_entries" -eq "$runtime_actual_entries" ]

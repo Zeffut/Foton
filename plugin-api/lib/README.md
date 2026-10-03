@@ -37,6 +37,14 @@ without shading it. The pinned JAR and its declared `adventure-api:5.2.0`
 dependency are included in the installed plugin runtime as well as the local
 build classpath.
 
+`sqlite-jdbc:3.49.1.0` belongs on Foton's host JVM classpath, even when a
+plugin shades its own SQLite driver. `DriverManager` discovers service
+providers with the host system class loader and checks driver visibility from
+the caller. The parent-first plugin loader must therefore resolve the same
+driver class that `DriverManager` registered. Zelda Civ's own shaded driver
+does not by itself satisfy this requirement. Xerial's published POM marks
+SLF4J optional; the runtime already provides `slf4j-api:2.0.17`.
+
 `examination-api` and `examination-string` are gone rather than updated:
 Adventure 5 dropped the dependency, and `adventure-api:5.2.0` names neither.
 
@@ -115,6 +123,7 @@ POM, not from memory and not carried over from the previous version.
 | kotlin-stdlib | 1.8.20 | Apache-2.0 | Maven Central POM |
 | kotlin-stdlib-common | 1.8.20 | Apache-2.0 | Maven Central POM |
 | slf4j-api | 2.0.17 | MIT | `META-INF/LICENSE.txt` inside the jar |
+| sqlite-jdbc | 3.49.1.0 | Apache-2.0 | Published Xerial POM and embedded `META-INF/maven/org.xerial/sqlite-jdbc/LICENSE` |
 | snakeyaml | 2.2 | Apache-2.0 | POM inside the jar |
 | netty-common | 4.2.15.Final | Apache-2.0 | Netty repository `LICENSE.txt` at tag `netty-4.2.15.Final` |
 | netty-buffer | 4.2.15.Final | Apache-2.0 | Netty repository `LICENSE.txt` at tag `netty-4.2.15.Final` |

@@ -652,7 +652,7 @@ fn installed_plugin_runtime_directory() -> Result<Option<PathBuf>, String> {
     Ok(None)
 }
 
-const PLUGIN_RUNTIME_JARS: [&str; 46] = [
+const PLUGIN_RUNTIME_JARS: [&str; 47] = [
     "adventure-api-5.2.0.jar",
     "adventure-key-5.2.0.jar",
     "adventure-text-minimessage-5.2.0.jar",
@@ -682,6 +682,7 @@ const PLUGIN_RUNTIME_JARS: [&str; 46] = [
     "netty-resolver-4.2.15.Final.jar",
     "netty-transport-4.2.15.Final.jar",
     "slf4j-api-2.0.17.jar",
+    "sqlite-jdbc-3.49.1.0.jar",
     "snakeyaml-2.2.jar",
     "maven-resolver-api-1.9.18.jar",
     "maven-resolver-spi-1.9.18.jar",

@@ -238,7 +238,7 @@ jobs:
       - name: Package the optional plugin runtime
         run: |
           bash dev/fetch-plugin-api-libs.sh --check
-          test "$(find plugin-api/lib -maxdepth 1 -type f -name '*.jar' | wc -l)" -eq 45
+          test "$(find plugin-api/lib -maxdepth 1 -type f -name '*.jar' | wc -l)" -eq 47
           test "$(find plugin-api/lib/licenses -maxdepth 1 -type f -name '*.txt' | wc -l)" -eq 6
           for license in ADVENTURE-MIT.txt APACHE-2.0.txt BRIGADIER-MIT.txt JOML-MIT.txt SLF4J-MIT.txt THIRD-PARTY-NOTICES.txt; do
             test -f "plugin-api/lib/licenses/${license}" && test ! -L "plugin-api/lib/licenses/${license}"

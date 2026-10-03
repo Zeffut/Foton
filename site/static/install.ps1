@@ -207,6 +207,7 @@ function Test-RuntimeComplete {
         'netty-resolver-4.2.15.Final.jar',
         'netty-transport-4.2.15.Final.jar',
         'slf4j-api-2.0.17.jar',
+        'sqlite-jdbc-3.49.1.0.jar',
         'snakeyaml-2.2.jar',
         'maven-resolver-api-1.9.18.jar', 'maven-resolver-spi-1.9.18.jar',
         'maven-resolver-util-1.9.18.jar', 'maven-resolver-impl-1.9.18.jar',
@@ -265,8 +266,8 @@ function Test-RuntimeComplete {
     foreach ($licenseName in $expectedLicenses) {
         if (-not (Test-RegularFile (Join-Path $licenses $licenseName))) { return $false }
     }
-    return $apiSeen -eq 1 -and $librariesSeen -eq 46 -and
-        $jarFiles.Count -eq 46 -and $libraryFiles.Count -eq 46 -and
+    return $apiSeen -eq 1 -and $librariesSeen -eq 47 -and
+        $jarFiles.Count -eq 47 -and $libraryFiles.Count -eq 47 -and
         $licensesSeen -eq 6 -and $manifestEntries -eq $actualFiles.Count
 }
 

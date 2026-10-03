@@ -31,8 +31,14 @@ fn main() -> ExitCode {
         .unwrap_or_default();
     let config = PluginHostConfig {
         java_home,
-        api_jar: repo.join("plugin-api/build/foton-plugin-api.jar"),
-        library_directory: Some(repo.join("plugin-api/lib")),
+        api_jar: var_os("FOTON_PLUGIN_API_JAR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| repo.join("plugin-api/build/foton-plugin-api.jar")),
+        library_directory: Some(
+            var_os("FOTON_PLUGIN_LIBRARY_DIRECTORY")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| repo.join("plugin-api/lib")),
+        ),
         plugin_directory: plugins.clone(),
     };
 

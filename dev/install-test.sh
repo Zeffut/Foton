@@ -66,6 +66,7 @@ netty-common-4.2.15.Final.jar
 netty-resolver-4.2.15.Final.jar
 netty-transport-4.2.15.Final.jar
 slf4j-api-2.0.17.jar
+sqlite-jdbc-3.49.1.0.jar
 snakeyaml-2.2.jar
 maven-resolver-api-1.9.18.jar
 maven-resolver-spi-1.9.18.jar

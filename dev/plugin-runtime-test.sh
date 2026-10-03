@@ -10,8 +10,8 @@ command -v jar >/dev/null 2>&1 || { echo 'jar is required' >&2; exit 1; }
 
 bash dev/fetch-plugin-api-libs.sh --check
 mapfile -t jars < <(find plugin-api/lib -maxdepth 1 -type f -name '*.jar' -print | LC_ALL=C sort)
-[ "${#jars[@]}" -eq 46 ] || {
-  echo "plugin runtime must contain exactly 46 dependency jars; found ${#jars[@]}" >&2
+[ "${#jars[@]}" -eq 47 ] || {
+  echo "plugin runtime must contain exactly 47 dependency jars; found ${#jars[@]}" >&2
   exit 1
 }
 # The release copies every pinned JAR, while Foton validates an exact filename
@@ -50,7 +50,8 @@ if grep -q -- '-> not found' "$scratch/jdeps.log"; then
       org.eclipse.aether.impl.guice.AetherModule*:com.google.inject.*|\
       org.apache.maven.model.building.DefaultModelBuilder:org.eclipse.sisu.Nullable|\
       org.apache.maven.model.building.DefaultModelProcessor:org.eclipse.sisu.Typed|\
-      org.eclipse.aether.internal.impl.slf4j.Slf4jLoggerFactory:org.eclipse.sisu.Nullable) continue ;;
+      org.eclipse.aether.internal.impl.slf4j.Slf4jLoggerFactory:org.eclipse.sisu.Nullable|\
+      org.sqlite.nativeimage.SqliteJdbcFeature:org.graalvm.nativeimage.hosted.*) continue ;;
     esac
     case "$missing" in
       com.oracle.svm.core.annotate.*|reactor.blockhound.*|\

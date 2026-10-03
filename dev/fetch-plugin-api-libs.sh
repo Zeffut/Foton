@@ -49,6 +49,7 @@ org/jetbrains/kotlin kotlin-stdlib-jdk7 1.8.20 af1ec40c3b951afdcc0c2a0173c7b8176
 org/jetbrains/kotlin kotlin-stdlib 1.8.20 4395647b1961d9fb730a34e8dbe56c293157bc0759004cca63d9b5ee6653e5c7
 org/jetbrains/kotlin kotlin-stdlib-common 1.8.20 fa20188abaa8ecf1d0035e93a969b071f10e45a1c8378c314521eade73f75fd5
 org/slf4j slf4j-api 2.0.17 7b751d952061954d5abfed7181c1f645d336091b679891591d63329c622eb832
+org/xerial sqlite-jdbc 3.49.1.0 5c8609d2ca341deb8c6f71778974b5ba4995c7d32d7c7c89d9392a3e72c39291
 org/yaml snakeyaml 2.2 1467931448a0817696ae2805b7b8b20bfb082652bf9c4efaed528930dc49389b
 io/netty netty-common 4.2.15.Final 78206aa7f6d197caa926291408c01889b6b910ca0f74017d3fcbdaccf9562959
 io/netty netty-buffer 4.2.15.Final 1361fd9c9ba85b9831cf54a1b2e45ddc3ce34a768931726c099d3f5ef0efe4a3

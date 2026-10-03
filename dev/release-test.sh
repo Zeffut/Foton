@@ -221,7 +221,7 @@ grep -q '^FROM rustlang/rust:nightly-alpine3.23-2026-07-23@sha256:e4a0ce16a94f25
 # Durable notices are required inputs, not files synthesized at publication.
 dependency_jar_count="$(find "$REPO/plugin-api/lib" -maxdepth 1 -type f -name '*.jar' | wc -l)"
 license_file_count="$(find "$REPO/plugin-api/lib/licenses" -maxdepth 1 -type f -name '*.txt' | wc -l)"
-[ "$dependency_jar_count" -eq 46 ]
+[ "$dependency_jar_count" -eq 47 ]
 [ "$license_file_count" -eq 6 ]
 for license in ADVENTURE-MIT.txt APACHE-2.0.txt BRIGADIER-MIT.txt JOML-MIT.txt \
   SLF4J-MIT.txt THIRD-PARTY-NOTICES.txt; do
@@ -235,7 +235,7 @@ for dependency in adventure-api adventure-key adventure-text-minimessage adventu
   failureaccess jspecify error_prone_annotations j2objc-annotations joml \
   kotlin-stdlib-jdk8 kotlin-stdlib-jdk7 kotlin-stdlib kotlin-stdlib-common \
   netty-buffer netty-codec-base netty-common netty-resolver netty-transport \
-  slf4j-api snakeyaml; do
+  slf4j-api sqlite-jdbc snakeyaml; do
   grep -qi "$dependency" "$REPO/plugin-api/lib/licenses/THIRD-PARTY-NOTICES.txt" \
     || { echo "third-party notices omit $dependency" >&2; exit 1; }
 done
@@ -261,10 +261,12 @@ runtime_manifest_count=$((runtime_jar_count + license_file_count))
 grep -qx './foton-plugin-api.jar' "$SCRATCH/tar-list"
 grep -qx './lib/snakeyaml-2.2.jar' "$SCRATCH/tar-list"
 grep -qx './lib/netty-codec-base-4.2.15.Final.jar' "$SCRATCH/tar-list"
+grep -qx './lib/sqlite-jdbc-3.49.1.0.jar' "$SCRATCH/tar-list"
 grep -qx 'foton-plugin-api.jar' "$SCRATCH/zip-list"
 grep -qx 'lib/snakeyaml-2.2.jar' "$SCRATCH/zip-list"
 grep -qx 'lib/netty-transport-4.2.15.Final.jar' "$SCRATCH/zip-list"
 grep -qx 'lib/adventure-text-minimessage-5.2.0.jar' "$SCRATCH/zip-list"
+grep -qx 'lib/sqlite-jdbc-3.49.1.0.jar' "$SCRATCH/zip-list"
 grep -qx './SHA256SUMS' "$SCRATCH/tar-list"
 grep -qx 'SHA256SUMS' "$SCRATCH/zip-list"
 grep -qx './licenses/THIRD-PARTY-NOTICES.txt' "$SCRATCH/tar-list"
