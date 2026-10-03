@@ -195,6 +195,49 @@ class LinkageCheck(unittest.TestCase):
             problems, _, _ = linkage.check(plugin, linkage.World([own, linkage.read_jar(api)]), own)
             self.assertFalse(problems["abstract method the plugin does not implement"])
 
+    def test_concrete_descendant_inherits_new_abstract_server_contract(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            _, paper_classes = compile_jar(root, "paper", {
+                "org/bukkit/Contract.java": (
+                    "package org.bukkit; public interface Contract { "
+                    "default void run() {} }"
+                ),
+            })
+            plugin, _ = compile_jar(root, "plugin", {
+                "example/Base.java": (
+                    "package example; public abstract class Base "
+                    "implements org.bukkit.Contract {}"
+                ),
+                "example/Impl.java": (
+                    "package example; public final class Impl extends Base { "
+                    "public static void main(String[] args) { "
+                    "((org.bukkit.Contract) new Impl()).run(); } }"
+                ),
+            }, paper_classes)
+            foton, _ = compile_jar(root, "foton", {
+                "org/bukkit/Contract.java": (
+                    "package org.bukkit; public interface Contract { void run(); }"
+                ),
+            })
+            own = linkage.read_jar(plugin)
+            problems, _, _ = linkage.check(plugin, linkage.World([own, linkage.read_jar(foton)]), own)
+            self.assertIn(
+                "example/Impl <- org/bukkit/Contract#run()V",
+                problems["abstract method the plugin does not implement"],
+            )
+            self.assertFalse(any(
+                value.startswith("example/Base <-")
+                for value in problems["abstract method the plugin does not implement"]
+            ))
+            if shutil.which("java"):
+                result = subprocess.run(
+                    ["java", "-cp", os.pathsep.join((str(foton), str(plugin))), "example.Impl"],
+                    capture_output=True, text=True,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("AbstractMethodError", result.stderr)
+
     def test_multi_release_variant_for_java_25_overrides_clean_base(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)

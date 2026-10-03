@@ -604,6 +604,29 @@ def access_problem(world, caller, owner, declarer, flags, opcode):
     return "protected receiver needs runtime verification"
 
 
+def inherited_server_contracts(world, class_name):
+    """Find API contracts through every known plugin-owned ancestor."""
+    contracts = set()
+    pending = [class_name]
+    seen = set()
+    while pending:
+        current = pending.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        info = world.find(current)
+        if info is None:
+            continue
+        for parent in [info.super, *info.interfaces]:
+            if not parent:
+                continue
+            if served(parent):
+                contracts.add(parent)
+            else:
+                pending.append(parent)
+    return contracts
+
+
 def check(plugin_path, world, plugin_classes):
     problems = collections.defaultdict(set)
     external = collections.Counter()
@@ -667,9 +690,7 @@ def check(plugin_path, world, plugin_classes):
 
         if info.flags & ACC_ABSTRACT:
             continue
-        for parent in [info.super, *info.interfaces]:
-            if not parent or not served(parent):
-                continue
+        for parent in inherited_server_contracts(world, info.name):
             target = world.find(parent)
             if target is None:
                 continue
