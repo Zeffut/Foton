@@ -63,6 +63,13 @@ before commit, while untouched native values remain intact. Their actual
 editing implementations remain separate armor/component work. This temporary
 limitation must be reported, never counted as complete ItemMeta compatibility.
 
+Foton currently runs plugin onLoad before registry initialization to collect
+declarations. Canonical item queries requiring that registry must fail clearly
+at this stage instead of panicking or inventing prototype values. A fallible
+registry-readiness check makes this safe but does not make these early calls
+Paper-compatible; bootstrap ordering/readiness remains a separate gap. Do not
+initialize the registry prematurely merely to hide that dependency.
+
 Stage complete item/bulk/event responses before committing any mutation.
 Merchant offers, death drops, crafter results/remainders and inventory arrays
 must not silently skip malformed elements or partially update. Missing/stale
@@ -94,6 +101,14 @@ live carrier is not a fix for Zelda's Piaf backup; full persistent item bytes
 and restore/restart tests remain mandatory before that workflow can pass.
 Any unsupported serialization must fail explicitly rather than silently lose
 newly retained components.
+
+The first carrier slice uses a conservative boundary: every carrier-backed
+item/meta serialization is rejected, even when its Java projection looks
+simple. This intentionally blocks more cases than a future complete codec
+will need to. No-carrier legacy formats remain only for fields they actually
+represent; unrepresented PDC, subtype or opaque state must also fail instead
+of becoming an empty map or incomplete backup. This is a temporary compatibility
+gap, not a substitute for Paper persistence.
 
 ## Acceptance sequence
 
