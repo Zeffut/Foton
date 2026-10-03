@@ -11,13 +11,14 @@
 
 use std::sync::Arc;
 
-use crate::natives;
 use crate::natives::describe_slot;
 use crate::natives::parse_slot;
+use crate::{enchantment, natives};
 use foton_core::entity::Entity as _;
 use foton_core::entity::conversion::ConversionReason;
 use foton_core::event::AsyncTabCompleteEvent;
 use foton_core::event::EntityTargetEvent;
+use foton_core::event::EventPriority;
 use foton_core::event::ExplosionPrimeEvent;
 use foton_core::event::{
     AsyncPlayerPreLoginEvent, AsyncPlayerPreLoginResult, BlockBreakEvent, BlockBurnEvent,
@@ -38,8 +39,8 @@ use foton_core::event::{
     PlayerJoinEvent, PlayerLocaleChangeEvent, PlayerLoginAbortEvent, PlayerLoginEvent,
     PlayerMoveEvent, PlayerOpenSignCause, PlayerOpenSignEvent, PlayerPortalEvent, PlayerQuitEvent,
     PlayerRespawnEvent, PlayerSpawnLocationEvent, PlayerTakeLecternBookEvent, PortalCreateEvent,
-    PreCreatureSpawnEvent, PrepareItemCraftEvent, ProjectileLaunchEvent, ServerTickEvent,
-    SignChangeEvent, ThunderChangeEvent, WeatherChangeEvent,
+    PreCreatureSpawnEvent, PrepareItemCraftEvent, PrepareItemEnchantEvent, ProjectileLaunchEvent,
+    ServerTickEvent, SignChangeEvent, ThunderChangeEvent, WeatherChangeEvent,
 };
 use foton_core::event::{
     PlayerChangedWorldEvent, PlayerCommandSendEvent, PlayerGameModeChangeEvent, PlayerItemHeldEvent,
@@ -243,6 +244,35 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
         event.set_matrix(matrix);
         event.set_result(result);
     });
+
+    let jvm = Arc::clone(&vm);
+    events.listen::<PrepareItemEnchantEvent, _>(
+        owner(),
+        EventPriority::Normal,
+        true,
+        move |event| {
+            let Some(answer) = prepare_enchant_call(&jvm, event) else {
+                return;
+            };
+            let fields: Vec<_> = answer.split('\u{001f}').collect();
+            let [cancelled, state, item, lapis] = fields.as_slice() else {
+                return;
+            };
+            let (Some(state), Some(item), Some(lapis)) = (
+                enchantment::decode(state),
+                natives::parse_slot(item),
+                natives::parse_slot(lapis),
+            ) else {
+                return;
+            };
+            if !matches!(*cancelled, "0" | "1") {
+                return;
+            }
+            event.cancelled = *cancelled == "1";
+            event.state = state;
+            event.items = [item, lapis];
+        },
+    );
 
     let jvm = Arc::clone(&vm);
     events.on::<CrafterCraftEvent, _>(owner(), move |event| {
@@ -1444,6 +1474,36 @@ fn interact_entity_call(vm: &JavaVM, player_uuid: &str, entity_uuid: &str) -> bo
     )
     .and_then(JValueGen::z)
     .unwrap_or(true)
+}
+
+fn prepare_enchant_call(vm: &JavaVM, event: &PrepareItemEnchantEvent) -> Option<String> {
+    let mut env = BridgeEnv::attach(vm)?;
+    let player = env.new_string(event.player_id.to_string()).ok()?;
+    let world = env.new_string(&event.world).ok()?;
+    let input = env
+        .new_string(natives::describe_slot(&event.items[0]))
+        .ok()?;
+    let lapis = env
+        .new_string(natives::describe_slot(&event.items[1]))
+        .ok()?;
+    let state = env
+        .new_string(format!(
+            "{}|{}",
+            event.menu_id,
+            enchantment::encode(&event.state)
+        ))
+        .ok()?;
+    let answer = env.call_static_method(
+        "foton/EnchantmentEventBridge", "prepare",
+        "(Ljava/lang/String;Ljava/lang/String;IIILjava/lang/String;Ljava/lang/String;ILjava/lang/String;Z)Ljava/lang/String;",
+        &[
+            JValue::Object(&player), JValue::Object(&world), JValue::Int(event.position.x()),
+            JValue::Int(event.position.y()), JValue::Int(event.position.z()), JValue::Object(&input),
+            JValue::Object(&lapis), JValue::Int(event.bonus), JValue::Object(&state), JValue::Bool(u8::from(event.cancelled)),
+        ],
+    ).ok()?.l().ok()?;
+    let value: String = env.get_string(&JString::from(answer)).ok()?.into();
+    Some(value)
 }
 
 fn prepare_craft_call(

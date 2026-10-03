@@ -9,6 +9,7 @@ use crate::{inventory::menu::Menu, player::Player, world::World};
 
 mod container;
 mod core;
+mod enchantment_view;
 mod equipment;
 mod player_handlers;
 

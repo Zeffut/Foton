@@ -32,6 +32,7 @@ mod brew;
 pub mod command;
 /// A command a player typed, before the server has read it.
 pub mod command_preprocess;
+mod enchantment;
 /// Events about entities that are not players.
 pub mod entity;
 mod fertilize;
@@ -50,6 +51,7 @@ pub use block::{
 pub use brew::BrewEvent;
 pub use command::{AsyncTabCompleteEvent, CommandEvent};
 pub use command_preprocess::PlayerCommandPreprocessEvent;
+pub use enchantment::{EnchantmentOffer, EnchantmentViewState, PrepareItemEnchantEvent};
 pub use entity::{
     BlockExplodeEvent, CreatureSpawnEvent, EntityChangeBlockEvent, EntityDamageByEntityEvent,
     EntityDeathEvent, EntityExplodeEvent, EntityMountEvent, EntityPickupItemEvent,

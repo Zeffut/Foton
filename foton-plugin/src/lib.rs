@@ -45,6 +45,7 @@ use tokio::{
     time::{Instant, timeout_at},
 };
 
+mod enchantment;
 mod forward;
 mod item_components;
 mod natives;

@@ -252,7 +252,7 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
 
     @Override
     public org.bukkit.inventory.InventoryView getOpenInventory() {
-        return new FotonInventoryView(this);
+        return EnchantmentEventBridge.currentView(this);
     }
 
     @Override

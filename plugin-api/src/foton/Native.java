@@ -487,6 +487,12 @@ public final class Native {
     public static native boolean setOpenMenuSlot(String uuid, int slot, String item);
     public static native String openMenuType(String uuid);
     public static native String openMenuTitle(String uuid);
+    public static native String enchantmentView(String uuid);
+    public static native boolean setEnchantmentView(String uuid, long instance, String state);
+    public static native String enchantmentItem(String uuid, long instance, int slot);
+    public static native String enchantmentTitle(String uuid, long instance);
+    public static native boolean setEnchantmentItem(String uuid, long instance, int slot, String item);
+    public static native boolean closeEnchantmentView(String uuid, long instance);
     public static native void updateInventory(String uuid);
     public static native void closeInventory(String uuid);
     public static native String gameMode(String uuid);

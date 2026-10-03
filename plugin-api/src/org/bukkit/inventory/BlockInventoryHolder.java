@@ -1,3 +1,8 @@
 package org.bukkit.inventory;
-/** A block-backed inventory provider. */
-public interface BlockInventoryHolder extends InventoryHolder { Inventory getInventory(); }
+
+import org.bukkit.block.Block;
+
+/** An inventory held by a placed block, including menus without a block entity. */
+public interface BlockInventoryHolder extends InventoryHolder {
+    Block getBlock();
+}

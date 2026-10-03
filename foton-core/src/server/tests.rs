@@ -4515,3 +4515,5 @@ fn joining_reservations_consume_capacity_before_player_data_is_loaded() {
         }
     });
 }
+#[path = "tests/prepare_enchant.rs"]
+mod prepare_enchant;

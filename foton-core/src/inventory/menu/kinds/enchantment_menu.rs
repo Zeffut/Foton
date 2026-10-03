@@ -21,7 +21,10 @@ use crate::enchantment_selection::{EnchantmentInstance, apply_enchantments};
 use crate::enchantment_selection::{
     OFFER_COUNT, enchanting_table_candidates, enchantment_cost, select_enchantment,
 };
+use crate::entity::Entity as _;
+use crate::event::{EnchantmentOffer, EnchantmentViewState, PrepareItemEnchantEvent};
 use crate::inventory::container::SimpleContainer;
+use crate::inventory::lock::ContainerId;
 use crate::inventory::prelude::*;
 use crate::player::player_inventory::PlayerInventory;
 use crate::world::{LevelReader as _, World};
@@ -87,21 +90,26 @@ pub fn enchantment(
     builder.drain(input);
 
     builder.build(EnchantmentKind {
-        enchant_slots,
+        enchant_slots: ContainerId::from_arc(&enchant_slots),
         block_pos: pos,
         world: Arc::clone(world),
         costs,
         seed,
         enchant_clues,
         level_clues,
-        cost_values: [0; OFFER_COUNT],
+        state: EnchantmentViewState {
+            seed: 0,
+            costs: [0; OFFER_COUNT],
+            offers: [None; OFFER_COUNT],
+        },
+        seed_initialized: false,
     })
 }
 
 /// Per-menu enchanting table state.
 pub struct EnchantmentKind {
     /// The two slots the table itself owns.
-    enchant_slots: Shared<SimpleContainer>,
+    enchant_slots: ContainerId,
     block_pos: BlockPos,
     world: Arc<World>,
     /// The three level costs shown to the client.
@@ -113,7 +121,8 @@ pub struct EnchantmentKind {
     /// Level of that enchantment per offer, or -1.
     level_clues: [DataSlot; OFFER_COUNT],
     /// Server-side copy of the costs, which the data slots only mirror.
-    cost_values: [i32; OFFER_COUNT],
+    state: EnchantmentViewState,
+    seed_initialized: bool,
 }
 
 // SAFETY: This Foton-owned key uniquely identifies the concrete menu kind
@@ -127,70 +136,137 @@ impl EnchantmentKind {
     /// Recomputes the three offers for whatever is in the item slot.
     ///
     /// Vanilla parity: `EnchantmentMenu.slotsChanged`.
-    fn recompute_offers(&mut self, behavior: &mut MenuBehavior, player: &Player) {
-        let item = self.enchant_slots.lock().get_item(SLOT_ITEM).clone();
+    fn recompute_offers(
+        &mut self,
+        behavior: &mut MenuBehavior,
+        guard: &mut ContainerLockGuard,
+        player: &Player,
+    ) {
+        let Some(slots) = guard.get(self.enchant_slots) else {
+            return;
+        };
+        let items = [
+            slots.get_item(SLOT_ITEM).clone(),
+            slots.get_item(SLOT_LAPIS).clone(),
+        ];
+        let item = &items[SLOT_ITEM];
 
-        if item.is_empty() || !item.is_enchantable() {
+        if item.is_empty() {
             self.clear_offers(behavior);
             return;
         }
 
         let bookshelves = self.count_bookshelves();
-        let seed = player.enchantment_seed();
-        // The wire carries a short, and vanilla casts rather than clamps. The
-        // difference matters here and nowhere else: a seed is a full-range int,
-        // so clamping would send the same value for almost every player and the
-        // client would draw the same scribbles on every table.
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "matching the (short) cast vanilla sends this seed through"
-        )]
-        self.seed.set(behavior, seed as i16);
+        if !self.seed_initialized {
+            self.state.seed = player.enchantment_seed();
+            self.seed_initialized = true;
+        }
+        let seed = self.state.seed;
 
         // Vanilla reseeds one shared random from the player's seed and reads all
         // three costs from it in order, so the same seed always yields the same
         // three offers for the same item and shelf count.
         let mut random = LegacyRandom::from_seed(seed as u64);
         for slot in 0..OFFER_COUNT {
-            let mut cost = enchantment_cost(&mut random, slot, bookshelves, &item);
+            let mut cost = enchantment_cost(&mut random, slot, bookshelves, item);
             // An offer that cannot even reach its own slot number is not shown.
             if cost < i32::try_from(slot).unwrap_or(i32::MAX) + 1 {
                 cost = 0;
             }
-            self.cost_values[slot] = cost;
-            self.costs[slot].set(behavior, clamp_to_i16(cost));
-            self.enchant_clues[slot].set(behavior, -1);
-            self.level_clues[slot].set(behavior, -1);
+            self.state.costs[slot] = cost;
+            self.state.offers[slot] = None;
         }
 
         for slot in 0..OFFER_COUNT {
-            if self.cost_values[slot] <= 0 {
+            if self.state.costs[slot] <= 0 {
                 continue;
             }
-            let rolled = Self::roll_offer(seed, slot, self.cost_values[slot], &item);
-            let Some(first) = rolled.first() else {
+            let (rolled, mut random) = Self::roll_offer(seed, slot, self.state.costs[slot], item);
+            if rolled.is_empty() {
+                continue;
+            }
+            let selected = random.next_i32_bounded(i32::try_from(rolled.len()).unwrap_or(i32::MAX));
+            let Some(clue) = usize::try_from(selected)
+                .ok()
+                .and_then(|index| rolled.get(index))
+            else {
                 continue;
             };
-            // The clue is the registry id, which is what the client looks the
-            // name up by.
-            let id = first
-                .enchantment
-                .try_id()
-                .and_then(|id| i16::try_from(id).ok())
-                .unwrap_or(-1);
-            self.enchant_clues[slot].set(behavior, id);
-            let level = i16::try_from(first.level).unwrap_or(i16::MAX);
-            self.level_clues[slot].set(behavior, level);
+            self.state.offers[slot] = Some(EnchantmentOffer {
+                enchantment: clue.enchantment,
+                level: i32::try_from(clue.level).unwrap_or(i32::MAX),
+                cost: self.state.costs[slot],
+            });
         }
+        let cancelled = !item.is_enchantable();
+        let mut event = PrepareItemEnchantEvent {
+            menu_id: behavior.instance_id(),
+            player_id: player.uuid(),
+            world: self.world.key.to_string(),
+            position: self.block_pos,
+            items,
+            bonus: bookshelves,
+            state: self.state,
+            cancelled,
+        };
+        // Java can read/write the player's real inventory during dispatch.
+        // The menu itself is detached by Player's existing callback protocol.
+        guard.run_unlocked(|| player.fire_event(&mut event));
+        self.state = event.state;
+        if event.cancelled {
+            self.state.clear();
+        }
+        if let Some(slots) = guard.get_mut(self.enchant_slots) {
+            for (index, item) in event.items.into_iter().enumerate() {
+                slots.set_item(index, item);
+            }
+        }
+        self.synchronize(behavior);
     }
 
     /// Blanks every offer.
     fn clear_offers(&mut self, behavior: &mut MenuBehavior) {
+        self.state.clear();
+        self.synchronize(behavior);
+    }
+
+    /// Returns the full-width values exposed by Bukkit's enchantment view.
+    #[must_use]
+    pub const fn view_state(&self) -> EnchantmentViewState {
+        self.state
+    }
+
+    /// The table backing this menu, including its world key.
+    #[must_use]
+    pub fn table(&self) -> (BlockPos, String) {
+        (self.block_pos, self.world.key.to_string())
+    }
+
+    /// Replaces only view state, without consuming RNG or recalculating offers.
+    pub fn set_view_state(&mut self, behavior: &mut MenuBehavior, state: EnchantmentViewState) {
+        self.state = state;
+        self.seed_initialized = true;
+        self.synchronize(behavior);
+    }
+
+    fn synchronize(&self, behavior: &mut MenuBehavior) {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "Vanilla narrows data slot values to signed shorts on the wire"
+        )]
+        self.seed.set(behavior, self.state.seed as i16);
         for slot in 0..OFFER_COUNT {
-            self.cost_values[slot] = 0;
-            self.costs[slot].set(behavior, 0);
-            self.enchant_clues[slot].set(behavior, -1);
-            self.level_clues[slot].set(behavior, -1);
+            self.costs[slot].set(behavior, data_slot_short(self.state.costs[slot]));
+            let offer = self.state.offers[slot];
+            let id = offer
+                .and_then(|offer| offer.enchantment.try_id())
+                .and_then(|id| i16::try_from(id).ok())
+                .unwrap_or(-1);
+            self.enchant_clues[slot].set(behavior, id);
+            self.level_clues[slot].set(
+                behavior,
+                offer.map_or(-1, |offer| data_slot_short(offer.level)),
+            );
         }
     }
 
@@ -199,8 +275,14 @@ impl EnchantmentKind {
     /// Vanilla parity: `EnchantmentMenu.getEnchantmentList`, including the
     /// offset seed per slot, which is what lets the clue shown before the click
     /// match what the click produces.
-    fn roll_offer(seed: i32, slot: usize, cost: i32, item: &ItemStack) -> Vec<EnchantmentInstance> {
-        let offset = i64::from(seed) + i64::try_from(slot).unwrap_or(0);
+    fn roll_offer(
+        seed: i32,
+        slot: usize,
+        cost: i32,
+        item: &ItemStack,
+    ) -> (Vec<EnchantmentInstance>, LegacyRandom) {
+        // Java adds the slot as an int before widening to RandomSource.setSeed(long).
+        let offset = i64::from(seed.wrapping_add(i32::try_from(slot).unwrap_or(0)));
         #[expect(
             clippy::cast_sign_loss,
             reason = "the seed is reinterpreted, matching Java's setSeed(long)"
@@ -216,7 +298,7 @@ impl EnchantmentKind {
             rolled.remove(usize::try_from(dropped).unwrap_or(0));
         }
 
-        rolled
+        (rolled, random)
     }
 
     /// Counts the shelves powering this table.
@@ -228,8 +310,8 @@ impl EnchantmentKind {
 }
 
 /// Narrows a value to the `i16` a data slot carries.
-fn clamp_to_i16(value: i32) -> i16 {
-    i16::try_from(value).unwrap_or(i16::MAX)
+const fn data_slot_short(value: i32) -> i16 {
+    value as i16
 }
 
 impl MenuKind for EnchantmentKind {
@@ -242,19 +324,21 @@ impl MenuKind for EnchantmentKind {
     fn on_open(
         &mut self,
         behavior: &mut MenuBehavior,
-        _guard: &mut ContainerLockGuard,
+        guard: &mut ContainerLockGuard,
         player: &Player,
     ) {
-        self.recompute_offers(behavior, player);
+        self.state.seed = player.enchantment_seed();
+        self.seed_initialized = true;
+        self.recompute_offers(behavior, guard, player);
     }
 
     fn slots_changed(
         &mut self,
         behavior: &mut MenuBehavior,
-        _guard: &mut ContainerLockGuard,
+        guard: &mut ContainerLockGuard,
         player: &Player,
     ) {
-        self.recompute_offers(behavior, player);
+        self.recompute_offers(behavior, guard, player);
     }
 
     /// Applies one of the three offers.
@@ -263,7 +347,7 @@ impl MenuKind for EnchantmentKind {
     fn on_button_click(
         &mut self,
         behavior: &mut MenuBehavior,
-        _guard: &mut ContainerLockGuard,
+        guard: &mut ContainerLockGuard,
         player: &Player,
         button: i32,
     ) -> bool {
@@ -275,7 +359,9 @@ impl MenuKind for EnchantmentKind {
         }
 
         let (item, lapis) = {
-            let slots = self.enchant_slots.lock();
+            let Some(slots) = guard.get(self.enchant_slots) else {
+                return false;
+            };
             (
                 slots.get_item(SLOT_ITEM).clone(),
                 slots.get_item(SLOT_LAPIS).clone(),
@@ -288,7 +374,7 @@ impl MenuKind for EnchantmentKind {
         // levels to click the row, but it is never what they pay. Charging it
         // made the bottom offer cost thirty levels instead of three.
         let enchantment_cost = i32::try_from(slot).unwrap_or(0) + 1;
-        let cost = self.cost_values[slot];
+        let cost = self.state.costs[slot];
         let free = player.has_infinite_materials();
 
         if !free && (lapis.is_empty() || lapis.count() < enchantment_cost) {
@@ -302,8 +388,7 @@ impl MenuKind for EnchantmentKind {
             return false;
         }
 
-        let seed = player.enchantment_seed();
-        let rolled = Self::roll_offer(seed, slot, cost, &item);
+        let (rolled, _) = Self::roll_offer(self.state.seed, slot, cost, &item);
         if rolled.is_empty() {
             return false;
         }
@@ -311,7 +396,9 @@ impl MenuKind for EnchantmentKind {
         let enchanted = apply_enchantments(&item, &rolled);
 
         {
-            let mut slots = self.enchant_slots.lock();
+            let Some(slots) = guard.get_mut(self.enchant_slots) else {
+                return false;
+            };
             slots.set_item(SLOT_ITEM, enchanted);
             let mut remaining = lapis;
             if !free {
@@ -320,73 +407,15 @@ impl MenuKind for EnchantmentKind {
             slots.set_item(SLOT_LAPIS, remaining);
         }
 
-        if !free {
-            player.on_enchantment_performed(enchantment_cost);
-        }
+        // Vanilla charges levels and rerolls the player seed even in creative;
+        // infinite materials only waive the lapis and level requirement.
+        player.on_enchantment_performed(enchantment_cost);
 
-        self.recompute_offers(behavior, player);
+        self.state.seed = player.enchantment_seed();
+        self.recompute_offers(behavior, guard, player);
         true
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use foton_registry::item_stack::ItemStack;
-    use foton_registry::{init_vanilla_registry, vanilla_items};
-    use foton_utils::BlockPos;
-
-    use super::{SLOT_ITEM, SLOT_LAPIS, enchantment};
-    use crate::player::Player;
-    use crate::test_support::{TestPlayerBuilder, fresh_test_world};
-
-    /// The two slot rules vanilla puts on the enchanting table.
-    ///
-    /// Both were missing, and each cost something different: with no `mayPlace`
-    /// on the currency slot, three of any item bought an enchantment and lapis
-    /// left the economy entirely; with no ceiling on the item slot, a
-    /// shift-clicked stack of sixty-four books went in and came back as one.
-    ///
-    /// The ceiling is asserted on *both* slots on purpose. Capping the section
-    /// rather than the slot is an easy mistake and a quiet one -- the lapis slot
-    /// still looks right, and only the three-lapis offer silently becomes
-    /// unpayable. A test that checked the item slot alone would not catch it.
-    #[test]
-    fn the_table_takes_lapis_only_and_one_item_at_a_time() {
-        init_vanilla_registry();
-        let world = fresh_test_world("enchantment_slot_rules");
-        let player: Arc<Player> =
-            TestPlayerBuilder::new(Arc::clone(&world), "EnchantTester", 1).build();
-
-        let menu = enchantment(
-            Arc::clone(&player.inventory),
-            1,
-            BlockPos::new(0, 64, 0),
-            &world,
-        );
-        let slots = menu.behavior().slots();
-
-        // Vanilla: `mayPlace` returns `itemStack.is(Items.LAPIS_LAZULI)`.
-        assert!(
-            slots[SLOT_LAPIS].may_place(&ItemStack::new(&vanilla_items::LAPIS_LAZULI)),
-            "the currency slot must accept lapis"
-        );
-        assert!(
-            !slots[SLOT_LAPIS].may_place(&ItemStack::new(&vanilla_items::DIRT)),
-            "the currency slot must not accept anything else"
-        );
-
-        // Vanilla: only the item slot overrides `getMaxStackSize()` to one.
-        let guard = menu.behavior().lock_all_containers();
-        assert_eq!(
-            slots[SLOT_ITEM].get_max_stack_size(&guard),
-            1,
-            "a stack must never sit in the item slot"
-        );
-        assert!(
-            slots[SLOT_LAPIS].get_max_stack_size(&guard) >= 3,
-            "the lapis slot has to hold the three the top offer costs"
-        );
-    }
-}
+mod tests;

@@ -70,6 +70,7 @@ if [ -z "${FOTON_PAPER_API_JAR:-}" ]; then
   export FOTON_PAPER_API_JAR
 fi
 run "Paper-compiled shapeless recipes"            bash dev/shapeless-recipe-test.sh "${FOTON_PAPER_API_JAR:-}"
+run "Paper-compiled prepare enchant"              bash dev/prepare-enchant-test.sh "${FOTON_PAPER_API_JAR:-}"
 run "plugin runtime dependency closure"            bash dev/plugin-runtime-test.sh
 # This fixture is compiled against exact official Paper bytes, not Foton's own
 # API. It checks DriverManager visibility and executes a real SQLite query.

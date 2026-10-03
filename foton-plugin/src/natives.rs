@@ -9,6 +9,7 @@
 //! World mutations remain scheduler-owned; narrowly scoped plugin registries
 //! (such as runtime recipes) expose their own synchronized write path.
 
+use crate::enchantment;
 use std::fmt::Write;
 use std::io::Cursor;
 use std::mem;
@@ -313,14 +314,14 @@ fn boss_bar(env: &mut JNIEnv<'_>, id: &JString<'_>) -> Option<Arc<ServerBossEven
 }
 
 /// Resolves a Java-side handle back to a player who is still online.
-fn player(env: &mut JNIEnv<'_>, uuid: &JString<'_>) -> Option<Arc<Player>> {
+pub(crate) fn player(env: &mut JNIEnv<'_>, uuid: &JString<'_>) -> Option<Arc<Player>> {
     let text: String = env.get_string(uuid).ok()?.into();
     let uuid = Uuid::parse_str(&text).ok()?;
     server()?.online_players().get_by_uuid(&uuid)
 }
 
 /// Returns a Java string, or Java's null when there is nothing to say.
-fn to_java(env: &mut JNIEnv<'_>, value: Option<String>) -> jstring {
+pub(crate) fn to_java(env: &mut JNIEnv<'_>, value: Option<String>) -> jstring {
     value
         .and_then(|text| env.new_string(text).ok())
         .map_or_else(null_mut, JString::into_raw)
@@ -13814,6 +13815,36 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "openMenuTitle",
             "(Ljava/lang/String;)Ljava/lang/String;",
             open_menu_title as *mut c_void,
+        ),
+        method(
+            "enchantmentView",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            enchantment::view as *mut c_void,
+        ),
+        method(
+            "setEnchantmentView",
+            "(Ljava/lang/String;JLjava/lang/String;)Z",
+            enchantment::set_view as *mut c_void,
+        ),
+        method(
+            "enchantmentItem",
+            "(Ljava/lang/String;JI)Ljava/lang/String;",
+            enchantment::item as *mut c_void,
+        ),
+        method(
+            "enchantmentTitle",
+            "(Ljava/lang/String;J)Ljava/lang/String;",
+            enchantment::title as *mut c_void,
+        ),
+        method(
+            "setEnchantmentItem",
+            "(Ljava/lang/String;JILjava/lang/String;)Z",
+            enchantment::set_item as *mut c_void,
+        ),
+        method(
+            "closeEnchantmentView",
+            "(Ljava/lang/String;J)Z",
+            enchantment::close as *mut c_void,
         ),
         method(
             "updateInventory",

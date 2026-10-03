@@ -202,7 +202,7 @@ impl Player {
         }
     }
 
-    fn take_open_menu_for_callback(
+    pub(super) fn take_open_menu_for_callback(
         &self,
         expected_container_id: Option<i32>,
     ) -> Result<Menu, OpenMenuUnavailable> {
@@ -246,7 +246,7 @@ impl Player {
         Ok(menu)
     }
 
-    fn finish_open_menu_callback(&self, menu: Menu) {
+    pub(super) fn finish_open_menu_callback(&self, menu: Menu) {
         let metadata = menu_metadata(&menu);
         let actions = {
             let mut open_menu = self.open_menu.lock();
