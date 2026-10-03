@@ -1,3 +1,5 @@
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -43,6 +45,28 @@ public final class EntityScoreboardTagsProbe extends JavaPlugin implements Liste
         tags.add("foton:clear");
         tags.clear();
         if (!entity.getScoreboardTags().isEmpty()) throw new AssertionError("clear did not persist");
+
+        boolean acceptedNull;
+        try {
+            acceptedNull = tags.add(null);
+        } catch (NullPointerException expected) {
+            acceptedNull = false;
+        }
+        if (acceptedNull && !tags.remove(null)) throw new AssertionError("null tag could not be removed");
+        getLogger().info("ENTITY_TAGS_NULL_ACCEPTED=" + acceptedNull);
+
+        List<String> boundary = new ArrayList<>();
+        for (int i = 0; i < 1023; i++) boundary.add("foton:limit_" + i);
+        if (!tags.addAll(boundary) || tags.size() != 1023)
+            throw new AssertionError("bulk tags did not reach 1023");
+        if (tags.addAll(List.of("foton:edge")) || tags.size() != 1023)
+            throw new AssertionError("addAll accepted the 1023+1 boundary");
+        if (tags.addAll(List.of("foton:limit_0")) || tags.size() != 1023)
+            throw new AssertionError("addAll accepted a duplicate at the boundary");
+        if (!tags.add("foton:edge") || tags.size() != 1024)
+            throw new AssertionError("single addition did not reach 1024");
+        if (tags.add("foton:overflow") || tags.size() != 1024)
+            throw new AssertionError("single addition exceeded 1024");
         getLogger().info("ENTITY_TAGS_PROBE_OK");
     }
 

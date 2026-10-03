@@ -1,14 +1,16 @@
 package foton;
 
 import java.util.AbstractSet;
+import java.util.Collection;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 
 /** A live Bukkit Set view whose mutations change the entity's persisted native tags.
- * Foton's 26.2 native add path enforces 1024 tags; Paper 1.21.11's exposed
- * HashSet did not, so additions at that boundary intentionally differ. */
+ * Paper 1.21.11 exposes a 1024-entry SizeLimitedSet; Foton enforces the same
+ * bound in native entity state. */
 final class FotonScoreboardTags extends AbstractSet<String> {
+    private static final int MAX_TAGS = 1024;
     private final String uuid;
 
     FotonScoreboardTags(String uuid) { this.uuid = uuid; }
@@ -28,6 +30,16 @@ final class FotonScoreboardTags extends AbstractSet<String> {
 
     @Override public boolean add(String tag) {
         return Native.entityAddScoreboardTag(uuid, Objects.requireNonNull(tag, "tag"));
+    }
+
+    @Override public boolean addAll(Collection<? extends String> tags) {
+        Objects.requireNonNull(tags, "tags");
+        // Paper's SizeLimitedSet rejects the entire batch at this boundary,
+        // even when the input contains tags already present in the set.
+        if (size() + tags.size() >= MAX_TAGS) return false;
+        boolean changed = false;
+        for (String tag : tags) changed |= add(tag);
+        return changed;
     }
 
     @Override public boolean remove(Object value) {
