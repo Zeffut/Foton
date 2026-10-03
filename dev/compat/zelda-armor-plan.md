@@ -76,6 +76,11 @@ PDC view/container, then trim/tag/meta exposure. Runtime bridge payloads must
 not accidentally become persistent numeric registry IDs; public item-byte
 persistence has its own explicit format/version contract.
 
+The [canonical live item design](item-state-bridge-plan.md) selects immutable
+native snapshots with explicit Java edits. Ordinary network serialization
+is not a lossless substitute: it omits live bundle selection. Lease ownership,
+atomic consumers and separate persistent item bytes all need their own proof.
+
 ## Bounded delivery and acceptance
 
 1. Implement exact trim/tag/PDC-view/data-presence API behavior and real typed
