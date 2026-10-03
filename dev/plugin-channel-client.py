@@ -92,6 +92,9 @@ def main():
 
     command(connection)
     before = initial_payloads + receive(connection, 1)
+    supported = [data for channel, data in before if channel == "minecraft:register"]
+    if not any(CLIENT_CHANNEL.encode() in data.split(b"\x00") for data in supported):
+        raise AssertionError(f"server did not advertise its incoming channel: {before}")
     if any(channel == VOICE_CHANNEL for channel, _ in before):
         raise AssertionError("server sent to a client that had not registered the channel")
 

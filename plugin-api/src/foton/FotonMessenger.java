@@ -1,6 +1,7 @@
 package foton;
 
 import java.nio.charset.StandardCharsets;
+import java.io.ByteArrayOutputStream;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -210,6 +211,24 @@ final class FotonMessenger implements Messenger {
             return;
         }
         messenger.dispatchIncomingMessage(player, channel, message);
+    }
+
+    /** Advertises serverbound plugin channels after the real play login packet. */
+    public static void sendSupportedChannels(String playerId) {
+        FotonMessenger messenger = running();
+        if (messenger == null) {
+            return;
+        }
+        Set<String> channels = messenger.getIncomingChannels();
+        if (channels.isEmpty()) {
+            return;
+        }
+        ByteArrayOutputStream payload = new ByteArrayOutputStream();
+        for (String channel : channels) {
+            payload.writeBytes(channel.getBytes(StandardCharsets.UTF_8));
+            payload.write(0);
+        }
+        Native.sendPluginMessage(playerId, "minecraft:register", payload.toByteArray());
     }
 
     static Set<String> listening(UUID player) {

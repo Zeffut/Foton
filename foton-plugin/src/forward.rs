@@ -978,6 +978,7 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     events.on::<PlayerJoinEvent, _>(owner(), move |event| {
         let uuid = event.player().gameprofile.id.to_string();
         let message = event.message().map(plain);
+        supported_channels_call(&jvm, &uuid);
         match join_call(&jvm, &uuid, event.player().id(), message.as_deref()) {
             Answer::Unreachable => {}
             Answer::Nothing => event.set_message(None),
@@ -3658,5 +3659,21 @@ fn plugin_message_call(vm: &JavaVM, uuid: &str, channel: &str, payload: &[u8]) {
             JValue::Object(&channel),
             JValue::Object(&payload),
         ],
+    );
+}
+
+/// Paper advertises incoming channels after the play login packet, before `PlayerJoinEvent`.
+fn supported_channels_call(vm: &JavaVM, uuid: &str) {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
+        return;
+    };
+    let Ok(uuid) = env.new_string(uuid) else {
+        return;
+    };
+    let _ = env.call_static_method(
+        MESSENGER,
+        "sendSupportedChannels",
+        "(Ljava/lang/String;)V",
+        &[JValue::Object(&uuid)],
     );
 }
