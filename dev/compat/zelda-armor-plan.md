@@ -48,6 +48,34 @@ the Piaf replacement; do not invent an armor feature to fill an audit table.
 These are source findings. They do not claim a measured runtime pass/failure
 for each scenario, and they do not remove the existing Zelda startup blockers.
 
+### Shared item prerequisites confirmed by deeper preflight
+
+The current slot projection is not a full component patch: it rebuilds an
+item from its prototype and selected fields. Its separate opaque NBT string
+does not preserve arbitrary typed components or prototype removals. Concrete
+regressions must cover a GLIDER addition and a DAMAGE removal surviving a
+trim-only Java edit. Canonical component transport must precede generic
+presence/get/set/remove/reset claims; removal and restoration of prototype
+defaults are different operations.
+
+Pinned Paper bytecode also resolves several ABI contracts: Tag and trim
+pattern/material types are interfaces, not Foton's current final classes;
+TRIM's value is ItemArmorTrim, whose armorTrim() projection Zelda calls.
+LeatherArmorMeta is separate from ArmorMeta; ColorableArmorMeta combines them,
+and meta capabilities are not identical to trimmable-tag membership.
+
+The stack PDC view is owner-bound and read-only: a retained view follows later
+applied meta/handle changes, but not unapplied edits to a copied meta. The
+complete view/mutable-PDC contract needs correct copying, byte serialization,
+types, keys and size, including native entries not projected by today's Java
+map. Adding only get/has under the full Paper interface would hide missing
+behavior. Reuse the real native CUSTOM_DATA state.
+
+These become sequential prerequisites: canonical component bridge, complete
+PDC view/container, then trim/tag/meta exposure. Runtime bridge payloads must
+not accidentally become persistent numeric registry IDs; public item-byte
+persistence has its own explicit format/version contract.
+
 ## Bounded delivery and acceptance
 
 1. Implement exact trim/tag/PDC-view/data-presence API behavior and real typed
