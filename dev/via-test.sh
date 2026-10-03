@@ -76,7 +76,9 @@ if [[ ${1:-} == --isolated ]]; then
     fi
     exit "$status"
   }
-  trap cleanup_inner EXIT INT TERM
+  trap cleanup_inner EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
 
   cp "$ROOT/package-content/config.toml" "$run_dir/config/config.toml"
   cp "$ROOT/package-content/worlds.toml" "$run_dir/config/worlds.toml"
@@ -201,9 +203,22 @@ fi
 
 temp_root=$(realpath "${TMPDIR:-/tmp}")
 scratch=$(mktemp -d "$temp_root/foton-via-e2e.XXXXXX")
+isolated_pid=""
 cleanup_outer() {
   local status=$?
   trap - EXIT INT TERM
+  if [[ -n "$isolated_pid" ]] && kill -0 "$isolated_pid" 2>/dev/null; then
+    kill -TERM "$isolated_pid" 2>/dev/null || true
+    for _ in $(seq 1 20); do
+      kill -0 "$isolated_pid" 2>/dev/null || break
+      sleep 1
+    done
+    if kill -0 "$isolated_pid" 2>/dev/null; then
+      kill -9 "$isolated_pid" 2>/dev/null || true
+      status=1
+    fi
+    wait "$isolated_pid" 2>/dev/null || true
+  fi
   if [[ $status -ne 0 || ${FOTON_VIA_KEEP_SCRATCH:-0} == 1 ]]; then
     echo "Via test evidence retained in $scratch" >&2
   else
@@ -213,7 +228,9 @@ cleanup_outer() {
   fi
   exit "$status"
 }
-trap cleanup_outer EXIT INT TERM
+trap cleanup_outer EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 run_dir="$scratch/run"
 plugins_dir="$run_dir/plugins"
 client_dir="$scratch/node-client"
@@ -256,4 +273,7 @@ TARGET_DIR=${CARGO_TARGET_DIR:-"$ROOT/target"}
 BIN="$TARGET_DIR/debug/foton"
 [[ -x "$BIN" ]] || { echo "Foton binary not built: $BIN" >&2; exit 1; }
 unshare -n bash -c 'ip link set lo up && exec bash "$@"' bash \
-  "$ROOT/dev/via-test.sh" --isolated "$scratch" "$BIN" "$java_home" "$PORT" "$client_dir/node_modules"
+  "$ROOT/dev/via-test.sh" --isolated "$scratch" "$BIN" "$java_home" "$PORT" "$client_dir/node_modules" &
+isolated_pid=$!
+wait "$isolated_pid"
+isolated_pid=""

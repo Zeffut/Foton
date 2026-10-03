@@ -16,6 +16,8 @@ SCRIPT = Path(__file__).resolve().parent / "compat" / "log_diagnostics.py"
 class LogDiagnosticsTests(unittest.TestCase):
     def test_java_exception_forms(self):
         lines = [
+            "Exception: plugin invocation failed",
+            "Caused by: Exception: plugin invocation failed",
             "java.lang.ClassNotFoundException: foton.entity.CraftPlayer",
             "Caused by: org.example.Outer$NestedException: failed",
             'Exception in thread "main" java.lang.IllegalStateException: bad',

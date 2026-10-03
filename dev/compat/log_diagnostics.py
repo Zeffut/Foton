@@ -11,7 +11,8 @@ import sys
 ALLOWED_LOG_ERRORS = ()
 ERROR_PATTERN = re.compile(
     r"\[(?:ERROR|SEVERE|FATAL)\]|\b(?:ERROR|SEVERE|FATAL):|"
-    r"\b[A-Za-z_$][\w.$]*(?:Exception|Error)\b(?![-\w])|\bException in thread\b|"
+    r"\b[A-Za-z_$][\w.$]*(?:Exception|Error)\b(?![-\w])|"
+    r"\bException(?::| in thread\b)|"
     r"\b(?:plugin|server) failed to (?:load|enable|start|initialize)\b|"
     r"\b(?:failed to|could not|unable to) (?:load|enable|start|initialize) (?:plugin\b|\S+\bplugin\b)|"
     r"\[host\].{0,80}\b(?:ViaVersion|ViaBackwards)\b.{0,80}\bfailed\b|"
