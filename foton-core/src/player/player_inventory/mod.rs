@@ -99,12 +99,9 @@ impl PlayerInventorySyncState {
     }
 }
 
-/// The pending open-menu work a tick still has to hand to the client.
-///
-/// It carried a `container_id` until the container-close handler stopped
-/// comparing ids -- vanilla's `handleContainerClose` reads none -- which left
-/// nothing reading it. The id is still on the menu itself for anyone who needs
-/// it; keeping a second, never-read copy here only invites the two to disagree.
+/// Snapshot and deferred actions while a callback owns the detached menu.
+/// The stable instance identity keeps targeted actions bound to that menu,
+/// independently of its cyclic wire container id.
 struct OpenMenuDispatch {
     instance: u64,
     overrides_player_slots: bool,
