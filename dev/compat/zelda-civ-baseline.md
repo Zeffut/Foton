@@ -100,3 +100,30 @@ a percentage of compatibility nor a gameplay result.
 The compatibility target is the *unchanged pinned Zelda JAR*, not a promise
 that every version of every plugin works. A newer Zelda commit requires a new
 build, hash and certification run.
+
+## Frozen Via regression after the enchantment slice
+
+The same frozen post-enchantment runtime was tested with unchanged official
+ViaVersion and ViaBackwards 5.11.0 in a loopback-only network namespace. Both
+clients passed: Minecraft 1.21.11 (protocol 774) reached PLAY, received a
+translated chunk, acknowledged keep-alive, executed `/list` and stayed
+connected; the native 26.2 client completed login/configuration and received
+nine chunks. ViaVersion enabled before ViaBackwards. Server shutdown was
+clean, exit 0; all 59 manifest inputs remained byte-identical. This does not
+test the later retained-enchantment-view fixes.
+
+ViaVersion nevertheless logs `ClassNotFoundException: foton.entity.CraftPlayer`
+and disables its login race-condition fixer. Its warning explicitly says
+plugins using ViaAPI on join may work incorrectly. This is a real compatibility
+gap, separate from the expected public-key and update-check network warnings
+in the disconnected namespace. The current `dev/via-test.sh` exception regex
+misses this named exception, although its codec/refcount assertions pass.
+Consequently the result is **client connection passed, full Via compatibility
+not certified**; a successful existing test gate must not hide this warning.
+
+Evidence is retained at
+`%TEMP%/Foton-Via-frozen-03263af45-684db737/via-report.md`, with original and
+normalized logs, client output, isolation evidence and input hashes. The report
+SHA-256 is `0ba515bc3f40d77aafb6580ddd594ed6f793ece590b708bdacc914942f440bf4`.
+Temporary runtime copies also remain because their cleanup was denied by the
+execution policy; no alternate deletion was attempted.
