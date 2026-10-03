@@ -92,6 +92,14 @@ heap estimator. Borrowed traversal must check actual recursive item/text/NBT
 edges before recursive clone; choose admission depth from verified call-stack
 tests and document any restriction rather than calling it a vanilla constant.
 
+The current prerequisite uses aggregate traversal depth128 and a separate
+four-nested-template path ceiling. A real Java-created-thread test reaches four
+templates plus deep text, but does not validate128 item-template clone frames.
+Deeper legitimate fixture construction currently repeats persistent validation
+and hashing before the bridge is reached. Both limits are temporary operational
+restrictions, not vanilla limits or universal stack guarantees. The recursive
+template foundation must supply deeper real tests before lifting that ceiling.
+
 ## Block-state conversion dependency
 
 Paper derives specialized block-state metadata from the component keys read by
