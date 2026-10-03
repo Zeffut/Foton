@@ -318,6 +318,7 @@ public final class FotonInventory implements PlayerInventory {
             if (meta instanceof org.bukkit.inventory.meta.BookMeta book) {
                 java.util.ArrayList<net.kyori.adventure.text.Component> pages = new java.util.ArrayList<>();
                 String nativeBook = null;
+                Boolean nativeBookResolved = null;
                 for (String field : encoded) {
                     if (field.startsWith("booktitlehex=")) book.setTitle(new String(hexDecode(field.substring(13)), java.nio.charset.StandardCharsets.UTF_8));
                     else if (field.startsWith("bookauthorhex=")) book.setAuthor(new String(hexDecode(field.substring(14)), java.nio.charset.StandardCharsets.UTF_8));
@@ -334,11 +335,17 @@ public final class FotonInventory implements PlayerInventory {
                     } else if (field.startsWith("bookrawhex=")) {
                         nativeBook = field.substring(11);
                         if (nativeBook.length() > MAX_SLOT_BRIDGE_CHARS || !isHex(nativeBook)) return null;
+                    } else if (field.startsWith("bookresolved=")) {
+                        String value = field.substring(13);
+                        if (!value.equals("true") && !value.equals("false")) return null;
+                        nativeBookResolved = Boolean.valueOf(value);
                     }
                 }
                 if (!pages.isEmpty()) book.pages(pages);
-                if (book instanceof org.bukkit.inventory.meta.SimpleBookMeta simple)
+                if (book instanceof org.bukkit.inventory.meta.SimpleBookMeta simple) {
                     simple.setNativeBookPassthrough(nativeBook);
+                    simple.setNativeBookResolved(nativeBookResolved);
+                }
             }
             for (String field : encoded) if (field.startsWith("enchhex=") || field.startsWith("storedenchhex=")) {
                 boolean stored = field.startsWith("storedenchhex=");
@@ -455,6 +462,10 @@ public final class FotonInventory implements PlayerInventory {
             if (book instanceof org.bukkit.inventory.meta.SimpleBookMeta simple
                     && simple.nativeBookPassthrough() != null)
                 value += "\u001dbookrawhex=" + simple.nativeBookPassthrough();
+            if (item.getType() == Material.WRITTEN_BOOK
+                    && book instanceof org.bukkit.inventory.meta.SimpleBookMeta simple
+                    && simple.nativeBookResolved() != null)
+                value += "\u001dbookresolved=" + simple.nativeBookResolved();
         }
         if (item.hasItemMeta()) {
             for (java.util.Map.Entry<org.bukkit.enchantments.Enchantment, Integer> entry : item.getItemMeta().getEnchants().entrySet()) {

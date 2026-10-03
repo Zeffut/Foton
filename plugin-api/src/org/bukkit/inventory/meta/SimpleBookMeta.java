@@ -16,6 +16,8 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
     private Generation generation;
     /** Original native content, including filtered projections unavailable in Bukkit. */
     private String nativeBookPassthrough;
+    /** Native resolution survives ordinary BookMeta edits, independently of filtered content. */
+    private Boolean nativeBookResolved;
 
     public String nativeBookPassthrough() {
         return nativeBookPassthrough;
@@ -24,6 +26,14 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
     /** Called after the visible fields have been decoded from a native slot. */
     public void setNativeBookPassthrough(String value) {
         nativeBookPassthrough = value;
+    }
+
+    public Boolean nativeBookResolved() {
+        return nativeBookResolved;
+    }
+
+    public void setNativeBookResolved(Boolean value) {
+        nativeBookResolved = value;
     }
 
     @Override
@@ -193,12 +203,14 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
             && java.util.Objects.equals(author, book.author)
             && pages.equals(book.pages)
             && generation == book.generation
-            && java.util.Objects.equals(nativeBookPassthrough, book.nativeBookPassthrough);
+            && java.util.Objects.equals(nativeBookPassthrough, book.nativeBookPassthrough)
+            && java.util.Objects.equals(nativeBookResolved, book.nativeBookResolved);
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(super.hashCode(), title, author, pages, generation, nativeBookPassthrough);
+        return java.util.Objects.hash(super.hashCode(), title, author, pages, generation,
+            nativeBookPassthrough, nativeBookResolved);
     }
 
     private int index(int page) {

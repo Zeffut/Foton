@@ -17,7 +17,8 @@ public final class NativeItemBridgeCheck {
             }
             return;
         }
-        if (args[0].equals("book") || args[0].equals("book-edit")) {
+        if (args[0].equals("book") || args[0].equals("book-edit")
+                || args[0].equals("book-title-edit") || args[0].equals("book-author-edit")) {
             org.bukkit.inventory.ItemStack item = foton.FotonInventory.decode(first);
             if (item == null || item.getType() != org.bukkit.Material.WRITTEN_BOOK)
                 throw new AssertionError("Written book was lost in Java");
@@ -40,6 +41,18 @@ public final class NativeItemBridgeCheck {
                 String changed = foton.FotonInventory.encode(item);
                 if (changed.contains("bookrawhex="))
                     throw new AssertionError("Edited book replayed stale filtered native content");
+                System.out.println(changed);
+                return;
+            }
+            if (args[0].equals("book-title-edit") || args[0].equals("book-author-edit")) {
+                if (args[0].equals("book-title-edit")) book.setTitle("Titre changé");
+                else book.setAuthor("Auteur changé");
+                item.setItemMeta(book);
+                String changed = foton.FotonInventory.encode(item);
+                if (changed.contains("bookrawhex="))
+                    throw new AssertionError("Edited cover replayed stale native content");
+                if (!changed.contains("bookresolved=false"))
+                    throw new AssertionError("Edited cover lost the native resolved state");
                 System.out.println(changed);
                 return;
             }

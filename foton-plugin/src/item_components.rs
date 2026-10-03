@@ -1,7 +1,7 @@
 //! Book item components crossing the Bukkit inventory slot bridge.
-//! Bukkit exposes only raw pages. Filtered projections and the resolved flag
-//! travel as typed native NBT, accepted back only if every visible field still
-//! matches; a Java edit can never be replaced by stale native content.
+//! Bukkit exposes only raw pages. Filtered projections travel as typed native
+//! NBT and the resolved flag travels separately, so cover edits retain it.
+//! Native content is accepted back only if every visible field still matches.
 
 use std::fmt::Write as _;
 use std::io::Cursor;
@@ -60,6 +60,17 @@ fn push_book_raw(out: &mut String, value: NbtTag) {
     field_bytes(out, "bookrawhex", &bytes);
 }
 
+fn book_resolved(metadata: &[&str]) -> Option<bool> {
+    match metadata
+        .iter()
+        .find_map(|part| part.strip_prefix("bookresolved="))
+    {
+        Some("true") | None => Some(true),
+        Some("false") => Some(false),
+        Some(_) => None,
+    }
+}
+
 pub(crate) fn describe_name(stack: &ItemStack, out: &mut String) -> Option<()> {
     if let Some(name) = stack.get(CUSTOM_NAME) {
         field(out, "namehex", &name.to_string());
@@ -74,6 +85,8 @@ pub(crate) fn describe(stack: &ItemStack, out: &mut String) -> Option<()> {
         field(out, "bookauthorhex", book.author());
         out.push('\u{1d}');
         let _ = write!(out, "bookgen={}", book.generation());
+        out.push('\u{1d}');
+        let _ = write!(out, "bookresolved={}", book.resolved());
         for page in book.pages() {
             field(
                 out,
@@ -109,6 +122,7 @@ pub(crate) fn parse(stack: &mut ItemStack, metadata: &[&str]) -> Option<()> {
         let generation = metadata
             .iter()
             .find_map(|part| part.strip_prefix("bookgen="));
+        let resolved = book_resolved(metadata)?;
         let page_fields = metadata
             .iter()
             .filter_map(|part| part.strip_prefix("bookpagehex="));
@@ -136,7 +150,7 @@ pub(crate) fn parse(stack: &mut ItemStack, metadata: &[&str]) -> Option<()> {
             author,
             generation,
             pages,
-            true,
+            resolved,
         )
         .ok()?;
         let book = if let Some(raw) = metadata
@@ -147,6 +161,7 @@ pub(crate) fn parse(stack: &mut ItemStack, metadata: &[&str]) -> Option<()> {
             if original.title().raw() != visible.title().raw()
                 || original.author() != visible.author()
                 || original.generation() != visible.generation()
+                || original.resolved() != visible.resolved()
                 || original.pages().len() != visible.pages().len()
                 || original
                     .pages()
@@ -274,6 +289,8 @@ mod tests {
         let mut encoded = "minecraft:written_book 1".to_owned();
         field(&mut encoded, "bookpagehex", "{bad JSON");
         assert!(parse_slot(&encoded).is_none());
+        let invalid_resolved = "minecraft:written_book 1\u{1d}bookresolved=maybe\u{1d}bookgen=0";
+        assert!(parse_slot(invalid_resolved).is_none());
         assert!(unhex("f").is_none());
         assert!(unhex("xx").is_none());
     }

@@ -14712,7 +14712,7 @@ mod slot_bridge_tests {
                 "Les cuisiniers d'Hyrule".to_owned(),
                 0,
                 vec![Filterable::new(
-                    page,
+                    page.clone(),
                     Some(text_components::TextComponent::plain("Censuré".to_owned())),
                 )],
                 false,
@@ -14731,7 +14731,7 @@ mod slot_bridge_tests {
             restored, original,
             "Java book bridge changed vanilla components"
         );
-        let edited = java_round_trip("book-edit", &[native]);
+        let edited = java_round_trip("book-edit", slice::from_ref(&native));
         assert_eq!(edited.len(), 1, "Java book edit should return one item");
         let changed = parse_slot(&edited[0]).expect("edited Java book should parse");
         let book = changed
@@ -14740,7 +14740,23 @@ mod slot_bridge_tests {
         assert_eq!(book.title().raw(), "Livre refait");
         assert!(book.title().filtered().is_none());
         assert!(book.pages()[0].filtered().is_none());
-        assert!(book.resolved());
+        assert!(!book.resolved());
+
+        for (mode, title, author) in [
+            ("book-title-edit", "Titre changé", "Les cuisiniers d'Hyrule"),
+            ("book-author-edit", "Livre de Cuisine", "Auteur changé"),
+        ] {
+            let edited = java_round_trip(mode, slice::from_ref(&native));
+            assert_eq!(edited.len(), 1, "{mode} should return one book");
+            let changed = parse_slot(&edited[0]).expect("edited cover should parse");
+            let book = changed
+                .get(WRITTEN_BOOK_CONTENT)
+                .expect("edited book component");
+            assert_eq!(book.title().raw(), title, "{mode} title");
+            assert_eq!(book.author(), author, "{mode} author");
+            assert_eq!(book.pages()[0].raw(), &page, "{mode} page");
+            assert!(!book.resolved(), "{mode} must retain unresolved state");
+        }
     }
 
     #[test]
