@@ -75,7 +75,7 @@ behavior. Reuse the real native CUSTOM_DATA state.
 These become sequential prerequisites: canonical component bridge, complete
 PDC view/container, then trim/tag/meta exposure. Runtime bridge payloads must
 not accidentally become persistent numeric registry IDs; public item-byte
-persistence has its own explicit format/version contract.
+persistence has its own [format/version contract](item-persistence-plan.md).
 
 The [canonical live item design](item-state-bridge-plan.md) selects immutable
 native snapshots with explicit Java edits. Ordinary network serialization
