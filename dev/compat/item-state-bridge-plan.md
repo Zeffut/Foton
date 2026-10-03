@@ -100,6 +100,34 @@ and hashing before the bridge is reached. Both limits are temporary operational
 restrictions, not vanilla limits or universal stack guarantees. The recursive
 template foundation must supply deeper real tests before lifting that ceiling.
 
+## Menu callbacks and merchant costs
+
+An item write can synchronously notify a container owner, update a neighboring
+block and reach a plugin ItemSpawnEvent. Container lock acquisition can itself
+unpack loot and notify. Neither boundary may run while the player's menu mutex
+is held. Newly detached setter dispatches therefore need owned, shallow live
+read sources so callbacks observe the newly written backing item. Existing
+packet callbacks with snapshots retain their separate snapshot policy.
+
+Only slots explicitly guaranteeing storage-equivalent reads may supply these
+sources; unsupported virtual/custom slots must refuse before writes. Queued
+item batches retain their original admission permits until applied or discarded,
+including restoration and nested replay. Terminal shutdown cannot report the
+item operations drained while queued owners remain. This does not promise
+atomic visibility of a whole batch to every observer or callback rollback.
+
+Paper merchant ingredient matching requires exact positive patch entries, not
+all effective prototype components. Removed entries impose no absence condition;
+payment is tested against its effective values and may carry extra components.
+The immediate displayed cost retains the original ingredient, including removal
+markers. Paper's persistent and network codecs reconstruct a display from the
+positive predicate instead. The bridge must preserve that distinction rather
+than reduce ingredients to item/count strings. Validate every ingredient/result
+before replacing offers; invalid predicates must never become empty predicates.
+Transient requirements can apply live/over the stream without surviving the
+persistent codec. These are source-derived requirements, not an executed Foton
+merchant compatibility pass.
+
 ## Block-state conversion dependency
 
 Paper derives specialized block-state metadata from the component keys read by
