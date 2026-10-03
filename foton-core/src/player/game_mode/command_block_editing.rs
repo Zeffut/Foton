@@ -129,7 +129,7 @@ impl Player {
         pos: foton_utils::BlockPos,
         block_entity: &CommandBlockEntity,
     ) {
-        let Some(nbt) = BlockEntity::get_update_tag(block_entity) else {
+        let Some(nbt) = BlockEntity::get_client_update_tag(block_entity) else {
             return;
         };
         // Vanilla resends the block to everyone tracking it, not just the

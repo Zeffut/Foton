@@ -27,6 +27,8 @@ pub(crate) mod block_state_nbt;
 mod components;
 pub mod entities;
 mod nameable;
+#[cfg(test)]
+mod persistence_tests;
 mod randomizable_container;
 mod registry;
 mod storage;
@@ -74,6 +76,13 @@ use crate::world::game_event::GameEventContext;
 use crate::world::World;
 use crate::world::base_spawner::Spawner;
 use crate::world::game_event::SharedGameEventListener;
+
+const PERSISTENT_DATA_KEY: &str = "PublicBukkitValues";
+
+/// Removes plugin-private block-entity data before an NBT payload leaves for a client.
+pub(crate) fn sanitize_block_entity_client_nbt(nbt: &mut NbtCompound) {
+    while nbt.remove(PERSISTENT_DATA_KEY).is_some() {}
+}
 
 /// Erased block-state-selected ticker for one concrete block-entity type.
 ///
@@ -185,6 +194,7 @@ pub struct BlockEntityBase {
     /// Vanilla parity: `BlockEntity.components`. What an item put on this block
     /// entity that no `apply_implicit_components` override claimed.
     components: SyncMutex<DataComponentMap>,
+    persistent_data: SyncMutex<NbtCompound>,
 }
 
 struct BlockEntityLifecycleDispatchGuard<'a> {
@@ -229,6 +239,7 @@ impl BlockEntityBase {
             removed: AtomicBool::new(false),
             open_count: AtomicI32::new(0),
             components: SyncMutex::new(DataComponentMap::new()),
+            persistent_data: SyncMutex::new(NbtCompound::new()),
             lifecycle: SyncMutex::new(BlockEntityLifecycle {
                 block_state,
                 events: SmallVec::new(),
@@ -251,6 +262,22 @@ impl BlockEntityBase {
     /// Vanilla parity: `BlockEntity.setComponents`.
     fn set_components(&self, components: DataComponentMap) {
         *self.components.lock() = components;
+    }
+
+    /// A detached typed copy for a future tile-state snapshot.
+    #[must_use]
+    pub fn persistent_data(&self) -> NbtCompound {
+        self.persistent_data.lock().clone()
+    }
+
+    /// Replaces plugin-owned tile data and marks the containing chunk dirty.
+    pub fn replace_persistent_data(&self, data: NbtCompound) {
+        *self.persistent_data.lock() = data;
+        self.set_changed();
+    }
+
+    pub(crate) fn load_persistent_data(&self, data: NbtCompound) {
+        *self.persistent_data.lock() = data;
     }
 
     #[must_use]
@@ -518,7 +545,7 @@ pub trait BlockEntity: ErasedType + Send + Sync + 'static {
     /// Vanilla parity: `BlockEntity.loadWithComponents`, the load path every
     /// block entity coming off disk or out of a chunk packet goes through.
     fn load_with_components(&self, nbt: &BorrowedNbtCompound<'_>) {
-        self.load_additional(nbt);
+        self.load_custom_only(nbt);
         let view: BorrowedNbtCompoundView<'_, '_> = nbt.into();
         let components = view
             .get("components")
@@ -527,12 +554,27 @@ pub trait BlockEntity: ErasedType + Send + Sync + 'static {
         self.base().set_components(components);
     }
 
+    /// Loads the entity's own data without changing its stored item components.
+    fn load_custom_only(&self, nbt: &BorrowedNbtCompound<'_>) {
+        self.load_additional(nbt);
+        let view: BorrowedNbtCompoundView<'_, '_> = nbt.into();
+        self.base().load_persistent_data(
+            view.compound(PERSISTENT_DATA_KEY)
+                .map_or_else(NbtCompound::new, |data| data.to_owned()),
+        );
+    }
+
     /// Saves only entity-specific data, excluding vanilla type and position metadata.
     fn save_custom_only(&self) -> NbtCompound {
         let mut nbt = NbtCompound::new();
         self.save_additional(&mut nbt);
         for key in ["id", "x", "y", "z"] {
             while nbt.remove(key).is_some() {}
+        }
+        while nbt.remove(PERSISTENT_DATA_KEY).is_some() {}
+        let persistent_data = self.base().persistent_data();
+        if !persistent_data.is_empty() {
+            nbt.insert(PERSISTENT_DATA_KEY, persistent_data);
         }
         nbt
     }
@@ -620,6 +662,14 @@ pub trait BlockEntity: ErasedType + Send + Sync + 'static {
     /// Return `None` if no client sync is needed.
     fn get_update_tag(&self) -> Option<NbtCompound> {
         None
+    }
+
+    /// Returns the update data safe for client packets.
+    fn get_client_update_tag(&self) -> Option<NbtCompound> {
+        self.get_update_tag().map(|mut tag| {
+            sanitize_block_entity_client_nbt(&mut tag);
+            tag
+        })
     }
 
     /// Called every game tick for ticking block entities.

@@ -2,6 +2,7 @@ use super::{
     Arc, BlockEntityTypeRef, BlockPos, CBlockDestruction, ChunkPos, DVec3, ItemEntity, ItemStack,
     NbtCompound, RegistryEntry, SectionPos, World,
 };
+use crate::block_entity::sanitize_block_entity_client_nbt;
 
 /// Generates a random value using triangle distribution.
 ///
@@ -63,6 +64,8 @@ impl World {
         // Get the block entity type ID from the registry
         let type_id = block_entity_type.id();
 
+        let mut nbt = nbt;
+        sanitize_block_entity_client_nbt(&mut nbt);
         let packet = CBlockEntityData {
             pos,
             block_entity_type: type_id as i32,

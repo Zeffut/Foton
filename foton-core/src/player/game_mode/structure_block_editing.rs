@@ -190,7 +190,7 @@ fn send_block_entity_update(
     pos: BlockPos,
     block_entity: &dyn BlockEntity,
 ) {
-    let Some(nbt) = block_entity.get_update_tag() else {
+    let Some(nbt) = block_entity.get_client_update_tag() else {
         return;
     };
     world.broadcast_block_entity_update(pos, block_entity.get_type(), nbt.clone());

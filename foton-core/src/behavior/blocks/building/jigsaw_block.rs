@@ -105,7 +105,7 @@ impl BlockBehavior for JigsawBlock {
         let Some(block_entity) = shared.downcast_ref::<JigsawBlockEntity>() else {
             return InteractionResult::Pass;
         };
-        let Some(nbt) = BlockEntity::get_update_tag(block_entity) else {
+        let Some(nbt) = BlockEntity::get_client_update_tag(block_entity) else {
             return InteractionResult::Pass;
         };
         player.send_packet(CBlockEntityData {

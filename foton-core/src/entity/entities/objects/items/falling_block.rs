@@ -26,6 +26,7 @@ use simdnbt::owned::{NbtCompound, NbtTag};
 
 use crate::behavior::blocks::{AnvilBlock, FallingBlock};
 use crate::behavior::{BLOCK_BEHAVIORS, BlockPlaceContext, Fallable};
+use crate::block_entity::BlockEntity;
 use crate::block_entity::block_state_nbt;
 use crate::entity::damage::DamageSource;
 use crate::entity::{
@@ -279,6 +280,13 @@ impl FallingBlockEntity {
             return;
         };
 
+        Self::merge_block_entity_data_into(block_entity.as_ref(), block_data);
+    }
+
+    pub(crate) fn merge_block_entity_data_into(
+        block_entity: &dyn BlockEntity,
+        block_data: NbtCompound,
+    ) {
         let mut merged = block_entity.save_custom_only();
         for (name, tag) in block_data {
             let name_text = name.to_string();
@@ -289,10 +297,13 @@ impl FallingBlockEntity {
         let mut bytes = Vec::new();
         merged.write(&mut bytes);
         let Ok(borrowed) = read_compound(&mut Cursor::new(bytes.as_slice())) else {
-            log::error!("failed to reborrow falling block entity data at {pos:?}");
+            log::error!(
+                "failed to reborrow falling block entity data at {:?}",
+                block_entity.get_block_pos()
+            );
             return;
         };
-        block_entity.load_additional(&borrowed);
+        block_entity.load_custom_only(&borrowed);
         block_entity.set_changed();
     }
 
