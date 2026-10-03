@@ -22,11 +22,13 @@ plugin to compile against Paper, load on Foton, and die later:
 
     python3 dev/plugin_link_check.py Some.jar [Other.jar ...]
     python3 dev/plugin_link_check.py Some.jar --provided-by packetevents.jar
+    python3 dev/plugin_link_check.py Some.jar --java-version 21
 
 Exits non-zero for detected mismatches in the known server-provided packages.
-This is a conservative static triage tool, not JVM verification: it does not
-interpret instructions, reflection, service loading, or optional dependency
-guards. References outside the known server packages are listed separately
+This is a conservative static triage tool, not JVM verification: it checks
+direct bytecode access opcodes, but not reflection, service loading, or
+optional dependency guards. References outside the known server packages are
+listed separately
 and require a real installed-dependency test before certification.
 
 Standard library only, like the rest of `dev/`.
@@ -47,8 +49,34 @@ DEFAULT_API = REPO / "plugin-api" / "build" / "foton-plugin-api.jar"
 DEFAULT_LIBS = REPO / "plugin-api" / "lib"
 
 ACC_STATIC = 0x0008
+ACC_PUBLIC = 0x0001
+ACC_PRIVATE = 0x0002
+ACC_PROTECTED = 0x0004
 ACC_INTERFACE = 0x0200
 ACC_ABSTRACT = 0x0400
+JAVA_VERSION = 25
+MAX_JAR_ENTRIES = 50_000
+MAX_JAR_BYTES = 256 * 1024 * 1024
+MAX_CENTRAL_DIRECTORY_BYTES = 32 * 1024 * 1024
+MAX_CLASS_COUNT = 50_000
+MAX_CLASS_SIZE = 16 * 1024 * 1024
+MAX_TOTAL_CLASS_BYTES = 512 * 1024 * 1024
+MAX_COMPRESSION_RATIO = 200
+
+ACCESS_OPCODES = {0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7, 0xb8, 0xb9}
+STATIC_OPCODES = {0xb2, 0xb3, 0xb8}
+FIELD_OPCODES = {0xb2, 0xb3, 0xb4, 0xb5}
+ONE_OPERAND = {0x10, 0x12, 0xa9, 0xbc, *range(0x15, 0x1a), *range(0x36, 0x3b)}
+TWO_OPERANDS = {
+    0x11, 0x13, 0x14, 0x84, *range(0x99, 0xa9), *range(0xb2, 0xb9),
+    0xbb, 0xbd, 0xc0, 0xc1, 0xc6, 0xc7,
+}
+THREE_OPERANDS = {0xc5}
+FOUR_OPERANDS = {0xb9, 0xba, 0xc8, 0xc9}
+HANDLE_OPCODE = {
+    1: 0xb4, 2: 0xb2, 3: 0xb5, 4: 0xb3,
+    5: 0xb6, 6: 0xb8, 7: 0xb7, 8: 0xb7, 9: 0xb9,
+}
 
 # What a Paper server puts on a plugin's class path without the plugin asking.
 # A reference into one of these that nothing resolves is a hole in Foton; a
@@ -84,9 +112,9 @@ JDK = ("java/", "jdk/", "sun/", "com/sun/", "org/w3c/", "org/xml/", "org/ietf/")
 class ClassInfo:
     """One class file, read far enough to answer linkage questions."""
 
-    __slots__ = ("name", "flags", "super", "interfaces", "members", "refs", "classes")
+    __slots__ = ("name", "flags", "super", "interfaces", "members", "refs", "calls", "classes")
 
-    def __init__(self, name, flags, super_name, interfaces, members, refs, classes):
+    def __init__(self, name, flags, super_name, interfaces, members, refs, calls, classes):
         self.name = name
         self.flags = flags
         self.super = super_name
@@ -95,6 +123,8 @@ class ClassInfo:
         self.members = members
         # [(tag, owner, name, descriptor)]
         self.refs = refs
+        # [(opcode, tag, owner, name, descriptor)] from actually used Code.
+        self.calls = calls
         # every class name the constant pool or a declared signature mentions
         self.classes = classes
 
@@ -127,7 +157,83 @@ def element_class(name):
     return None
 
 
-def read_class(data):
+def member_ref(pool, index):
+    entry = pool.get(index)
+    if entry is None or entry[0] not in (
+        usage.TAG_FIELDREF, usage.TAG_METHODREF, usage.TAG_INTERFACE_METHODREF
+    ):
+        raise ValueError(f"invalid member reference {index}")
+    owner_index, name_and_type_index = struct.unpack(">HH", entry[1])
+    owner = usage._class_name(pool, owner_index)
+    pair = pool.get(name_and_type_index)
+    if not owner or pair is None or pair[0] != usage.TAG_NAME_AND_TYPE:
+        raise ValueError(f"invalid member reference {index}")
+    name_index, descriptor_index = struct.unpack(">HH", pair[1])
+    name = usage._utf8(pool, name_index)
+    descriptor = usage._utf8(pool, descriptor_index)
+    if not name or not descriptor:
+        raise ValueError(f"invalid member reference {index}")
+    return entry[0], owner, name, descriptor
+
+
+def code_accesses(code, pool):
+    """Decode instruction boundaries; never mistake an operand for an opcode."""
+    accesses = []
+    offset = 0
+    while offset < len(code):
+        start = offset
+        opcode = code[offset]
+        offset += 1
+        if opcode in (0xaa, 0xab):  # tableswitch / lookupswitch
+            offset += (4 - offset % 4) % 4
+            if offset + 8 > len(code):
+                raise ValueError("truncated switch")
+            if opcode == 0xaa:
+                if offset + 12 > len(code):
+                    raise ValueError("truncated tableswitch")
+                low, high = struct.unpack_from(">ii", code, offset + 4)
+                count = high - low + 1
+                if count < 0 or count > (len(code) - offset - 12) // 4:
+                    raise ValueError("invalid tableswitch bounds")
+                offset += 12 + count * 4
+            else:
+                count = struct.unpack_from(">i", code, offset + 4)[0]
+                if count < 0 or count > (len(code) - offset - 8) // 8:
+                    raise ValueError("invalid lookupswitch bounds")
+                offset += 8 + count * 8
+            continue
+        if opcode == 0xc4:  # wide
+            if offset >= len(code):
+                raise ValueError("truncated wide instruction")
+            widened = code[offset]
+            if widened == 0x84:
+                offset += 5
+            elif widened in {*range(0x15, 0x1a), *range(0x36, 0x3b), 0xa9}:
+                offset += 3
+            else:
+                raise ValueError(f"invalid wide opcode {widened}")
+        elif opcode in ONE_OPERAND:
+            offset += 1
+        elif opcode in TWO_OPERANDS:
+            offset += 2
+        elif opcode in THREE_OPERANDS:
+            offset += 3
+        elif opcode in FOUR_OPERANDS:
+            offset += 4
+        elif opcode > 0xc9:
+            raise ValueError(f"reserved opcode {opcode}")
+        if offset > len(code):
+            raise ValueError(f"truncated instruction at {start}")
+        if opcode in ACCESS_OPCODES:
+            index = struct.unpack_from(">H", code, start + 1)[0]
+            tag, owner, name, descriptor = member_ref(pool, index)
+            if (opcode in FIELD_OPCODES) != (tag == usage.TAG_FIELDREF):
+                raise ValueError(f"wrong constant-pool kind at {start}")
+            accesses.append((opcode, tag, owner, name, descriptor))
+    return accesses
+
+
+def read_class(data, scan_code=True):
     pool, offset = usage._read_pool(data)
     flags, this_index, super_index, interface_count = struct.unpack_from(">HHHH", data, offset)
     offset += 8
@@ -137,8 +243,9 @@ def read_class(data):
         offset += 2
 
     members = {}
+    calls = []
     classes = set()
-    for _ in range(2):
+    for section in range(2):
         count = struct.unpack_from(">H", data, offset)[0]
         offset += 2
         for _ in range(count):
@@ -152,11 +259,29 @@ def read_class(data):
             attributes = struct.unpack_from(">H", data, offset)[0]
             offset += 2
             for _ in range(attributes):
+                attribute_name = usage._utf8(pool, struct.unpack_from(">H", data, offset)[0])
                 length = struct.unpack_from(">I", data, offset + 2)[0]
+                if offset + 6 + length > len(data):
+                    raise ValueError("truncated attribute")
+                if scan_code and section == 1 and attribute_name == "Code":
+                    if length < 8:
+                        raise ValueError("truncated Code attribute")
+                    code_length = struct.unpack_from(">I", data, offset + 10)[0]
+                    if code_length > length - 8:
+                        raise ValueError("truncated Code instructions")
+                    calls.extend(code_accesses(data[offset + 14:offset + 14 + code_length], pool))
                 offset += 6 + length
 
     refs = []
-    for tag, payload in pool.values():
+    for index, (tag, payload) in pool.items():
+        if tag == usage.TAG_METHOD_HANDLE:
+            kind, target_index = struct.unpack(">BH", payload)
+            opcode = HANDLE_OPCODE.get(kind)
+            if opcode is None:
+                raise ValueError(f"invalid method-handle reference kind {kind}")
+            ref_tag, owner, name, descriptor = member_ref(pool, target_index)
+            calls.append((opcode, ref_tag, owner, name, descriptor))
+            continue
         if tag == usage.TAG_CLASS:
             name = usage._utf8(pool, struct.unpack(">H", payload)[0])
             element = element_class(name) if name else None
@@ -165,16 +290,7 @@ def read_class(data):
             continue
         if tag not in (usage.TAG_FIELDREF, usage.TAG_METHODREF, usage.TAG_INTERFACE_METHODREF):
             continue
-        class_index, name_and_type_index = struct.unpack(">HH", payload)
-        owner = usage._class_name(pool, class_index)
-        entry = pool.get(name_and_type_index)
-        if not owner or not entry:
-            continue
-        name_index, descriptor_index = struct.unpack(">HH", entry[1])
-        name = usage._utf8(pool, name_index)
-        descriptor = usage._utf8(pool, descriptor_index)
-        if not name or not descriptor:
-            continue
+        _, owner, name, descriptor = member_ref(pool, index)
         owner = element_class(owner)
         if owner is None:
             continue
@@ -192,23 +308,124 @@ def read_class(data):
         [i for i in interfaces if i],
         members,
         refs,
+        calls,
         classes,
     )
 
 
-def read_jar(path):
+def check_entry_limits(entry, total):
+    if entry.file_size > MAX_CLASS_SIZE:
+        raise ValueError(f"class exceeds {MAX_CLASS_SIZE} bytes: {entry.filename}")
+    if entry.file_size and (
+        entry.compress_size == 0 or entry.file_size > entry.compress_size * MAX_COMPRESSION_RATIO
+    ):
+        raise ValueError(f"class compression ratio exceeds {MAX_COMPRESSION_RATIO}: {entry.filename}")
+    if total + entry.file_size > MAX_TOTAL_CLASS_BYTES:
+        raise ValueError("total decompressed class size exceeds limit")
+    return total + entry.file_size
+
+
+def check_jar_entry_count(count):
+    if count > MAX_JAR_ENTRIES:
+        raise ValueError(f"JAR exceeds {MAX_JAR_ENTRIES} entries")
+
+
+def preflight_archive(path):
+    """Bound ZIP metadata before zipfile allocates its central-directory map."""
+    size = path.stat().st_size
+    if size > MAX_JAR_BYTES:
+        raise ValueError(f"JAR exceeds {MAX_JAR_BYTES} bytes: {path}")
+    with path.open("rb") as source:
+        source.seek(max(0, size - (65_535 + 22)))
+        tail = source.read()
+    position = tail.rfind(b"PK\x05\x06")
+    while position >= 0:
+        if position + 22 <= len(tail):
+            fields = struct.unpack_from("<4sHHHHIIH", tail, position)
+            _, disk, directory_disk, disk_entries, count, directory_size, _, comment = fields
+            if position + 22 + comment == len(tail):
+                if disk or directory_disk or disk_entries != count or count == 0xffff:
+                    raise ValueError(f"multi-disk or ZIP64 JAR is unsupported: {path}")
+                check_jar_entry_count(count)
+                if directory_size > MAX_CENTRAL_DIRECTORY_BYTES:
+                    raise ValueError(f"JAR central directory exceeds limit: {path}")
+                return
+        position = tail.rfind(b"PK\x05\x06", 0, position)
+    raise ValueError(f"JAR has no valid end-of-central-directory record: {path}")
+
+
+def read_bounded(archive, entry, limit):
+    data = bytearray()
+    with archive.open(entry) as source:
+        while chunk := source.read(65_536):
+            if len(data) + len(chunk) > limit:
+                raise ValueError(f"entry exceeds decompression limit: {entry.filename}")
+            data.extend(chunk)
+    return bytes(data)
+
+
+def multi_release_enabled(archive, entries):
+    manifest = entries.get("META-INF/MANIFEST.MF")
+    if manifest is None:
+        return False
+    if manifest.file_size > 65_536:
+        raise ValueError("JAR manifest exceeds limit")
+    text = read_bounded(archive, manifest, 65_536).decode("utf-8", errors="replace")
+    unfolded = text.replace("\r\n", "\n").replace("\n ", "")
+    main_section = unfolded.split("\n\n", 1)[0]
+    return any(line.lower().strip() == "multi-release: true" for line in main_section.splitlines())
+
+
+def read_jar(path, scan_code=True, java_version=JAVA_VERSION):
+    if not 9 <= java_version <= JAVA_VERSION:
+        raise ValueError(f"unsupported Java target {java_version}; supported range is 9..{JAVA_VERSION}")
+    preflight_archive(path)
     classes = {}
     with zipfile.ZipFile(path) as archive:
-        for entry in archive.namelist():
-            if not entry.endswith(".class") or entry.startswith("META-INF/"):
+        infos = archive.infolist()
+        check_jar_entry_count(len(infos))
+        entries = {}
+        for entry in infos:
+            if entry.filename in entries:
+                raise ValueError(f"duplicate archive entry {entry.filename} in {path}")
+            entries[entry.filename] = entry
+        multi_release = multi_release_enabled(archive, entries)
+        selected = {}
+        for name, entry in entries.items():
+            if not name.endswith(".class"):
                 continue
+            version = 0
+            logical = name
+            if name.startswith("META-INF/versions/"):
+                parts = name.split("/", 3)
+                if len(parts) != 4 or not parts[2].isdigit() or int(parts[2]) < 9:
+                    raise ValueError(f"malformed multi-release class entry {name} in {path}")
+                if not multi_release:
+                    continue  # Java ignores versioned classes without the manifest flag.
+                version = int(parts[2])
+                logical = parts[3]
+                if version > java_version:
+                    continue
+            elif name.startswith("META-INF/"):
+                continue
+            if logical == "module-info.class":
+                continue  # Classpath loading does not define the module descriptor.
+            previous = selected.get(logical)
+            if previous is None or previous[0] < version:
+                selected[logical] = (version, entry)
+        if len(selected) > MAX_CLASS_COUNT:
+            raise ValueError(f"JAR exceeds {MAX_CLASS_COUNT} selected classes: {path}")
+        total = 0
+        for logical, (_, entry) in selected.items():
+            total = check_entry_limits(entry, total)
             try:
-                info = read_class(archive.read(entry))
-            except (usage.NotAClassFile, struct.error, KeyError, IndexError, ValueError) as error:
-                raise ValueError(f"unreadable class {entry} in {path}: {error}") from error
-            if info.name != entry[:-6]:
-                raise ValueError(f"class name {info.name!r} does not match entry {entry} in {path}")
-            classes.setdefault(info.name, info)
+                info = read_class(read_bounded(archive, entry, MAX_CLASS_SIZE), scan_code)
+            except (usage.NotAClassFile, struct.error, KeyError, IndexError, ValueError,
+                    zipfile.BadZipFile, EOFError) as error:
+                raise ValueError(f"unreadable class {entry.filename} in {path}: {error}") from error
+            if info.name != logical[:-6]:
+                raise ValueError(f"class name {info.name!r} does not match entry {entry.filename} in {path}")
+            classes[info.name] = info
     return classes
 
 
@@ -223,6 +440,39 @@ class World:
 
     def find(self, name):
         return self.classes.get(name)
+
+    def resolve(self, owner, signature, field, seen=None):
+        """Return the declaring type/flags, not merely a Boolean hit."""
+        seen = seen if seen is not None else set()
+        if owner in seen:
+            return None
+        seen.add(owner)
+        info = self.find(owner)
+        if info is None:
+            return None
+        access = info.members.get(signature)
+        if access is not None:
+            return owner, access
+        parents = [*info.interfaces, info.super] if field else [info.super, *info.interfaces]
+        for parent in parents:
+            if parent:
+                found = self.resolve(parent, signature, field, seen)
+                if found is not None:
+                    return found
+        return None
+
+    def is_subclass(self, name, ancestor, seen=None):
+        if name == ancestor:
+            return True
+        seen = seen if seen is not None else set()
+        if name in seen:
+            return False
+        seen.add(name)
+        info = self.find(name)
+        return info is not None and any(
+            self.is_subclass(parent, ancestor, seen)
+            for parent in [info.super, *info.interfaces] if parent
+        )
 
     def _jdk_has(self, name, signature):
         """A JDK class this tool does not model; only the common members are known."""
@@ -289,7 +539,7 @@ class World:
         for signature, access in info.members.items():
             if "(" not in signature or signature.startswith("<"):
                 continue
-            if access & ACC_STATIC:
+            if access & (ACC_STATIC | ACC_PRIVATE):
                 continue
             if access & ACC_ABSTRACT:
                 out.setdefault(signature, name)
@@ -309,8 +559,10 @@ class World:
             # signatures known to exist in the JDK can satisfy a contract.
             return name.startswith("java/") and self._jdk_has(name, signature) is True
         access = info.members.get(signature)
-        if access is not None and not access & ACC_ABSTRACT:
-            return True
+        if access is not None:
+            # An abstract redeclaration masks inherited bodies; a static or
+            # private same-named method cannot implement the contract.
+            return not access & (ACC_ABSTRACT | ACC_STATIC | ACC_PRIVATE)
         for parent in [info.super, *info.interfaces]:
             if parent and self.concrete(parent, signature, seen):
                 return True
@@ -327,6 +579,31 @@ def is_jdk(name):
     return name.startswith(JDK) or (name.startswith("javax/") and not name.startswith("javax/inject/"))
 
 
+def package_of(name):
+    return name.rpartition("/")[0]
+
+
+def access_problem(world, caller, owner, declarer, flags, opcode):
+    """Return a failure category, or None for an access proven legal."""
+    for class_name in (owner, declarer):
+        info = world.find(class_name)
+        if info is not None and not info.flags & ACC_PUBLIC and package_of(caller) != package_of(class_name):
+            return "inaccessible class"
+    if flags & ACC_PUBLIC:
+        return None
+    if flags & ACC_PRIVATE:
+        return None if caller == declarer else "inaccessible member"
+    if package_of(caller) == package_of(declarer):
+        return None
+    if not flags & ACC_PROTECTED or not world.is_subclass(caller, declarer):
+        return "inaccessible member"
+    if opcode in STATIC_OPCODES or opcode == 0xb7:
+        return None
+    # Java's cross-package protected instance rule also constrains the
+    # receiver type. This static pass has not modeled the operand stack.
+    return "protected receiver needs runtime verification"
+
+
 def check(plugin_path, world, plugin_classes):
     problems = collections.defaultdict(set)
     external = collections.Counter()
@@ -336,7 +613,15 @@ def check(plugin_path, world, plugin_classes):
             if name.startswith(INTERNAL):
                 internal.add(name)
                 continue
-            if world.find(name) or is_jdk(name):
+            target_class = world.find(name)
+            if target_class is not None:
+                if (served(name) and not target_class.flags & ACC_PUBLIC
+                        and package_of(info.name) != package_of(name)):
+                    problems["inaccessible class"].add(
+                        f"{name}  (named by {info.name})"
+                    )
+                continue
+            if is_jdk(name):
                 continue
             if served(name):
                 problems["missing class"].add(f"{name}  (named by {info.name})")
@@ -344,12 +629,15 @@ def check(plugin_path, world, plugin_classes):
                 external[name.rsplit("/", 1)[0]] += 1
 
         for tag, owner, member, descriptor in info.refs:
-            if owner in plugin_classes or owner.startswith(INTERNAL) or not served(owner):
+            if owner.startswith(INTERNAL) or not (served(owner) or owner in plugin_classes):
                 continue
             target = world.find(owner)
             if target is None:
                 continue  # already reported as a missing class
             signature = f"{member}{descriptor}"
+            resolved = world.resolve(owner, signature, tag == usage.TAG_FIELDREF)
+            if owner in plugin_classes and (resolved is None or not served(resolved[0])):
+                continue
             if tag == usage.TAG_INTERFACE_METHODREF and not target.is_interface:
                 problems["called as an interface, declared a class"].add(f"{owner}#{signature}")
             if tag == usage.TAG_METHODREF and target.is_interface:
@@ -361,6 +649,24 @@ def check(plugin_path, world, plugin_classes):
             if found is False:
                 problems["missing member"].add(f"{owner}#{signature}")
 
+        for opcode, tag, owner, member, descriptor in info.calls:
+            if owner.startswith(INTERNAL) or not (served(owner) or owner in plugin_classes):
+                continue
+            signature = f"{member}{descriptor}"
+            resolved = world.resolve(owner, signature, opcode in FIELD_OPCODES)
+            if resolved is None:
+                continue  # missing member above, or an unmodeled JDK ancestor.
+            declarer, flags = resolved
+            if not served(declarer):
+                continue
+            if bool(opcode in STATIC_OPCODES) != bool(flags & ACC_STATIC):
+                problems["wrong static kind"].add(f"{owner}#{signature}")
+            access = access_problem(world, info.name, owner, declarer, flags, opcode)
+            if access:
+                problems[access].add(f"{owner}#{signature}  (called by {info.name})")
+
+        if info.flags & ACC_ABSTRACT:
+            continue
         for parent in [info.super, *info.interfaces]:
             if not parent or not served(parent):
                 continue
@@ -380,6 +686,7 @@ def main():
     parser.add_argument("plugins", nargs="+", type=pathlib.Path)
     parser.add_argument("--api", type=pathlib.Path, default=DEFAULT_API)
     parser.add_argument("--libs", type=pathlib.Path, default=DEFAULT_LIBS)
+    parser.add_argument("--java-version", type=int, default=JAVA_VERSION)
     parser.add_argument(
         "--provided-by",
         type=pathlib.Path,
@@ -391,13 +698,15 @@ def main():
 
     if not args.api.is_file():
         raise SystemExit(f"no API jar at {args.api}; run dev/build-plugin-api.sh")
-    layers = [read_jar(args.api)]
-    layers += [read_jar(jar) for jar in sorted(args.libs.glob("*.jar"))]
-    layers += [read_jar(jar) for jar in args.provided_by]
+    layers = [read_jar(args.api, scan_code=False, java_version=args.java_version)]
+    layers += [read_jar(jar, scan_code=False, java_version=args.java_version)
+               for jar in sorted(args.libs.glob("*.jar"))]
+    layers += [read_jar(jar, scan_code=False, java_version=args.java_version)
+               for jar in args.provided_by]
 
     failed = False
     for plugin in args.plugins:
-        plugin_classes = read_jar(plugin)
+        plugin_classes = read_jar(plugin, java_version=args.java_version)
         if not plugin_classes:
             raise SystemExit(f"no readable plugin classes in {plugin}")
         # The plugin's own classes come first: a shaded Gson answers for itself.
