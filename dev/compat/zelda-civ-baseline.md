@@ -159,6 +159,35 @@ requires the complete suite on its exact revision.
 The original Linux `/tmp` integration logs are no longer present; the execution
 record retains the stage outcomes. Subsequent detailed logs are retained in
 Windows TEMP or the ignored plan workspace, outside the volatile Linux `/tmp`.
-The next active slice is native brewing lock enforcement and persistence;
-complete tile PDC, container transfer, holder snapshots and Java BrewEvent
-remain outstanding. Neither Zelda nor Voice Chat is certified.
+At that point, the next slice was native brewing lock enforcement and
+persistence. Neither Zelda nor Voice Chat was certified.
+
+## Reviewed native foundations and complete integration
+
+Native typed brewing locks (`4b3899c87`) and tile PDC lifecycle/client filtering
+(`d1dd7ce1c`) passed their independent spec and quality reviews. Lock tests cover
+real opening/denial and the corrected five-slot brewing menu layout. PDC tests
+cover normal/raw/falling persistence and real chunk-update preparation, with
+all seven current client-egress routes using the same sanitizer. Live editor
+packet capture and world-backed dirty/restart scenarios remain later holder
+integration gates; these native tests do not certify the full Java holder.
+
+A new complete `bash dev/ci.sh` run on frozen `f1ca5e71e`, with the generated
+test inventory refreshed to **5,687 tests across 20 targets**, exited0 and
+reported **ALL GREEN**. Every stage passed: formatting/spelling, config/site,
+strict release workspace Clippy with all targets/features, workspace tests,
+Java API, official Paper recipe/enchantment/SQLite fixtures, runtime closure,
+packaging/installers, native/JNI checks, test inventory and developer tooling.
+Durable stage output is in the ignored compatibility-plan workspace at
+`native-wave-ci-20261003.log`; this is one completed full integration run, not
+the earlier combined stabilization. It is not a new unchanged-Zelda boot or
+an armor/Via gameplay result.
+
+The user's armor requirement is mapped in [the armor plan](zelda-armor-plan.md).
+An isolated official Paper132 oracle completed111 observations and97 verifier
+checks for full item/meta transitions and PDC semantics; the [live item design]
+(item-state-bridge-plan.md) records the results and evidence location. Native
+canonical item ownership is the next implementation prerequisite. Complete
+PDC API, trim/attributes, persistent chestplate bytes, real armor events,
+container transfer/holder/BrewEvent and the CraftPlayer/Voice Chat bridges
+remain open. **No plugin is certified yet.**
