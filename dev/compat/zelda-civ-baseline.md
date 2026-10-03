@@ -173,7 +173,7 @@ packet capture and world-backed dirty/restart scenarios remain later holder
 integration gates; these native tests do not certify the full Java holder.
 
 A new complete `bash dev/ci.sh` run on frozen `f1ca5e71e`, with the generated
-test inventory refreshed to **5,687 tests across 20 targets**, exited0 and
+test inventory refreshed to **5,687 tests across 20 targets**, exited 0 and
 reported **ALL GREEN**. Every stage passed: formatting/spelling, config/site,
 strict release workspace Clippy with all targets/features, workspace tests,
 Java API, official Paper recipe/enchantment/SQLite fixtures, runtime closure,
@@ -184,9 +184,9 @@ the earlier combined stabilization. It is not a new unchanged-Zelda boot or
 an armor/Via gameplay result.
 
 The user's armor requirement is mapped in [the armor plan](zelda-armor-plan.md).
-An isolated official Paper132 oracle completed111 observations and97 verifier
-checks for full item/meta transitions and PDC semantics; the [live item design]
-(item-state-bridge-plan.md) records the results and evidence location. Native
+An isolated official Paper 132 oracle completed 111 observations and 97 verifier
+checks for full item/meta transitions and PDC semantics; the
+[live item design](item-state-bridge-plan.md) records the results and evidence location. Native
 canonical item ownership is the next implementation prerequisite. Complete
 PDC API, trim/attributes, persistent chestplate bytes, real armor events,
 container transfer/holder/BrewEvent and the CraftPlayer/Voice Chat bridges
