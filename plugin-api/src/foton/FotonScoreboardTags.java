@@ -47,7 +47,8 @@ final class FotonScoreboardTags extends AbstractSet<String> {
     }
 
     @Override public Iterator<String> iterator() {
-        // JNI supplies a snapshot, not Paper's fail-fast iterator; removals write through.
+        // JNI supplies a snapshot; Paper iterates its live ObjectOpenHashSet.
+        // Iterator removals still write through to native entity state.
         String[] tags = snapshot();
         return new Iterator<>() {
             private int index;
