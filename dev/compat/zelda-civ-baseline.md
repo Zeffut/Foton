@@ -25,6 +25,7 @@ from its Modrinth 2.6.20 release. The Paper builds are pinned in
 | Paper 26.2 build 129 | 25 | With both JARs, Voice Chat enabled, but Zelda failed during `onEnable` with `NoSuchMethodError: BookMeta.pages(List)` in `LivreCuisine.creer`. This is a Paper version/API mismatch, not a Foton-specific failure. |
 | Foton `4982ede6d72c4711d36b713d3ae3c04d969f2aa2`, Minecraft 26.2 | 21 | With both JARs, Voice Chat rejected Foton's version and could not find its expected server adapter `getServer`; Zelda then failed to discover its shaded SQLite driver through `DriverManager`; cleanup exposed missing `Entity.getScoreboardTags()`. Foton itself stopped cleanly. |
 | Foton `c964da1ac98c9bfdeb4b0d2936e70bbdef3be779`, Minecraft 26.2 | 21 | With the unchanged pair, SQLite initialized Zelda's databases (`zones.db` and `players.db`), then Zelda failed with `NoSuchFieldError: CreatureSpawnEvent$SpawnReason.BEEHIVE` in `VanillaSuppressor`. Voice Chat still rejected the Foton version and reflective `getServer`. Neither plugin enabled; no commands, delayed tasks or client behavior were tested. Foton stopped cleanly. |
+| Foton `4f4b18e3c44b8ac8f42b3cebe42c7fb689a747ac`, Minecraft 26.2 | 21 | SQLite and the BEEHIVE class initialization pass. Zelda next fails with `NoClassDefFoundError: org/bukkit/event/enchantment/PrepareItemEnchantEvent` while registering `VanillaSuppressor`. Voice Chat recognizes `26.2.build.0-foton`, then fails on reflective `FotonServer.getServer`. Neither plugin enabled. Foton saved the fresh world and stopped with exit 0. |
 
 The Paper 1.21.11 control log has SHA-256
 `4df833cb79abce77f162b394df594c5b11410bac98bdaa6351311cec960cb721`.
@@ -39,6 +40,14 @@ The later Foton run is recorded separately under
 `%TEMP%/Foton-Zelda-Foton-postfix-3c324d63-20261003-c36eeffc8ade4836852b92252b70a69c/baseline-report.md`;
 its binary SHA-256 is
 `f547a1f711ba8dfb61dc28f10863a4412b9df87656bd35bef56dade5f8d550b7`.
+The book/beehive baseline is retained under
+`%TEMP%/Foton-Zelda-Foton-books-4f4b18e3c-20261003/baseline-report.md`.
+Its frozen binary SHA-256 is
+`6591e930c04d1267e69998de08e88003902f75bbd26b1d13422fe580f1448eb8`,
+and Java stderr SHA-256 is
+`65c377ec308ba3879e9436de130bb26a5015bc71173d34ab1cc18889c7ba29da`.
+This no-client run does not validate the channel registration path; a separate
+review found an invalid NUL-splitting regex in that snapshot.
 
 ## Acceptance path
 
@@ -61,6 +70,9 @@ its binary SHA-256 is
    Repeat each scenario on both Paper 1.21.11 and Foton. The static linkage
    scan reported 238 references after MiniMessage was packaged, but this is
    diagnostic only and omits reflective/runtime interactions.
+   The current boot blocker, `PrepareItemEnchantEvent`, must be emitted by the
+   real enchanting table and apply cancellation/offer changes: Zelda's pinned
+   listener cancels preparation unless the player has `zeldaciv.bypass`.
 
 The compatibility target is the *unchanged pinned Zelda JAR*, not a promise
 that every version of every plugin works. A newer Zelda commit requires a new
