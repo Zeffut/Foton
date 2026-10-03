@@ -37,6 +37,7 @@ use crate::entity::entities::BeeEntity;
 use crate::entity::{
     AgeableMob, Animal, ENTITIES, Entity, Mob, RemovalReason, SharedEntity, next_entity_id,
 };
+use crate::event::CreatureSpawnEvent;
 use crate::player::Player;
 use crate::world::game_event::GameEventContext;
 use crate::world::{LevelReader, World};
@@ -586,6 +587,23 @@ fn release_occupant(
     bee.set_no_gravity(true);
     set_bee_release_data(occupant.ticks_in_hive, bee);
 
+    // Paper assigns BEEHIVE to this fresh insertion. Keep the bee pending so
+    // event listeners can resolve and inspect it before it enters the world.
+    let mut spawn_event = CreatureSpawnEvent::new(
+        entity.uuid(),
+        world.key.to_string(),
+        spawn.x,
+        spawn.y,
+        spawn.z,
+        "Beehive".to_owned(),
+    );
+    world.begin_pending_spawn(Arc::clone(&entity));
+    world.fire_event(&mut spawn_event);
+    world.end_pending_spawn(&entity.uuid());
+    if spawn_event.is_cancelled() || world.try_add_entity(Arc::clone(&entity)).is_err() {
+        return None;
+    }
+
     if release_status == BeeReleaseStatus::HoneyDelivered {
         bee.drop_off_nectar();
         raise_honey_level(world, pos, block_state);
@@ -606,9 +624,6 @@ fn release_occupant(
         &GameEventContext::new(Some(bee), None),
     );
 
-    if world.try_add_entity(Arc::clone(&entity)).is_err() {
-        return None;
-    }
     Some(entity)
 }
 

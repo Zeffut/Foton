@@ -22,7 +22,7 @@ use foton_registry::{
     vanilla_blocks, vanilla_dimension_types, vanilla_entities, vanilla_game_rules::RESPAWN_RADIUS,
     vanilla_items,
 };
-use foton_utils::{BlockPos, ChunkPos, types::UpdateFlags};
+use foton_utils::{BlockPos, ChunkPos, Downcast as _, types::UpdateFlags};
 use foton_utils::{codec::VarInt, serial::ReadFrom, text::DisplayResolutor};
 use glam::DVec3;
 use text_components::TextComponent;
@@ -35,6 +35,8 @@ use tokio::{
 use uuid::Uuid;
 
 use crate::behavior::{blocks::PistonBaseBlock, init_behaviors};
+use crate::block_entity::entities::{BeeReleaseStatus, BeehiveBlockEntity};
+use crate::block_entity::init_block_entities;
 use crate::chunk_saver::registry::WorldStorageRegistry;
 use crate::command::execution::{
     CommandArgumentSource, CommandExecutionContext, CommandPermissionSource, CommandResultCallback,
@@ -44,7 +46,11 @@ use crate::command::functions::FunctionManager;
 use crate::command::rcon::RconOutput;
 use crate::command::sender::{CommandExecutionOwner, CommandSender};
 use crate::config::{ResolvedDomainConfig, RuntimeConfig, StorageSelection};
-use crate::entity::{DEFAULT_MAX_AIR_SUPPLY, Entity, EntityBase, LivingEntity as _, SharedEntity};
+use crate::entity::entities::BeeEntity;
+use crate::entity::{
+    DEFAULT_MAX_AIR_SUPPLY, Entity, EntityBase, LivingEntity as _, SharedEntity, init_entities,
+    next_entity_id,
+};
 use crate::permission::{
     OP_GROUP, PermissionEntry, PermissionExpr, PermissionGroupConfig, PermissionGroupManager,
     PermissionGroupsConfig, PermissionKey, PermissionMetadataSet, PermissionSet,
@@ -81,7 +87,8 @@ use super::{
 };
 use crate::boss_event::custom::DomainCustomBossEvents;
 use crate::event::{
-    BlockBreakEvent, EventBus, PistonEvent, PlayerChatEvent, PlayerJoinEvent, PlayerLoginAbortEvent,
+    BlockBreakEvent, CreatureSpawnEvent, EventBus, PistonEvent, PlayerChatEvent, PlayerJoinEvent,
+    PlayerLoginAbortEvent,
 };
 use crate::player::game_mode::block_breaking::BlockBreakAction;
 use crate::test_support::init_test_logger;
@@ -361,6 +368,188 @@ async fn test_server_with_worlds(
         events: EventBus::new(),
         pending_domain_switches: SyncMutex::new(Vec::new()),
     }))
+}
+
+fn put_nectar_bee_in_hive(world: &Arc<World>, hive: &BeehiveBlockEntity, pos: BlockPos) {
+    let bee = Arc::new(BeeEntity::new(
+        &vanilla_entities::BEE,
+        next_entity_id(),
+        DVec3::new(
+            f64::from(pos.x()) + 0.5,
+            f64::from(pos.y()) + 1.0,
+            f64::from(pos.z()) + 0.5,
+        ),
+        Arc::downgrade(world),
+    ));
+    world
+        .try_add_entity(Arc::clone(&bee) as SharedEntity)
+        .unwrap_or_else(|error| panic!("bee should enter the world: {error:?}"));
+    bee.set_has_nectar(true);
+    hive.add_occupant(bee.as_ref());
+    assert_eq!(hive.occupant_count(), 1);
+}
+
+#[test]
+fn cancelled_beehive_spawn_keeps_nectar_until_an_accepted_release() {
+    foton_registry::init_vanilla_registry();
+    init_block_entities();
+    init_entities();
+    let world = fresh_test_world("cancelled_beehive_spawn");
+    let runtime = Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap_or_else(|error| panic!("test runtime should initialize: {error}"));
+    runtime.block_on(async {
+        let storage_root = test_storage_root("cancelled-beehive-spawn");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("test server should initialize: {error}"));
+        server.attach_worlds();
+
+        let pos = BlockPos::new(8, 64, 8);
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(pos));
+        assert!(world.set_block(
+            pos,
+            vanilla_blocks::BEEHIVE.default_state(),
+            UpdateFlags::UPDATE_ALL
+        ));
+        let block_entity = world
+            .get_block_entity(pos)
+            .unwrap_or_else(|| panic!("hive should exist"));
+        let hive = block_entity
+            .downcast_ref::<BeehiveBlockEntity>()
+            .unwrap_or_else(|| panic!("block entity should be a hive"));
+        put_nectar_bee_in_hive(&world, hive, pos);
+
+        let reject = Arc::new(AtomicBool::new(true));
+        let seen = Arc::new(AtomicUsize::new(0));
+        let reject_for_event = Arc::clone(&reject);
+        let seen_for_event = Arc::clone(&seen);
+        let world_for_event = Arc::clone(&world);
+        server.events.on::<CreatureSpawnEvent, _>(
+            Identifier::new_static("test", "beehive_spawn"),
+            move |event| {
+                assert_eq!(event.reason(), "Beehive");
+                let pending = world_for_event
+                    .get_entity_by_uuid(&event.entity())
+                    .unwrap_or_else(|| panic!("listener should resolve pending bee"));
+                let pending_bee = pending
+                    .downcast_ref::<BeeEntity>()
+                    .unwrap_or_else(|| panic!("pending entity should be a bee"));
+                assert!(pending_bee.has_nectar(), "nectar remains during the event");
+                seen_for_event.fetch_add(1, Ordering::SeqCst);
+                event.set_cancelled(reject_for_event.load(Ordering::SeqCst));
+            },
+        );
+
+        let state = world.get_block_state(pos);
+        hive.empty_all_living_from_hive(None, state, BeeReleaseStatus::HoneyDelivered);
+        assert_eq!(seen.load(Ordering::SeqCst), 1);
+        assert_eq!(hive.occupant_count(), 1, "cancelled bee stays inside");
+        assert_eq!(
+            world
+                .get_block_state(pos)
+                .get_value(&BlockStateProperties::LEVEL_HONEY),
+            0
+        );
+
+        reject.store(false, Ordering::SeqCst);
+        hive.empty_all_living_from_hive(None, state, BeeReleaseStatus::HoneyDelivered);
+        assert_eq!(seen.load(Ordering::SeqCst), 2);
+        assert!(hive.is_empty());
+        assert!(
+            world
+                .get_block_state(pos)
+                .get_value(&BlockStateProperties::LEVEL_HONEY)
+                > 0
+        );
+
+        drop(server);
+        fs::remove_dir_all(&storage_root)
+            .await
+            .unwrap_or_else(|error| panic!("test storage should be removed: {error}"));
+    });
+}
+
+#[test]
+fn beehive_keeps_occupant_when_spawn_chunk_is_not_ready() {
+    foton_registry::init_vanilla_registry();
+    init_block_entities();
+    init_entities();
+    let world = fresh_test_world("beehive_spawn_chunk_not_ready");
+    let runtime = Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap_or_else(|error| panic!("test runtime should initialize: {error}"));
+    runtime.block_on(async {
+        let storage_root = test_storage_root("beehive-spawn-chunk-not-ready");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("test server should initialize: {error}"));
+        server.attach_worlds();
+
+        let pos = BlockPos::new(15, 64, 8);
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(pos));
+        let state = vanilla_blocks::BEEHIVE
+            .default_state()
+            .set_value(&BlockStateProperties::HORIZONTAL_FACING, Direction::East);
+        assert!(world.set_block(pos, state, UpdateFlags::UPDATE_ALL));
+        let block_entity = world
+            .get_block_entity(pos)
+            .unwrap_or_else(|| panic!("hive should exist"));
+        let hive = block_entity
+            .downcast_ref::<BeehiveBlockEntity>()
+            .unwrap_or_else(|| panic!("block entity should be a hive"));
+        put_nectar_bee_in_hive(&world, hive, pos);
+
+        let seen = Arc::new(AtomicUsize::new(0));
+        let seen_for_event = Arc::clone(&seen);
+        server.events.on::<CreatureSpawnEvent, _>(
+            Identifier::new_static("test", "beehive_unloaded_spawn"),
+            move |event| {
+                assert_eq!(event.reason(), "Beehive");
+                seen_for_event.fetch_add(1, Ordering::SeqCst);
+            },
+        );
+
+        hive.empty_all_living_from_hive(None, state, BeeReleaseStatus::HoneyDelivered);
+        assert_eq!(seen.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            hive.occupant_count(),
+            1,
+            "failed insertion retains occupant"
+        );
+        assert_eq!(
+            world
+                .get_block_state(pos)
+                .get_value(&BlockStateProperties::LEVEL_HONEY),
+            0
+        );
+
+        insert_ready_full_chunk(&world, ChunkPos::from_block_pos(pos.east()));
+        hive.empty_all_living_from_hive(None, state, BeeReleaseStatus::HoneyDelivered);
+        assert_eq!(seen.load(Ordering::SeqCst), 2);
+        assert!(hive.is_empty());
+        assert!(
+            world
+                .get_block_state(pos)
+                .get_value(&BlockStateProperties::LEVEL_HONEY)
+                > 0
+        );
+
+        drop(server);
+        fs::remove_dir_all(&storage_root)
+            .await
+            .unwrap_or_else(|error| panic!("test storage should be removed: {error}"));
+    });
 }
 
 #[test]
