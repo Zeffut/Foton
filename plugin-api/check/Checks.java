@@ -16,6 +16,7 @@ public final class Checks {
         InventoryViewCheck.check();
         foton.CustomInventoryCheck.check();
         Items.check();
+        ShapelessRecipeParity.check();
         Colors.check();
         Commands.check();
         Scoreboards.check();
