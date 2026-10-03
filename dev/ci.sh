@@ -85,6 +85,7 @@ run "POSIX installer transactions"                bash dev/install-test.sh
 # unregistered and the first plugin to call it takes an
 # UnsatisfiedLinkError. Neither shows up in a build.
 run "every native is registered"                   "$PY" dev/check-natives.py --quiet
+run "event JNI descriptors and arguments"          "$PY" dev/check-event-bridge.py --quiet
 run "test counts are current"                      "$PY" dev/count-tests.py --check
 # Four test files sat in dev/ that nothing ran, which is the same shape as the
 # clippy note above: the checks existed and nobody was reading them.

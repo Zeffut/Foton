@@ -1098,7 +1098,7 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
         let result = env.call_static_method(
             BRIDGE,
             "fireBlockExp",
-            "(Ljava/lang/String;IIILjava/lang/String;)Ljava/lang/String;",
+            "(Ljava/lang/String;IIII)Ljava/lang/String;",
             &[
                 JValue::Object(&world),
                 JValue::Int(event.position().x()),
@@ -1494,7 +1494,7 @@ fn crafter_craft_call(
         BRIDGE,
         "fireCrafterCraft",
         "(Ljava/lang/String;IIILjava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
-        &[JValue::Object(&world), JValue::from(position.x()), JValue::from(position.y()), JValue::from(position.z()), JValue::Object(&recipe), JValue::Object(&result), JValue::Object(&remaining)],
+        &[JValue::Object(&world), JValue::Int(position.x()), JValue::Int(position.y()), JValue::Int(position.z()), JValue::Object(&recipe), JValue::Object(&result), JValue::Object(&remaining)],
     ).ok()?.l().ok().and_then(|value| {
         let binding = JString::from(value);
         let text = env.get_string(&binding).ok()?;
@@ -1767,7 +1767,27 @@ fn entity_portal_call(vm: &JavaVM, event: &EntityPortalEvent) -> Option<(String,
     };
     let from = event.from_position();
     let to = event.to_position();
-    let value=env.call_static_method(BRIDGE, "fireEntityPortal", "(Ljava/lang/String;Ljava/lang/String;DDDDLjava/lang/String;DDDDLjava/lang/String;)Ljava/lang/String;", &[JValue::Object(&entity),JValue::Object(&from_world),JValue::Double(from.x),JValue::Double(from.y),JValue::Double(from.z),JValue::Object(&to_world),JValue::Double(to.x),JValue::Double(to.y),JValue::Double(to.z),JValue::Object(&portal_type)]).ok()?.l().ok()?;
+    let value = env
+        .call_static_method(
+            BRIDGE,
+            "fireEntityPortal",
+            "(Ljava/lang/String;Ljava/lang/String;DDDLjava/lang/String;DDDLjava/lang/String;)Ljava/lang/String;",
+            &[
+                JValue::Object(&entity),
+                JValue::Object(&from_world),
+                JValue::Double(from.x),
+                JValue::Double(from.y),
+                JValue::Double(from.z),
+                JValue::Object(&to_world),
+                JValue::Double(to.x),
+                JValue::Double(to.y),
+                JValue::Double(to.z),
+                JValue::Object(&portal_type),
+            ],
+        )
+        .ok()?
+        .l()
+        .ok()?;
     let text: String = env.get_string((&value).into()).ok()?.into();
     if text == "!" {
         return None;
@@ -1803,7 +1823,7 @@ fn pre_creature_spawn_call(
     env.call_static_method(
         BRIDGE,
         "firePreCreatureSpawn",
-        "(Ljava/lang/String;DDDDLjava/lang/String;Ljava/lang/String;)Z",
+        "(Ljava/lang/String;DDDLjava/lang/String;Ljava/lang/String;)Z",
         &[
             JValue::Object(&world),
             JValue::Double(x),
@@ -3306,25 +3326,28 @@ fn spawn_location_call_named(
         world, position[0], position[1], position[2], rotation.0, rotation.1
     );
     let encoded = env.new_string(encoded).ok()?;
-    let signature = if method == "firePlayerRespawn" {
-        "(Ljava/lang/String;Ljava/lang/String;Z)Ljava/lang/String;"
+    let value = if method == "firePlayerRespawn" {
+        env.call_static_method(
+            BRIDGE,
+            "firePlayerRespawn",
+            "(Ljava/lang/String;Ljava/lang/String;Z)Ljava/lang/String;",
+            &[
+                JValue::Object(&uuid),
+                JValue::Object(&encoded),
+                JValue::Bool(anchor_spawn.into()),
+            ],
+        )
     } else {
-        "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;"
-    };
-    let args = if method == "firePlayerRespawn" {
-        vec![
-            JValue::Object(&uuid),
-            JValue::Object(&encoded),
-            JValue::Bool(anchor_spawn.into()),
-        ]
-    } else {
-        vec![JValue::Object(&uuid), JValue::Object(&encoded)]
-    };
-    let value = env
-        .call_static_method(BRIDGE, method, signature, &args)
-        .ok()?
-        .l()
-        .ok()?;
+        env.call_static_method(
+            BRIDGE,
+            "firePlayerSpawnLocation",
+            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            &[JValue::Object(&uuid), JValue::Object(&encoded)],
+        )
+    }
+    .ok()?
+    .l()
+    .ok()?;
     if value.is_null() {
         return None;
     }
