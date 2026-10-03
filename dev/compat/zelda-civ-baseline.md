@@ -24,6 +24,7 @@ from its Modrinth 2.6.20 release. The Paper builds are pinned in
 | Paper 1.21.11 build 132 | 21 | Without Voice Chat, Zelda fails before `onEnable` with missing `de.maxhenkel.voicechat.api.VoicechatPlugin`. Its `softdepend` is not a working standalone mode in this revision. |
 | Paper 26.2 build 129 | 25 | With both JARs, Voice Chat enabled, but Zelda failed during `onEnable` with `NoSuchMethodError: BookMeta.pages(List)` in `LivreCuisine.creer`. This is a Paper version/API mismatch, not a Foton-specific failure. |
 | Foton `4982ede6d72c4711d36b713d3ae3c04d969f2aa2`, Minecraft 26.2 | 21 | With both JARs, Voice Chat rejected Foton's version and could not find its expected server adapter `getServer`; Zelda then failed to discover its shaded SQLite driver through `DriverManager`; cleanup exposed missing `Entity.getScoreboardTags()`. Foton itself stopped cleanly. |
+| Foton `c964da1ac98c9bfdeb4b0d2936e70bbdef3be779`, Minecraft 26.2 | 21 | With the unchanged pair, SQLite initialized Zelda's databases (`zones.db` and `players.db`), then Zelda failed with `NoSuchFieldError: CreatureSpawnEvent$SpawnReason.BEEHIVE` in `VanillaSuppressor`. Voice Chat still rejected the Foton version and reflective `getServer`. Neither plugin enabled; no commands, delayed tasks or client behavior were tested. Foton stopped cleanly. |
 
 The Paper 1.21.11 control log has SHA-256
 `4df833cb79abce77f162b394df594c5b11410bac98bdaa6351311cec960cb721`.
@@ -34,6 +35,10 @@ The Paper 26.2 control log has SHA-256
 All runs used an isolated world, offline mode, loopback networking, the same
 two plugin JARs and no player connection. Expected warnings for missing
 administrator token and optional LuckPerms are not counted as startup failures.
+The later Foton run is recorded separately under
+`%TEMP%/Foton-Zelda-Foton-postfix-3c324d63-20261003-c36eeffc8ade4836852b92252b70a69c/baseline-report.md`;
+its binary SHA-256 is
+`f547a1f711ba8dfb61dc28f10863a4412b9df87656bd35bef56dade5f8d550b7`.
 
 ## Acceptance path
 
