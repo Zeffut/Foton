@@ -88,3 +88,32 @@ newly retained components.
 4. Durable chestplate bytes, custom attributes and real armor/drop events.
 5. Unchanged Zelda scenarios, save/restart and two-client observation on native
    and Via-translated connections. No earlier slice substitutes for this pass.
+
+## Executed Paper transition oracle
+
+One isolated Paper1.21.11 build132 run completed111 observations and97 verifier
+checks, with16 deliberately tested exceptions and clean save/shutdown. All
+input hashes remained unchanged. Source, logs, verifier and manifests are at
+`%TEMP%/Foton-ItemState-Paper-oracle-4c362e4a989047a987e0cc129da8bfc1/`.
+Bootstrap/runtime/API identities match the pinned baseline. This is Paper
+reference evidence, not a Foton pass or an exhaustive material conversion table.
+
+- No-edit getItemMeta/setItemMeta preserves GLIDER and explicit DAMAGE removal.
+  Null metadata resets the complete patch to the item's prototype.
+- Captured donor metadata remains independent of later source changes and
+  replaces recipient metadata as a whole. The tested armor donor applies to
+  diamond chestplate, but refuses stone and leather chestplate unchanged.
+- Changing iron to diamond retains count and patch. Changing next to stone
+  removes a redundant DAMAGE removal; returning to iron then exposes default
+  DAMAGE. Rebase/sanitize at each actual type transition.
+- setAmount(0) publicly masks the item and PDC as empty, but later restoring
+  count revives its original type and complete metadata. setType(AIR) instead
+  destroys them; subsequently setting iron type creates a default count1 item.
+- Retained PDC views follow applied owner changes, never unapplied metadata
+  copies, and remain independently bound on clone. Native transfer may encode
+  an empty slot while the detached Java object still retains latent state.
+
+The same run pins complete PDC primitive/list/copy and named-root byte cases,
+including modified UTF, duplicate names, trailing input and clear-before-parse
+failure behavior. Intentional overlong-string serialization failure was
+isolated and matched; it is not permission to truncate canonical live state.
