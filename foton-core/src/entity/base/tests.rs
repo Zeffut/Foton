@@ -1082,13 +1082,18 @@ fn entity_tags_respect_vanilla_limit() {
         Weak::<World>::new(),
     );
 
-    for index in 0..MAX_ENTITY_TAGS {
+    assert!(base.add_tag(String::new()));
+    let before = base.tags();
+    for index in 0..MAX_ENTITY_TAGS - 1 {
         assert!(base.add_tag(format!("tag_{index}")));
     }
 
+    assert_eq!(before, vec![String::new()]);
+    assert!(!base.add_tag(String::new()));
     assert!(!base.add_tag("overflow".to_owned()));
     assert_eq!(base.tags().len(), MAX_ENTITY_TAGS);
-    assert!(base.remove_tag("tag_0"));
+    assert!(base.remove_tag(""));
+    assert!(!base.remove_tag(""));
     assert!(base.add_tag("replacement".to_owned()));
     assert!(base.tags().iter().any(|tag| tag == "replacement"));
 }

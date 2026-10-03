@@ -15,6 +15,15 @@ import org.bukkit.plugin.Plugin;
  * is not a new hazard for a plugin to learn.
  */
 public final class FotonPlayer implements Player, org.bukkit.projectiles.ProjectileSource, net.kyori.adventure.audience.Audience {
+    @Override public Set<String> getScoreboardTags() {
+        return new FotonScoreboardTags(id.toString());
+    }
+    @Override public boolean addScoreboardTag(String tag) {
+        return Native.entityAddScoreboardTag(id.toString(), java.util.Objects.requireNonNull(tag, "tag"));
+    }
+    @Override public boolean removeScoreboardTag(String tag) {
+        return Native.entityRemoveScoreboardTag(id.toString(), java.util.Objects.requireNonNull(tag, "tag"));
+    }
     @Override public void playEffect(org.bukkit.EntityEffect effect) { if (effect != null) Native.playerEntityEffect(getUniqueId().toString(), effect.name()); }
 
     @Override public Player getKiller() {

@@ -1,6 +1,7 @@
 package foton;
 
 import java.util.UUID;
+import java.util.Set;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.Entity;
@@ -37,6 +38,15 @@ public class FotonEntity implements Entity, org.bukkit.projectiles.ProjectileSou
     }
     @Override public boolean isPersistent() { return Native.entityPersistent(getUniqueId().toString()); }
     @Override public void setPersistent(boolean persistent) { Native.setEntityPersistent(getUniqueId().toString(), persistent); }
+    @Override public Set<String> getScoreboardTags() {
+        return new FotonScoreboardTags(id.toString());
+    }
+    @Override public boolean addScoreboardTag(String tag) {
+        return Native.entityAddScoreboardTag(id.toString(), java.util.Objects.requireNonNull(tag, "tag"));
+    }
+    @Override public boolean removeScoreboardTag(String tag) {
+        return Native.entityRemoveScoreboardTag(id.toString(), java.util.Objects.requireNonNull(tag, "tag"));
+    }
 
     @Override public org.bukkit.persistence.PersistentDataContainer getPersistentDataContainer() {
         return DATA.computeIfAbsent(id, ignored -> new FotonPersistentDataContainer());

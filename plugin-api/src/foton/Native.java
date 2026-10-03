@@ -240,6 +240,9 @@ public final class Native {
     public static native boolean entityRemoveWhenFarAway(String uuid);
     public static native boolean entityPersistent(String uuid);
     public static native void setEntityPersistent(String uuid, boolean persistent);
+    public static native String[] entityScoreboardTags(String uuid);
+    public static native boolean entityAddScoreboardTag(String uuid, String tag);
+    public static native boolean entityRemoveScoreboardTag(String uuid, String tag);
     public static native void setEntityRemoveWhenFarAway(String uuid, boolean remove);
     public static native float entityDropChance(String uuid, int slot);
     public static native void setEntityDropChance(String uuid, int slot, float chance);

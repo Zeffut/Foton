@@ -5872,6 +5872,62 @@ extern "system" fn set_entity_persistent(
     }
 }
 
+extern "system" fn entity_scoreboard_tags(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jobjectArray {
+    let Ok(text) = env.get_string(&uuid) else {
+        return string_array(&mut env, &[]);
+    };
+    let Ok(id) = Uuid::parse_str(text.to_str().unwrap_or_default()) else {
+        return string_array(&mut env, &[]);
+    };
+    let tags = entity_by_uuid(&id).map_or_else(Vec::new, |(_, entity)| entity.tags());
+    string_array(&mut env, &tags)
+}
+
+extern "system" fn entity_add_scoreboard_tag(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    tag: JString<'_>,
+) -> jboolean {
+    let Ok(text) = env.get_string(&uuid) else {
+        return 0;
+    };
+    let Ok(id) = Uuid::parse_str(text.to_str().unwrap_or_default()) else {
+        return 0;
+    };
+    let Ok(tag) = env.get_string(&tag) else {
+        return 0;
+    };
+    jboolean::from(
+        entity_by_uuid(&id)
+            .is_some_and(|(_, entity)| entity.add_tag(tag.to_string_lossy().into_owned())),
+    )
+}
+
+extern "system" fn entity_remove_scoreboard_tag(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    tag: JString<'_>,
+) -> jboolean {
+    let Ok(text) = env.get_string(&uuid) else {
+        return 0;
+    };
+    let Ok(id) = Uuid::parse_str(text.to_str().unwrap_or_default()) else {
+        return 0;
+    };
+    let Ok(tag) = env.get_string(&tag) else {
+        return 0;
+    };
+    jboolean::from(
+        entity_by_uuid(&id).is_some_and(|(_, entity)| entity.remove_tag(&tag.to_string_lossy())),
+    )
+}
+
 extern "system" fn entity_remove_when_far_away(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -8459,7 +8515,7 @@ extern "system" fn recipe_result(
     let value = env.get_string(&key).ok().and_then(|text| {
         let key = text.to_str().ok()?.parse().ok()?;
         let recipe = foton_registry::REGISTRY.recipes.result_by_id(&key)?;
-        Some(format!("{}|{}", recipe.item.key(), recipe.count))
+        Some(format!("{}|{}", recipe.item().key(), recipe.count()))
     });
     to_java(&mut env, value)
 }
@@ -8505,6 +8561,9 @@ extern "system" fn recipe_add_shapeless(
     if count <= 0 {
         return jboolean::from(false);
     }
+    let Ok(result) = RecipeResult::try_new(result_item, count) else {
+        return jboolean::from(false);
+    };
     let Ok(length) = env.get_array_length(&ingredients) else {
         return jboolean::from(false);
     };
@@ -8533,10 +8592,7 @@ extern "system" fn recipe_add_shapeless(
                 id: key,
                 category: CraftingCategory::Misc,
                 ingredients,
-                result: RecipeResult {
-                    item: result_item,
-                    count,
-                },
+                result,
             }),
     )
 }
@@ -8570,6 +8626,9 @@ extern "system" fn recipe_add_shaped(
     if count <= 0 {
         return jboolean::from(false);
     }
+    let Ok(result) = RecipeResult::try_new(result_item, count) else {
+        return jboolean::from(false);
+    };
     let Some(rows) = read_string_array(&mut env, &shape) else {
         return jboolean::from(false);
     };
@@ -8636,10 +8695,7 @@ extern "system" fn recipe_add_shaped(
         width,
         rows.len(),
         pattern,
-        RecipeResult {
-            item: result_item,
-            count,
-        },
+        result,
         true,
     )))
 }
@@ -8652,8 +8708,8 @@ extern "system" fn recipe_list(mut env: JNIEnv<'_>, _class: JClass<'_>) -> jobje
             format!(
                 "{}|{}|{}",
                 recipe.id(),
-                recipe.result().item.key(),
-                recipe.result().count
+                recipe.result().item().key(),
+                recipe.result().count()
             )
         })
         .collect();
@@ -13586,6 +13642,21 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "setEntityPersistent",
             "(Ljava/lang/String;Z)V",
             set_entity_persistent as *mut c_void,
+        ),
+        method(
+            "entityScoreboardTags",
+            "(Ljava/lang/String;)[Ljava/lang/String;",
+            entity_scoreboard_tags as *mut c_void,
+        ),
+        method(
+            "entityAddScoreboardTag",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            entity_add_scoreboard_tag as *mut c_void,
+        ),
+        method(
+            "entityRemoveScoreboardTag",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            entity_remove_scoreboard_tag as *mut c_void,
         ),
         method(
             "entityRemoveWhenFarAway",

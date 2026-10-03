@@ -1,6 +1,7 @@
 package org.bukkit.entity;
 
 import java.util.UUID;
+import java.util.Set;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.command.CommandSender;
@@ -34,6 +35,9 @@ public interface Entity extends CommandSender, org.bukkit.persistence.Persistent
     default void removeMetadata(String key, org.bukkit.plugin.Plugin plugin) { foton.FotonMetadataBridge.remove(this, key, plugin); }
     default boolean isPersistent() { return true; }
     default void setPersistent(boolean persistent) { }
+    Set<String> getScoreboardTags();
+    boolean addScoreboardTag(String tag);
+    boolean removeScoreboardTag(String tag);
 
     default org.bukkit.persistence.PersistentDataContainer getPersistentDataContainer() {
         return new foton.FotonPersistentDataContainer();
