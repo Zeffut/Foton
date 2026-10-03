@@ -67,10 +67,8 @@ mod tests {
         let recipe = SmeltingRecipe {
             id: Identifier::vanilla_static("test"),
             ingredient: Ingredient::Item(&vanilla_items::RAW_IRON),
-            result: RecipeResult {
-                item: &vanilla_items::IRON_INGOT,
-                count: 1,
-            },
+            result: RecipeResult::try_new(&vanilla_items::IRON_INGOT, 1)
+                .expect("valid cooking result"),
             experience: 0.0,
             cooking_time: 200,
         };
@@ -87,10 +85,8 @@ mod tests {
         let recipe = SmeltingRecipe {
             id: Identifier::vanilla_static("test"),
             ingredient: Ingredient::Item(&vanilla_items::RAW_IRON),
-            result: RecipeResult {
-                item: &vanilla_items::IRON_INGOT,
-                count: 1,
-            },
+            result: RecipeResult::try_new(&vanilla_items::IRON_INGOT, 1)
+                .expect("valid cooking result"),
             experience: 0.0,
             cooking_time: 200,
         };

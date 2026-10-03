@@ -137,6 +137,10 @@ pub fn init_vanilla_registry() -> bool {
 ///
 /// This is the bootstrap seam for plugin-owned typed registrations. The
 /// callback runs at most once, on the thread that publishes the registry.
+#[expect(
+    clippy::panic,
+    reason = "invalid extracted vanilla recipe data makes the server unusable"
+)]
 pub fn init_vanilla_registry_with(register: impl FnOnce(&mut Registry)) -> bool {
     static INIT: Once = Once::new();
 
@@ -146,6 +150,9 @@ pub fn init_vanilla_registry_with(register: impl FnOnce(&mut Registry)) -> bool 
         if let Some(register) = register.take() {
             let registry = build_vanilla_registry(register);
             published = REGISTRY.init(registry).is_ok();
+            if published && let Err(error) = REGISTRY.recipes.validate_vanilla_results() {
+                panic!("Invalid extracted vanilla recipe result: {error}");
+            }
         }
     });
     published

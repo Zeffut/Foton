@@ -6,7 +6,10 @@
 
 use foton_utils::Identifier;
 
-use crate::{item_stack::ItemStack, items::ItemRef};
+use crate::data_components::{ComponentPatchEntry, DataComponentPatch};
+use crate::{item_stack::ItemStack, item_stack_template::ItemStackTemplate, items::ItemRef};
+use std::io::{Error, Result};
+use std::sync::OnceLock;
 
 use super::ingredient::Ingredient;
 
@@ -22,15 +25,121 @@ pub enum CraftingCategory {
 /// The result of a crafting recipe.
 #[derive(Debug, Clone)]
 pub struct RecipeResult {
-    pub item: ItemRef,
-    pub count: i32,
+    item: ItemRef,
+    count: i32,
+    components: DataComponentPatch,
+    template: OnceLock<std::result::Result<ItemStackTemplate, String>>,
 }
 
 impl RecipeResult {
+    /// Constructs a result from a validated non-empty Vanilla template.
+    #[must_use]
+    pub fn from_template(template: ItemStackTemplate) -> Self {
+        let item = template.item();
+        let count = template.count();
+        let components = template.components().clone();
+        let cached = OnceLock::new();
+        let _ = cached.set(Ok(template));
+        Self {
+            item,
+            count,
+            components,
+            template: cached,
+        }
+    }
+
+    /// Constructs a result with no component overrides.
+    pub fn try_new(item: ItemRef, count: i32) -> Result<Self> {
+        ItemStackTemplate::try_with_count_and_patch(item, count, DataComponentPatch::new())
+            .map(Self::from_template)
+    }
+
+    /// Holds an already typed component patch while the global registry is
+    /// being built. The template is validated after registry publication.
+    pub fn try_with_patch(
+        item: ItemRef,
+        count: i32,
+        components: DataComponentPatch,
+    ) -> Result<Self> {
+        if item == &*crate::vanilla_items::AIR || !(1..=99).contains(&count) {
+            return Err(Error::other(
+                "Recipe result must be a non-empty item with count 1..=99",
+            ));
+        }
+        Ok(Self {
+            item,
+            count,
+            components,
+            template: OnceLock::new(),
+        })
+    }
+
+    #[must_use]
+    pub const fn item(&self) -> ItemRef {
+        self.item
+    }
+
+    #[must_use]
+    pub const fn count(&self) -> i32 {
+        self.count
+    }
+
+    /// Validates the typed patch once registry codecs are available.
+    pub fn try_template(&self) -> Result<&ItemStackTemplate> {
+        self.template
+            .get_or_init(|| {
+                ItemStackTemplate::try_with_count_and_patch(
+                    self.item,
+                    self.count,
+                    self.components.clone(),
+                )
+                .map_err(|error| error.to_string())
+            })
+            .as_ref()
+            .map_err(|error| Error::other(error.clone()))
+    }
+
     /// Creates an `ItemStack` from this result.
     #[must_use]
     pub fn to_item_stack(&self) -> ItemStack {
-        ItemStack::with_count(self.item, self.count)
+        match self.try_template() {
+            Ok(template) => template.create(),
+            Err(error) => {
+                log::warn!("Can't assemble invalid recipe result {self:?}: {error}");
+                ItemStack::empty()
+            }
+        }
+    }
+
+    /// Applies a smithing result over the base patch, as Vanilla's
+    /// `TransmuteRecipe.createWithOriginalComponents` does.
+    #[must_use]
+    pub fn apply_to(&self, base: &ItemStack) -> ItemStack {
+        let Ok(template) = self.try_template() else {
+            log::warn!("Can't assemble invalid smithing result {self:?}");
+            return ItemStack::empty();
+        };
+        let mut patch = base.components_patch().clone();
+        for (key, entry) in template.components().iter() {
+            match entry {
+                ComponentPatchEntry::Set(value) => {
+                    if !patch.set_raw(key.clone(), value.clone()) {
+                        return ItemStack::empty();
+                    }
+                }
+                ComponentPatchEntry::Removed => {
+                    if !patch.remove_raw(key.clone()) {
+                        return ItemStack::empty();
+                    }
+                }
+            }
+        }
+        let result = ItemStack::with_count_and_patch(self.item(), self.count(), patch);
+        if let Err(error) = result.validate_strict() {
+            log::warn!("Can't assemble smithing recipe result {self:?}: {error}");
+            return ItemStack::empty();
+        }
+        result
     }
 }
 

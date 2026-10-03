@@ -42,10 +42,8 @@ mod tests {
         let recipe = StonecuttingRecipe {
             id: Identifier::vanilla_static("test"),
             ingredient: Ingredient::Item(&vanilla_items::ANDESITE),
-            result: RecipeResult {
-                item: &vanilla_items::ANDESITE_SLAB,
-                count: 2,
-            },
+            result: RecipeResult::try_new(&vanilla_items::ANDESITE_SLAB, 2)
+                .expect("valid stonecutting result"),
         };
 
         assert!(recipe.matches(&ItemStack::new(&vanilla_items::ANDESITE)));

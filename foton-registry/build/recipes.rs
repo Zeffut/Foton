@@ -62,6 +62,79 @@ struct RecipeResult {
     id: String,
     #[serde(default = "default_count")]
     count: i32,
+    #[serde(default)]
+    components: Option<serde_json::Map<String, Value>>,
+}
+
+impl RecipeResult {
+    fn components(&self) -> Option<serde_json::Map<String, Value>> {
+        self.components.clone()
+    }
+}
+
+fn result_tokens(
+    item: &Ident,
+    count: i32,
+    components: Option<&serde_json::Map<String, Value>>,
+    name: &str,
+) -> TokenStream {
+    let patch = if let Some(components) = components {
+        let mut setters = Vec::new();
+        for (key, value) in components {
+            assert!(
+                key == "minecraft:suspicious_stew_effects",
+                "{name}: unsupported recipe result component {key}"
+            );
+            let effects = value
+                .as_array()
+                .unwrap_or_else(|| panic!("{name}.{key}: expected list"));
+            let mut effect_tokens = Vec::new();
+            for (index, value) in effects.iter().enumerate() {
+                let object = value
+                    .as_object()
+                    .unwrap_or_else(|| panic!("{name}.{key}[{index}]: expected object"));
+                let id = object
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_else(|| panic!("{name}.{key}[{index}].id: missing id"));
+                let id = id
+                    .strip_prefix("minecraft:")
+                    .unwrap_or_else(|| panic!("{name}.{key}[{index}].id: expected vanilla effect"));
+                let ident = Ident::new(&id.to_shouty_snake_case(), Span::call_site());
+                let duration = object.get("duration").map_or(160, |value| {
+                    value
+                        .as_i64()
+                        .and_then(|value| i32::try_from(value).ok())
+                        .unwrap_or_else(|| panic!("{name}.{key}[{index}].duration: expected i32"))
+                });
+                if object
+                    .keys()
+                    .any(|field| field != "id" && field != "duration")
+                {
+                    panic!("{name}.{key}[{index}]: unsupported effect field");
+                }
+                effect_tokens.push(
+                    quote! { SuspiciousStewEffect::new(vanilla_mob_effects::#ident, #duration) },
+                );
+            }
+            setters.push(quote! {
+                patch.set(SUSPICIOUS_STEW_EFFECTS, SuspiciousStewEffects::new(vec![#(#effect_tokens),*]));
+            });
+        }
+        quote! {{
+            let mut patch = DataComponentPatch::new();
+            #(#setters)*
+            patch
+        }}
+    } else {
+        quote! { DataComponentPatch::new() }
+    };
+    quote! {
+        match RecipeResult::try_with_patch(&*vanilla_items::#item, #count, #patch) {
+            Ok(result) => result,
+            Err(error) => panic!("Invalid extracted recipe {} result: {}", #name, error),
+        }
+    }
 }
 
 const fn default_count() -> i32 {
@@ -124,6 +197,7 @@ struct ShapedRecipeData {
     pattern_data: Vec<ParsedIngredient>,
     result_item_ident: Ident,
     result_count: i32,
+    result_components: Option<serde_json::Map<String, Value>>,
     show_notification: bool,
     symmetrical: bool,
 }
@@ -135,6 +209,7 @@ struct ShapelessRecipeData {
     ingredient_data: Vec<ParsedIngredient>,
     result_item_ident: Ident,
     result_count: i32,
+    result_components: Option<serde_json::Map<String, Value>>,
 }
 
 struct SmithingRecipeData {
@@ -145,6 +220,7 @@ struct SmithingRecipeData {
     addition: ParsedIngredient,
     result_item_ident: Ident,
     result_count: i32,
+    result_components: Option<serde_json::Map<String, Value>>,
 }
 
 struct StonecuttingRecipeData {
@@ -153,6 +229,7 @@ struct StonecuttingRecipeData {
     ingredient: ParsedIngredient,
     result_item_ident: Ident,
     result_count: i32,
+    result_components: Option<serde_json::Map<String, Value>>,
 }
 
 struct SmeltingRecipeData {
@@ -161,6 +238,7 @@ struct SmeltingRecipeData {
     ingredient: ParsedIngredient,
     result_item_ident: Ident,
     result_count: i32,
+    result_components: Option<serde_json::Map<String, Value>>,
     experience: f32,
     cooking_time: i32,
 }
@@ -232,6 +310,7 @@ fn parse_shaped_recipe(recipe_name: &str, recipe: &RecipeJson) -> Option<ShapedR
         pattern_data,
         result_item_ident,
         result_count: result.count,
+        result_components: result.components(),
         show_notification: recipe.show_notification.unwrap_or(true),
         symmetrical,
     })
@@ -284,6 +363,7 @@ fn parse_shapeless_recipe(recipe_name: &str, recipe: &RecipeJson) -> Option<Shap
         ingredient_data,
         result_item_ident,
         result_count: result.count,
+        result_components: result.components(),
     })
 }
 
@@ -312,6 +392,7 @@ fn parse_smithing_recipe(recipe_name: &str, recipe: &RecipeJson) -> Option<Smith
             .map_or(ParsedIngredient::Empty, parse_ingredient),
         result_item_ident: Ident::new(&result_item_id.to_shouty_snake_case(), Span::call_site()),
         result_count: result.count,
+        result_components: result.components(),
     })
 }
 
@@ -335,6 +416,12 @@ fn smithing_tokens(
             let addition = generate_ingredient_tokens(&r.addition);
             let result_item_ident = &r.result_item_ident;
             let result_count = r.result_count;
+            let result = result_tokens(
+                result_item_ident,
+                result_count,
+                r.result_components.as_ref(),
+                name,
+            );
 
             quote! {
                 #[inline(never)]
@@ -344,10 +431,7 @@ fn smithing_tokens(
                         template: #template,
                         base: #base,
                         addition: #addition,
-                        result: RecipeResult {
-                            item: &*vanilla_items::#result_item_ident,
-                            count: #result_count,
-                        },
+                        result: #result,
                     }
                 }
             }
@@ -401,6 +485,7 @@ fn parse_stonecutting_recipe(
         ingredient: parse_ingredient(ingredient),
         result_item_ident: Ident::new(&result_item_id.to_shouty_snake_case(), Span::call_site()),
         result_count: result.count,
+        result_components: result.components(),
     })
 }
 
@@ -425,6 +510,12 @@ fn stonecutting_tokens(
             let ingredient = generate_ingredient_tokens(&r.ingredient);
             let result_item_ident = &r.result_item_ident;
             let result_count = r.result_count;
+            let result = result_tokens(
+                result_item_ident,
+                result_count,
+                r.result_components.as_ref(),
+                name,
+            );
 
             quote! {
                 #[inline(never)]
@@ -432,10 +523,7 @@ fn stonecutting_tokens(
                     StonecuttingRecipe {
                         id: Identifier::vanilla_static(#name),
                         ingredient: #ingredient,
-                        result: RecipeResult {
-                            item: &*vanilla_items::#result_item_ident,
-                            count: #result_count,
-                        },
+                        result: #result,
                     }
                 }
             }
@@ -495,6 +583,7 @@ fn parse_smelting_recipe(
         ingredient: parse_ingredient(ingredient),
         result_item_ident,
         result_count: result.count,
+        result_components: result.components(),
         experience: recipe.experience.unwrap_or(0.0),
         cooking_time: recipe.cookingtime.unwrap_or(default_cooking_time),
     })
@@ -525,6 +614,12 @@ fn cooking_family_tokens(
             let ingredient = generate_ingredient_tokens(&r.ingredient);
             let result_item_ident = &r.result_item_ident;
             let result_count = r.result_count;
+            let result = result_tokens(
+                result_item_ident,
+                result_count,
+                r.result_components.as_ref(),
+                name,
+            );
             let experience = r.experience;
             let cooking_time = r.cooking_time;
 
@@ -534,10 +629,7 @@ fn cooking_family_tokens(
                     SmeltingRecipe {
                         id: Identifier::vanilla_static(#name),
                         ingredient: #ingredient,
-                        result: RecipeResult {
-                            item: &*vanilla_items::#result_item_ident,
-                            count: #result_count,
-                        },
+                        result: #result,
                         experience: #experience,
                         cooking_time: #cooking_time,
                     }
@@ -722,6 +814,12 @@ pub(crate) fn build() -> TokenStream {
             let height = r.height;
             let result_item_ident = &r.result_item_ident;
             let result_count = r.result_count;
+            let result = result_tokens(
+                result_item_ident,
+                result_count,
+                r.result_components.as_ref(),
+                name,
+            );
             let show_notification = r.show_notification;
             let symmetrical = r.symmetrical;
 
@@ -745,10 +843,7 @@ pub(crate) fn build() -> TokenStream {
                         width: #width,
                         height: #height,
                         pattern,
-                        result: RecipeResult {
-                            item: &*vanilla_items::#result_item_ident,
-                            count: #result_count,
-                        },
+                        result: #result,
                         show_notification: #show_notification,
                         symmetrical: #symmetrical,
                     }
@@ -766,6 +861,12 @@ pub(crate) fn build() -> TokenStream {
             let category = &r.category;
             let result_item_ident = &r.result_item_ident;
             let result_count = r.result_count;
+            let result = result_tokens(
+                result_item_ident,
+                result_count,
+                r.result_components.as_ref(),
+                name,
+            );
 
             let ingredient_tokens: Vec<TokenStream> = r
                 .ingredient_data
@@ -785,10 +886,7 @@ pub(crate) fn build() -> TokenStream {
                         id: Identifier::vanilla_static(#name),
                         category: #category,
                         ingredients,
-                        result: RecipeResult {
-                            item: &*vanilla_items::#result_item_ident,
-                            count: #result_count,
-                        },
+                        result: #result,
                     }
                 }
             }
@@ -872,7 +970,8 @@ pub(crate) fn build() -> TokenStream {
                 ShapedRecipe, ShapelessRecipe, SmeltingRecipe, SmithingTransformRecipe,
                 StonecuttingRecipe,
             },
-            vanilla_items,
+            data_components::{DataComponentPatch, vanilla_components::{SUSPICIOUS_STEW_EFFECTS, SuspiciousStewEffect, SuspiciousStewEffects}},
+            vanilla_items, vanilla_mob_effects,
         };
         use foton_utils::Identifier;
         use std::sync::LazyLock;
