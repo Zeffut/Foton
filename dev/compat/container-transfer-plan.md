@@ -59,6 +59,17 @@ physical list/compound depth limits before equating codec acceptance with a
 template-count limit. This exact interface/depth policy still needs an
 implementation preflight; do not guess it from the constant 512.
 
+The pinned dependency source is available: simdnbt 0.10.0's borrowed parser
+rejects a push reaching 512 active frames, so 511 is its accepted maximum.
+Compounds and lists of lists/compounds consume frames (including typed empty
+lists); primitive lists do not. Current strict validation reparses each
+component root, not one outer item root. The proposed checked traversal carries
+both its hash and physical frame height internally, enforcing that height at
+every component boundary. Actual nested custom-NBT leaf height must propagate:
+a leaf accepted by itself can exceed the limit inside a template and recursive
+component. Compare the height accounting against the pinned parser in tests;
+this source-derived design is not yet an executed acceptance result.
+
 ## Complete transfer sequence
 
 | Slice | Required result | Not established by this slice alone |
