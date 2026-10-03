@@ -101,9 +101,38 @@ reaches the actual ItemEntity by UUID, including pending spawns. This direct
 write needs the canonical codec and runtime proof, not a duplicate returned
 stack field. A separate source-verified mismatch remains: Paper cancellation
 restores the entity's current, potentially listener-modified stack, whereas
-Foton restores its pre-event clone. Foton also fires ItemSpawnEvent earlier
-than PlayerDropItemEvent; verify Paper's actual spawn-event insertion before
-changing that order. Entity removal and cancellation need explicit fixtures.
+Foton restores its pre-event clone. The pinned Paper call chain also confirms
+PlayerDropItemEvent precedes ItemSpawnEvent on the same entity, before world
+insertion; Foton currently reverses them. Cancelling the first Paper event
+skips item-spawn entirely. Its restitution prefers the emptied main hand,
+then a one-item similar merge, then addItem; Foton uses inventory.add directly.
+The shown Paper drop method does not restore inventory when the later spawn
+event rejects insertion. Preserve these distinct branches in the planned
+player-drop lifecycle fix rather than just swapping two callbacks. Empty or
+changed stacks, entity removal, full inventory and callers' final outcomes
+still need explicit runtime fixtures.
+
+### Piaf protection and tooltip flags
+
+The native typed ATTRIBUTE_MODIFIERS component already feeds equipped-player
+armor, toughness and knockback attributes, followed by damage and durability
+handling. The established gap is the Java API and transport into that component,
+not a demonstrated defect in the native damage formula. Paper's Attribute is
+an interface and EquipmentSlotGroup a final predicate class; Foton's current
+enum shapes and missing modern attribute fields do not satisfy that ABI.
+
+Paper metadata reads the component patch, not all effective prototype values.
+A chestplate whose only edit is a name therefore exposes no custom modifiers,
+even though it still grants vanilla armor. Zelda copies only actual custom
+entries, then adds its own keyed Piaf modifiers to the chest slot. Preserve
+an explicitly empty modifier patch separately from absence/defaults. Adding
+the same key on the same attribute throws in Paper; it is not replacement.
+
+HIDE_ATTRIBUTES and HIDE_UNBREAKABLE change TOOLTIP_DISPLAY's hidden-component
+set. They must not remove the effective modifiers or UNBREAKABLE component.
+The later adapter needs clone/donor/collision/slot tests, then actual equipped
+protection and durability comparisons, including unequip/re-equip and original
+plastron restoration. Source-established native wiring alone is not that proof.
 
 ## Bounded delivery and acceptance
 

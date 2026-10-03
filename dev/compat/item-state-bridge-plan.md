@@ -37,6 +37,16 @@ cleanup waits for existing callback/deferred teardown quiescence through the
 host's invocation lifecycle, without sleeping or polling the game tick. Close
 admission before retiring entries; late Cleaner calls are harmless.
 
+Native candidates on plugin-created threads are not necessarily tracked by
+the Java host. Closing admission must therefore signal a separate async drain:
+the outer server shutdown waits for admitted item operations to finish before
+world saving. Final permit release must wake this wait without a lost race,
+and no lock or game tick may wait on a callback. Constructor failures and
+deferred/reentrant shutdown use the same boundary. Synchronous Drop can only
+perform best-effort cleanup; embedders must await the explicit async shutdown
+contract before their own world teardown. A failed Java close handshake must
+be reported and native admission sealed, not disguised as a successful drain.
+
 ## Edits, errors and resource limits
 
 Keep unchanged, SET, REMOVE and RESET-to-prototype distinct. Hydration is not

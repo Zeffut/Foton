@@ -92,10 +92,14 @@ ledger, separately from the probe's earlier transcribed attempt notes.
   including the tested unsupported kind99 with count0. This is not evidence
   that unknown nonempty list types are accepted.
 
-These cases supplement, not replace, the public PDC server oracle. Native
-raw invalid modified-UTF values require explicit handling: preserving an
-untouched item snapshot does not authorize decoding unreadable data as an
-empty Java string when a plugin edits its PDC.
+These cases supplement, not replace, the public PDC server oracle. The raw
+simdnbt parser accepts some invalid modified-UTF bytes, but the current
+CustomData constructor normalizes its compound and rejects those bytes.
+Do not manufacture an unreachable malformed PDC item to claim an ingress bug.
+Raw import helpers must still reject unreadable strings rather than turn them
+into empty Java strings. Valid overlong CustomData strings are a separate,
+reachable case: the live snapshot can retain them even when the legacy Java
+projection must refuse to materialize them without loss.
 
 ## Delivery gates
 
