@@ -61,6 +61,15 @@ run "cargo test --workspace"                       cargo test --workspace
 # is why Build Release failed on the runner while passing on every developer's
 # machine, where the file was left over from an earlier build.
 run "plugin api builds"                            bash dev/build-plugin-api.sh --check
+PAPER_API_TEMP=""
+if [ -z "${FOTON_PAPER_API_JAR:-}" ]; then
+  PAPER_API_TEMP="$(mktemp -d "${TMPDIR:-/tmp}/foton-ci-paper-api.XXXXXX")"
+  trap 'rm -rf -- "$PAPER_API_TEMP"' EXIT
+  source dev/paper-api-test-lib.sh
+  FOTON_PAPER_API_JAR="$(paper_api_prepare "" "$PAPER_API_TEMP")" || exit 1
+  export FOTON_PAPER_API_JAR
+fi
+run "Paper-compiled shapeless recipes"            bash dev/shapeless-recipe-test.sh "${FOTON_PAPER_API_JAR:-}"
 run "plugin runtime dependency closure"            bash dev/plugin-runtime-test.sh
 # This fixture is compiled against exact official Paper bytes, not Foton's own
 # API. It checks DriverManager visibility and executes a real SQLite query.

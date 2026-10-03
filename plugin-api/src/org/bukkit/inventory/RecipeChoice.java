@@ -6,9 +6,10 @@ import java.util.List;
 import org.bukkit.Material;
 
 /** An ingredient predicate used by Bukkit crafting recipes. */
-public interface RecipeChoice {
+public interface RecipeChoice extends Cloneable {
     boolean test(ItemStack stack);
     ItemStack getItemStack();
+    RecipeChoice clone();
 
     /** Matches any one of a set of materials. */
     class MaterialChoice implements RecipeChoice {
@@ -24,6 +25,7 @@ public interface RecipeChoice {
             this(choices == null ? new Material[0] : choices.toArray(new Material[0]));
         }
         public List<Material> getChoices() { return Collections.unmodifiableList(choices); }
+        @Override public MaterialChoice clone() { return new MaterialChoice(choices); }
         @Override public boolean test(ItemStack stack) {
             return stack != null && choices.contains(stack.getType());
         }
@@ -36,8 +38,9 @@ public interface RecipeChoice {
     class ExactChoice implements RecipeChoice {
         private final ItemStack stack;
         public ExactChoice(ItemStack stack) { this.stack = stack == null ? new ItemStack(Material.AIR) : stack.clone(); }
+        @Override public ExactChoice clone() { return new ExactChoice(stack); }
         @Override public boolean test(ItemStack candidate) { return stack.isSimilar(candidate); }
-        public List<ItemStack> getChoices() { return Collections.singletonList(getItemStack()); }
+        public List<ItemStack> getChoices() { return Collections.singletonList(stack); }
         @Override public ItemStack getItemStack() { return stack.clone(); }
     }
 }

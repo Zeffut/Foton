@@ -11,7 +11,13 @@ public class ShapelessRecipe extends CraftingRecipe {
     public ShapelessRecipe(NamespacedKey key, ItemStack result) { super(key, result); }
     /** Legacy Bukkit constructor for recipes that are assigned a key on registration. */
     public ShapelessRecipe(ItemStack result) { this(null, result); }
-    public ShapelessRecipe addIngredient(RecipeChoice choice) { if (choice != null) choices.add(choice); return this; }
+    public ShapelessRecipe addIngredient(RecipeChoice choice) {
+        if (choices.size() >= 9) {
+            throw new IllegalArgumentException("Shapeless recipes cannot have more than 9 ingredients");
+        }
+        choices.add(java.util.Objects.requireNonNull(choice, "choice").clone());
+        return this;
+    }
     public ShapelessRecipe addIngredient(Material material) { return addIngredient(1, material); }
     /** Adds one grid ingredient per material, as in the Paper 1.21.11 API. */
     public ShapelessRecipe addIngredient(int count, Material material) {
@@ -27,7 +33,11 @@ public class ShapelessRecipe extends CraftingRecipe {
         return this;
     }
     public ShapelessRecipe addIngredient(ItemStack stack) { return addIngredient(new RecipeChoice.ExactChoice(stack)); }
-    public List<RecipeChoice> getChoiceList() { return new ArrayList<>(choices); }
+    public List<RecipeChoice> getChoiceList() {
+        List<RecipeChoice> result = new ArrayList<>(choices.size());
+        for (RecipeChoice choice : choices) result.add(choice.clone());
+        return result;
+    }
     /** Bukkit's representative item stacks, detached from the recipe. */
     public List<ItemStack> getIngredientList() {
         List<ItemStack> result = new ArrayList<>(choices.size());

@@ -32,6 +32,29 @@ public final class ShapelessRecipeParity {
         stacks.clear();
         assertIngredients(recipe, 4, Material.WHEAT, Material.SUGAR, Material.SUGAR, Material.SUGAR);
 
+        ItemStack sourceStack = new ItemStack(Material.APPLE);
+        RecipeChoice.ExactChoice sourceChoice = new RecipeChoice.ExactChoice(sourceStack);
+        ShapelessRecipe copied = new ShapelessRecipe(
+            new NamespacedKey("foton", "choice_copy_parity"), new ItemStack(Material.BREAD));
+        copied.addIngredient(sourceChoice);
+        sourceStack.setType(Material.CARROT);
+        sourceChoice.getChoices().get(0).setType(Material.POTATO);
+        if (copied.getChoiceList().get(0).getItemStack().getType() != Material.APPLE) {
+            throw new AssertionError("adding a choice must clone its item stack");
+        }
+        RecipeChoice.ExactChoice readChoice =
+            (RecipeChoice.ExactChoice) copied.getChoiceList().get(0);
+        readChoice.getChoices().get(0).setType(Material.STONE);
+        if (copied.getChoiceList().get(0).getItemStack().getType() != Material.APPLE) {
+            throw new AssertionError("reading choices must clone nested mutable item stacks");
+        }
+        RecipeChoice.MaterialChoice materialChoice =
+            (RecipeChoice.MaterialChoice) recipe.getChoiceList().get(0);
+        if (materialChoice == recipe.getChoiceList().get(0)
+                || materialChoice.clone() == materialChoice) {
+            throw new AssertionError("material choices must be independently cloned");
+        }
+
         recipe.addIngredient(0, (Material) null).addIngredient(-2, (Material) null);
         assertIngredients(recipe, 4, Material.WHEAT, Material.SUGAR, Material.SUGAR, Material.SUGAR);
         rejects(() -> recipe.addIngredient(6, Material.SUGAR));
