@@ -59,7 +59,7 @@
       "descriptor": "plugin.yml",
       "api_version": "1.21",
       "paper_build": "paper:1.21.11:132",
-      "dependencies": [{"artifact": "voicechat@2.6.20#bukkit", "sha256": "b63c4389ccfb37dff1d631f91e0bb1b983bcdb55609e7a26c22bb9442976a9fa", "required": true}],
+      "dependencies": [{"artifact": "voicechat@2.6.20#bukkit", "sha256": "b63c4389ccfb37dff1d631f91e0bb1b983bcdb55609e7a26c22bb9442976a9fa", "required": true}, {"artifact": "LuckPerms@unresolved#optional Zelda integration", "sha256": null, "required": false}, {"artifact": "MythicMobs@unresolved#optional Zelda integration", "sha256": null, "required": false}],
       "scenarios": ["startup with Voice Chat", "domain and team display", "item PDC restart", "custom inventory", "entity and player events", "merchant and recipe", "mounts", "region interaction", "optional integrations"],
       "uses_internals": "manual_review_required",
       "reflection_review": "not_tested",
