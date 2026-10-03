@@ -20,6 +20,9 @@ import org.bukkit.plugin.messaging.ReservedChannelException;
 
 /** Bukkit custom channels backed by Foton's custom-payload packets. */
 final class FotonMessenger implements Messenger {
+    private static final int MAX_PLAYER_CHANNELS = 128;
+    private static final boolean DISABLE_CHANNEL_LIMIT =
+        System.getProperty("paper.disableChannelLimit") != null;
     private final Map<Plugin, Set<String>> outgoing = new HashMap<>();
     private final Map<String, Set<PluginMessageListenerRegistration>> incomingByChannel =
         new HashMap<>();
@@ -219,6 +222,22 @@ final class FotonMessenger implements Messenger {
         }
     }
 
+    static boolean addChannel(Player player, String channel) {
+        FotonMessenger messenger = running();
+        if (messenger == null) {
+            throw new IllegalStateException("No plugin messenger is running");
+        }
+        return messenger.changeListening(player, channel, true);
+    }
+
+    static boolean removeChannel(Player player, String channel) {
+        FotonMessenger messenger = running();
+        if (messenger == null) {
+            throw new IllegalStateException("No plugin messenger is running");
+        }
+        return messenger.changeListening(player, channel, false);
+    }
+
     static void forgetPlayer(String playerId) {
         FotonMessenger messenger = running();
         UUID player = Native.parse(playerId);
@@ -248,31 +267,64 @@ final class FotonMessenger implements Messenger {
         if (message.length > MAX_MESSAGE_SIZE) {
             throw new MessageTooLargeException(message);
         }
+        if (!listening(player.getUniqueId()).contains(corrected)) {
+            return;
+        }
         Native.sendPluginMessage(
             player.getUniqueId().toString(), corrected, message);
     }
 
-    private synchronized void updateListening(Player player, String operation, byte[] payload) {
-        UUID playerId = player.getUniqueId();
-        Set<String> channels = listening.computeIfAbsent(playerId, ignored -> new HashSet<>());
+    private void updateListening(Player player, String operation, byte[] payload) {
         for (String candidate : new String(payload, StandardCharsets.UTF_8).split("\\0")) {
+            String corrected;
             try {
-                String corrected = channel(candidate);
-                if (operation.equals("minecraft:register") && channels.add(corrected)) {
-                    EventBridge.dispatch(new org.bukkit.event.player.PlayerRegisterChannelEvent(
-                        player, corrected));
-                } else if (operation.equals("minecraft:unregister")
-                        && channels.remove(corrected)) {
-                    EventBridge.dispatch(new org.bukkit.event.player.PlayerUnregisterChannelEvent(
-                        player, corrected));
-                }
+                corrected = channel(candidate);
             } catch (IllegalArgumentException ignored) {
                 // Client input: an invalid advertised channel is ignored.
+                continue;
+            }
+            if (operation.equals("minecraft:register")) {
+                try {
+                    changeListening(player, corrected, true);
+                } catch (IllegalStateException ignored) {
+                    // Client input beyond Paper's channel limit is ignored.
+                }
+            } else {
+                changeListening(player, corrected, false);
             }
         }
-        if (channels.isEmpty()) {
-            listening.remove(playerId);
+    }
+
+    private boolean changeListening(Player player, String channel, boolean add) {
+        Objects.requireNonNull(player, "player");
+        String corrected = channel(channel);
+        boolean changed;
+        synchronized (this) {
+            UUID playerId = player.getUniqueId();
+            Set<String> channels = listening.get(playerId);
+            if (add) {
+                if (channels == null) {
+                    channels = new HashSet<>();
+                    listening.put(playerId, channels);
+                }
+                if (!DISABLE_CHANNEL_LIMIT && channels.size() >= MAX_PLAYER_CHANNELS) {
+                    throw new IllegalStateException(
+                        "Cannot register channel. Too many channels registered!");
+                }
+                changed = channels.add(corrected);
+            } else {
+                changed = channels != null && channels.remove(corrected);
+                if (channels != null && channels.isEmpty()) {
+                    listening.remove(playerId);
+                }
+            }
         }
+        if (changed) {
+            EventBridge.dispatch(add
+                ? new org.bukkit.event.player.PlayerRegisterChannelEvent(player, corrected)
+                : new org.bukkit.event.player.PlayerUnregisterChannelEvent(player, corrected));
+        }
+        return changed;
     }
 
     private synchronized void remove(PluginMessageListenerRegistration registration) {

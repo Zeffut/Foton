@@ -118,6 +118,75 @@ final class Events {
         messenger.registerOutgoingPluginChannel(owner, "fixture:messages");
         Checks.expect(messenger.isOutgoingChannelRegistered(owner, "fixture:messages"),
             "the outgoing plugin channel was not recorded");
+
+        playerChannelLifecycle(owner);
+    }
+
+    private static void playerChannelLifecycle(org.bukkit.plugin.Plugin owner) {
+        foton.FotonPlayer player = new foton.FotonPlayer(java.util.UUID.fromString(
+            "00000000-0000-0000-0000-000000000001"));
+        foton.FotonPlayer other = new foton.FotonPlayer(java.util.UUID.fromString(
+            "00000000-0000-0000-0000-000000000002"));
+        int[] registered = {0};
+        int[] unregistered = {0};
+        org.bukkit.event.Listener listener = new org.bukkit.event.Listener() {};
+        org.bukkit.Bukkit.getPluginManager().registerEvent(
+            org.bukkit.event.player.PlayerRegisterChannelEvent.class,
+            listener, org.bukkit.event.EventPriority.NORMAL,
+            (ignored, event) -> {
+                org.bukkit.event.player.PlayerRegisterChannelEvent registration =
+                    (org.bukkit.event.player.PlayerRegisterChannelEvent) event;
+                if (registration.getChannel().equals("fixture:voice")) {
+                    Checks.same(registration.getPlayer(), player,
+                        "channel registration named the wrong player");
+                    Checks.expect(player.getListeningPluginChannels().contains("fixture:voice"),
+                        "registration event ran before the channel became visible");
+                    registered[0]++;
+                }
+            }, owner, false);
+        org.bukkit.Bukkit.getPluginManager().registerEvent(
+            org.bukkit.event.player.PlayerUnregisterChannelEvent.class,
+            listener, org.bukkit.event.EventPriority.NORMAL,
+            (ignored, event) -> {
+                org.bukkit.event.player.PlayerUnregisterChannelEvent removal =
+                    (org.bukkit.event.player.PlayerUnregisterChannelEvent) event;
+                if (removal.getChannel().equals("fixture:voice")) {
+                    Checks.same(removal.getPlayer(), player,
+                        "channel removal named the wrong player");
+                    Checks.expect(!player.getListeningPluginChannels().contains("fixture:voice"),
+                        "removal event ran before the channel disappeared");
+                    unregistered[0]++;
+                }
+            }, owner, false);
+
+        Checks.expect(player.addChannel("fixture:voice"), "a new player channel was not added");
+        Checks.expect(!player.addChannel("fixture:voice"), "duplicate channel was added twice");
+        Checks.same(registered[0], 1, "duplicate registration emitted another event");
+        Checks.expect(!other.getListeningPluginChannels().contains("fixture:voice"),
+            "a player's advertised channels leaked to another player");
+        Checks.expect(player.removeChannel("fixture:voice"), "registered channel was not removed");
+        Checks.expect(!player.removeChannel("fixture:voice"), "missing channel removal succeeded");
+        Checks.same(unregistered[0], 1, "duplicate removal emitted another event");
+
+        // The plugin registered an outgoing channel, but this client did not
+        // advertise it. Paper validates the send and then sends no packet.
+        player.sendPluginMessage(owner, "fixture:messages", new byte[] {7});
+
+        for (int index = 0; index < 128; index++) {
+            player.addChannel("fixture:limit" + index);
+        }
+        boolean limitEnforced = false;
+        try {
+            player.addChannel("fixture:overflow");
+        } catch (IllegalStateException expected) {
+            limitEnforced = true;
+        }
+        Checks.expect(limitEnforced, "Paper's per-player channel limit was not enforced");
+        Checks.same(player.getListeningPluginChannels().size(), 128,
+            "rejected channel changed the player's advertised channels");
+        foton.EventBridge.fireQuit(player.getUniqueId().toString(), "bye");
+        Checks.expect(player.getListeningPluginChannels().isEmpty(),
+            "player channels survived disconnect");
     }
 
     /** The scheduler's promise is about *when*, so this checks when. */

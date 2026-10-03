@@ -866,6 +866,14 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
         return FotonMessenger.listening(id);
     }
 
+    public boolean addChannel(String channel) {
+        return FotonMessenger.addChannel(this, channel);
+    }
+
+    public boolean removeChannel(String channel) {
+        return FotonMessenger.removeChannel(this, channel);
+    }
+
     @Override
     public void sendPluginMessage(Plugin source, String channel, byte[] message) {
         FotonMessenger.send(this, source, channel, message);
