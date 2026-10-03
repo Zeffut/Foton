@@ -10,10 +10,19 @@ command -v jar >/dev/null 2>&1 || { echo 'jar is required' >&2; exit 1; }
 
 bash dev/fetch-plugin-api-libs.sh --check
 mapfile -t jars < <(find plugin-api/lib -maxdepth 1 -type f -name '*.jar' -print | LC_ALL=C sort)
-[ "${#jars[@]}" -eq 45 ] || {
-  echo "plugin runtime must contain exactly 45 dependency jars; found ${#jars[@]}" >&2
+[ "${#jars[@]}" -eq 46 ] || {
+  echo "plugin runtime must contain exactly 46 dependency jars; found ${#jars[@]}" >&2
   exit 1
 }
+# The release copies every pinned JAR, while Foton validates an exact filename
+# set at startup. Keep those two independent allowlists synchronized.
+if ! diff -u \
+  <(printf '%s\n' "${jars[@]##*/}" | LC_ALL=C sort) \
+  <(sed -n '/^const PLUGIN_RUNTIME_JARS:/,/^];/p' foton/src/lib.rs \
+    | grep -oE '"[^"]+\.jar"' | tr -d '"' | LC_ALL=C sort); then
+  echo "Foton's installed runtime allowlist differs from the packaged JAR set" >&2
+  exit 1
+fi
 
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/foton-plugin-runtime.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT

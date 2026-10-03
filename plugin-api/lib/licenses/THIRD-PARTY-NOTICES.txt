@@ -9,6 +9,7 @@ MIT license
 -----------
 
 * adventure-api 5.2.0, adventure-key 5.2.0,
+  adventure-text-minimessage 5.2.0,
   adventure-text-logger-slf4j 5.2.0 and
   adventure-text-serializer-plain 5.2.0,
   adventure-text-serializer-json 5.2.0,

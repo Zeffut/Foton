@@ -221,14 +221,14 @@ grep -q '^FROM rustlang/rust:nightly-alpine3.23-2026-07-23@sha256:e4a0ce16a94f25
 # Durable notices are required inputs, not files synthesized at publication.
 dependency_jar_count="$(find "$REPO/plugin-api/lib" -maxdepth 1 -type f -name '*.jar' | wc -l)"
 license_file_count="$(find "$REPO/plugin-api/lib/licenses" -maxdepth 1 -type f -name '*.txt' | wc -l)"
-[ "$dependency_jar_count" -eq 45 ]
+[ "$dependency_jar_count" -eq 46 ]
 [ "$license_file_count" -eq 6 ]
 for license in ADVENTURE-MIT.txt APACHE-2.0.txt BRIGADIER-MIT.txt JOML-MIT.txt \
   SLF4J-MIT.txt THIRD-PARTY-NOTICES.txt; do
   [ -f "$REPO/plugin-api/lib/licenses/$license" ]
 done
 grep -q 'END OF TERMS AND CONDITIONS' "$REPO/plugin-api/lib/licenses/APACHE-2.0.txt"
-for dependency in adventure-api adventure-key adventure-text-logger-slf4j \
+for dependency in adventure-api adventure-key adventure-text-minimessage adventure-text-logger-slf4j \
   adventure-text-serializer-plain adventure-text-serializer-json \
   adventure-text-serializer-gson adventure-text-serializer-commons option \
   auto-service-annotations annotations brigadier gson guava \
@@ -264,6 +264,7 @@ grep -qx './lib/netty-codec-base-4.2.15.Final.jar' "$SCRATCH/tar-list"
 grep -qx 'foton-plugin-api.jar' "$SCRATCH/zip-list"
 grep -qx 'lib/snakeyaml-2.2.jar' "$SCRATCH/zip-list"
 grep -qx 'lib/netty-transport-4.2.15.Final.jar' "$SCRATCH/zip-list"
+grep -qx 'lib/adventure-text-minimessage-5.2.0.jar' "$SCRATCH/zip-list"
 grep -qx './SHA256SUMS' "$SCRATCH/tar-list"
 grep -qx 'SHA256SUMS' "$SCRATCH/zip-list"
 grep -qx './licenses/THIRD-PARTY-NOTICES.txt' "$SCRATCH/tar-list"

@@ -72,6 +72,7 @@ hash_file() {
 runtime_library_is_expected() {
   case "$1" in
     adventure-api-5.2.0.jar|adventure-key-5.2.0.jar|\
+    adventure-text-minimessage-5.2.0.jar|\
     adventure-text-logger-slf4j-5.2.0.jar|adventure-text-serializer-plain-5.2.0.jar|\
     adventure-text-serializer-json-5.2.0.jar|adventure-text-serializer-gson-5.2.0.jar|\
     adventure-text-serializer-commons-5.2.0.jar|option-1.1.0.jar|\
@@ -156,7 +157,7 @@ runtime_archive_is_safe() {
       *) return 1 ;;
     esac
   done < "$runtime_archive_list"
-  [ "$runtime_archive_files" -eq 53 ] && [ "$runtime_archive_directories" -eq 3 ]
+  [ "$runtime_archive_files" -eq 54 ] && [ "$runtime_archive_directories" -eq 3 ]
 }
 
 runtime_is_complete() {
@@ -219,9 +220,9 @@ runtime_is_complete() {
       && [ ! -L "$runtime_dir/licenses/$runtime_license" ] || return 1
   done
   [ "$runtime_api_seen" -eq 1 ] \
-    && [ "$runtime_libs_seen" -eq 45 ] \
-    && [ "$runtime_actual_libs" -eq 45 ] \
-    && [ "$runtime_all_lib_files" -eq 45 ] \
+    && [ "$runtime_libs_seen" -eq 46 ] \
+    && [ "$runtime_actual_libs" -eq 46 ] \
+    && [ "$runtime_all_lib_files" -eq 46 ] \
     && [ "$runtime_licenses_seen" -eq 6 ] \
     && [ "$runtime_license_files" -eq 6 ] \
     && [ "$runtime_manifest_entries" -eq "$runtime_actual_entries" ]

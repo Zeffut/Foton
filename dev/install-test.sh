@@ -39,6 +39,7 @@ runtime_libraries() {
   cat <<'EOF'
 adventure-api-5.2.0.jar
 adventure-key-5.2.0.jar
+adventure-text-minimessage-5.2.0.jar
 adventure-text-logger-slf4j-5.2.0.jar
 adventure-text-serializer-plain-5.2.0.jar
 adventure-text-serializer-json-5.2.0.jar

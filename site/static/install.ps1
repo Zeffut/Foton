@@ -180,6 +180,7 @@ function Test-RuntimeComplete {
     $expectedLibraries = @(
         'adventure-api-5.2.0.jar',
         'adventure-key-5.2.0.jar',
+        'adventure-text-minimessage-5.2.0.jar',
         'adventure-text-logger-slf4j-5.2.0.jar',
         'adventure-text-serializer-plain-5.2.0.jar',
         'adventure-text-serializer-json-5.2.0.jar',
@@ -264,8 +265,8 @@ function Test-RuntimeComplete {
     foreach ($licenseName in $expectedLicenses) {
         if (-not (Test-RegularFile (Join-Path $licenses $licenseName))) { return $false }
     }
-    return $apiSeen -eq 1 -and $librariesSeen -eq 45 -and
-        $jarFiles.Count -eq 45 -and $libraryFiles.Count -eq 45 -and
+    return $apiSeen -eq 1 -and $librariesSeen -eq 46 -and
+        $jarFiles.Count -eq 46 -and $libraryFiles.Count -eq 46 -and
         $licensesSeen -eq 6 -and $manifestEntries -eq $actualFiles.Count
 }
 

@@ -35,6 +35,7 @@ function New-Runtime {
     [System.IO.File]::WriteAllText((Join-Path $Path 'foton-plugin-api.jar'), "api $Marker`n")
     $libraries = @(
         'adventure-api-5.2.0.jar', 'adventure-key-5.2.0.jar',
+        'adventure-text-minimessage-5.2.0.jar',
         'adventure-text-logger-slf4j-5.2.0.jar', 'adventure-text-serializer-plain-5.2.0.jar',
         'adventure-text-serializer-json-5.2.0.jar', 'adventure-text-serializer-gson-5.2.0.jar',
         'adventure-text-serializer-commons-5.2.0.jar', 'option-1.1.0.jar',

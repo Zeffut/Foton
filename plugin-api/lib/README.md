@@ -31,6 +31,12 @@ The first version of this directory held Adventure 4.26.1 beside
 top of an API from Adventure 4. It compiled. That is exactly why the set is now
 pinned by digest and checked rather than trusted for compiling.
 
+`adventure-text-minimessage:5.2.0` is a Paper-provided runtime dependency,
+not an API compile requirement. Zelda Civ references `MiniMessage.miniMessage()`
+without shading it. The pinned JAR and its declared `adventure-api:5.2.0`
+dependency are included in the installed plugin runtime as well as the local
+build classpath.
+
 `examination-api` and `examination-string` are gone rather than updated:
 Adventure 5 dropped the dependency, and `adventure-api:5.2.0` names neither.
 
@@ -88,6 +94,7 @@ POM, not from memory and not carried over from the previous version.
 | adventure-api | 5.2.0 | MIT | Maven Central POM |
 | adventure-key | 5.2.0 | MIT | Maven Central POM |
 | adventure-text-logger-slf4j | 5.2.0 | MIT | Maven Central POM |
+| adventure-text-minimessage | 5.2.0 | MIT | PaperMC Maven POM |
 | adventure-text-serializer-plain | 5.2.0 | MIT | Maven Central POM |
 | adventure-text-serializer-json | 5.2.0 | MIT | Maven Central POM |
 | adventure-text-serializer-gson | 5.2.0 | MIT | Maven Central POM |
