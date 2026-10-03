@@ -179,6 +179,18 @@ gap, not a substitute for Paper persistence.
 
 ## Executed Paper transition oracle
 
+The separate merchant-cost reference ran once on pinned Paper1.21.11 build132:
+28 assertions passed with four expected exceptions, immutable-input verification
+and clean stop. It exercised actual CraftMerchantRecipe conversion and native
+ItemCost.STREAM_CODEC, confirming positive-patch matching, removal-insensitive
+payment, original immediate display and predicate-derived decoded display.
+Zero/AIR addIngredient throws IllegalArgumentException; a third ingredient and
+conversion with none throw IllegalStateException. Failed addIngredient preserved
+the accepted entries. Evidence is at
+`%TEMP%/Foton-Merchant-Paper-oracle-585df6154aeb4278ae63265195c81ce7/`.
+Second-ingredient behavior, setIngredients failure, villager persistence and
+player trade gameplay were not executed; this is not a Foton acceptance result.
+
 One isolated Paper1.21.11 build132 run completed111 observations and97 verifier
 checks, with16 deliberately tested exceptions and clean save/shutdown. All
 input hashes remained unchanged. Source, logs, verifier and manifests are at
