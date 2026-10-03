@@ -270,7 +270,7 @@ mod tests {
         );
         assert!(
             described_page.contains("dark_green") || described_page.contains("#00aa00"),
-            "page colour lost: {described_page}"
+            "page color lost: {described_page}"
         );
         let reparsed = parse_slot(&described).expect("native slot round trip");
         assert_eq!(reparsed, stack);
@@ -337,7 +337,7 @@ mod tests {
             .expect("styled name JSON");
         assert!(
             rendered.contains("gold"),
-            "empty name colour lost: {rendered}"
+            "empty name color lost: {rendered}"
         );
         assert_eq!(parse_slot(&described), Some(stack));
     }

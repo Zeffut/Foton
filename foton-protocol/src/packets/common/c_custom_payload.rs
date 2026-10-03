@@ -12,6 +12,16 @@ pub struct CCustomPayload {
     pub payload: Box<[u8]>,
 }
 
+impl CCustomPayload {
+    #[must_use]
+    pub const fn new(identifier: Identifier, payload: Box<[u8]>) -> Self {
+        Self {
+            identifier,
+            payload,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use foton_utils::{Identifier, serial::WriteTo};
@@ -30,16 +40,6 @@ mod tests {
             expected.extend_from_slice(b"fixture:voice");
             expected.extend_from_slice(&body);
             assert_eq!(encoded, expected);
-        }
-    }
-}
-
-impl CCustomPayload {
-    #[must_use]
-    pub const fn new(identifier: Identifier, payload: Box<[u8]>) -> Self {
-        Self {
-            identifier,
-            payload,
         }
     }
 }
