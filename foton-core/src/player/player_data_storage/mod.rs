@@ -213,6 +213,15 @@ struct SlotFile {
     item_nbt: Vec<u8>,
 }
 
+impl SlotFile {
+    fn from_persistent(slot: &PersistentSlot) -> io::Result<Self> {
+        Ok(Self {
+            slot: slot.slot,
+            item_nbt: item_to_nbt_bytes(&slot.item)?,
+        })
+    }
+}
+
 #[derive(SchemaWrite, SchemaRead)]
 struct GlobalPlayerDataFile {
     data_version: i32,
@@ -956,21 +965,16 @@ impl FilePlayerDataStorage {
 
 impl PlayerDataFile {
     fn from_persistent(data: &PersistentPlayerData) -> io::Result<Self> {
-        let mut ender_items = Vec::with_capacity(data.ender_items.len());
-        for slot in &data.ender_items {
-            ender_items.push(SlotFile {
-                slot: slot.slot,
-                item_nbt: item_to_nbt_bytes(&slot.item)?,
-            });
-        }
-
-        let mut inventory = Vec::with_capacity(data.inventory.len());
-        for slot in &data.inventory {
-            inventory.push(SlotFile {
-                slot: slot.slot,
-                item_nbt: item_to_nbt_bytes(&slot.item)?,
-            });
-        }
+        let ender_items = data
+            .ender_items
+            .iter()
+            .map(SlotFile::from_persistent)
+            .collect::<io::Result<Vec<_>>>()?;
+        let inventory = data
+            .inventory
+            .iter()
+            .map(SlotFile::from_persistent)
+            .collect::<io::Result<Vec<_>>>()?;
 
         let file = Self {
             data_version: data.data_version,
