@@ -62,6 +62,9 @@ run "cargo test --workspace"                       cargo test --workspace
 # machine, where the file was left over from an earlier build.
 run "plugin api builds"                            bash dev/build-plugin-api.sh --check
 run "plugin runtime dependency closure"            bash dev/plugin-runtime-test.sh
+# This fixture is compiled against exact official Paper bytes, not Foton's own
+# API. It checks DriverManager visibility and executes a real SQLite query.
+run "Paper-compiled SQLite plugin"                 bash dev/sqlite-plugin-test.sh
 # The release path has its own packaging logic and must stay aligned with the
 # workflow without actually creating a tag or contacting GitHub during CI.
 run "manual release packaging"                    bash dev/release-test.sh
