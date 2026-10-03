@@ -275,7 +275,7 @@ final class FotonMessenger implements Messenger {
     }
 
     private void updateListening(Player player, String operation, byte[] payload) {
-        for (String candidate : new String(payload, StandardCharsets.UTF_8).split("\\0")) {
+        for (String candidate : new String(payload, StandardCharsets.UTF_8).split("\0")) {
             String corrected;
             try {
                 corrected = channel(candidate);
