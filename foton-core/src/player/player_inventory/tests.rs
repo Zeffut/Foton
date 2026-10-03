@@ -8,6 +8,7 @@ use std::{
 };
 
 use crate::{
+    behavior::init_behaviors,
     entity::{Entity, LivingEntity as _, RemovalReason, entities::ItemEntity, next_entity_id},
     inventory::{
         click::{Click, ClickOutcome, DragKind, MouseButton, QuickCraft},
@@ -1542,6 +1543,7 @@ fn menu_removed_hook_can_open_a_replacement() {
 #[test]
 fn terminal_menu_removal_returns_carried_item_and_rejects_replacement() {
     init_vanilla_registry();
+    init_behaviors();
     let player = test_player(Arc::clone(test_world()));
     player
         .inventory
