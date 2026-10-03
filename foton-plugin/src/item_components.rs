@@ -1,6 +1,10 @@
 //! Book item components crossing the Bukkit inventory slot bridge.
+//! Bukkit exposes only raw pages. Filtered projections and the resolved flag
+//! travel as typed native NBT, accepted back only if every visible field still
+//! matches; a Java edit can never be replaced by stale native content.
 
 use std::fmt::Write as _;
+use std::io::Cursor;
 
 use foton_registry::data_components::components::{
     Filterable, WritableBookContent, WrittenBookContent,
@@ -10,27 +14,50 @@ use foton_registry::data_components::vanilla_components::{
 };
 use foton_registry::item_stack::ItemStack;
 use foton_registry::vanilla_items;
+use simdnbt::borrow::read_tag;
+use simdnbt::owned::NbtTag;
+use simdnbt::{FromNbtTag, ToNbtTag as _};
 
 use crate::natives::{adventure_component_from_json, adventure_component_to_json};
 
 fn field(out: &mut String, name: &str, value: &str) {
+    field_bytes(out, name, value.as_bytes());
+}
+
+fn field_bytes(out: &mut String, name: &str, value: &[u8]) {
     out.push('\u{1d}');
     out.push_str(name);
     out.push('=');
-    for byte in value.as_bytes() {
+    for byte in value {
         let _ = write!(out, "{byte:02x}");
     }
 }
 
-fn unhex(value: &str) -> Option<String> {
+fn unhex_bytes(value: &str) -> Option<Vec<u8>> {
     if !value.len().is_multiple_of(2) {
         return None;
     }
-    let bytes = (0..value.len())
+    (0..value.len())
         .step_by(2)
         .map(|index| u8::from_str_radix(value.get(index..index + 2)?, 16).ok())
-        .collect::<Option<Vec<_>>>()?;
-    String::from_utf8(bytes).ok()
+        .collect::<Option<Vec<_>>>()
+}
+
+fn unhex(value: &str) -> Option<String> {
+    String::from_utf8(unhex_bytes(value)?).ok()
+}
+
+fn native_book<T: FromNbtTag>(value: &str) -> Option<T> {
+    let bytes = unhex_bytes(value)?;
+    let mut cursor = Cursor::new(bytes.as_slice());
+    let book = T::from_nbt_tag(read_tag(&mut cursor).ok()?.as_tag())?;
+    (cursor.position() as usize == bytes.len()).then_some(book)
+}
+
+fn push_book_raw(out: &mut String, value: NbtTag) {
+    let mut bytes = Vec::new();
+    value.write(&mut bytes);
+    field_bytes(out, "bookrawhex", &bytes);
 }
 
 pub(crate) fn describe_name(stack: &ItemStack, out: &mut String) -> Option<()> {
@@ -54,9 +81,18 @@ pub(crate) fn describe(stack: &ItemStack, out: &mut String) -> Option<()> {
                 &adventure_component_to_json(page.raw())?,
             );
         }
+        if book.title().filtered().is_some()
+            || !book.resolved()
+            || book.pages().iter().any(|page| page.filtered().is_some())
+        {
+            push_book_raw(out, book.clone().to_nbt_tag());
+        }
     } else if let Some(book) = stack.get(WRITABLE_BOOK_CONTENT) {
         for page in book.pages() {
             field(out, "bookpagehex", page.raw());
+        }
+        if book.pages().iter().any(|page| page.filtered().is_some()) {
+            push_book_raw(out, book.clone().to_nbt_tag());
         }
     }
     Some(())
@@ -95,7 +131,7 @@ pub(crate) fn parse(stack: &mut ItemStack, metadata: &[&str]) -> Option<()> {
             Some(value) => value.parse::<i32>().ok()?,
             None => 0,
         };
-        let book = WrittenBookContent::new(
+        let visible = WrittenBookContent::new(
             Filterable::pass_through(title),
             author,
             generation,
@@ -103,6 +139,27 @@ pub(crate) fn parse(stack: &mut ItemStack, metadata: &[&str]) -> Option<()> {
             true,
         )
         .ok()?;
+        let book = if let Some(raw) = metadata
+            .iter()
+            .find_map(|part| part.strip_prefix("bookrawhex="))
+        {
+            let original: WrittenBookContent = native_book(raw)?;
+            if original.title().raw() != visible.title().raw()
+                || original.author() != visible.author()
+                || original.generation() != visible.generation()
+                || original.pages().len() != visible.pages().len()
+                || original
+                    .pages()
+                    .iter()
+                    .zip(visible.pages())
+                    .any(|(left, right)| left.raw() != right.raw())
+            {
+                return None;
+            }
+            original
+        } else {
+            visible
+        };
         stack.set(WRITTEN_BOOK_CONTENT, book);
     } else if stack.is(&vanilla_items::WRITABLE_BOOK) {
         let pages = metadata
@@ -110,8 +167,27 @@ pub(crate) fn parse(stack: &mut ItemStack, metadata: &[&str]) -> Option<()> {
             .filter_map(|part| part.strip_prefix("bookpagehex="))
             .map(|page| unhex(page).map(Filterable::pass_through))
             .collect::<Option<Vec<_>>>()?;
-        if !pages.is_empty() {
-            stack.set(WRITABLE_BOOK_CONTENT, WritableBookContent::new(pages).ok()?);
+        if !pages.is_empty() || metadata.iter().any(|part| part.starts_with("bookrawhex=")) {
+            let visible = WritableBookContent::new(pages).ok()?;
+            let book = if let Some(raw) = metadata
+                .iter()
+                .find_map(|part| part.strip_prefix("bookrawhex="))
+            {
+                let original: WritableBookContent = native_book(raw)?;
+                if original.pages().len() != visible.pages().len()
+                    || original
+                        .pages()
+                        .iter()
+                        .zip(visible.pages())
+                        .any(|(left, right)| left.raw() != right.raw())
+                {
+                    return None;
+                }
+                original
+            } else {
+                visible
+            };
+            stack.set(WRITABLE_BOOK_CONTENT, book);
         }
     }
     Some(())
@@ -123,11 +199,13 @@ mod tests {
 
     use super::{field, unhex};
     use crate::natives::{adventure_component_from_json, describe_slot, parse_slot};
+    use foton_registry::data_components::components::{Filterable, WritableBookContent};
     use foton_registry::data_components::vanilla_components::{
-        CUSTOM_DATA, CUSTOM_NAME, WRITTEN_BOOK_CONTENT,
+        CUSTOM_DATA, CUSTOM_NAME, WRITABLE_BOOK_CONTENT, WRITTEN_BOOK_CONTENT,
     };
     use foton_registry::init_vanilla_registry;
     use foton_registry::item_stack::ItemStack;
+    use foton_registry::vanilla_items;
     use simdnbt::FromNbtTag as _;
     use simdnbt::borrow::read_tag;
 
@@ -198,5 +276,53 @@ mod tests {
         assert!(parse_slot(&encoded).is_none());
         assert!(unhex("f").is_none());
         assert!(unhex("xx").is_none());
+    }
+
+    #[test]
+    fn filtered_writable_pages_survive_and_stale_passthrough_is_rejected() {
+        init_vanilla_registry();
+        let mut stack = ItemStack::new(&vanilla_items::WRITABLE_BOOK);
+        stack.set(
+            WRITABLE_BOOK_CONTENT,
+            WritableBookContent::new(vec![Filterable::new(
+                "visible".to_owned(),
+                Some("filtered".to_owned()),
+            )])
+            .expect("writable book"),
+        );
+        let encoded = describe_slot(&stack);
+        assert!(encoded.contains("bookrawhex="));
+        assert_eq!(parse_slot(&encoded).as_ref(), Some(&stack));
+        let mut bytes = Vec::new();
+        stack.to_nbt_tag_ref().write(&mut bytes);
+        let borrowed = read_tag(&mut Cursor::new(bytes.as_slice())).expect("filtered writable NBT");
+        assert_eq!(ItemStack::from_nbt_tag(borrowed.as_tag()), Some(stack));
+
+        let stale = encoded.replace("bookpagehex=76697369626c65", "bookpagehex=6368616e676564");
+        assert!(
+            parse_slot(&stale).is_none(),
+            "stale native book must not override edited page"
+        );
+    }
+
+    #[test]
+    fn empty_styled_name_is_still_a_present_native_component() {
+        init_vanilla_registry();
+        let json = r#"{"text":"","color":"gold"}"#;
+        let mut encoded = "minecraft:paper 1".to_owned();
+        field(&mut encoded, "namejsonhex", json);
+        let stack = parse_slot(&encoded).expect("styled empty name");
+        assert!(stack.get(CUSTOM_NAME).is_some());
+        let described = describe_slot(&stack);
+        let rendered = described
+            .split('\u{1d}')
+            .find_map(|part| part.strip_prefix("namejsonhex="))
+            .and_then(unhex)
+            .expect("styled name JSON");
+        assert!(
+            rendered.contains("gold"),
+            "empty name colour lost: {rendered}"
+        );
+        assert_eq!(parse_slot(&described), Some(stack));
     }
 }

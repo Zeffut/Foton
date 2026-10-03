@@ -184,6 +184,18 @@ final class Items {
             org.bukkit.persistence.PersistentDataType.INTEGER), 3, "book PDC integer survives");
         Checks.expect(restored.pages(List.of(page)).pages().equals(List.of(page)),
             "Paper's Book-returning pages method keeps the page");
+
+        ItemStack blankNamed = new ItemStack(Material.PAPER);
+        ItemMeta blankMeta = blankNamed.getItemMeta();
+        var styledEmpty = net.kyori.adventure.text.Component.empty().color(gold);
+        blankMeta.displayName(styledEmpty);
+        Checks.expect(blankMeta.hasDisplayName(), "an empty but styled component is a present name");
+        blankNamed.setItemMeta(blankMeta);
+        String blankSlot = foton.FotonInventory.encode(blankNamed);
+        Checks.expect(blankSlot.contains("namejsonhex="), "an empty but styled name crosses the slot bridge");
+        ItemStack blankRead = foton.FotonInventory.decode(blankSlot);
+        Checks.same(blankRead.getItemMeta().displayName(), styledEmpty,
+            "empty styled name survives the Java slot bridge");
     }
 
     /** One slot crosses JNI as a string, so the string has to survive. */

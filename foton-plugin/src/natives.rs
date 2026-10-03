@@ -14583,7 +14583,8 @@ mod slot_bridge_tests {
         push_pdc_fields,
     };
     use foton_registry::data_components::{
-        components::CustomData, vanilla_components::CUSTOM_DATA,
+        components::{CustomData, Filterable, WritableBookContent, WrittenBookContent},
+        vanilla_components::{CUSTOM_DATA, WRITABLE_BOOK_CONTENT, WRITTEN_BOOK_CONTENT},
     };
     use foton_registry::{init_vanilla_registry, item_stack::ItemStack, vanilla_items};
     use simdnbt::{
@@ -14595,6 +14596,7 @@ mod slot_bridge_tests {
         io::Write as _,
         path::Path,
         process::{Command, Stdio},
+        slice,
         sync::OnceLock,
     };
 
@@ -14696,14 +14698,66 @@ mod slot_bridge_tests {
             hex_encode(cover.as_bytes()),
             hex_encode(b"zeldaciv:livre_cuisine"),
         );
-        let original = parse_slot(&encoded).expect("Zelda book should parse");
-        let returned = java_round_trip("book", &[describe_slot(&original)]);
+        let mut original = parse_slot(&encoded).expect("Zelda book should parse");
+        let page = original.get(WRITTEN_BOOK_CONTENT).expect("page").pages()[0]
+            .raw()
+            .clone();
+        original.set(
+            WRITTEN_BOOK_CONTENT,
+            WrittenBookContent::new(
+                Filterable::new(
+                    "Livre de Cuisine".to_owned(),
+                    Some("Livre filtré".to_owned()),
+                ),
+                "Les cuisiniers d'Hyrule".to_owned(),
+                0,
+                vec![Filterable::new(
+                    page,
+                    Some(text_components::TextComponent::plain("Censuré".to_owned())),
+                )],
+                false,
+            )
+            .expect("filtered native book"),
+        );
+        let native = describe_slot(&original);
+        assert!(
+            native.contains("bookrawhex="),
+            "filtered book needs native passthrough"
+        );
+        let returned = java_round_trip("book", slice::from_ref(&native));
         assert_eq!(returned.len(), 1, "Java book check should return one item");
         let restored = parse_slot(&returned[0]).expect("Java's book should parse again");
         assert_eq!(
             restored, original,
             "Java book bridge changed vanilla components"
         );
+        let edited = java_round_trip("book-edit", &[native]);
+        assert_eq!(edited.len(), 1, "Java book edit should return one item");
+        let changed = parse_slot(&edited[0]).expect("edited Java book should parse");
+        let book = changed
+            .get(WRITTEN_BOOK_CONTENT)
+            .expect("edited book component");
+        assert_eq!(book.title().raw(), "Livre refait");
+        assert!(book.title().filtered().is_none());
+        assert!(book.pages()[0].filtered().is_none());
+        assert!(book.resolved());
+    }
+
+    #[test]
+    fn filtered_writable_book_survives_the_actual_java_bridge() {
+        init_vanilla_registry();
+        let mut original = ItemStack::new(&vanilla_items::WRITABLE_BOOK);
+        original.set(
+            WRITABLE_BOOK_CONTENT,
+            WritableBookContent::new(vec![Filterable::new(
+                "visible".to_owned(),
+                Some("filtered".to_owned()),
+            )])
+            .expect("writable book"),
+        );
+        let returned = java_round_trip("writable", &[describe_slot(&original)]);
+        assert_eq!(returned.len(), 1);
+        assert_eq!(parse_slot(&returned[0]), Some(original));
     }
 
     #[test]

@@ -17,7 +17,7 @@ public final class NativeItemBridgeCheck {
             }
             return;
         }
-        if (args[0].equals("book")) {
+        if (args[0].equals("book") || args[0].equals("book-edit")) {
             org.bukkit.inventory.ItemStack item = foton.FotonInventory.decode(first);
             if (item == null || item.getType() != org.bukkit.Material.WRITTEN_BOOK)
                 throw new AssertionError("Written book was lost in Java");
@@ -33,6 +33,26 @@ public final class NativeItemBridgeCheck {
             if (!Integer.valueOf(3).equals(book.getPersistentDataContainer().get(marker,
                     org.bukkit.persistence.PersistentDataType.INTEGER)))
                 throw new AssertionError("Written book PDC was lost in Java");
+            if (args[0].equals("book-edit")) {
+                book.setTitle("Livre refait");
+                book.page(1, net.kyori.adventure.text.Component.text("Nouveau"));
+                item.setItemMeta(book);
+                String changed = foton.FotonInventory.encode(item);
+                if (changed.contains("bookrawhex="))
+                    throw new AssertionError("Edited book replayed stale filtered native content");
+                System.out.println(changed);
+                return;
+            }
+            System.out.println(foton.FotonInventory.encode(item));
+            return;
+        }
+        if (args[0].equals("writable")) {
+            org.bukkit.inventory.ItemStack item = foton.FotonInventory.decode(first);
+            if (item == null || item.getType() != org.bukkit.Material.WRITABLE_BOOK)
+                throw new AssertionError("Writable book was lost in Java");
+            org.bukkit.inventory.meta.BookMeta book = (org.bukkit.inventory.meta.BookMeta) item.getItemMeta();
+            if (!"visible".equals(book.getPage(1)))
+                throw new AssertionError("Writable page changed in Java");
             System.out.println(foton.FotonInventory.encode(item));
             return;
         }

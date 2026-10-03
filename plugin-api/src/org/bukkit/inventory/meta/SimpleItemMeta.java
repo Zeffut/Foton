@@ -25,7 +25,7 @@ public class SimpleItemMeta implements Damageable {
 
     @Override
     public boolean hasDisplayName() {
-        return displayName != null && !displayName.isEmpty();
+        return displayNameComponent != null;
     }
 
     @Override

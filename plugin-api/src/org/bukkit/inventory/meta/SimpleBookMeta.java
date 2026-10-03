@@ -14,6 +14,17 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
     private String author;
     private List<Component> pages = new ArrayList<>();
     private Generation generation;
+    /** Original native content, including filtered projections unavailable in Bukkit. */
+    private String nativeBookPassthrough;
+
+    public String nativeBookPassthrough() {
+        return nativeBookPassthrough;
+    }
+
+    /** Called after the visible fields have been decoded from a native slot. */
+    public void setNativeBookPassthrough(String value) {
+        nativeBookPassthrough = value;
+    }
 
     @Override
     public boolean hasTitle() {
@@ -31,6 +42,7 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
             return false;
         }
         title = value;
+        nativeBookPassthrough = null;
         return true;
     }
 
@@ -47,6 +59,7 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
     @Override
     public void setAuthor(String value) {
         author = value;
+        nativeBookPassthrough = null;
     }
 
     @Override
@@ -62,6 +75,7 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
     @Override
     public void setPage(int page, String data) {
         pages.set(index(page), Component.text(data == null ? "" : data));
+        nativeBookPassthrough = null;
     }
 
     @Override
@@ -73,6 +87,7 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
     public void setPages(List<String> value) {
         pages = new ArrayList<>();
         if (value != null) for (String page : value) pages.add(Component.text(page == null ? "" : page));
+        nativeBookPassthrough = null;
     }
 
     @Override
@@ -88,6 +103,7 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
         for (String page : added) {
             pages.add(Component.text(page == null ? "" : page));
         }
+        nativeBookPassthrough = null;
     }
 
     @Override
@@ -103,6 +119,7 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
     @Override
     public void setGeneration(Generation value) {
         generation = value;
+        nativeBookPassthrough = null;
     }
 
     @Override
@@ -137,6 +154,7 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
         List<Component> copy = new ArrayList<>();
         if (value != null) for (Component page : value) copy.add(page == null ? Component.empty() : page);
         pages = copy;
+        nativeBookPassthrough = null;
         return net.kyori.adventure.inventory.Book.book(
             title == null ? Component.empty() : title(),
             author == null ? Component.empty() : author(), pages);
@@ -150,6 +168,7 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
     @Override
     public void page(int page, Component data) {
         pages.set(index(page), data == null ? Component.empty() : data);
+        nativeBookPassthrough = null;
     }
 
     private static String text(Component page) {
@@ -173,12 +192,13 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
             && java.util.Objects.equals(title, book.title)
             && java.util.Objects.equals(author, book.author)
             && pages.equals(book.pages)
-            && generation == book.generation;
+            && generation == book.generation
+            && java.util.Objects.equals(nativeBookPassthrough, book.nativeBookPassthrough);
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(super.hashCode(), title, author, pages, generation);
+        return java.util.Objects.hash(super.hashCode(), title, author, pages, generation, nativeBookPassthrough);
     }
 
     private int index(int page) {
