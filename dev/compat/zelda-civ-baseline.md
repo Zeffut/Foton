@@ -94,8 +94,8 @@ a percentage of compatibility nor a gameplay result.
    but the Java event needs a real `BrewingStand`/`Container` holder with
    snapshot/update, lock and inventory semantics. Adding an empty event class
    would only move the reflection failure. The preceding enchantment slice
-   has real native and Paper-compiled fixture tests, while review fixes and
-   the integrated suite remain separate acceptance gates.
+   has real native and Paper-compiled fixture tests; its review fixes and
+   the subsequent integration results are recorded below.
 
 The compatibility target is the *unchanged pinned Zelda JAR*, not a promise
 that every version of every plugin works. A newer Zelda commit requires a new
@@ -116,8 +116,9 @@ ViaVersion nevertheless logs `ClassNotFoundException: foton.entity.CraftPlayer`
 and disables its login race-condition fixer. Its warning explicitly says
 plugins using ViaAPI on join may work incorrectly. This is a real compatibility
 gap, separate from the expected public-key and update-check network warnings
-in the disconnected namespace. The current `dev/via-test.sh` exception regex
-misses this named exception, although its codec/refcount assertions pass.
+in the disconnected namespace. The `dev/via-test.sh` exception regex used for
+this frozen run missed this named exception, although its codec/refcount
+assertions passed.
 Consequently the result is **client connection passed, full Via compatibility
 not certified**; a successful existing test gate must not hide this warning.
 
@@ -127,3 +128,37 @@ normalized logs, client output, isolation evidence and input hashes. The report
 SHA-256 is `0ba515bc3f40d77aafb6580ddd594ed6f793ece590b708bdacc914942f440bf4`.
 Temporary runtime copies also remain because their cleanup was denied by the
 execution policy; no alternate deletion was attempted.
+
+## Stabilization after the frozen runtime observations
+
+The book canonicalization, retained enchantment views, instance-qualified
+deferred menu closes, channel advertisement and test-isolation fixes passed
+their independent scoped reviews. These later fixes do not retroactively
+change the hashes or results of the frozen server runs above.
+
+The Via harness now uses a shared strict diagnostic classifier and verifies
+network isolation before starting the server or clients. It also owns and
+stops its client/server processes on interruption, retains failure evidence,
+and checks the complete shutdown log. Commits `413764045`, `0cad2618b` and
+`684511382` passed focused regressions and independent review, including a
+root namespace slow-client interruption test. Classification of the retained
+real log now exits 1 for the missing CraftPlayer class. The underlying runtime
+adapter is still missing; this tooling repair is not a Via compatibility pass.
+
+The complete `dev/ci.sh` run on `3eb818153` passed workspace tests, Java API,
+official-Paper-compiled shapeless/enchantment/SQLite fixtures, runtime closure,
+packaging/installers, native/JNI checks, the 5,675-test/20-target inventory and
+developer-tooling tests. It exited 1 because strict Clippy found two equivalent
+Option expressions in the plugin-loading example. The single-file correction
+`f5ff305a8` then passed the FULL strict release workspace/all-target/all-feature
+Clippy command, formatting, spelling and independent delta review. This is
+combined stabilization evidence, not a single post-correction all-green CI
+run or a gameplay certification. The next broad foundation/release gate still
+requires the complete suite on its exact revision.
+
+The original Linux `/tmp` integration logs are no longer present; the execution
+record retains the stage outcomes. Subsequent detailed logs are retained in
+Windows TEMP or the ignored plan workspace, outside the volatile Linux `/tmp`.
+The next active slice is native brewing lock enforcement and persistence;
+complete tile PDC, container transfer, holder snapshots and Java BrewEvent
+remain outstanding. Neither Zelda nor Voice Chat is certified.
