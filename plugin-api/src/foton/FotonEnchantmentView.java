@@ -12,31 +12,27 @@ final class FotonEnchantmentView extends FotonInventoryView implements Enchantme
     private final String owner;
     private final long instance;
     private final FotonEnchantingInventory inventory;
-    private State preparing;
 
-    FotonEnchantmentView(FotonPlayer player, long instance, Block table, org.bukkit.inventory.ItemStack[] items, State state) {
-        this(player, instance, new FotonEnchantingInventory(player, instance, table, items), state);
+    FotonEnchantmentView(FotonPlayer player, long instance, Block table) {
+        this(player, instance, new FotonEnchantingInventory(player, instance, table));
     }
 
-    private FotonEnchantmentView(FotonPlayer player, long instance, FotonEnchantingInventory inventory, State state) {
+    private FotonEnchantmentView(FotonPlayer player, long instance, FotonEnchantingInventory inventory) {
         super(player, inventory);
         this.owner = player.getUniqueId().toString();
         this.instance = instance;
         this.inventory = inventory;
-        this.preparing = state;
     }
 
-    void finishPrepare() { preparing = null; inventory.finishPrepare(); }
     @Override public EnchantingInventory getTopInventory() { return inventory; }
     @Override public int countSlots() { return 38; }
     @Override public String getTitle() {
-        String title = preparing != null ? Native.openMenuTitle(owner) : Native.enchantmentTitle(owner, instance);
+        String title = Native.enchantmentTitle(owner, instance);
         if (title == null) throw new IllegalStateException("The enchanting view is no longer open");
         return title;
     }
     @Override public void close() {
-        if (preparing != null) super.close();
-        else if (!Native.closeEnchantmentView(owner, instance)) throw new IllegalStateException("The enchanting view is no longer open");
+        if (!Native.closeEnchantmentView(owner, instance)) throw new IllegalStateException("The enchanting view is no longer open");
     }
     @Override public int getEnchantmentSeed() { return state().seed; }
     @Override public void setEnchantmentSeed(int seed) {
@@ -56,7 +52,8 @@ final class FotonEnchantmentView extends FotonInventoryView implements Enchantme
     }
 
     private State state() {
-        if (preparing != null) return preparing;
+        EnchantmentEventBridge.PrepareContext preparing = EnchantmentEventBridge.preparing(owner, instance);
+        if (preparing != null) return preparing.state();
         String value = Native.enchantmentView(owner);
         if (value == null || Long.parseUnsignedLong(value.substring(0, value.indexOf(' '))) != instance)
             throw new IllegalStateException("The enchanting view is no longer open");
@@ -64,7 +61,7 @@ final class FotonEnchantmentView extends FotonInventoryView implements Enchantme
     }
 
     private void update(State state) {
-        if (preparing == null && !Native.setEnchantmentView(owner, instance, state.encode()))
+        if (EnchantmentEventBridge.preparing(owner, instance) == null && !Native.setEnchantmentView(owner, instance, state.encode()))
             throw new IllegalStateException("The enchanting view is no longer open");
     }
 

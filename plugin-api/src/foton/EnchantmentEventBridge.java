@@ -8,11 +8,19 @@ import org.bukkit.inventory.ItemStack;
 /** One synchronous prepare call. The player's containers are unlocked across JNI. */
 public final class EnchantmentEventBridge {
     private EnchantmentEventBridge() { }
-    private static final ThreadLocal<FotonEnchantmentView> PREPARING = new ThreadLocal<>();
+    private static final ThreadLocal<PrepareContext> PREPARING = new ThreadLocal<>();
+
+    record PrepareContext(String owner, long instance, FotonEnchantmentView view,
+            FotonEnchantmentView.State state, ItemStack[] items) { }
+
+    static PrepareContext preparing(String owner, long instance) {
+        PrepareContext context = PREPARING.get();
+        return context != null && context.instance() == instance && context.owner().equals(owner) ? context : null;
+    }
 
     static InventoryView currentView(FotonPlayer player) {
-        FotonEnchantmentView preparing = PREPARING.get();
-        if (preparing != null && preparing.getPlayer().getUniqueId().equals(player.getUniqueId())) return preparing;
+        PrepareContext preparing = PREPARING.get();
+        if (preparing != null && preparing.owner().equals(player.getUniqueId().toString())) return preparing.view();
         if (FotonCustomInventory.openForViewer(player.getUniqueId().toString()) != null)
             return new FotonInventoryView(player);
         String encoded = Native.enchantmentView(player.getUniqueId().toString());
@@ -20,7 +28,7 @@ public final class EnchantmentEventBridge {
         String[] table = encoded.substring(0, encoded.indexOf('\u001f')).split(" ");
         long instance = Long.parseUnsignedLong(table[0]);
         Block block = new FotonBlock(new FotonWorld(table[1]), Integer.parseInt(table[2]), Integer.parseInt(table[3]), Integer.parseInt(table[4]));
-        return new FotonEnchantmentView(player, instance, block, null, null);
+        return new FotonEnchantmentView(player, instance, block);
     }
 
     public static String prepare(String uuid, String world, int x, int y, int z,
@@ -31,11 +39,11 @@ public final class EnchantmentEventBridge {
         int separator = encodedState.indexOf('|');
         long instance = Long.parseUnsignedLong(encodedState.substring(0, separator));
         FotonEnchantmentView.State state = FotonEnchantmentView.State.decode(encodedState.substring(separator + 1));
-        FotonEnchantmentView view = new FotonEnchantmentView(player, instance, block, items, state);
+        FotonEnchantmentView view = new FotonEnchantmentView(player, instance, block);
         PrepareItemEnchantEvent event = new PrepareItemEnchantEvent(player, view, block, items[0], state.copyOffers(), bonus);
         event.setCancelled(cancelled);
-        FotonEnchantmentView previous = PREPARING.get();
-        PREPARING.set(view);
+        PrepareContext previous = PREPARING.get();
+        PREPARING.set(new PrepareContext(uuid, instance, view, state, items));
         try {
             EventBridge.dispatch(event);
             state.applyEventOffers(event.getOffers());
@@ -43,7 +51,6 @@ public final class EnchantmentEventBridge {
                 + '\u001f' + FotonInventory.encode(items[0]) + '\u001f' + FotonInventory.encode(items[1]);
         } finally {
             if (previous == null) PREPARING.remove(); else PREPARING.set(previous);
-            view.finishPrepare();
         }
     }
 }

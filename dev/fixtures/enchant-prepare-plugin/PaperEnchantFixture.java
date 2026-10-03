@@ -15,6 +15,8 @@ import org.bukkit.plugin.java.JavaPlugin;
 public final class PaperEnchantFixture extends JavaPlugin implements Listener {
     public static int calls;
     public static int completed;
+    private EnchantmentView retained;
+    private EnchantingInventory retainedInventory;
     @Override public void onEnable() { getServer().getPluginManager().registerEvents(this, this); }
 
     @EventHandler
@@ -35,10 +37,21 @@ public final class PaperEnchantFixture extends JavaPlugin implements Listener {
         check(inventory.getItem() == event.getItem(), "item mirror during callback");
         if (calls++ == 0) {
             check(!event.isCancelled(), "enchantable input starts allowed");
+            retained = view;
+            retainedInventory = inventory;
             event.setCancelled(true);
             completed++;
             return;
         }
+        check(retained.getEnchantmentSeed() == 987654321, "retained view reads the new callback state");
+        check(retainedInventory.getItem() == event.getItem(), "retained inventory reads the new item mirror");
+        check(retainedInventory.getViewers().get(0).getUniqueId().equals(event.getEnchanter().getUniqueId()), "retained inventory viewers");
+        EnchantmentOffer[] initial = retained.getOffers();
+        EnchantmentOffer[] changed = retained.getOffers();
+        changed[0].setCost(7);
+        retained.setOffers(changed);
+        check(view.getOffers()[0].getCost() == 7, "retained offer writes share the active context");
+        retained.setOffers(initial);
         check(event.isCancelled(), "non-enchantable input starts cancelled");
         event.setCancelled(false);
         event.getOffers()[0] = new EnchantmentOffer(Enchantment.UNBREAKING, 3, 9);
@@ -47,11 +60,14 @@ public final class PaperEnchantFixture extends JavaPlugin implements Listener {
         EnchantmentOffer[] copy = view.getOffers();
         copy[0].setCost(31);
         check(view.getOffers()[0].getCost() == 2, "view reads return independent offers");
-        view.setEnchantmentSeed(Integer.MIN_VALUE + 7);
+        retained.setEnchantmentSeed(Integer.MIN_VALUE + 7);
         check(view.getEnchantmentSeed() == Integer.MIN_VALUE + 7, "full-width seed");
         event.getItem().setType(Material.DIAMOND_SWORD);
-        inventory.setSecondary(new ItemStack(Material.LAPIS_LAZULI, 3));
+        retainedInventory.setSecondary(new ItemStack(Material.LAPIS_LAZULI, 3));
         check(generic.getItem(1).getAmount() == 3, "raw-slot inventory write");
+        retained.setItem(1, new ItemStack(Material.LAPIS_LAZULI, 4));
+        check(inventory.getSecondary().getAmount() == 4, "retained raw-slot write");
+        retainedInventory.setSecondary(new ItemStack(Material.LAPIS_LAZULI, 3));
         completed++;
     }
 

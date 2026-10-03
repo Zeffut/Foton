@@ -237,6 +237,7 @@ impl Player {
                 .collect()
         };
         open_menu.dispatch = Some(OpenMenuDispatch {
+            instance: menu.behavior().instance_id(),
             overrides_player_slots,
             top_slot_count,
             menu_type,
@@ -293,12 +294,11 @@ impl Player {
     fn run_deferred_menu_actions(&self, actions: Vec<DeferredMenuAction>) {
         for action in actions {
             match action {
-                DeferredMenuAction::Close { send_packet } => {
-                    if send_packet {
-                        self.close_container();
-                    } else {
-                        self.do_close_container();
-                    }
+                DeferredMenuAction::Close {
+                    send_packet,
+                    expected_instance,
+                } => {
+                    self.close_open_menu(send_packet, expected_instance);
                 }
                 DeferredMenuAction::Open(prepared) => {
                     self.execute_menu_open(*prepared);
@@ -890,6 +890,7 @@ impl Player {
                     .collect()
             };
             open_menu.dispatch = Some(OpenMenuDispatch {
+                instance: menu.behavior().instance_id(),
                 overrides_player_slots: menu.overrides_player_slots(),
                 top_slot_count,
                 menu_type,
@@ -975,7 +976,7 @@ impl Player {
     /// Based on Java's `ServerPlayer::closeContainer`.
     /// This sends a close packet to the client.
     pub fn close_container(&self) {
-        self.close_open_menu(true);
+        self.close_open_menu(true, None);
     }
 
     /// Internal close container logic without sending a packet.
@@ -983,7 +984,7 @@ impl Player {
     /// Based on Java's `ServerPlayer::doCloseContainer`.
     /// Called when the client sends a close packet or when opening a new menu.
     pub fn do_close_container(&self) {
-        self.close_open_menu(false);
+        self.close_open_menu(false, None);
     }
 
     /// Removes both the base inventory menu and any external menu.
@@ -1088,23 +1089,40 @@ impl Player {
         self.try_finish_terminal_menu_removal();
     }
 
-    fn close_open_menu(&self, send_packet: bool) {
+    pub(super) fn close_open_menu(
+        &self,
+        send_packet: bool,
+        expected_instance: Option<u64>,
+    ) -> bool {
         let menu = {
             let mut open_menu = self.open_menu.lock();
             if open_menu.terminal_removal.is_some() {
-                return;
+                return false;
             }
             if let Some(dispatch) = open_menu.dispatch.as_mut() {
-                dispatch
-                    .actions
-                    .push(DeferredMenuAction::Close { send_packet });
-                return;
+                if expected_instance.is_some_and(|expected| dispatch.instance != expected) {
+                    return false;
+                }
+                dispatch.actions.push(DeferredMenuAction::Close {
+                    send_packet,
+                    expected_instance,
+                });
+                return true;
+            }
+            if expected_instance.is_some_and(|expected| {
+                open_menu
+                    .menu
+                    .as_ref()
+                    .is_none_or(|menu| menu.behavior().instance_id() != expected)
+            }) {
+                return false;
             }
             let Some(menu) = open_menu.menu.take() else {
-                return;
+                return false;
             };
             open_menu.title = None;
             open_menu.dispatch = Some(OpenMenuDispatch {
+                instance: menu.behavior().instance_id(),
                 overrides_player_slots: menu.overrides_player_slots(),
                 top_slot_count: 0,
                 menu_type: None,
@@ -1124,6 +1142,7 @@ impl Player {
         self.fire_event(&mut close_event);
         self.remove_open_menu(&mut menu);
         self.finish_open_menu_removal();
+        true
     }
 
     fn remove_open_menu(&self, menu: &mut Menu) {

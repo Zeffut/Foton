@@ -178,3 +178,92 @@ fn prepare_enchant_cancellation_offers_items_and_unlocked_player_inventory() {
             .expect("remove test storage");
     });
 }
+
+#[test]
+fn closing_a_preparing_enchant_view_does_not_close_its_queued_replacement() {
+    foton_registry::init_vanilla_registry();
+    let world = fresh_test_world("prepare_enchant_replacement");
+    let runtime = Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    runtime.block_on(async {
+        let storage_root = test_storage_root("prepare-enchant-replacement");
+        let server = test_server(
+            Arc::clone(&world),
+            PermissionSubjectIndex::new(),
+            &storage_root,
+        )
+        .await
+        .expect("test server");
+        server.attach_worlds();
+        let player = TestPlayerBuilder::new(Arc::clone(&world), "ReentrantEnchanter", 1)
+            .server(&server)
+            .build();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_for_event = Arc::clone(&calls);
+        let player_for_event = Arc::clone(&player);
+        let owner = Identifier::new_static("test", "prepare_enchant_replacement");
+        server
+            .events
+            .on::<PrepareItemEnchantEvent, _>(owner.clone(), move |event| {
+                let player = &player_for_event;
+                let first = calls_for_event.fetch_add(1, Ordering::SeqCst) == 0;
+                assert_eq!(
+                    player.enchantment_title(event.menu_id).as_deref(),
+                    Some(if first { "Original" } else { "Replacement" }),
+                    "title remains available while the menu is detached"
+                );
+                if first {
+                    player.open_menu(TextComponent::plain("Replacement"), |context| {
+                        enchantment(
+                            Arc::clone(&context.player.inventory),
+                            context.container_id,
+                            BlockPos::new(16, 64, 16),
+                            context.world,
+                        )
+                    });
+                }
+                assert!(player.close_enchantment_view(event.menu_id));
+            });
+        player.open_menu(TextComponent::plain("Original"), |context| {
+            enchantment(
+                Arc::clone(&context.player.inventory),
+                context.container_id,
+                BlockPos::new(8, 64, 8),
+                context.world,
+            )
+        });
+        let original = player.enchantment_view().expect("original table").0;
+        assert!(player.set_enchantment_item(
+            original,
+            0,
+            ItemStack::new(&vanilla_items::DIAMOND_SWORD)
+        ));
+        let replacement = player
+            .enchantment_view()
+            .expect("replacement remains open")
+            .0;
+        assert_ne!(original, replacement);
+        assert_eq!(
+            player.enchantment_title(replacement).as_deref(),
+            Some("Replacement")
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(player.set_enchantment_item(
+            replacement,
+            0,
+            ItemStack::new(&vanilla_items::DIAMOND_SWORD)
+        ));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert!(
+            player.enchantment_view().is_none(),
+            "a matching queued close still executes"
+        );
+        server.events.forget(&owner);
+        drop(server);
+        fs::remove_dir_all(&storage_root)
+            .await
+            .expect("remove test storage");
+    });
+}

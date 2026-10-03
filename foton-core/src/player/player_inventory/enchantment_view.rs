@@ -10,6 +10,11 @@ impl Player {
     #[must_use]
     pub fn enchantment_title(&self, instance: u64) -> Option<String> {
         let open = self.open_menu.lock();
+        if let Some(dispatch) = open.dispatch.as_ref() {
+            return (dispatch.instance == instance)
+                .then(|| open.title.clone())
+                .flatten();
+        }
         let menu = open.menu.as_ref()?;
         if menu.behavior().instance_id() != instance
             || menu.kind().downcast_ref::<EnchantmentKind>().is_none()
@@ -78,15 +83,6 @@ impl Player {
 
     /// Closes only the table to which the plugin view belongs.
     pub fn close_enchantment_view(&self, instance: u64) -> bool {
-        let Ok(menu) = self.take_open_menu_for_callback(None) else {
-            return false;
-        };
-        let matches = menu.behavior().instance_id() == instance
-            && menu.kind().downcast_ref::<EnchantmentKind>().is_some();
-        if matches {
-            self.close_container();
-        }
-        self.finish_open_menu_callback(menu);
-        matches
+        self.close_open_menu(true, Some(instance))
     }
 }

@@ -14,40 +14,40 @@ final class FotonEnchantingInventory extends FotonMenuInventory implements Encha
     private final FotonPlayer player;
     private final long instance;
     private final Block block;
-    private ItemStack[] preparing;
     private final BlockInventoryHolder holder = new BlockInventoryHolder() {
         @Override public Block getBlock() { return block; }
         @Override public Inventory getInventory() { return FotonEnchantingInventory.this; }
     };
 
-    FotonEnchantingInventory(FotonPlayer player, long instance, Block block, ItemStack[] preparing) {
+    FotonEnchantingInventory(FotonPlayer player, long instance, Block block) {
         super(player.getUniqueId().toString());
         this.player = player;
         this.instance = instance;
         this.block = block;
-        this.preparing = preparing;
     }
 
-    void finishPrepare() { preparing = null; }
     @Override public int getSize() { return 2; }
     @Override public InventoryType getType() { return InventoryType.ENCHANTING; }
     @Override public BlockInventoryHolder getHolder() { return holder; }
     @Override public Location getLocation() { return block.getLocation(); }
     @Override public java.util.List<HumanEntity> getViewers() {
-        if (preparing == null && Native.enchantmentTitle(player.getUniqueId().toString(), instance) == null)
+        if (EnchantmentEventBridge.preparing(player.getUniqueId().toString(), instance) == null
+                && Native.enchantmentTitle(player.getUniqueId().toString(), instance) == null)
             throw new IllegalStateException("The enchanting view is no longer open");
         return java.util.List.of(player);
     }
     @Override public ItemStack getItem(int slot) {
         if (slot < 0 || slot >= 2) throw new IndexOutOfBoundsException(slot);
-        if (preparing != null) return preparing[slot];
+        EnchantmentEventBridge.PrepareContext preparing = EnchantmentEventBridge.preparing(player.getUniqueId().toString(), instance);
+        if (preparing != null) return preparing.items()[slot];
         String encoded = Native.enchantmentItem(player.getUniqueId().toString(), instance, slot);
         if (encoded == null) throw new IllegalStateException("The enchanting view is no longer open");
         return FotonInventory.decode(encoded);
     }
     @Override public void setItem(int slot, ItemStack item) {
         if (slot < 0 || slot >= 2) throw new IndexOutOfBoundsException(slot);
-        if (preparing != null) preparing[slot] = item == null ? null : item.clone();
+        EnchantmentEventBridge.PrepareContext preparing = EnchantmentEventBridge.preparing(player.getUniqueId().toString(), instance);
+        if (preparing != null) preparing.items()[slot] = item == null ? null : item.clone();
         else if (!Native.setEnchantmentItem(player.getUniqueId().toString(), instance, slot, FotonInventory.encode(item)))
             throw new IllegalStateException("The enchanting view is no longer open");
     }

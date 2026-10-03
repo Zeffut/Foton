@@ -8,13 +8,13 @@ public final class EnchantmentBridgeCheck {
             "minecraft:diamond_sword 1", "minecraft:lapis_lazuli 2", 7, state, false);
         if (!cancelled.startsWith("1\u001f")) throw new AssertionError("listener cancellation lost");
         String changed = foton.EnchantmentEventBridge.prepare(uuid, "minecraft:overworld", 8, 64, 8,
-            "minecraft:stone 1", "minecraft:lapis_lazuli 2", 7, state, true);
+            "minecraft:stone 1", "minecraft:lapis_lazuli 2", 7, state.replace("123456789", "987654321"), true);
         String expected = "0\u001f-2147483641;9,minecraft:unbreaking,3;0,,-1;0,,-1"
             + "\u001fminecraft:diamond_sword 1\u001fminecraft:lapis_lazuli 3";
         if (!expected.equals(changed)) throw new AssertionError("writeback differs: " + changed);
         if (PaperEnchantFixture.calls != 2) throw new AssertionError("actual listeners not called");
         if (PaperEnchantFixture.completed != 2) throw new AssertionError("listener assertion failed");
         foton.PluginHost.disableAll();
-        System.out.println("Paper-compiled prepare enchant: interface ABI, cancellation, offers, seed and inventory passed");
+        System.out.println("Paper-compiled prepare enchant: exercised interface descriptors, cancellation, offers, seed and retained inventory passed");
     }
 }

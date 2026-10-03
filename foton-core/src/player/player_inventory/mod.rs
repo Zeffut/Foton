@@ -106,6 +106,7 @@ impl PlayerInventorySyncState {
 /// nothing reading it. The id is still on the menu itself for anyone who needs
 /// it; keeping a second, never-read copy here only invites the two to disagree.
 struct OpenMenuDispatch {
+    instance: u64,
     overrides_player_slots: bool,
     top_slot_count: usize,
     menu_type: Option<String>,
@@ -121,10 +122,16 @@ struct TerminalMenuRemoval {
 }
 
 enum DeferredMenuAction {
-    Close { send_packet: bool },
+    Close {
+        send_packet: bool,
+        expected_instance: Option<u64>,
+    },
     Open(Box<PendingMenuOpen>),
     Install(Box<PreparedMenu>),
-    SetSlot { index: usize, stack: ItemStack },
+    SetSlot {
+        index: usize,
+        stack: ItemStack,
+    },
 }
 
 type MenuFactory = Box<dyn for<'a> FnOnce(MenuOpenContext<'a>) -> Menu + Send + 'static>;
