@@ -80,6 +80,8 @@ The [canonical live item design](item-state-bridge-plan.md) selects immutable
 native snapshots with explicit Java edits. Ordinary network serialization
 is not a lossless substitute: it omits live bundle selection. Lease ownership,
 atomic consumers and separate persistent item bytes all need their own proof.
+The [complete persistent-data contract](persistent-data-plan.md) records the
+type, copying, retained-view and public NBT-byte requirements for owner markers.
 
 ## Bounded delivery and acceptance
 
