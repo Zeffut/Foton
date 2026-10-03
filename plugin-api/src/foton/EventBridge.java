@@ -507,7 +507,7 @@ public final class EventBridge {
         } catch (RuntimeException ex) { return "!"; }
     }
     public static boolean fireCreatureSpawn(String entity, String world, double x, double y, double z, String reason) {
-        org.bukkit.entity.LivingEntity living = new FotonLivingEntity(Native.parse(entity));
+        org.bukkit.entity.LivingEntity living = (org.bukkit.entity.LivingEntity) FotonEntity.handle(Native.parse(entity));
         org.bukkit.event.entity.CreatureSpawnEvent event =
             new org.bukkit.event.entity.CreatureSpawnEvent(
                 living, new org.bukkit.Location(new FotonWorld(world), x, y, z),

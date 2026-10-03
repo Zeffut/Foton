@@ -33,7 +33,7 @@ public class FotonEntity implements Entity, org.bukkit.projectiles.ProjectileSou
     public FotonEntity(UUID id) { this.id = id; }
     public static FotonEntity handle(UUID id) {
         if (id == null) return null;
-        org.bukkit.entity.Entity wrapped = FotonWorld.wrapEntity(id, Native.entityType(id.toString()));
+        org.bukkit.entity.Entity wrapped = FotonWorld.wrapEntity(id, id.toString());
         return wrapped instanceof FotonEntity entity ? entity : new FotonEntity(id);
     }
     @Override public boolean isPersistent() { return Native.entityPersistent(getUniqueId().toString()); }

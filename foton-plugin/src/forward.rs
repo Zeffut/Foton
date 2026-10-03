@@ -1840,7 +1840,7 @@ fn creature_spawn_call(
     env.call_static_method(
         BRIDGE,
         "fireCreatureSpawn",
-        "(Ljava/lang/String;Ljava/lang/String;DDDDLjava/lang/String;)Z",
+        "(Ljava/lang/String;Ljava/lang/String;DDDLjava/lang/String;)Z",
         &[
             JValue::Object(&entity),
             JValue::Object(&world),
