@@ -62,6 +62,12 @@ These artifacts were built before their corresponding commits, then frozen
 before later review fixes. Source association uses the recorded build report,
 source state and timestamps; the hashes identify the executed artifacts.
 This run establishes the new startup blocker, not live enchanting behavior.
+The same frozen API and its 47-library runtime produce 228 static linkage
+diagnostics for the exact Zelda JAR: 14 interface/class-kind mismatches, 52
+missing classes and 162 missing members. The scanner exits 1; its full output
+is retained beside the report as `linkage-after-enchant.txt`. The earlier
+MiniMessage-only snapshot produced 238 diagnostics. These counts are neither
+a percentage of compatibility nor a gameplay result.
 
 ## Acceptance path
 
