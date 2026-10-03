@@ -5,19 +5,17 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PAPER_API_SHA256=c577b181c11a8674310e56c92a91e31c010b7f04c9bd10b91c3be18374401070
 PAPER_API_URL=https://repo.papermc.io/repository/maven-public/io/papermc/paper/paper-api/1.21.11-R0.1-SNAPSHOT/paper-api-1.21.11-R0.1-20260511.115010-91.jar
-command -v javac >/dev/null || { echo 'javac is required' >&2; exit 1; }
-command -v jar >/dev/null || { echo 'jar is required' >&2; exit 1; }
+VERIFY_PAPER_ONLY=0
+if [ "${1:-}" = '--verify-paper-api' ]; then
+  VERIFY_PAPER_ONLY=1
+  shift
+fi
 command -v sha256sum >/dev/null || { echo 'sha256sum is required' >&2; exit 1; }
-[ -f "$REPO/plugin-api/build/foton-plugin-api.jar" ] || {
-  echo 'run bash dev/build-plugin-api.sh first' >&2
-  exit 2
-}
-bash "$REPO/dev/fetch-plugin-api-libs.sh" --check
 
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/foton-sqlite-plugin.XXXXXX")"
 trap 'rm -rf "$scratch"' EXIT
-PAPER_API_JAR="${1:-$scratch/paper-api-1.21.11-91.jar}"
-if [ "${1:-}" = '' ]; then
+PAPER_API_JAR="${1:-${FOTON_PAPER_API_JAR:-$scratch/paper-api-1.21.11-91.jar}}"
+if [ -z "${1:-}" ] && [ -z "${FOTON_PAPER_API_JAR:-}" ]; then
   command -v curl >/dev/null || { echo 'curl is required to fetch Paper API' >&2; exit 1; }
   curl -fsSL --retry 3 --max-time 180 -o "$PAPER_API_JAR" "$PAPER_API_URL"
 fi
@@ -28,6 +26,17 @@ if [ "$actual_paper_sha256" != "$PAPER_API_SHA256" ]; then
   echo "expected SHA-256 $PAPER_API_SHA256, got $actual_paper_sha256" >&2
   exit 2
 fi
+if [ "$VERIFY_PAPER_ONLY" -eq 1 ]; then
+  printf 'pinned Paper 1.21.11 API verified\n'
+  exit 0
+fi
+command -v javac >/dev/null || { echo 'javac is required' >&2; exit 1; }
+command -v jar >/dev/null || { echo 'jar is required' >&2; exit 1; }
+[ -f "$REPO/plugin-api/build/foton-plugin-api.jar" ] || {
+  echo 'run bash dev/build-plugin-api.sh first' >&2
+  exit 2
+}
+bash "$REPO/dev/fetch-plugin-api-libs.sh" --check
 
 if [ -z "${FOTON_JAVA_HOME:-}" ]; then
   java_binary="$(readlink -f "$(command -v java)")"
