@@ -536,7 +536,13 @@ extern "system" fn tag_values(
 
 /// `foton.Native.serverVersion`
 extern "system" fn server_version(mut env: JNIEnv<'_>, _class: JClass<'_>) -> jstring {
-    to_java(&mut env, Some(env!("CARGO_PKG_VERSION").to_owned()))
+    to_java(&mut env, Some(bukkit_api_version()))
+}
+
+/// Paper 26.2 uses `26.2.build.<build>-stable`, whereas Foton has no Paper
+/// build number. Keep the target API detectable without claiming Paper's build.
+fn bukkit_api_version() -> String {
+    format!("{}.build.0-foton", foton_utils::MC_VERSION)
 }
 
 /// `foton.Native.minecraftVersion`
@@ -14480,6 +14486,17 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             effective_permissions as *mut c_void,
         ),
     ]
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::bukkit_api_version;
+
+    #[test]
+    fn bukkit_version_identifies_target_api_without_claiming_a_paper_build() {
+        assert_eq!(bukkit_api_version(), "26.2.build.0-foton");
+        assert_ne!(bukkit_api_version(), env!("CARGO_PKG_VERSION"));
+    }
 }
 
 #[cfg(test)]

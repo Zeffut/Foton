@@ -156,11 +156,11 @@ public final class FotonServer implements Server {
         return Native.serverBrand();
     }
 
-    /** The API version a plugin checks against, not Foton's own.
+    /** The targeted Paper API version a plugin checks against, not Foton's own.
      *
      * A plugin reading this is asking "which Bukkit am I talking to", and
      * answering with Foton's version number would tell it something true about
-     * the wrong question.
+     * the wrong question. Foton's version remains available from getVersion().
      */
     @Override
     public String getBukkitVersion() {
