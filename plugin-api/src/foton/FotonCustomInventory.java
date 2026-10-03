@@ -41,27 +41,36 @@ public final class FotonCustomInventory implements Inventory {
     @Override public InventoryType getType() { return InventoryType.CHEST; }
     @Override public ItemStack getItem(int slot) {
         if (slot < 0 || slot >= contents.length) return null;
-        if (viewer != null && Native.openMenuTopSlotCount(viewer) == contents.length) return FotonInventory.decode(Native.openMenuSlot(viewer, slot));
+        if (viewer != null && Native.openMenuTopSlotCount(viewer) == contents.length) return FotonInventory.decodeTransfer(Native.openMenuSlot(viewer, slot));
         return contents[slot] == null ? null : contents[slot].clone();
     }
     @Override public void setItem(int slot, ItemStack item) {
         if (slot < 0 || slot >= contents.length) return;
-        contents[slot] = item == null ? null : item.clone();
-        if (viewer != null && Native.openMenuTopSlotCount(viewer) == contents.length) Native.setOpenMenuSlot(viewer, slot, FotonInventory.encode(item));
+        ItemStack replacement = item == null ? null : item.clone();
+        if (viewer != null && Native.openMenuTopSlotCount(viewer) == contents.length)
+            Native.setOpenMenuItems(viewer, new int[]{slot}, new foton.item.ItemMutation[]{FotonInventory.mutation(replacement)}, false);
+        contents[slot] = replacement;
     }
     @Override public HashMap<Integer, ItemStack> addItem(ItemStack... items) {
         HashMap<Integer, ItemStack> left = new HashMap<>(); if (items == null) return left;
+        ItemStack[] staged = getContents();
         for (int index = 0; index < items.length; index++) { ItemStack in = items[index] == null ? null : items[index].clone(); if (in == null) continue;
-            for (int slot = 0; slot < contents.length && in.getAmount() > 0; slot++) { ItemStack current = getItem(slot); if (current != null && current.isSimilar(in)) { int moved = Math.min(in.getAmount(), Math.max(0, current.getMaxStackSize() - current.getAmount())); if (moved > 0) { current.setAmount(current.getAmount() + moved); in.setAmount(in.getAmount() - moved); setItem(slot, current); } } }
-            for (int slot = 0; slot < contents.length && in.getAmount() > 0; slot++) if (getItem(slot) == null || getItem(slot).getType().isAir()) { int moved = Math.min(in.getAmount(), in.getMaxStackSize()); ItemStack placed = in.clone(); placed.setAmount(moved); setItem(slot, placed); in.setAmount(in.getAmount() - moved); }
+            for (int slot = 0; slot < contents.length && in.getAmount() > 0; slot++) { ItemStack current = staged[slot]; if (current != null && current.isSimilar(in)) { int moved = Math.min(in.getAmount(), Math.max(0, current.getMaxStackSize() - current.getAmount())); if (moved > 0) { current.setAmount(current.getAmount() + moved); in.setAmount(in.getAmount() - moved); staged[slot] = current; } } }
+            for (int slot = 0; slot < contents.length && in.getAmount() > 0; slot++) if (staged[slot] == null || staged[slot].getType().isAir()) { int moved = Math.min(in.getAmount(), in.getMaxStackSize()); ItemStack placed = in.clone(); placed.setAmount(moved); staged[slot] = placed; in.setAmount(in.getAmount() - moved); }
             if (in.getAmount() > 0) left.put(index, in);
-        } return left;
+        } setContents(staged); return left;
     }
     @Override public ItemStack[] getContents() { ItemStack[] result = new ItemStack[contents.length]; for (int i = 0; i < result.length; i++) result[i] = getItem(i); return result; }
-    @Override public void setContents(ItemStack[] items) { for (int i = 0; i < contents.length; i++) setItem(i, items != null && i < items.length ? items[i] : null); }
+    @Override public void setContents(ItemStack[] items) {
+        if (items != null && items.length > contents.length) throw new IllegalArgumentException("inventory contents exceed size");
+        ItemStack[] replacement = new ItemStack[contents.length];
+        for (int i = 0; i < replacement.length; i++) replacement[i] = items != null && i < items.length && items[i] != null ? items[i].clone() : null;
+        if (viewer != null && Native.openMenuTopSlotCount(viewer) == contents.length) FotonMenuInventory.setNativeContents(viewer, contents.length, replacement);
+        System.arraycopy(replacement, 0, contents, 0, contents.length);
+    }
     @Override public boolean contains(Material material) { return first(material) >= 0; }
     @Override public int first(Material material) { if (material == null) return -1; for (int i = 0; i < contents.length; i++) if (contents[i] != null && contents[i].getType() == material) return i; return -1; }
-    @Override public void clear() { for (int i = 0; i < contents.length; i++) clear(i); }
+    @Override public void clear() { setContents(null); }
     @Override public void clear(int slot) { if (slot >= 0 && slot < contents.length) setItem(slot, null); }
     public String getTitle() { return title; }
     synchronized void attachViewer(String uuid) {

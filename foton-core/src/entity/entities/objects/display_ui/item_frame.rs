@@ -309,6 +309,12 @@ impl ItemFrameEntity {
         self.entity_data.lock().item.get().clone()
     }
 
+    /// Borrows the stack synchronously under the entity-data lock, permitting
+    /// clone preflight. The reader must not call Java or reenter this entity.
+    pub fn with_framed_item<R>(&self, read: impl FnOnce(&ItemStack) -> R) -> R {
+        read(self.entity_data.lock().item.get())
+    }
+
     /// Sets the framed item, matching vanilla by storing a single item.
     pub fn set_item(&self, item: ItemStack) {
         self.set_item_with_update(item, true);

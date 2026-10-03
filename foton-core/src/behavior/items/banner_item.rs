@@ -66,6 +66,10 @@ impl BannerItem {
 }
 
 impl ItemBehavior for BannerItem {
+    fn is_banner(&self) -> bool {
+        true
+    }
+
     fn use_on(&self, context: &mut UseOnContext) -> InteractionResult {
         self.base.use_on(context)
     }

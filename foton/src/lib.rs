@@ -289,8 +289,32 @@ impl FotonServer {
                     api_jar,
                     library_directory,
                     plugin_directory: plugin_directory.clone(),
+                    item_snapshot_limit: match env::var("FOTON_PLUGIN_ITEM_SNAPSHOT_LIMIT") {
+                        Ok(value) => value.parse().map_err(|_| {
+                            FotonServerError::Plugin(
+                                "FOTON_PLUGIN_ITEM_SNAPSHOT_LIMIT must be a positive integer"
+                                    .to_owned(),
+                            )
+                        })?,
+                        Err(env::VarError::NotPresent) => {
+                            PluginHostConfig::DEFAULT_ITEM_SNAPSHOT_LIMIT
+                        }
+                        Err(env::VarError::NotUnicode(_)) => {
+                            return Err(FotonServerError::Plugin(
+                                "FOTON_PLUGIN_ITEM_SNAPSHOT_LIMIT must be a positive integer"
+                                    .to_owned(),
+                            ));
+                        }
+                    },
                 };
-                Some(start_plugin_host(config, plugin_directory)?)
+                match start_plugin_host(config, plugin_directory) {
+                    Ok(host) => Some(host),
+                    Err(error) => {
+                        PluginHost::seal_item_operations();
+                        PluginHost::drain_item_operations().await;
+                        return Err(error);
+                    }
+                }
             }
         };
 
@@ -306,7 +330,9 @@ impl FotonServer {
         {
             Ok(server) => Arc::new(server),
             Err(error) => {
-                cleanup_plugin_host(&mut plugin_host, None);
+                if let Err(shutdown_error) = shutdown_plugin_host(&mut plugin_host, None).await {
+                    log::error!("Plugin cleanup after startup failure failed: {shutdown_error}");
+                }
                 return Err(FotonServerError::Core(error));
             }
         };
@@ -314,7 +340,11 @@ impl FotonServer {
         if let Some(host) = &plugin_host {
             host.bind_server(&Arc::downgrade(&server));
             if let Err(error) = host.enable_all() {
-                shutdown_plugin_host(&mut plugin_host, Some(&server)).await;
+                if let Err(shutdown_error) =
+                    shutdown_plugin_host(&mut plugin_host, Some(&server)).await
+                {
+                    log::error!("Plugin cleanup after startup failure failed: {shutdown_error}");
+                }
                 return Err(FotonServerError::Plugin(error.to_string()));
             }
         }
@@ -323,7 +353,13 @@ impl FotonServer {
             match TcpListener::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, server_port)).await {
                 Ok(listener) => listener,
                 Err(source) => {
-                    shutdown_plugin_host(&mut plugin_host, Some(&server)).await;
+                    if let Err(shutdown_error) =
+                        shutdown_plugin_host(&mut plugin_host, Some(&server)).await
+                    {
+                        log::error!(
+                            "Plugin cleanup after startup failure failed: {shutdown_error}"
+                        );
+                    }
                     return Err(FotonServerError::Bind {
                         port: server_port,
                         source,
@@ -396,7 +432,13 @@ impl FotonServer {
             {
                 Ok(listener) => Some(listener),
                 Err(source) => {
-                    shutdown_plugin_host(&mut plugin_host, Some(&server)).await;
+                    if let Err(shutdown_error) =
+                        shutdown_plugin_host(&mut plugin_host, Some(&server)).await
+                    {
+                        log::error!(
+                            "Plugin cleanup after startup failure failed: {shutdown_error}"
+                        );
+                    }
                     return Err(FotonServerError::RconBind { address, source });
                 }
             }
@@ -427,26 +469,25 @@ impl FotonServer {
         })
     }
 
-    /// Disables loaded plugins during an early or orderly shutdown.
+    /// Best-effort synchronous teardown; does not drain native item operations.
+    /// Embedders must await `shutdown_plugins` before tearing down worlds.
     pub fn disable_plugins(&mut self) {
-        cleanup_plugin_host(&mut self.plugin_host, Some(&self.server));
-    }
-
-    /// Closes plugin persistence, drains every accepted update, then unloads plugins.
-    pub async fn shutdown_plugins(&mut self) {
-        shutdown_plugin_host(&mut self.plugin_host, Some(&self.server)).await;
-    }
-
-    fn mark_plugins_stopping(&self) {
-        if let Some(host) = &self.plugin_host
-            && let Err(error) = host.mark_stopping()
-        {
-            log::warn!("Failed to publish plugin shutdown state: {error}");
+        if let Err(error) = cleanup_plugin_host(&mut self.plugin_host, Some(&self.server)) {
+            log::error!("Plugin shutdown failed: {error}");
         }
     }
 
+    /// Closes plugin persistence, drains every accepted update, then unloads plugins.
+    pub async fn shutdown_plugins(&mut self) -> Result<(), FotonServerError> {
+        shutdown_plugin_host(&mut self.plugin_host, Some(&self.server)).await
+    }
+
+    fn mark_plugins_stopping(&self) -> Result<(), FotonServerError> {
+        mark_plugin_host_stopping(self.plugin_host.as_ref())
+    }
+
     /// Starts the server and begins accepting connections.
-    pub async fn start(&mut self, task_tracker: TaskTracker) {
+    pub async fn start(&mut self, task_tracker: TaskTracker) -> Result<(), FotonServerError> {
         log::info!("Started Foton Server");
 
         let server = self.server.clone();
@@ -537,14 +578,15 @@ impl FotonServer {
                 }
             }
         }
-        self.mark_plugins_stopping();
+        let stopping = self.mark_plugins_stopping();
         let _ = server_handle.await;
         // Per-connection Via channels own plugin classes and Netty buffers.
         // Drain every network task (which closes those channels) before the
         // plugin lifecycle removes ViaVersion's handlers and class loaders.
         task_tracker.close();
         task_tracker.wait().await;
-        self.disable_plugins();
+        let teardown = self.shutdown_plugins().await;
+        stopping.and(teardown)
     }
 }
 
@@ -559,8 +601,12 @@ fn start_plugin_host(
             let host = PluginHost::start(&config, &Weak::new())
                 .map_err(|error| FotonServerError::Plugin(error.to_string()))?;
             if let Err(error) = host.load_all_on_load(&plugin_directory) {
-                let _ = host.mark_stopping();
-                let _ = host.disable_all();
+                if let Err(shutdown_error) = host.mark_stopping() {
+                    log::error!("Plugin bootstrap stop failed: {shutdown_error}");
+                }
+                if let Err(shutdown_error) = host.disable_all() {
+                    log::error!("Plugin bootstrap teardown failed: {shutdown_error}");
+                }
                 return Err(FotonServerError::Plugin(error.to_string()));
             }
             Ok(host)
@@ -576,46 +622,55 @@ fn start_plugin_host(
 
 impl Drop for FotonServer {
     fn drop(&mut self) {
-        // Public embedders may drop a constructed server without ever calling
-        // `start`; keep that exit path subject to the same lifecycle boundary.
+        // Drop cannot await quiescence. Embedders must await shutdown_plugins
+        // before external world teardown. Java teardown may still wait for its
+        // tracked invocations; this path does not drain native item operations.
         self.disable_plugins();
     }
 }
 
-fn cleanup_plugin_host(plugin_host: &mut Option<PluginHost>, server: Option<&Arc<Server>>) {
-    mark_plugin_host_stopping(plugin_host.as_ref());
-    cleanup_plugin_host_after_stopping(plugin_host, server);
+fn cleanup_plugin_host(
+    plugin_host: &mut Option<PluginHost>,
+    server: Option<&Arc<Server>>,
+) -> Result<(), FotonServerError> {
+    let stopping = mark_plugin_host_stopping(plugin_host.as_ref());
+    let teardown = cleanup_plugin_host_after_stopping(plugin_host, server);
+    stopping.and(teardown)
 }
 
-async fn shutdown_plugin_host(plugin_host: &mut Option<PluginHost>, server: Option<&Arc<Server>>) {
-    mark_plugin_host_stopping(plugin_host.as_ref());
+async fn shutdown_plugin_host(
+    plugin_host: &mut Option<PluginHost>,
+    server: Option<&Arc<Server>>,
+) -> Result<(), FotonServerError> {
+    let stopping = mark_plugin_host_stopping(plugin_host.as_ref());
     if let Some(server) = server {
         server.close_and_drain_plugin_persistence_updates().await;
     }
-    cleanup_plugin_host_after_stopping(plugin_host, server);
+    let teardown = cleanup_plugin_host_after_stopping(plugin_host, server);
+    PluginHost::drain_item_operations().await;
+    stopping.and(teardown)
 }
 
-fn mark_plugin_host_stopping(plugin_host: Option<&PluginHost>) {
-    if let Some(host) = plugin_host
-        && let Err(error) = host.mark_stopping()
-    {
-        log::warn!("Failed to publish plugin shutdown state: {error}");
+fn mark_plugin_host_stopping(plugin_host: Option<&PluginHost>) -> Result<(), FotonServerError> {
+    if let Some(host) = plugin_host {
+        host.mark_stopping()
+            .map_err(|error| FotonServerError::Plugin(error.to_string()))?;
     }
+    Ok(())
 }
 
 fn cleanup_plugin_host_after_stopping(
     plugin_host: &mut Option<PluginHost>,
     server: Option<&Arc<Server>>,
-) {
+) -> Result<(), FotonServerError> {
     let Some(host) = plugin_host.take() else {
-        return;
+        return Ok(());
     };
     if let Some(server) = server {
         PluginHost::unsubscribe(server);
     }
-    if let Err(error) = host.disable_all() {
-        log::warn!("Failed to disable plugins cleanly: {error}");
-    }
+    host.disable_all()
+        .map_err(|error| FotonServerError::Plugin(error.to_string()))
 }
 
 /// Finds the plugin runtime installed beside the executable or in the working

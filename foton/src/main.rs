@@ -412,12 +412,14 @@ async fn run_server(
     {
         Ok(true) => {}
         Ok(false) => {
-            foton.shutdown_plugins().await;
+            let shutdown = foton.shutdown_plugins().await;
             shutdown_worlds(&server).await;
-            return Ok(());
+            return shutdown.map_err(|error| error.to_string());
         }
         Err(payload) => {
-            foton.shutdown_plugins().await;
+            if let Err(error) = foton.shutdown_plugins().await {
+                log::error!("Plugin shutdown during spawn failure failed: {error}");
+            }
             shutdown_worlds(&server).await;
             panic::resume_unwind(payload);
         }
@@ -427,7 +429,7 @@ async fn run_server(
 
     let task_tracker = TaskTracker::new();
 
-    foton.start(task_tracker.clone()).await;
+    let shutdown = foton.start(task_tracker.clone()).await;
 
     log::info!("Waiting for pending tasks...");
 
@@ -435,6 +437,8 @@ async fn run_server(
     task_tracker.wait().await;
 
     shutdown_worlds(&server).await;
+
+    shutdown.map_err(|error| error.to_string())?;
 
     log::info!("Server stopped");
     Ok(())

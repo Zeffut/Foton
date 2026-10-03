@@ -46,46 +46,48 @@ public class FotonMenuInventory implements Inventory {
     @Override
     public ItemStack getItem(int slot) {
         if (snapshot != null) return slot < 0 || slot >= snapshot.length || snapshot[slot] == null ? null : snapshot[slot].clone();
-        return FotonInventory.decode(Native.openMenuSlot(owner, slot));
+        return FotonInventory.decodeTransfer(Native.openMenuSlot(owner, slot));
     }
 
     @Override
     public void setItem(int slot, ItemStack item) {
         if (snapshot != null) { if (slot >= 0 && slot < snapshot.length) snapshot[slot] = item == null ? null : item.clone(); return; }
-        Native.setOpenMenuSlot(owner, slot, FotonInventory.encode(item));
+        Native.setOpenMenuItems(owner, new int[]{slot}, new foton.item.ItemMutation[]{FotonInventory.mutation(item)}, false);
     }
 
     @Override
     public HashMap<Integer, ItemStack> addItem(ItemStack... items) {
         HashMap<Integer, ItemStack> leftovers = new HashMap<>();
         if (items == null) return leftovers;
+        ItemStack[] contents = getContents();
         for (int index = 0; index < items.length; index++) {
             ItemStack incoming = items[index] == null ? null : items[index].clone();
             if (incoming == null || incoming.getType().isAir() || incoming.getAmount() <= 0) continue;
-            for (int slot = 0; slot < getSize() && incoming.getAmount() > 0; slot++) {
-                ItemStack current = getItem(slot);
+            for (int slot = 0; slot < contents.length && incoming.getAmount() > 0; slot++) {
+                ItemStack current = contents[slot];
                 if (current != null && current.isSimilar(incoming)) {
                     int space = current.getMaxStackSize() - current.getAmount();
                     int moved = Math.min(Math.max(0, space), incoming.getAmount());
                     if (moved > 0) {
                         current.setAmount(current.getAmount() + moved);
                         incoming.setAmount(incoming.getAmount() - moved);
-                        setItem(slot, current);
+                        contents[slot] = current;
                     }
                 }
             }
-            for (int slot = 0; slot < getSize() && incoming.getAmount() > 0; slot++) {
-                ItemStack current = getItem(slot);
+            for (int slot = 0; slot < contents.length && incoming.getAmount() > 0; slot++) {
+                ItemStack current = contents[slot];
                 if (current == null || current.getType().isAir() || current.getAmount() <= 0) {
                     int moved = Math.min(incoming.getMaxStackSize(), incoming.getAmount());
                     ItemStack placed = incoming.clone();
                     placed.setAmount(moved);
-                    setItem(slot, placed);
+                    contents[slot] = placed;
                     incoming.setAmount(incoming.getAmount() - moved);
                 }
             }
             if (incoming.getAmount() > 0) leftovers.put(index, incoming);
         }
+        setContents(contents);
         return leftovers;
     }
 
@@ -99,7 +101,18 @@ public class FotonMenuInventory implements Inventory {
     @Override
     public void setContents(ItemStack[] items) {
         int size = getSize();
-        for (int slot = 0; slot < size; slot++) setItem(slot, items != null && slot < items.length ? items[slot] : null);
+        if (items != null && items.length > size) throw new IllegalArgumentException("inventory contents exceed size");
+        if (snapshot != null) {
+            ItemStack[] replacement = new ItemStack[size];
+            for (int slot = 0; slot < size; slot++) replacement[slot] = items != null && slot < items.length && items[slot] != null ? items[slot].clone() : null;
+            snapshot = replacement;
+        } else setNativeContents(owner, size, items);
+    }
+
+    static void setNativeContents(String owner, int size, ItemStack[] items) {
+        int[] slots = new int[size];
+        for (int slot = 0; slot < size; slot++) slots[slot] = slot;
+        Native.setOpenMenuItems(owner, slots, FotonInventory.mutations(size, items), true);
     }
 
     @Override
@@ -119,7 +132,7 @@ public class FotonMenuInventory implements Inventory {
 
     @Override
     public void clear() {
-        for (int slot = 0; slot < getSize(); slot++) clear(slot);
+        setContents(null);
     }
 
     @Override

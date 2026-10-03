@@ -11,6 +11,7 @@ public class MerchantRecipe {
     private int uses;
     private int maxUses;
     private int demand;
+    private int specialPrice;
     private boolean experienceReward;
     private int villagerExperience;
     private float priceMultiplier;
@@ -61,10 +62,11 @@ public class MerchantRecipe {
             recipe.owner = owner;
             recipe.offerIndex = offerIndex;
             if (fields.length == 6) {
-                recipe.ingredients.add(parseItem(fields[4]));
+                ItemStack first = parseItem(fields[4]);
                 ItemStack second = parseItem(fields[5]);
+                if ((!fields[4].isEmpty() && first == null) || (!fields[5].isEmpty() && second == null)) return null;
+                if (first != null && !first.getType().isAir()) recipe.ingredients.add(first);
                 if (second != null && !second.getType().isAir()) recipe.ingredients.add(second);
-                recipe.ingredients.removeIf(java.util.Objects::isNull);
             }
             return recipe;
         } catch (NumberFormatException error) {
@@ -91,13 +93,18 @@ public class MerchantRecipe {
     public boolean hasExperienceReward() { return experienceReward; }
     public int getVillagerExperience() { return villagerExperience; }
     public float getPriceMultiplier() { return priceMultiplier; }
-    /** Encodes the Vanilla fields understood by Foton's merchant bridge. */
-    public String encode() {
-        ItemStack first = ingredients.size() > 0 ? ingredients.get(0) : null;
-        ItemStack second = ingredients.size() > 1 ? ingredients.get(1) : null;
-        return item(result) + "|" + uses + "|" + maxUses + "|" + demand + "|" + item(first) + "|" + item(second);
+    public int getSpecialPrice() { return specialPrice; }
+    public void setSpecialPrice(int value) { specialPrice = value; }
+    /** Internal attachment preserves the existing live counter setters. */
+    public void attachNativeOffer(String owner, int index) { this.owner = owner; this.offerIndex = index; }
+    /** Native hydration does not normalize stored counters through public constructors. */
+    public void hydrateNativeCounters(int uses, int maxUses, int experience) {
+        this.uses = uses; this.maxUses = maxUses; this.villagerExperience = experience;
     }
-    private static String item(ItemStack value) { return value == null || value.getType().isAir() ? "" : value.getType().getKey() + " " + value.getAmount(); }
+    /** Legacy delimiter output cannot represent complete item and offer state. */
+    public String encode() {
+        throw new UnsupportedOperationException("legacy merchant encoding cannot preserve complete offer state");
+    }
     public List<ItemStack> getIngredients() {
         ArrayList<ItemStack> copy = new ArrayList<>(ingredients.size());
         for (ItemStack item : ingredients) copy.add(item.clone());
@@ -105,7 +112,10 @@ public class MerchantRecipe {
     }
 
     public void addIngredient(ItemStack ingredient) {
-        if (ingredient != null) ingredients.add(ingredient.clone());
+        if (ingredients.size() >= 2) throw new IllegalStateException("merchant recipe has more than two ingredients");
+        if (ingredient == null || ingredient.getType().isAir() || ingredient.getAmount() <= 0)
+            throw new IllegalArgumentException("empty merchant ingredient");
+        ingredients.add(ingredient.clone());
     }
     public void setIngredients(List<ItemStack> values) {
         ingredients.clear();
@@ -119,6 +129,6 @@ public class MerchantRecipe {
         Material material = Material.matchMaterial(fields[0]);
         if (material == null) return null;
         try { return new ItemStack(material, Integer.parseInt(fields[1])); }
-        catch (NumberFormatException ignored) { return null; }
+        catch (IllegalArgumentException ignored) { return null; }
     }
 }

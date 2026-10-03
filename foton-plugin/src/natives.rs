@@ -59,7 +59,6 @@ use foton_core::entity::entities::mobs::passive::AxolotlEntity;
 use foton_core::entity::entities::mobs::passive::BeeEntity;
 use foton_core::entity::entities::mobs::passive::CatEntity;
 use foton_core::entity::entities::mobs::passive::ChickenEntity;
-use foton_core::entity::entities::mobs::passive::NautilusEntity;
 use foton_core::entity::entities::mobs::passive::PigEntity;
 use foton_core::entity::entities::mobs::passive::SheepEntity;
 use foton_core::entity::entities::mobs::passive::ZombieNautilusEntity;
@@ -89,9 +88,7 @@ use foton_core::entity::{
     Entity, EntitySpawnReason, LlamaVariant, MobEffectInstance, is_tamed, owner_uuid,
     set_owner_uuid, set_tamed, start_riding_entities,
 };
-use foton_core::inventory::container::Container;
 use foton_core::inventory::equipment::EquipmentSlot;
-use foton_core::inventory::lock::{ContainerLockGuard, ContainerRef};
 use foton_core::inventory::menu::kinds::anvil;
 use foton_core::inventory::menu::kinds::cartography;
 use foton_core::inventory::menu::kinds::crafting;
@@ -126,7 +123,7 @@ use foton_registry::data_components::components::{
 use foton_registry::data_components::vanilla_components::{
     CUSTOM_DATA, CUSTOM_MODEL_DATA, CUSTOM_NAME, ENCHANTMENTS, FIREWORKS, FireworkExplosion,
     FireworkExplosionShape, Fireworks, ITEM_MODEL, ITEM_NAME, LORE, STORED_ENCHANTMENTS,
-    TOOLTIP_DISPLAY, TOOLTIP_STYLE, UNBREAKABLE, WRITABLE_BOOK_CONTENT, WRITTEN_BOOK_CONTENT,
+    TOOLTIP_DISPLAY, TOOLTIP_STYLE, UNBREAKABLE,
 };
 use foton_registry::entity_data::{Quaternionf, Vector3f};
 use foton_registry::entity_type::EntityTypeRef;
@@ -139,7 +136,6 @@ use foton_registry::particle_type::ParticleData;
 use foton_registry::recipe::{
     CraftingCategory, Ingredient, RecipeResult, ShapedRecipe, ShapelessRecipe,
 };
-use foton_registry::trading::ItemCost;
 use foton_registry::trading::MerchantOffer;
 use foton_registry::vanilla_block_entity_types::SIGN;
 use foton_registry::vanilla_damage_types::PLAYER_ATTACK;
@@ -383,7 +379,7 @@ fn to_position(env: &mut JNIEnv<'_>, at: Option<[f64; 5]>) -> jdoubleArray {
 }
 
 /// Resolves a world by the key a plugin holds it under.
-fn world(env: &mut JNIEnv<'_>, name: &JString<'_>) -> Option<Arc<World>> {
+pub(crate) fn world(env: &mut JNIEnv<'_>, name: &JString<'_>) -> Option<Arc<World>> {
     let text: String = env.get_string(name).ok()?.into();
     let key: Identifier = text.parse().ok()?;
     server()?.worlds.get_owned(&key)
@@ -1042,7 +1038,7 @@ extern "system" fn send_block_change(
     });
 }
 
-fn entity_by_uuid(uuid: &Uuid) -> Option<(Arc<World>, SharedEntity)> {
+pub(crate) fn entity_by_uuid(uuid: &Uuid) -> Option<(Arc<World>, SharedEntity)> {
     let server = server()?;
     for snapshot in server.worlds.snapshots() {
         let world = snapshot.world();
@@ -1205,67 +1201,6 @@ extern "system" fn entity_tnt_source(
         return null_mut();
     };
     to_java(&mut env, Some(source.uuid().to_string()))
-}
-
-extern "system" fn entity_item_stack(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-) -> jstring {
-    let Ok(text) = env.get_string(&uuid) else {
-        return null_mut();
-    };
-    let Ok(id) = text
-        .to_str()
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .ok_or(())
-    else {
-        return null_mut();
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return null_mut();
-    };
-    if let Some(item) = entity.as_ref().downcast_ref::<ItemEntity>() {
-        return to_java(&mut env, Some(describe_slot(&item.get_item())));
-    }
-    if let Some(frame) = entity.as_ref().downcast_ref::<ItemFrameEntity>() {
-        return to_java(&mut env, Some(describe_slot(&frame.framed_item())));
-    }
-    null_mut()
-}
-
-extern "system" fn set_entity_item_stack(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    item: JString<'_>,
-) {
-    let Ok(text) = env.get_string(&uuid) else {
-        return;
-    };
-    let Ok(id) = text
-        .to_str()
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .ok_or(())
-    else {
-        return;
-    };
-    let Ok(encoded) = env.get_string(&item) else {
-        return;
-    };
-    let Some(stack) = parse_slot(encoded.to_str().unwrap_or_default()) else {
-        return;
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return;
-    };
-    if let Some(item) = entity.as_ref().downcast_ref::<ItemEntity>() {
-        item.set_item(stack);
-    } else if let Some(frame) = entity.as_ref().downcast_ref::<ItemFrameEntity>() {
-        frame.set_item(stack);
-    }
 }
 
 extern "system" fn set_item_unlimited_lifetime(
@@ -1993,54 +1928,6 @@ extern "system" fn villager_experience(
                 .map(VillagerEntity::villager_xp)
         })
         .unwrap_or(0)
-}
-
-extern "system" fn set_villager_offers(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    offers: JObjectArray<'_>,
-) {
-    let Ok(text) = env.get_string(&uuid) else {
-        return;
-    };
-    let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
-        return;
-    };
-    let Some(values) = read_string_array(&mut env, &offers) else {
-        return;
-    };
-    let mut parsed = Vec::with_capacity(values.len());
-    for value in values {
-        let fields = value.split('|').collect::<Vec<_>>();
-        if fields.len() < 6 {
-            continue;
-        }
-        let Some(result) = parse_slot(fields[0]) else {
-            continue;
-        };
-        let Some(cost_a) = parse_slot(fields[4]) else {
-            continue;
-        };
-        let cost_b = if fields[5].is_empty() {
-            None
-        } else {
-            parse_slot(fields[5])
-        };
-        let uses = fields[1].parse().unwrap_or(0).max(0);
-        let max_uses = fields[2].parse().unwrap_or(1).max(1);
-        let demand = fields[3].parse().unwrap_or(0);
-        let first = ItemCost::new(cost_a.item(), cost_a.count());
-        let second = cost_b.map(|stack| ItemCost::new(stack.item(), stack.count()));
-        parsed.push(MerchantOffer::with_uses(
-            first, second, result, uses, max_uses, 0, 0.05, demand,
-        ));
-    }
-    if let Some((_, entity)) = entity_by_uuid(&id)
-        && let Some(villager) = entity.as_ref().downcast_ref::<VillagerEntity>()
-    {
-        villager.merchant().set_offers(parsed.into());
-    }
 }
 
 extern "system" fn reset_villager_offers(
@@ -3292,150 +3179,6 @@ extern "system" fn pig_set_saddle(
         ItemStack::empty()
     };
     pig.set_item_slot(EquipmentSlot::Saddle, saddle);
-}
-
-extern "system" fn mount_inventory_slot(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    slot: jint,
-) -> jstring {
-    let Ok(text) = env.get_string(&uuid) else {
-        return null_mut();
-    };
-    let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
-        return null_mut();
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return null_mut();
-    };
-    let equipment_slot = if slot == 0 {
-        EquipmentSlot::Saddle
-    } else if slot == 1 {
-        EquipmentSlot::Body
-    } else {
-        return null_mut();
-    };
-    let mut value = None;
-    if let Some(mount) = entity.as_ref().downcast_ref::<HorseEntity>() {
-        mount.with_equipment_slot(equipment_slot, &mut |item| {
-            value = Some(describe_slot(item));
-        });
-    } else if let Some(mount) = entity.as_ref().downcast_ref::<NautilusEntity>() {
-        mount.with_equipment_slot(equipment_slot, &mut |item| {
-            value = Some(describe_slot(item));
-        });
-    } else if let Some(mount) = entity.as_ref().downcast_ref::<ZombieNautilusEntity>() {
-        mount.with_equipment_slot(equipment_slot, &mut |item| {
-            value = Some(describe_slot(item));
-        });
-    }
-    to_java(&mut env, value)
-}
-
-extern "system" fn set_mount_inventory_slot(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    slot: jint,
-    item: JString<'_>,
-) {
-    let Ok(text) = env.get_string(&uuid) else {
-        return;
-    };
-    let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
-        return;
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return;
-    };
-    let Ok(encoded) = env.get_string(&item) else {
-        return;
-    };
-    let Some(stack) = parse_slot(encoded.to_str().unwrap_or_default()) else {
-        return;
-    };
-    let equipment_slot = if slot == 0 {
-        EquipmentSlot::Saddle
-    } else if slot == 1 {
-        EquipmentSlot::Body
-    } else {
-        return;
-    };
-    if let Some(mount) = entity.as_ref().downcast_ref::<HorseEntity>() {
-        mount.set_item_slot(equipment_slot, stack);
-    } else if let Some(mount) = entity.as_ref().downcast_ref::<NautilusEntity>() {
-        mount.set_item_slot(equipment_slot, stack);
-    } else if let Some(mount) = entity.as_ref().downcast_ref::<ZombieNautilusEntity>() {
-        mount.set_item_slot(equipment_slot, stack);
-    }
-}
-
-extern "system" fn horse_inventory_slot(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    slot: jint,
-) -> jstring {
-    let Ok(text) = env.get_string(&uuid) else {
-        return null_mut();
-    };
-    let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
-        return null_mut();
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return null_mut();
-    };
-    let Some(horse) = entity.as_ref().downcast_ref::<HorseEntity>() else {
-        return null_mut();
-    };
-    let equipment_slot = if slot == 0 {
-        EquipmentSlot::Saddle
-    } else if slot == 1 {
-        EquipmentSlot::Body
-    } else {
-        return null_mut();
-    };
-    let mut value = None;
-    horse.with_equipment_slot(equipment_slot, &mut |item| {
-        value = Some(describe_slot(item));
-    });
-    to_java(&mut env, value)
-}
-
-extern "system" fn set_horse_inventory_slot(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    slot: jint,
-    item: JString<'_>,
-) {
-    let Ok(text) = env.get_string(&uuid) else {
-        return;
-    };
-    let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
-        return;
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return;
-    };
-    let Some(horse) = entity.as_ref().downcast_ref::<HorseEntity>() else {
-        return;
-    };
-    let Ok(encoded) = env.get_string(&item) else {
-        return;
-    };
-    let Some(stack) = parse_slot(encoded.to_str().unwrap_or_default()) else {
-        return;
-    };
-    let equipment_slot = if slot == 0 {
-        EquipmentSlot::Saddle
-    } else if slot == 1 {
-        EquipmentSlot::Body
-    } else {
-        return;
-    };
-    horse.set_item_slot(equipment_slot, stack);
 }
 
 extern "system" fn entity_has_chest(
@@ -6300,56 +6043,6 @@ extern "system" fn entity_set_merchant_offer_demand(
     }))
 }
 
-extern "system" fn entity_merchant_recipes(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-) -> jobjectArray {
-    let Ok(text) = env.get_string(&uuid) else {
-        return null_mut();
-    };
-    let Ok(uuid) = text
-        .to_str()
-        .ok()
-        .and_then(|value| uuid::Uuid::parse_str(value).ok())
-        .ok_or(())
-    else {
-        return null_mut();
-    };
-    let Some(server) = server() else {
-        return null_mut();
-    };
-    for snapshot in server.worlds.snapshots() {
-        let world = snapshot.world();
-        let Some(entity) = world.get_entity_by_uuid(&uuid) else {
-            continue;
-        };
-        let Some(villager) = entity.as_ref().downcast_ref::<VillagerEntity>() else {
-            continue;
-        };
-        let offers = villager.offers();
-        let values = offers
-            .iter()
-            .map(|offer| {
-                format!(
-                    "{} {}|{}|{}|{}|{} {}|{} {}",
-                    offer.result().item().key,
-                    offer.result().count(),
-                    offer.uses(),
-                    offer.max_uses(),
-                    offer.demand(),
-                    offer.cost_a().item().key,
-                    offer.cost_a().count(),
-                    offer.cost_b().item().key,
-                    offer.cost_b().count()
-                )
-            })
-            .collect::<Vec<_>>();
-        return string_array(&mut env, &values);
-    }
-    null_mut()
-}
-
 extern "system" fn iron_golem_player_created(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -7709,7 +7402,7 @@ const MAX_SLOT_BRIDGE_BYTES: usize = 8_388_608;
 const MAX_SLOT_METADATA_FIELDS: usize = 4_096;
 const PDC_IDENTITY_FIELD_BYTES: usize = 77;
 // An error in the item bridge, never an empty or writable item description.
-const SLOT_METADATA_LIMIT_ERROR: &str = "!foton:item-metadata-limit";
+pub(crate) const SLOT_METADATA_LIMIT_ERROR: &str = "!foton:item-metadata-limit";
 
 fn push_pdc_fields(value: &mut String, stack: &ItemStack) -> bool {
     let Some(custom_data) = stack.get(CUSTOM_DATA) else {
@@ -7849,11 +7542,12 @@ fn decode_pdc_field(field: &str) -> Option<(String, NbtTag)> {
 }
 
 fn apply_pdc_fields(stack: &mut ItemStack, metadata: &[&str]) -> Option<()> {
-    let raw = metadata
+    let raw = match metadata
         .iter()
         .find_map(|field| field.strip_prefix("pdcrawhex="))
-        .and_then(|encoded| decode_hex(encoded, MAX_PDC_RAW_BYTES))
-        .and_then(|bytes| {
+    {
+        Some(encoded) => {
+            let bytes = decode_hex(encoded, MAX_PDC_RAW_BYTES)?;
             let mut cursor = Cursor::new(bytes.as_slice());
             let tag = read_tag(&mut cursor).ok()?;
             if cursor.position() != bytes.len() as u64
@@ -7861,8 +7555,10 @@ fn apply_pdc_fields(stack: &mut ItemStack, metadata: &[&str]) -> Option<()> {
             {
                 return None;
             }
-            tag.into_compound()
-        });
+            Some(tag.into_compound()?)
+        }
+        None => None,
+    };
     let has_raw = raw.is_some();
     let mut custom_data = raw.unwrap_or_else(|| {
         stack
@@ -7879,21 +7575,29 @@ fn apply_pdc_fields(stack: &mut ItemStack, metadata: &[&str]) -> Option<()> {
         None => NbtCompound::new(),
     };
     let mut decoded_fields = 0;
-    for key in metadata
+    let mut changed_keys = std::collections::HashSet::new();
+    for encoded in metadata
         .iter()
         .filter_map(|field| field.strip_prefix("pdcremove="))
-        .filter_map(|key| decode_hex_utf8(key, MAX_PDC_KEY_BYTES))
-        .filter_map(|key| key.parse::<Identifier>().ok())
-        .take(MAX_PDC_ENTRIES)
     {
+        let key = decode_hex_utf8(encoded, MAX_PDC_KEY_BYTES)?
+            .parse::<Identifier>()
+            .ok()?;
+        if !changed_keys.insert(key.to_string()) || changed_keys.len() > MAX_PDC_ENTRIES {
+            return None;
+        }
         persistent_data.remove(&key.to_string());
         decoded_fields += 1;
     }
-    for (key, tag) in metadata
-        .iter()
-        .filter_map(|field| decode_pdc_field(field))
-        .take(MAX_PDC_ENTRIES)
-    {
+    for field in metadata.iter().filter(|field| {
+        field.starts_with("pdcstrhex=")
+            || field.starts_with("pdcbyte=")
+            || field.starts_with("pdcint=")
+    }) {
+        let (key, tag) = decode_pdc_field(field)?;
+        if !changed_keys.insert(key.clone()) || changed_keys.len() > MAX_PDC_ENTRIES {
+            return None;
+        }
         persistent_data.remove(&key);
         persistent_data.insert(key, tag);
         decoded_fields += 1;
@@ -7917,6 +7621,9 @@ pub(crate) fn describe_slot(stack: &ItemStack) -> String {
         return String::new();
     }
     let mut value = format!("{} {}", stack.item().key, stack.count());
+    if let Some(damage) = stack.get(foton_registry::data_components::vanilla_components::DAMAGE) {
+        let _ = write!(value, "\u{1d}damage={damage}");
+    }
     if let Some(opaque) = stack.opaque_nbt() {
         if opaque.len() > (MAX_SLOT_BRIDGE_BYTES - value.len() - 8) / 2 {
             return SLOT_METADATA_LIMIT_ERROR.to_owned();
@@ -8048,9 +7755,11 @@ extern "system" fn item_translation_key(
               several functions"
 )]
 pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
+    REGISTRY.get()?;
     if text == SLOT_METADATA_LIMIT_ERROR || text.len() > MAX_SLOT_BRIDGE_BYTES {
         return None;
     }
+    crate::item_bridge::legacy::validate(text)?;
     let mut encoded = text.trim().split('\u{1d}');
     let text = encoded.next().unwrap_or_default();
     let metadata = encoded
@@ -8084,7 +7793,10 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
         .find_map(|value| value.strip_prefix("damage="))
         .and_then(|value| value.parse::<i32>().ok());
     if let Some(damage) = damage {
-        stack.set_damage_value(damage);
+        stack.set(
+            foton_registry::data_components::vanilla_components::DAMAGE,
+            damage,
+        );
     }
     if let Some(encoded) = metadata
         .iter()
@@ -8216,50 +7928,18 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
         stack.set(STORED_ENCHANTMENTS, stored);
     }
     item_components::parse(&mut stack, &metadata)?;
-    if let Some(effects) = metadata.iter().find(|value| {
-        !value.starts_with("damage=")
-            && !value.starts_with("namehex=")
-            && !value.starts_with("lorehex=")
-            && !value.starts_with("enchhex=")
-            && !value.starts_with("storedenchhex=")
-            && !value.starts_with("model=")
-            && !value.starts_with("modelfloat=")
-            && !value.starts_with("modelflag=")
-            && !value.starts_with("modelstrhex=")
-            && !value.starts_with("modelcolor=")
-            && !value.starts_with("itemmodelhex=")
-            && !value.starts_with("tooltipstylehex=")
-            && **value != "hidetooltip"
-            && **value != "unbreakable"
-    }) {
-        use foton_registry::data_components::components::PotionContents;
-        use foton_registry::data_components::vanilla_components::POTION_CONTENTS;
-        use foton_registry::mob_effect::instance::MobEffectInstance;
-        let mut custom = Vec::new();
-        for field in effects.split(';') {
-            let mut parts = field.split(',');
-            let (Some(name), Some(duration), Some(amplifier)) =
-                (parts.next(), parts.next(), parts.next())
-            else {
-                continue;
-            };
-            let (Ok(duration), Ok(amplifier)) = (duration.parse(), amplifier.parse()) else {
-                continue;
-            };
-            let Ok(key) = format!("minecraft:{name}").parse() else {
-                continue;
-            };
-            let Some(effect) = REGISTRY.mob_effects.by_key(&key) else {
-                continue;
-            };
-            custom.push(MobEffectInstance::simple(effect, duration, amplifier));
-        }
-        if !custom.is_empty() {
-            stack.set(
-                POTION_CONTENTS,
-                PotionContents::new(None, None, custom, None),
-            );
-        }
+    if let Some(effects) = metadata
+        .iter()
+        .find(|value| value.contains(',') && !value.contains('='))
+    {
+        use foton_registry::data_components::{
+            components::PotionContents, vanilla_components::POTION_CONTENTS,
+        };
+        let custom = crate::item_bridge::legacy::parse_effects(effects)?;
+        stack.set(
+            POTION_CONTENTS,
+            PotionContents::new(None, None, custom, None),
+        );
     }
     Some(stack)
 }
@@ -8794,59 +8474,8 @@ extern "system" fn block_passable(
 }
 
 /// Returns the item currently stored in a lectern, without discarding its book type.
-extern "system" fn lectern_book(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    name: JString<'_>,
-    x: jint,
-    y: jint,
-    z: jint,
-) -> jstring {
-    let value = world(&mut env, &name).and_then(|world| {
-        let entity = world.get_block_entity(BlockPos::new(x, y, z))?;
-        let lectern = entity.downcast_ref::<LecternBlockEntity>()?;
-        let book = lectern.book();
-        (!book.is_empty()).then(|| describe_slot(&book))
-    });
-    to_java(&mut env, value)
-}
 
 /// Returns the plain pages currently stored in a lectern book.
-extern "system" fn lectern_book_pages(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    name: JString<'_>,
-    x: jint,
-    y: jint,
-    z: jint,
-) -> jobjectArray {
-    let Some(world) = world(&mut env, &name) else {
-        return null_mut();
-    };
-    let Some(entity) = world.get_block_entity(BlockPos::new(x, y, z)) else {
-        return null_mut();
-    };
-    let Some(lectern) = entity.downcast_ref::<LecternBlockEntity>() else {
-        return null_mut();
-    };
-    let book = lectern.book();
-    let pages: Vec<String> = if let Some(written) = book.get(WRITTEN_BOOK_CONTENT) {
-        written
-            .pages()
-            .iter()
-            .map(|page| page.get(false).to_plain(&DisplayResolutor))
-            .collect()
-    } else if let Some(writable) = book.get(WRITABLE_BOOK_CONTENT) {
-        writable
-            .pages()
-            .iter()
-            .map(|page| page.get(false).clone())
-            .collect()
-    } else {
-        Vec::new()
-    };
-    string_array(&mut env, &pages)
-}
 
 /// Removes the book from a lectern and returns the slot to its vanilla empty state.
 extern "system" fn lectern_clear_book(
@@ -8870,37 +8499,6 @@ extern "system" fn lectern_clear_book(
 }
 
 /// Sets a lectern book from the API's item encoding; non-book items are rejected.
-extern "system" fn lectern_set_book(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    name: JString<'_>,
-    x: jint,
-    y: jint,
-    z: jint,
-    item: JString<'_>,
-) -> jboolean {
-    let Ok(text) = env.get_string(&item) else {
-        return 0;
-    };
-    let Some(book) = parse_slot(&String::from(text)) else {
-        return 0;
-    };
-    if *book.item() != *vanilla_items::WRITABLE_BOOK && *book.item() != *vanilla_items::WRITTEN_BOOK
-    {
-        return 0;
-    }
-    let Some(world) = world(&mut env, &name) else {
-        return 0;
-    };
-    let Some(entity) = world.get_block_entity(BlockPos::new(x, y, z)) else {
-        return 0;
-    };
-    let Some(lectern) = entity.downcast_ref::<LecternBlockEntity>() else {
-        return 0;
-    };
-    lectern.set_book(book);
-    1
-}
 
 /// `foton.Native.setBlock`
 extern "system" fn set_block(
@@ -9097,40 +8695,7 @@ extern "system" fn open_menu_top_slot_count(
         .unwrap_or(-1)
 }
 
-extern "system" fn open_menu_slot(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    slot: jint,
-) -> jstring {
-    let item = usize::try_from(slot).ok().and_then(|slot| {
-        player(&mut env, &uuid).and_then(|player| player.open_container_item(slot))
-    });
-    to_java(&mut env, item.map(|stack| describe_slot(&stack)))
-}
-
 /// `foton.Native.openMenuType`
-extern "system" fn set_open_menu_slot(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    slot: jint,
-    item: JString<'_>,
-) -> jboolean {
-    let Ok(text) = env.get_string(&item) else {
-        return 0;
-    };
-    let Some(stack) = parse_slot(&String::from(text)) else {
-        return 0;
-    };
-    let Ok(slot) = usize::try_from(slot) else {
-        return 0;
-    };
-    jboolean::from(
-        player(&mut env, &uuid).is_some_and(|player| player.set_open_container_item(slot, stack)),
-    )
-}
-
 /// Native open menu type
 extern "system" fn open_menu_title(
     mut env: JNIEnv<'_>,
@@ -9480,88 +9045,6 @@ extern "system" fn set_allow_flight(
     if let Some(player) = player(&mut env, &uuid) {
         player.abilities.lock().may_fly = value != 0;
         player.send_abilities();
-    }
-}
-
-/// `foton.Native.inventorySlot`
-extern "system" fn inventory_slot(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    slot: jint,
-) -> jstring {
-    let described = player(&mut env, &uuid).and_then(|player| {
-        let slot = usize::try_from(slot).ok()?;
-        let inventory = player.inventory.lock();
-        (slot < inventory.get_container_size()).then(|| describe_slot(inventory.get_item(slot)))
-    });
-    to_java(&mut env, described)
-}
-
-/// `foton.Native.setInventorySlot`
-extern "system" fn set_inventory_slot(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    slot: jint,
-    item: JString<'_>,
-) {
-    let Some(player) = player(&mut env, &uuid) else {
-        return;
-    };
-    let Ok(text) = env.get_string(&item) else {
-        return;
-    };
-    let text: String = text.into();
-    let Some(stack) = parse_slot(&text) else {
-        return;
-    };
-    let Ok(slot) = usize::try_from(slot) else {
-        return;
-    };
-    let mut inventory = player.inventory.lock();
-    if slot < inventory.get_container_size() {
-        inventory.set_item(slot, stack);
-    }
-}
-
-extern "system" fn ender_chest_slot(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    slot: jint,
-) -> jstring {
-    let described = player(&mut env, &uuid).and_then(|player| {
-        let slot = usize::try_from(slot).ok()?;
-        let inventory = player.ender_chest.lock();
-        (slot < inventory.get_container_size()).then(|| describe_slot(inventory.get_item(slot)))
-    });
-    to_java(&mut env, described)
-}
-
-extern "system" fn set_ender_chest_slot(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    slot: jint,
-    item: JString<'_>,
-) {
-    let Some(player) = player(&mut env, &uuid) else {
-        return;
-    };
-    let Ok(text) = env.get_string(&item) else {
-        return;
-    };
-    let text: String = text.into();
-    let Some(stack) = parse_slot(&text) else {
-        return;
-    };
-    let Ok(slot) = usize::try_from(slot) else {
-        return;
-    };
-    let mut inventory = player.ender_chest.lock();
-    if slot < inventory.get_container_size() {
-        inventory.set_item(slot, stack);
     }
 }
 
@@ -10510,106 +9993,6 @@ extern "system" fn jukebox_is_playing(
     u8::from(playing)
 }
 
-extern "system" fn jukebox_record(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    name: JString<'_>,
-    x: jint,
-    y: jint,
-    z: jint,
-) -> jstring {
-    let value = world(&mut env, &name)
-        .and_then(|world| world.get_block_entity(BlockPos::new(x, y, z)))
-        .and_then(|entity| {
-            entity
-                .downcast_ref::<JukeboxBlockEntity>()
-                .map(|jukebox| describe_slot(&jukebox.item()))
-        });
-    to_java(&mut env, value)
-}
-
-extern "system" fn jukebox_set_record(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    name: JString<'_>,
-    x: jint,
-    y: jint,
-    z: jint,
-    encoded: JString<'_>,
-) {
-    let Ok(encoded): Result<String, _> = env.get_string(&encoded).map(Into::into) else {
-        return;
-    };
-    let Some(world) = world(&mut env, &name) else {
-        return;
-    };
-    let Some(entity) = world.get_block_entity(BlockPos::new(x, y, z)) else {
-        return;
-    };
-    let Some(jukebox) = entity.downcast_ref::<JukeboxBlockEntity>() else {
-        return;
-    };
-    let Some(item) = parse_slot(&encoded) else {
-        return;
-    };
-    jukebox.insert(&world, item);
-}
-
-extern "system" fn hopper_inventory_slot(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    name: JString<'_>,
-    x: jint,
-    y: jint,
-    z: jint,
-    slot: jint,
-) -> jstring {
-    let value = world(&mut env, &name).and_then(|world| {
-        let entity = world.get_block_entity(BlockPos::new(x, y, z))?;
-        let container = ContainerRef::from_block_entity(entity)?;
-        let guard = ContainerLockGuard::lock_all(&[&container]);
-        guard.get(container.container_id()).and_then(|c| {
-            (slot >= 0 && (slot as usize) < c.get_container_size())
-                .then(|| describe_slot(c.get_item(slot as usize)))
-        })
-    });
-    to_java(&mut env, value)
-}
-
-extern "system" fn hopper_set_inventory_slot(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    name: JString<'_>,
-    x: jint,
-    y: jint,
-    z: jint,
-    slot: jint,
-    item: JString<'_>,
-) {
-    let Ok(item): Result<String, _> = env.get_string(&item).map(Into::into) else {
-        return;
-    };
-    let Some(stack) = parse_slot(&item) else {
-        return;
-    };
-    let Some(world) = world(&mut env, &name) else {
-        return;
-    };
-    let Some(entity) = world.get_block_entity(BlockPos::new(x, y, z)) else {
-        return;
-    };
-    let Some(container) = ContainerRef::from_block_entity(entity) else {
-        return;
-    };
-    let mut guard = ContainerLockGuard::lock_all(&[&container]);
-    if slot >= 0
-        && let Some(c) = guard.get_mut(container.container_id())
-        && (slot as usize) < c.get_container_size()
-    {
-        c.set_item(slot as usize, stack);
-    }
-}
-
 /// `foton.Native.signLines`
 extern "system" fn sign_lines(
     mut env: JNIEnv<'_>,
@@ -11116,34 +10499,6 @@ extern "system" fn world_loaded_chunk_coords(
             .collect()
     });
     string_array(&mut env, &coords)
-}
-
-/// `foton.Native.worldDropItem`
-extern "system" fn world_drop_item(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    name: JString<'_>,
-    x: jdouble,
-    y: jdouble,
-    z: jdouble,
-    item: JString<'_>,
-) -> jstring {
-    let Some(world) = world(&mut env, &name) else {
-        return null_mut();
-    };
-    let Ok(item) = env.get_string(&item) else {
-        return null_mut();
-    };
-    let Ok(item) = item.to_str() else {
-        return null_mut();
-    };
-    let Some(stack) = parse_slot(item) else {
-        return null_mut();
-    };
-    let Some(entity) = world.spawn_item(glam::DVec3::new(x, y, z), stack) else {
-        return null_mut();
-    };
-    to_java(&mut env, Some(entity.uuid().to_string()))
 }
 
 /// `foton.Native.worldAutoSave`
@@ -12005,6 +11360,76 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
 
     vec![
         method(
+            "itemMetaKind",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            crate::item_bridge::meta_kind::query as *mut c_void,
+        ),
+        method(
+            "itemComponentState",
+            "(Lfoton/item/ItemMutation;Ljava/lang/String;)I",
+            crate::item_bridge::public_components::state as *mut c_void,
+        ),
+        method(
+            "editItemComponent",
+            "(Lfoton/item/ItemMutation;Ljava/lang/String;Z)Lfoton/item/ItemTransfer;",
+            crate::item_bridge::public_components::edit as *mut c_void,
+        ),
+        method(
+            "itemCustomModelData",
+            "(Lfoton/item/ItemMutation;)Lio/papermc/paper/datacomponent/item/CustomModelData;",
+            crate::item_bridge::public_components::model as *mut c_void,
+        ),
+        method(
+            "itemDurability",
+            "(Lfoton/item/ItemMutation;)I",
+            crate::item_bridge::queries::durability as *mut c_void,
+        ),
+        method(
+            "setItemDurability",
+            "(Lfoton/item/ItemMutation;I)Lfoton/item/ItemTransfer;",
+            crate::item_bridge::transitions::durability as *mut c_void,
+        ),
+        method(
+            "rebaseItem",
+            "(Lfoton/item/ItemMutation;Ljava/lang/String;Z)Lfoton/item/ItemTransfer;",
+            crate::item_bridge::transitions::rebase as *mut c_void,
+        ),
+        method(
+            "convertItemMeta",
+            "(Lfoton/item/ItemMutation;Lfoton/item/ItemMutation;Ljava/lang/String;Z)Lfoton/item/ItemTransfer;",
+            crate::item_bridge::transitions::convert_meta as *mut c_void,
+        ),
+        method(
+            "itemHasMeta",
+            "(Lfoton/item/ItemMutation;)Z",
+            crate::item_bridge::queries::has_meta as *mut c_void,
+        ),
+        method(
+            "itemsSimilar",
+            "(Lfoton/item/ItemMutation;Lfoton/item/ItemMutation;)Z",
+            crate::item_bridge::queries::similar as *mut c_void,
+        ),
+        method(
+            "itemDamage",
+            "(Lfoton/item/ItemMutation;)Ljava/lang/Integer;",
+            crate::item_bridge::queries::damage as *mut c_void,
+        ),
+        method(
+            "setPlayerInventorySlots",
+            "(Ljava/lang/String;Z[I[Lfoton/item/ItemMutation;)V",
+            crate::item_bridge::inventory::set_slots as *mut c_void,
+        ),
+        method(
+            "closeItemSnapshots",
+            "()V",
+            crate::item_bridge::transfer::close as *mut c_void,
+        ),
+        method(
+            "releaseItemLease",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            crate::item_bridge::transfer::release as *mut c_void,
+        ),
+        method(
             "mergeItemSnbt",
             "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
             merge_item_snbt as *mut c_void,
@@ -12297,23 +11722,28 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method(
             "jukeboxSetRecord",
-            "(Ljava/lang/String;IIILjava/lang/String;)V",
-            jukebox_set_record as *mut c_void,
+            "(Ljava/lang/String;IIILfoton/item/ItemMutation;)V",
+            crate::item_bridge::block_item::set_jukebox as *mut c_void,
         ),
         method(
             "jukeboxRecord",
-            "(Ljava/lang/String;III)Ljava/lang/String;",
-            jukebox_record as *mut c_void,
+            "(Ljava/lang/String;III)Lfoton/item/ItemTransfer;",
+            crate::item_bridge::block_item::jukebox as *mut c_void,
         ),
         method(
             "hopperInventorySlot",
-            "(Ljava/lang/String;IIII)Ljava/lang/String;",
-            hopper_inventory_slot as *mut c_void,
+            "(Ljava/lang/String;IIII)Lfoton/item/ItemTransfer;",
+            crate::item_bridge::block_inventory::get as *mut c_void,
         ),
         method(
             "hopperSetInventorySlot",
-            "(Ljava/lang/String;IIIILjava/lang/String;)V",
-            hopper_set_inventory_slot as *mut c_void,
+            "(Ljava/lang/String;IIIILfoton/item/ItemMutation;)V",
+            crate::item_bridge::block_inventory::set as *mut c_void,
+        ),
+        method(
+            "blockInventorySetContents",
+            "(Ljava/lang/String;III[Lfoton/item/ItemMutation;)V",
+            crate::item_bridge::block_inventory::set_contents as *mut c_void,
         ),
         method(
             "hopperCustomName",
@@ -12447,8 +11877,8 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method(
             "worldDropItem",
-            "(Ljava/lang/String;DDDLjava/lang/String;)Ljava/lang/String;",
-            world_drop_item as *mut c_void,
+            "(Ljava/lang/String;DDDLfoton/item/ItemMutation;)Ljava/lang/String;",
+            crate::item_bridge::entity::drop_item as *mut c_void,
         ),
         method(
             "scoreboardTeamNames",
@@ -13222,23 +12652,28 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method(
             "mountInventorySlot",
-            "(Ljava/lang/String;I)Ljava/lang/String;",
-            mount_inventory_slot as *mut c_void,
+            "(Ljava/lang/String;I)Lfoton/item/ItemTransfer;",
+            crate::item_bridge::mounts::get as *mut c_void,
         ),
         method(
             "setMountInventorySlot",
-            "(Ljava/lang/String;ILjava/lang/String;)V",
-            set_mount_inventory_slot as *mut c_void,
+            "(Ljava/lang/String;ILfoton/item/ItemMutation;)V",
+            crate::item_bridge::mounts::set as *mut c_void,
         ),
         method(
             "horseInventorySlot",
-            "(Ljava/lang/String;I)Ljava/lang/String;",
-            horse_inventory_slot as *mut c_void,
+            "(Ljava/lang/String;I)Lfoton/item/ItemTransfer;",
+            crate::item_bridge::mounts::get_horse as *mut c_void,
         ),
         method(
             "setHorseInventorySlot",
-            "(Ljava/lang/String;ILjava/lang/String;)V",
-            set_horse_inventory_slot as *mut c_void,
+            "(Ljava/lang/String;ILfoton/item/ItemMutation;)V",
+            crate::item_bridge::mounts::set_horse as *mut c_void,
+        ),
+        method(
+            "setMountInventoryContents",
+            "(Ljava/lang/String;[Lfoton/item/ItemMutation;)V",
+            crate::item_bridge::mounts::set_contents as *mut c_void,
         ),
         method(
             "spawnParticle",
@@ -13407,13 +12842,13 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method(
             "entityItemStack",
-            "(Ljava/lang/String;)Ljava/lang/String;",
-            entity_item_stack as *mut c_void,
+            "(Ljava/lang/String;)Lfoton/item/ItemTransfer;",
+            crate::item_bridge::entity::get as *mut c_void,
         ),
         method(
             "setEntityItemStack",
-            "(Ljava/lang/String;Ljava/lang/String;)V",
-            set_entity_item_stack as *mut c_void,
+            "(Ljava/lang/String;Lfoton/item/ItemMutation;)V",
+            crate::item_bridge::entity::set as *mut c_void,
         ),
         method(
             "setItemUnlimitedLifetime",
@@ -13753,13 +13188,13 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method(
             "entityMerchantRecipes",
-            "(Ljava/lang/String;)[Ljava/lang/String;",
-            entity_merchant_recipes as *mut c_void,
+            "(Ljava/lang/String;)[Lfoton/item/MerchantOfferTransfer;",
+            crate::item_bridge::merchant::get as *mut c_void,
         ),
         method(
             "setVillagerOffers",
-            "(Ljava/lang/String;[Ljava/lang/String;)V",
-            set_villager_offers as *mut c_void,
+            "(Ljava/lang/String;[Lfoton/item/MerchantOfferMutation;)V",
+            crate::item_bridge::merchant::set as *mut c_void,
         ),
         method(
             "entitySetMerchantOfferUses",
@@ -13793,8 +13228,8 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method(
             "openMenuSlot",
-            "(Ljava/lang/String;I)Ljava/lang/String;",
-            open_menu_slot as *mut c_void,
+            "(Ljava/lang/String;I)Lfoton/item/ItemTransfer;",
+            crate::item_bridge::menu::get as *mut c_void,
         ),
         method(
             "openMenuTopSlotCount",
@@ -13802,9 +13237,9 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             open_menu_top_slot_count as *mut c_void,
         ),
         method(
-            "setOpenMenuSlot",
-            "(Ljava/lang/String;ILjava/lang/String;)Z",
-            set_open_menu_slot as *mut c_void,
+            "setOpenMenuItems",
+            "(Ljava/lang/String;[I[Lfoton/item/ItemMutation;Z)V",
+            crate::item_bridge::menu::set as *mut c_void,
         ),
         method(
             "openMenuType",
@@ -13943,23 +13378,23 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method(
             "inventorySlot",
-            "(Ljava/lang/String;I)Ljava/lang/String;",
-            inventory_slot as *mut c_void,
+            "(Ljava/lang/String;I)Lfoton/item/ItemTransfer;",
+            crate::item_bridge::inventory::inventory_slot as *mut c_void,
         ),
         method(
             "setInventorySlot",
-            "(Ljava/lang/String;ILjava/lang/String;)V",
-            set_inventory_slot as *mut c_void,
+            "(Ljava/lang/String;ILfoton/item/ItemMutation;)V",
+            crate::item_bridge::inventory::set_inventory_slot as *mut c_void,
         ),
         method(
             "enderChestSlot",
-            "(Ljava/lang/String;I)Ljava/lang/String;",
-            ender_chest_slot as *mut c_void,
+            "(Ljava/lang/String;I)Lfoton/item/ItemTransfer;",
+            crate::item_bridge::inventory::ender_chest_slot as *mut c_void,
         ),
         method(
             "setEnderChestSlot",
-            "(Ljava/lang/String;ILjava/lang/String;)V",
-            set_ender_chest_slot as *mut c_void,
+            "(Ljava/lang/String;ILfoton/item/ItemMutation;)V",
+            crate::item_bridge::inventory::set_ender_chest_slot as *mut c_void,
         ),
         method(
             "spellcasterSpell",
@@ -14098,13 +13533,13 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method(
             "lecternBook",
-            "(Ljava/lang/String;III)Ljava/lang/String;",
-            lectern_book as *mut c_void,
+            "(Ljava/lang/String;III)Lfoton/item/ItemTransfer;",
+            crate::item_bridge::block_item::lectern as *mut c_void,
         ),
         method(
             "lecternBookPages",
             "(Ljava/lang/String;III)[Ljava/lang/String;",
-            lectern_book_pages as *mut c_void,
+            crate::item_bridge::block_item::pages as *mut c_void,
         ),
         method(
             "lecternClearBook",
@@ -14113,8 +13548,8 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method(
             "lecternSetBook",
-            "(Ljava/lang/String;IIILjava/lang/String;)Z",
-            lectern_set_book as *mut c_void,
+            "(Ljava/lang/String;IIILfoton/item/ItemMutation;)Z",
+            crate::item_bridge::block_item::set_lectern as *mut c_void,
         ),
         method(
             "biomeKey",
@@ -14929,15 +14364,11 @@ mod slot_bridge_tests {
     }
 
     #[test]
-    fn malformed_pdc_fields_do_not_make_the_item_unreadable() {
+    fn malformed_pdc_fields_reject_the_complete_item_input() {
         init_vanilla_registry();
-        let stack = parse_slot(
+        assert!(parse_slot(
             "minecraft:paper 1\u{1d}nbthex=7b666f6f3a31627d\u{1d}pdcstrhex=7a656c64616369763a616374696f6e:ff",
-        )
-        .expect("optional malformed PDC should be ignored");
-
-        assert_eq!(stack.opaque_nbt(), Some("{foo:1b}"));
-        assert!(stack.get(CUSTOM_DATA).is_none());
+        ).is_none(), "malformed PDC must not be silently dropped while other fields survive");
     }
 
     #[test]
@@ -15204,7 +14635,9 @@ mod slot_bridge_tests {
             "minecraft:paper 1\u{1d}pdcstrhex={key}:{}",
             hex_encode("\0".repeat(32_768).as_bytes())
         );
-        let rejected = parse_slot(&rejected).expect("oversized optional PDC should be ignored");
-        assert!(rejected.get(CUSTOM_DATA).is_none());
+        assert!(
+            parse_slot(&rejected).is_none(),
+            "oversized PDC must reject the complete input, not silently disappear"
+        );
     }
 }

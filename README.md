@@ -85,6 +85,39 @@ location with `FOTON_PLUGIN_API_JAR` or `FOTON_PLUGIN_LIBRARY_DIRECTORY` when
 running a custom build. With no FOTON_PLUGIN_DIRECTORY, Foton neither opens
 the runtime bundle nor starts a JVM, so the normal server path is unchanged.
 
+`FOTON_PLUGIN_ITEM_SNAPSHOT_LIMIT` is a positive integer (default `4096`) for
+the live item bridge's retained snapshots and, separately, in-flight item
+materializations. Clones sharing a lease do not consume another retained entry.
+Exhaustion fails explicitly; live entries are never evicted or reclaimed by
+forcing Java GC. This is a cardinality limit, **not a hard RAM bound**: very
+large values and delayed Java GC can exhaust memory before the entry limit.
+The bridge currently refuses source trees exceeding 128 aggregate owned levels
+or four nested `ItemStackTemplate` values on any single path, before cloning.
+The template counter does not reset across mixed component/predicate wrappers;
+sibling paths are independent. These are temporary operational compatibility
+restrictions, not vanilla limits. The four-template and mixed item/text boundary
+were exercised on a Java-created thread on the tested Linux/OpenJDK runtime;
+this is not a universal platform or thread-stack guarantee. Deeper item support
+requires separate recursive-constructor/hash work and legitimate depth tests.
+
+This item bridge is an **incomplete compatibility checkpoint**, not Zelda/Paper
+item parity. Migrated inventory, entity, block-item and merchant boundaries retain
+typed native snapshots; event item requests/responses, custom-menu initial
+contents and instance-qualified enchanting transfers still have legacy paths.
+The menu batch ownership path is implemented, but its real server/Java reentrant
+owner-notification and outer-host shutdown acceptance fixture is still pending.
+Do not treat unit/DTO checks as that end-to-end proof. Async host shutdown must be
+awaited before external world teardown; synchronous Drop is best-effort only.
+
+Carrier-backed public item/meta persistence refuses explicitly; legacy merchant
+`encode()` also refuses because its delimiter format loses item/scalar state.
+Pre-registry canonical operations fail explicitly during early plugin loading.
+Unsupported metadata edits (including attributes/flags, bundles/projectiles,
+trim and other untransported subtypes), unprojected native potion-effect edits,
+carrier opaque-NBT edits and unsupported BlockState material conversion refuse
+before native mutation. Untouched state is preserved, but these are documented
+missing capabilities, not completed public API support or durable backup support.
+
 Direct ViaVersion and ViaBackwards 5.11.0 support is opt-in: download their
 official plugin JARs into `FOTON_PLUGIN_DIRECTORY`. Those plugins are not
 redistributed by Foton. The plugin runtime does include the five pinned Netty

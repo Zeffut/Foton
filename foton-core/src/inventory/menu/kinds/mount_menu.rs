@@ -193,6 +193,10 @@ unsafe impl DowncastType for MountEquipmentSlot {
 }
 
 impl Slot for MountEquipmentSlot {
+    fn live_read_source(&self) -> Option<crate::inventory::slots::MenuSlotReadSource> {
+        self.base.live_read_source()
+    }
+
     fn storage(&self) -> &SlotStorage {
         self.base.storage()
     }

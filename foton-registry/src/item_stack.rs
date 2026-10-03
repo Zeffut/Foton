@@ -478,6 +478,44 @@ impl ItemStack {
         self.patch.clear(component);
     }
 
+    /// Sets a registered component, with the same prototype sanitization as [`Self::set`].
+    /// Unknown keys and incompatible concrete values leave the stack unchanged.
+    pub fn set_raw(&mut self, key: Identifier, value: ComponentData) -> Result<()> {
+        let entry = REGISTRY
+            .data_components
+            .by_key(&key)
+            .ok_or_else(|| std::io::Error::other("unregistered item component"))?;
+        if !entry.validates(&value) {
+            return Err(std::io::Error::other("incompatible item component value"));
+        }
+        self.set_component_data(key, value);
+        Ok(())
+    }
+
+    /// Hides a registered component, retaining a removal only when the prototype has it.
+    pub fn remove_raw(&mut self, key: Identifier) -> Result<()> {
+        if REGISTRY.data_components.by_key(&key).is_none() {
+            return Err(std::io::Error::other("unregistered item component"));
+        }
+        if self.prototype().get_raw(&key).is_some() {
+            if !self.patch.remove_raw(key) {
+                return Err(std::io::Error::other("unregistered item component"));
+            }
+        } else {
+            self.patch.clear_key(&key);
+        }
+        Ok(())
+    }
+
+    /// Clears a registered component override, revealing its prototype value again.
+    pub fn reset_raw(&mut self, key: &Identifier) -> Result<()> {
+        if REGISTRY.data_components.by_key(key).is_none() {
+            return Err(std::io::Error::other("unregistered item component"));
+        }
+        self.patch.clear_key(key);
+        Ok(())
+    }
+
     /// Returns a reference to the component patch.
     #[must_use]
     pub const fn patch(&self) -> &DataComponentPatch {
@@ -1650,6 +1688,10 @@ fn decode_persistent_count(tag: Option<BorrowedNbtTag<'_, '_>>) -> Option<i32> {
     };
     (1..=99).contains(&count).then_some(count)
 }
+
+#[cfg(test)]
+#[path = "item_stack_dynamic_tests.rs"]
+mod dynamic_tests;
 
 #[cfg(test)]
 mod enchantment_tests {

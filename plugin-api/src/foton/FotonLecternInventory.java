@@ -5,7 +5,6 @@ import org.bukkit.Material;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.BookMeta;
 
 /** The one real slot exposed by a lectern block entity. */
 final class FotonLecternInventory implements Inventory {
@@ -18,14 +17,7 @@ final class FotonLecternInventory implements Inventory {
 
     @Override public ItemStack getItem(int slot) {
         if (slot != 0 || block.getWorld() == null) return null;
-        String encoded = Native.lecternBook(block.getWorld().getName(), block.getX(), block.getY(), block.getZ());
-        ItemStack item = FotonInventory.decode(encoded);
-        if (item == null || (item.getType() != Material.WRITTEN_BOOK && item.getType() != Material.WRITABLE_BOOK)) return item;
-        String[] pages = Native.lecternBookPages(block.getWorld().getName(), block.getX(), block.getY(), block.getZ());
-        BookMeta meta = (BookMeta) item.getItemMeta();
-        meta.setPages(pages == null ? new String[0] : pages);
-        item.setItemMeta(meta);
-        return item;
+        return FotonInventory.decodeTransfer(Native.lecternBook(block.getWorld().getName(), block.getX(), block.getY(), block.getZ()));
     }
 
     @Override public void setItem(int slot, ItemStack item) {
@@ -35,7 +27,7 @@ final class FotonLecternInventory implements Inventory {
             Native.lecternClearBook(world, block.getX(), block.getY(), block.getZ());
             return;
         }
-        Native.lecternSetBook(world, block.getX(), block.getY(), block.getZ(), FotonInventory.encode(item));
+        Native.lecternSetBook(world, block.getX(), block.getY(), block.getZ(), FotonInventory.mutation(item));
     }
 
     @Override

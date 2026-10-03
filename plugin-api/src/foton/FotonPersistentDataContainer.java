@@ -45,6 +45,17 @@ public final class FotonPersistentDataContainer implements PersistentDataContain
     private final Set<NamespacedKey> nativeExposedKeys = new HashSet<>();
     private String nativePassthrough;
     private String nativePassthroughIdentity;
+    private Runnable mutationListener = () -> { };
+
+    /** Internal persistence guard: projected keys alone do not describe the retained raw state. */
+    public boolean hasRetainedItemState() {
+        return !values.isEmpty() || nativePassthrough != null || nativePassthroughIdentity != null;
+    }
+
+    /** Internal item-owner notification; copies are rebound to their new owner. */
+    public void setMutationListener(Runnable listener) {
+        mutationListener = java.util.Objects.requireNonNull(listener);
+    }
 
     private static Object copyValue(Object value) {
         return value instanceof byte[] bytes ? bytes.clone() : value;
@@ -52,8 +63,9 @@ public final class FotonPersistentDataContainer implements PersistentDataContain
 
     @Override public <P, C> void set(NamespacedKey key, PersistentDataType<P, C> type, C value) {
         if (key == null || type == null) throw new IllegalArgumentException("key and type are required");
-        if (value == null) { values.remove(key); return; }
+        if (value == null) { remove(key); return; }
         values.put(key, new StoredValue(type, value));
+        mutationListener.run();
     }
     @SuppressWarnings("unchecked")
     @Override public <P, C> C get(NamespacedKey key, PersistentDataType<P, C> type) {
@@ -69,7 +81,9 @@ public final class FotonPersistentDataContainer implements PersistentDataContain
         return stored != null && stored.type == type;
     }
     @Override public boolean has(NamespacedKey key) { return values.containsKey(key); }
-    @Override public void remove(NamespacedKey key) { values.remove(key); }
+    @Override public void remove(NamespacedKey key) {
+        if (values.remove(key) != null) mutationListener.run();
+    }
     @Override public Set<NamespacedKey> getKeys() { return new HashSet<>(values.keySet()); }
     public FotonPersistentDataContainer copy() {
         FotonPersistentDataContainer copy = new FotonPersistentDataContainer();

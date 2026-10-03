@@ -2,7 +2,7 @@ package org.bukkit.entity;
 import org.bukkit.inventory.ItemStack;
 /** A thrown potion projectile. */
 public interface ThrownPotion extends Projectile {
-    default ItemStack getItem() { return foton.FotonInventory.decode(foton.Native.entityItemStack(getUniqueId().toString())); }
+    default ItemStack getItem() { return foton.FotonInventory.decodeTransfer(foton.Native.entityItemStack(getUniqueId().toString())); }
     default java.util.Collection<org.bukkit.potion.PotionEffect> getEffects() {
         String[] values = foton.Native.entityPotionEffects(getUniqueId().toString());
         java.util.ArrayList<org.bukkit.potion.PotionEffect> result = new java.util.ArrayList<>();

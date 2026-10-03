@@ -10,5 +10,5 @@ public interface SuspiciousStewMeta extends ItemMeta {
     boolean addCustomEffect(PotionEffect effect, boolean overwrite);
     boolean removeCustomEffect(org.bukkit.potion.PotionEffectType type);
     boolean clearCustomEffects();
-    default java.util.Map<String,Object> serialize() { return java.util.Collections.emptyMap(); }
+    default java.util.Map<String,Object> serialize() { throw new UnsupportedOperationException("specialized metadata persistence"); }
 }

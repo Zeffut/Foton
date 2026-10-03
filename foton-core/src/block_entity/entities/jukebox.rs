@@ -96,6 +96,12 @@ impl JukeboxBlockEntity {
         self.state.lock().item.clone()
     }
 
+    /// Pure synchronous storage read; do not invoke Java/world callbacks or reenter
+    /// this jukebox. Construct external results after the storage guard releases.
+    pub fn read_item<R>(&self, read: impl FnOnce(&ItemStack) -> R) -> R {
+        read(&self.state.lock().item)
+    }
+
     /// Returns what a comparator reads off it.
     ///
     /// Vanilla parity: `JukeboxBlockEntity.getComparatorOutput`, which is a

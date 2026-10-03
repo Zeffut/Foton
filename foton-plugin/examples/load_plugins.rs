@@ -40,6 +40,7 @@ fn main() -> ExitCode {
                 .map_or_else(|| repo.join("plugin-api/lib"), PathBuf::from),
         ),
         plugin_directory: plugins.clone(),
+        item_snapshot_limit: PluginHostConfig::DEFAULT_ITEM_SNAPSHOT_LIMIT,
     };
 
     // No server: the natives answer as they would for one that has

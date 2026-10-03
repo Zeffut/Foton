@@ -20,6 +20,7 @@ public class SimpleBundleMeta extends SimpleItemMeta implements BundleMeta {
 
     @Override
     public void setItems(List<ItemStack> items) {
+        unsupportedChange("bundle_contents");
         this.items = new ArrayList<>();
         if (items == null) return;
         for (ItemStack item : items) {
@@ -30,7 +31,7 @@ public class SimpleBundleMeta extends SimpleItemMeta implements BundleMeta {
         @Override
     public SimpleBundleMeta clone() {
         SimpleBundleMeta copy = (SimpleBundleMeta) super.clone();
-        copy.setItems(items);
+        copy.items = getItems();
         return copy;
     }
 

@@ -12,5 +12,5 @@ public interface BannerMeta extends ItemMeta {
     boolean removePattern(int index);
     void setPatterns(List<Pattern> patterns);
 
-    default java.util.Map<String,Object> serialize() { return java.util.Collections.emptyMap(); }
+    default java.util.Map<String,Object> serialize() { throw new UnsupportedOperationException("specialized metadata persistence"); }
 }

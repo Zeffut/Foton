@@ -63,6 +63,7 @@ fn a_call_made_in_java_reaches_foton() {
         api_jar,
         library_directory: Some(repo().join("plugin-api/lib")),
         plugin_directory: repo().join("plugin-api/build/no-plugins"),
+        item_snapshot_limit: PluginHostConfig::DEFAULT_ITEM_SNAPSHOT_LIMIT,
     };
 
     // No server behind the handle: the natives answer as they would for one

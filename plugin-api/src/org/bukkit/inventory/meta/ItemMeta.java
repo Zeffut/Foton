@@ -99,5 +99,5 @@ public interface ItemMeta extends Cloneable, org.bukkit.persistence.PersistentDa
     default void setHideTooltip(boolean hide) { }
 
     ItemMeta clone();
-    default java.util.Map<String,Object> serialize() { return java.util.Collections.emptyMap(); }
+    default java.util.Map<String,Object> serialize() { throw new UnsupportedOperationException("metadata persistence"); }
 }

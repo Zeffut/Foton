@@ -25,7 +25,6 @@ final class PluginLifecycle {
             lifecycleCallbackCanJoinHelper(root.resolve("lifecycle-helper"));
             disableEventSeesPublishedResources(root.resolve("disable-visibility"));
             oldTeardownCannotCloseReplacement(root.resolve("reload-identity"));
-            stoppingIsVisibleDuringDisable(root.resolve("stopping"));
         } finally {
             discard("LifecycleTeardown");
             discard("AlphaTarget");
@@ -54,6 +53,25 @@ final class PluginLifecycle {
                         .toList()) {
                     java.nio.file.Files.deleteIfExists(path);
                 }
+            }
+        }
+    }
+
+    /** Terminal shutdown is irreversible; run after fixtures that still publish plugins. */
+    static void checkTerminalShutdown() throws Exception {
+        java.nio.file.Path root = java.nio.file.Files.createTempDirectory("foton-terminal-lifecycle-");
+        try {
+            stoppingIsVisibleDuringDisable(root.resolve("stopping"));
+            pluginJar(root.resolve("late"), "LateAfterTerminal", StoppingObserver.class, "");
+            foton.PluginHost.loadAll(root.resolve("late").toString());
+            Checks.expect(foton.PluginHost.byName("LateAfterTerminal") == null,
+                "terminal shutdown must reject new plugin publication");
+        } finally {
+            discard("StoppingObserver");
+            discard("LateAfterTerminal");
+            try (java.util.stream.Stream<java.nio.file.Path> paths = java.nio.file.Files.walk(root)) {
+                for (java.nio.file.Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList())
+                    java.nio.file.Files.deleteIfExists(path);
             }
         }
     }

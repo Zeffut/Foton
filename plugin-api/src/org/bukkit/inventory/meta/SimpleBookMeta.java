@@ -19,6 +19,11 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
     /** Native resolution survives ordinary BookMeta edits, independently of filtered content. */
     private boolean nativeBookResolved;
 
+    private void bookChanged() {
+        nativeBookPassthrough = null;
+        changed("book", true);
+    }
+
     public String nativeBookPassthrough() {
         return nativeBookPassthrough;
     }
@@ -52,7 +57,7 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
             return false;
         }
         title = value;
-        nativeBookPassthrough = null;
+        bookChanged();
         return true;
     }
 
@@ -69,7 +74,7 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
     @Override
     public void setAuthor(String value) {
         author = value;
-        nativeBookPassthrough = null;
+        bookChanged();
     }
 
     @Override
@@ -85,7 +90,7 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
     @Override
     public void setPage(int page, String data) {
         pages.set(index(page), Component.text(data == null ? "" : data));
-        nativeBookPassthrough = null;
+        bookChanged();
     }
 
     @Override
@@ -97,7 +102,7 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
     public void setPages(List<String> value) {
         pages = new ArrayList<>();
         if (value != null) for (String page : value) pages.add(Component.text(page == null ? "" : page));
-        nativeBookPassthrough = null;
+        bookChanged();
     }
 
     @Override
@@ -113,7 +118,7 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
         for (String page : added) {
             pages.add(Component.text(page == null ? "" : page));
         }
-        nativeBookPassthrough = null;
+        bookChanged();
     }
 
     @Override
@@ -134,7 +139,7 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
     @Override
     public void setGeneration(Generation value) {
         generation = value == null ? Generation.ORIGINAL : value;
-        nativeBookPassthrough = null;
+        bookChanged();
     }
 
     @Override
@@ -169,7 +174,7 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
         List<Component> copy = new ArrayList<>();
         if (value != null) for (Component page : value) copy.add(page == null ? Component.empty() : page);
         pages = copy;
-        nativeBookPassthrough = null;
+        bookChanged();
         return net.kyori.adventure.inventory.Book.book(
             title == null ? Component.empty() : title(),
             author == null ? Component.empty() : author(), pages);
@@ -183,7 +188,7 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
     @Override
     public void page(int page, Component data) {
         pages.set(index(page), data == null ? Component.empty() : data);
-        nativeBookPassthrough = null;
+        bookChanged();
     }
 
     private static String text(Component page) {

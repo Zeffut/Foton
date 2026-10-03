@@ -6,6 +6,22 @@ use foton_utils::ErasedType;
 use crate::inventory::lock::{ContainerId, ContainerLockGuard, ContainerRef};
 use crate::player::Player;
 
+/// Owned storage coordinates for callback reads while the menu itself is detached.
+/// Cloning transfers shallow container ownership, never an item graph.
+#[derive(Clone)]
+pub struct MenuSlotReadSource {
+    pub(crate) container: ContainerRef,
+    pub(crate) index: usize,
+}
+
+impl MenuSlotReadSource {
+    /// The slot opting in promises this is exactly its stable storage-local read.
+    #[must_use]
+    pub fn new(container: ContainerRef, index: usize) -> Self {
+        Self { container, index }
+    }
+}
+
 /// Physical storage and auxiliary container dependencies used by a [`Slot`].
 ///
 /// Menu builders derive their complete lock set and physical-alias checks from
@@ -76,6 +92,13 @@ impl SlotStorage {
 /// retain one [`SlotStorage`] descriptor for their full container dependency
 /// set.
 pub trait Slot: ErasedType + Send + Sync {
+    /// Opts into detached live reads. Coordinates must match get_item exactly,
+    /// remain stable for this menu lifetime, and need no auxiliary reads/callbacks.
+    /// Custom/virtual slots are unsupported unless they explicitly opt in.
+    fn live_read_source(&self) -> Option<MenuSlotReadSource> {
+        None
+    }
+
     /// Returns this slot's physical storage and auxiliary dependencies.
     fn storage(&self) -> &SlotStorage;
 

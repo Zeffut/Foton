@@ -38,5 +38,5 @@ public interface PotionMeta extends ItemMeta {
         PotionData data = getBasePotionData();
         return data == null ? null : data.getType();
     }
-    default java.util.Map<String,Object> serialize() { return java.util.Collections.emptyMap(); }
+    default java.util.Map<String,Object> serialize() { throw new UnsupportedOperationException("specialized metadata persistence"); }
 }

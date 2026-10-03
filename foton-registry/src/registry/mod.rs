@@ -106,6 +106,11 @@ use std::{
 pub struct RegistryLock(OnceLock<Registry>);
 
 impl RegistryLock {
+    /// Returns the published registry without panicking during plugin bootstrap.
+    pub fn get(&self) -> Option<&Registry> {
+        self.0.get()
+    }
+
     #[expect(clippy::result_large_err)]
     pub fn init(&self, value: Registry) -> Result<(), Registry> {
         self.0.set(value)

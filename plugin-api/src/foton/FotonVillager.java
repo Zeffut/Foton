@@ -61,20 +61,18 @@ public final class FotonVillager extends AbstractVillager implements org.bukkit.
     }
 
     @Override public void setRecipes(List<MerchantRecipe> recipes) {
-        if (recipes == null) { Native.setVillagerOffers(getUniqueId().toString(), new String[0]); return; }
-        String[] encoded = new String[recipes.size()];
-        for (int index = 0; index < recipes.size(); index++) encoded[index] = recipes.get(index) == null ? "" : recipes.get(index).encode();
+        if (recipes == null) { Native.setVillagerOffers(getUniqueId().toString(), new foton.item.MerchantOfferMutation[0]); return; }
+        foton.item.MerchantOfferMutation[] encoded = new foton.item.MerchantOfferMutation[recipes.size()];
+        for (int index = 0; index < recipes.size(); index++) encoded[index] = new foton.item.MerchantOfferMutation(recipes.get(index));
         Native.setVillagerOffers(getUniqueId().toString(), encoded);
     }
 
     @Override public List<MerchantRecipe> getRecipes() {
-        String[] encoded = Native.entityMerchantRecipes(getUniqueId().toString());
+        foton.item.MerchantOfferTransfer[] encoded = Native.entityMerchantRecipes(getUniqueId().toString());
         if (encoded == null) return Collections.emptyList();
         ArrayList<MerchantRecipe> recipes = new ArrayList<>(encoded.length);
         for (int index = 0; index < encoded.length; index++) {
-            String value = encoded[index];
-            MerchantRecipe recipe = MerchantRecipe.decode(value, getUniqueId().toString(), index);
-            if (recipe != null) recipes.add(recipe);
+            recipes.add(encoded[index].recipe(getUniqueId().toString(), index));
         }
         return Collections.unmodifiableList(recipes);
     }

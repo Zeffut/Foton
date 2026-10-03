@@ -16,6 +16,8 @@ public final class Checks {
         InventoryViewCheck.check();
         foton.CustomInventoryCheck.check();
         Items.check();
+        ItemPersistenceCheck.check();
+        MerchantItemsCheck.check();
         ShapelessRecipeParity.check();
         Colors.check();
         Commands.check();
@@ -32,6 +34,7 @@ public final class Checks {
         foton.PluginLibraries.check();
         foton.PaperBootstrap.check();
         foton.PaperBootstrapGraph.check();
+        PluginLifecycle.checkTerminalShutdown();
         System.out.println(
             "plugin API checked: services, events, scheduler, lifecycle, network hooks, YAML,\n"
                 + "    configuration, geometry, items, colors, commands, scoreboards and permissions");

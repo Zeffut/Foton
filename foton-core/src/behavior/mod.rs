@@ -121,6 +121,13 @@ impl Deref for BlockBehaviorLock {
 /// Wrapper for the global item behavior registry that implements `Deref`.
 pub struct ItemBehaviorLock(OnceLock<ItemBehaviorRegistry>);
 
+impl ItemBehaviorLock {
+    /// Returns published behaviors without panicking during plugin bootstrap.
+    pub fn get(&self) -> Option<&ItemBehaviorRegistry> {
+        self.0.get()
+    }
+}
+
 impl Deref for ItemBehaviorLock {
     type Target = ItemBehaviorRegistry;
 

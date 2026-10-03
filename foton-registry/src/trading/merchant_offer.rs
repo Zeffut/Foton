@@ -274,6 +274,11 @@ impl MerchantOffer {
         self.reward_exp
     }
 
+    /// Whether completing this offer rewards experience, as in Paper's constructor.
+    pub const fn set_reward_exp(&mut self, reward_exp: bool) {
+        self.reward_exp = reward_exp;
+    }
+
     /// Returns `true` if these two stacks pay for this trade.
     ///
     /// Vanilla parity: `satisfiedBy`. The first price is compared against its

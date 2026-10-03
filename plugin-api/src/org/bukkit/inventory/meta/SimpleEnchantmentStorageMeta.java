@@ -11,11 +11,15 @@ public final class SimpleEnchantmentStorageMeta extends SimpleItemMeta implement
     @Override public boolean addStoredEnchant(Enchantment enchantment, int level, boolean ignoreLevelRestriction) {
         if (enchantment == null || level <= 0) return false;
         Integer previous = stored.put(enchantment, level);
+        if (previous == null || previous != level) changed("stored_enchantments", true);
         return previous == null || previous != level;
     }
     @Override public int getStoredEnchantLevel(Enchantment enchantment) { return stored.getOrDefault(enchantment, 0); }
     @Override public boolean hasStoredEnchant(Enchantment enchantment) { return stored.containsKey(enchantment); }
-    @Override public boolean removeStoredEnchant(Enchantment enchantment) { return stored.remove(enchantment) != null; }
+    @Override public boolean removeStoredEnchant(Enchantment enchantment) {
+        if (stored.remove(enchantment) == null) return false;
+        changed("stored_enchantments", true); return true;
+    }
     @Override public Map<Enchantment, Integer> getStoredEnchants() {
         return java.util.Collections.unmodifiableMap(new HashMap<>(stored));
     }

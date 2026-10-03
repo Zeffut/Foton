@@ -43,6 +43,9 @@ public final class PluginHost {
     private static final ThreadLocal<Integer> lifecycleCallbackDepth =
         ThreadLocal.withInitial(() -> 0);
     private static final Object lifecycle = new Object();
+    private static boolean itemBridgeBound;
+    private static boolean terminalRequested;
+    private static boolean itemBridgeClosed;
     /** Serializes lifecycle callbacks without holding the state monitor.
      *
      * <p>The lock is reentrant because Bukkit permits a plugin callback to
@@ -55,6 +58,28 @@ public final class PluginHost {
     /** Marks a real host shutdown; ordinary plugin disable/re-enable does not call this. */
     public static void markStopping() {
         org.bukkit.Bukkit.markStopping();
+        synchronized (lifecycle) { terminalRequested = true; }
+        closeItemBridgeIfDrained();
+    }
+
+    /** Called only after the embedded host registers its real native methods. */
+    public static void bindItemBridge() {
+        synchronized (lifecycle) { itemBridgeBound = true; }
+        closeItemBridgeIfDrained();
+    }
+
+    /** Internal availability signal; registry readiness is checked by native calls. */
+    public static boolean itemBridgeBound() {
+        synchronized (lifecycle) { return itemBridgeBound; }
+    }
+
+    private static void closeItemBridgeIfDrained() {
+        boolean close;
+        synchronized (lifecycle) {
+            close = itemBridgeBound && terminalRequested && !itemBridgeClosed && invocations.isEmpty();
+            if (close) itemBridgeClosed = true;
+        }
+        if (close) Native.closeItemSnapshots();
     }
 
     static Object lifecycleLock() {
@@ -468,6 +493,7 @@ public final class PluginHost {
             loader.setPlugin(plugin);
             plugin.init(org.bukkit.Bukkit.getServer(), descriptor, dataFolder);
             synchronized (lifecycle) {
+                if (terminalRequested) return null;
                 if (findExactNameLocked(descriptor.getName()) != null) {
                     System.out.println("[host] " + descriptor.getName()
                         + " was published concurrently; skipping " + jar.getName());
@@ -873,6 +899,7 @@ public final class PluginHost {
                     + " classloader failed to close: " + error);
             }
         }
+        closeItemBridgeIfDrained();
     }
 
     private static void awaitInvocations(InvocationState state, Runnable onDrained) {
@@ -1047,5 +1074,6 @@ public final class PluginHost {
         } finally {
             lifecycleOperation.unlock();
         }
+        closeItemBridgeIfDrained();
     }
 }

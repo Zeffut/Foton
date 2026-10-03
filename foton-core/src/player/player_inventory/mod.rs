@@ -11,7 +11,9 @@ mod container;
 mod core;
 mod enchantment_view;
 mod equipment;
+mod item_batch;
 mod player_handlers;
+pub use item_batch::{MenuItemBatch, MenuItemBatchError, MenuItemBatchStatus, MenuSlotWrite};
 
 pub use container::InvalidHotbarSlot;
 pub(crate) use container::armor_equipment;
@@ -107,8 +109,14 @@ struct OpenMenuDispatch {
     overrides_player_slots: bool,
     top_slot_count: usize,
     menu_type: Option<String>,
-    snapshot: Vec<ItemStack>,
+    reads: OpenMenuReadSource,
+    live_reads_supported: bool,
     actions: Vec<DeferredMenuAction>,
+}
+
+enum OpenMenuReadSource {
+    Snapshot(Vec<ItemStack>),
+    Live(Vec<crate::inventory::slots::MenuSlotReadSource>),
 }
 
 struct TerminalMenuRemoval {
@@ -125,10 +133,7 @@ enum DeferredMenuAction {
     },
     Open(Box<PendingMenuOpen>),
     Install(Box<PreparedMenu>),
-    SetSlot {
-        index: usize,
-        stack: ItemStack,
-    },
+    SetItems(Box<dyn MenuItemBatch>),
 }
 
 type MenuFactory = Box<dyn for<'a> FnOnce(MenuOpenContext<'a>) -> Menu + Send + 'static>;
@@ -160,5 +165,7 @@ impl OpenMenuState {
     }
 }
 
+#[cfg(test)]
+mod item_bridge_tests;
 #[cfg(test)]
 mod tests;

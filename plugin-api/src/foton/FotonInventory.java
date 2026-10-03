@@ -5,19 +5,17 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.InventoryHolder;
 
-/** A player's inventory, read and written across JNI.
- *
- * Every slot is a separate crossing, which is slower than one call for the
- * whole thing and is what keeps the contract honest: nothing here holds a
- * reference into the live inventory, so a plugin cannot change a chest from
- * its own thread while the tick is reading it.
- *
- * A slot crosses as a string -- `minecraft:diamond_sword 3` -- rather than as
- * an object. Building a Java object from Rust means calling a constructor by
- * signature, and a signature that drifts is a NoSuchMethodError at the worst
- * possible moment; a string that fails to parse is an empty slot.
- */
+/** Player inventory snapshots own immutable native item state. Bulk writes stage
+ * every candidate before the native inventory is changed. */
 public final class FotonInventory implements PlayerInventory {
+    /** The transfer owns its lease throughout hydration; the resulting metadata shares it. */
+    public static ItemStack decodeTransfer(foton.item.ItemTransfer transfer) {
+        if (transfer == null) return null;
+        ItemStack result = decode(transfer.projection());
+        if (result == null) throw new IllegalArgumentException("invalid native item projection");
+        result.attachNativeState(transfer);
+        return result;
+    }
     /** Vanilla's player inventory: 36 storage slots, 4 armor, 1 offhand. */
     private static final int SIZE = 41;
     private static final int ARMOR = 36;
@@ -52,45 +50,47 @@ public final class FotonInventory implements PlayerInventory {
 
     @Override
     public ItemStack getItem(int slot) {
-        return decode(Native.inventorySlot(owner, slot));
+        return decodeTransfer(Native.inventorySlot(owner, slot));
     }
 
     @Override
     public void setItem(int slot, ItemStack item) {
-        Native.setInventorySlot(owner, slot, encode(item));
+        Native.setInventorySlot(owner, slot, mutation(item));
     }
 
     @Override
     public java.util.HashMap<Integer, ItemStack> addItem(ItemStack... items) {
         java.util.HashMap<Integer, ItemStack> leftovers = new java.util.HashMap<>();
         if (items == null) return leftovers;
+        ItemStack[] contents = getContents();
         for (int index = 0; index < items.length; index++) {
             ItemStack incoming = items[index] == null ? null : items[index].clone();
             if (incoming == null || incoming.getType().isAir() || incoming.getAmount() <= 0) continue;
             for (int slot = 0; slot < getSize() && incoming.getAmount() > 0; slot++) {
-                ItemStack current = getItem(slot);
+                ItemStack current = contents[slot];
                 if (current != null && current.isSimilar(incoming)) {
                     int space = current.getMaxStackSize() - current.getAmount();
                     if (space > 0) {
                         int moved = Math.min(space, incoming.getAmount());
                         current.setAmount(current.getAmount() + moved);
                         incoming.setAmount(incoming.getAmount() - moved);
-                        setItem(slot, current);
+                        contents[slot] = current;
                     }
                 }
             }
             for (int slot = 0; slot < getSize() && incoming.getAmount() > 0; slot++) {
-                ItemStack current = getItem(slot);
+                ItemStack current = contents[slot];
                 if (current == null || current.getType().isAir() || current.getAmount() <= 0) {
                     int moved = Math.min(incoming.getMaxStackSize(), incoming.getAmount());
                     ItemStack placed = incoming.clone();
                     placed.setAmount(moved);
-                    setItem(slot, placed);
+                    contents[slot] = placed;
                     incoming.setAmount(incoming.getAmount() - moved);
                 }
             }
             if (incoming.getAmount() > 0) leftovers.put(index, incoming);
         }
+        setContents(contents);
         return leftovers;
     }
 
@@ -105,9 +105,7 @@ public final class FotonInventory implements PlayerInventory {
 
     @Override
     public void setContents(ItemStack[] items) {
-        for (int slot = 0; slot < SIZE; slot++) {
-            setItem(slot, items != null && slot < items.length ? items[slot] : null);
-        }
+        setPlayerContents(owner, false, SIZE, items);
     }
 
     @Override
@@ -131,14 +129,12 @@ public final class FotonInventory implements PlayerInventory {
 
     @Override
     public void clear() {
-        for (int slot = 0; slot < SIZE; slot++) {
-            clear(slot);
-        }
+        setContents(null);
     }
 
     @Override
     public void clear(int slot) {
-        Native.setInventorySlot(owner, slot, "");
+        Native.setInventorySlot(owner, slot, foton.item.ItemMutation.empty());
     }
 
     @Override
@@ -184,7 +180,11 @@ public final class FotonInventory implements PlayerInventory {
         return result;
     }
     @Override public void setStorageContents(ItemStack[] contents) {
-        for (int slot = 0; slot < ARMOR; slot++) setItem(slot, contents != null && slot < contents.length ? contents[slot] : null);
+        setPlayerRange(owner, false, 0, ARMOR, contents);
+    }
+
+    @Override public void setArmorContents(ItemStack[] contents) {
+        setPlayerRange(owner, false, ARMOR, 4, contents);
     }
 
     @Override
@@ -244,7 +244,9 @@ public final class FotonInventory implements PlayerInventory {
         }
         ItemStack result = new ItemStack(material, amount);
         for (int i = 1; i < encoded.length; i++) if (encoded[i].startsWith("damage=")) {
-            try { result.setDurability(Short.parseShort(encoded[i].substring(7))); } catch (NumberFormatException ignored) { }
+            org.bukkit.inventory.meta.ItemMeta damageMeta = result.getItemMeta();
+            ((org.bukkit.inventory.meta.Damageable) damageMeta).setDamage(Integer.parseInt(encoded[i].substring(7)));
+            result.hydrateMeta(damageMeta);
         }
         for (String field : encoded) if (field.startsWith("nbthex=")) {
             String hex = field.substring(7); java.io.ByteArrayOutputStream raw = new java.io.ByteArrayOutputStream();
@@ -364,7 +366,7 @@ public final class FotonInventory implements PlayerInventory {
                     }
                 } catch (NumberFormatException ignored) { }
             }
-            result.setItemMeta(meta);
+            result.hydrateMeta(meta);
         }
         if (result.getItemMeta() instanceof org.bukkit.inventory.meta.PotionMeta meta) {
             for (String encodedField : encoded) {
@@ -379,7 +381,7 @@ public final class FotonInventory implements PlayerInventory {
                     catch (NumberFormatException ignored) { }
                 }
             }
-            result.setItemMeta(meta);
+            result.hydrateMeta(meta);
         }
         return result;
     }
@@ -414,8 +416,9 @@ public final class FotonInventory implements PlayerInventory {
         }
         String value = "minecraft:" + item.getType().getKeyName() + " " + item.getAmount();
         if (item.getOpaqueNbt() != null && !item.getOpaqueNbt().isEmpty()) value += "\u001dnbthex=" + hexEncode(item.getOpaqueNbt());
-        if (item.getDurability() != 0) value += "\u001ddamage=" + item.getDurability();
-        if (item.hasItemMeta()
+        if (item.getItemMeta() instanceof org.bukkit.inventory.meta.Damageable damageable && damageable.getDamage() != 0)
+            value += "\u001ddamage=" + damageable.getDamage();
+        if ((item.getItemMeta() != null)
                 && item.getItemMeta().getPersistentDataContainer() instanceof FotonPersistentDataContainer persistentData) {
             if (persistentData.nativePassthrough() != null && !persistentData.nativePassthrough().isEmpty())
                 value += "\u001dpdcrawhex=" + persistentData.nativePassthrough();
@@ -423,15 +426,16 @@ public final class FotonInventory implements PlayerInventory {
                 value += "\u001dpdcidentity=" + persistentData.nativePassthroughIdentity();
             value += persistentData.encodeItemFields();
         }
-        if (item.hasItemMeta() && item.getItemMeta().isUnbreakable()) value += "\u001dunbreakable";
-        if (item.hasItemMeta() && item.getItemMeta().isHideTooltip()) value += "\u001dhidetooltip";
-        if (item.hasItemMeta() && item.getItemMeta().hasItemModel())
+        if ((item.getItemMeta() != null) && item.getItemMeta().isUnbreakable()) value += "\u001dunbreakable";
+        if ((item.getItemMeta() != null) && item.getItemMeta().isHideTooltip()) value += "\u001dhidetooltip";
+        if ((item.getItemMeta() != null) && item.getItemMeta().hasItemModel())
             value += "\u001ditemmodelhex=" + hexEncode(item.getItemMeta().getItemModel().toString());
-        if (item.hasItemMeta() && item.getItemMeta().hasTooltipStyle())
+        if ((item.getItemMeta() != null) && item.getItemMeta().hasTooltipStyle())
             value += "\u001dtooltipstylehex=" + hexEncode(item.getItemMeta().getTooltipStyle().toString());
-        if (item.hasItemMeta() && item.getItemMeta().hasCustomModelData())
+        if ((item.getItemMeta() != null) && item.getItemMeta().hasCustomModelData()
+                && item.getItemMeta().getCustomModelDataComponent().getFloats().isEmpty())
             value += "\u001dmodel=" + item.getItemMeta().getCustomModelData();
-        if (item.hasItemMeta()) {
+        if ((item.getItemMeta() != null)) {
             org.bukkit.inventory.meta.components.CustomModelDataComponent model = item.getItemMeta().getCustomModelDataComponent();
             for (Float valuePart : model.getFloats()) value += "\u001dmodelfloat=" + valuePart;
             for (Boolean valuePart : model.getFlags()) value += "\u001dmodelflag=" + valuePart;
@@ -442,7 +446,7 @@ public final class FotonInventory implements PlayerInventory {
             }
             for (org.bukkit.Color valuePart : model.getColors()) value += "\u001dmodelcolor=" + valuePart.asRGB();
         }
-        if (item.hasItemMeta() && item.getItemMeta().hasDisplayName()) {
+        if ((item.getItemMeta() != null) && item.getItemMeta().hasDisplayName()) {
             String name = item.getItemMeta().getDisplayName();
             StringBuilder hex = new StringBuilder();
             for (byte byteValue : name.getBytes(java.nio.charset.StandardCharsets.UTF_8)) hex.append(String.format("%02x", byteValue & 0xff));
@@ -466,7 +470,7 @@ public final class FotonInventory implements PlayerInventory {
                     && book instanceof org.bukkit.inventory.meta.SimpleBookMeta simple)
                 value += "\u001dbookresolved=" + simple.nativeBookResolved();
         }
-        if (item.hasItemMeta()) {
+        if ((item.getItemMeta() != null)) {
             for (java.util.Map.Entry<org.bukkit.enchantments.Enchantment, Integer> entry : item.getItemMeta().getEnchants().entrySet()) {
                 StringBuilder hex = new StringBuilder();
                 for (byte byteValue : entry.getKey().getKey().toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)) hex.append(String.format("%02x", byteValue & 0xff));
@@ -479,7 +483,7 @@ public final class FotonInventory implements PlayerInventory {
                     value += "\u001dstoredenchhex=" + hex + ":" + entry.getValue();
                 }
         }
-        if (item.hasItemMeta() && item.getItemMeta().hasLore()) {
+        if ((item.getItemMeta() != null) && item.getItemMeta().hasLore()) {
             for (String line : item.getItemMeta().getLore()) {
                 StringBuilder hex = new StringBuilder();
                 for (byte byteValue : line.getBytes(java.nio.charset.StandardCharsets.UTF_8)) hex.append(String.format("%02x", byteValue & 0xff));
@@ -488,11 +492,39 @@ public final class FotonInventory implements PlayerInventory {
         }
         if (item.getItemMeta() instanceof org.bukkit.inventory.meta.PotionMeta meta && !meta.getCustomEffects().isEmpty()) {
             StringBuilder effects = new StringBuilder("\u001d");
-            for (org.bukkit.potion.PotionEffect effect : meta.getCustomEffects()) effects.append(effect.getType().getName()).append(',').append(effect.getDuration()).append(',').append(effect.getAmplifier()).append(';');
+            for (org.bukkit.potion.PotionEffect effect : meta.getCustomEffects()) {
+                if (effect.isAmbient() || !effect.hasParticles() || !effect.hasIcon())
+                    throw new UnsupportedOperationException("unrepresented potion effect flags");
+                effects.append(effect.getType().getName()).append(',').append(effect.getDuration()).append(',').append(effect.getAmplifier()).append(';');
+            }
             value += effects;
         }
         if (value.length() > MAX_SLOT_BRIDGE_CHARS)
             throw new IllegalArgumentException("item metadata exceeds the native bridge limit");
         return value;
+    }
+
+    public static foton.item.ItemMutation mutation(ItemStack item) {
+        return item == null ? foton.item.ItemMutation.empty() : item.nativeMutation();
+    }
+
+    static void setPlayerContents(String owner, boolean ender, int size, ItemStack[] items) {
+        setPlayerRange(owner, ender, 0, size, items);
+    }
+
+    private static void setPlayerRange(String owner, boolean ender, int start, int size, ItemStack[] items) {
+        int[] slots = new int[size];
+        foton.item.ItemMutation[] mutations = mutations(size, items);
+        for (int slot = 0; slot < size; slot++) {
+            slots[slot] = start + slot;
+        }
+        Native.setPlayerInventorySlots(owner, ender, slots, mutations);
+    }
+
+    static foton.item.ItemMutation[] mutations(int size, ItemStack[] items) {
+        if (items != null && items.length > size) throw new IllegalArgumentException("inventory contents exceed size");
+        foton.item.ItemMutation[] result = new foton.item.ItemMutation[size];
+        for (int slot = 0; slot < size; slot++) result[slot] = mutation(items != null && slot < items.length ? items[slot] : null);
+        return result;
     }
 }

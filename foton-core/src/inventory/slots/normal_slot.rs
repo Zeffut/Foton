@@ -46,6 +46,11 @@ impl NormalSlot {
 }
 
 impl Slot for NormalSlot {
+    fn live_read_source(&self) -> Option<super::MenuSlotReadSource> {
+        let (container, index) = self.backing();
+        Some(super::MenuSlotReadSource::new(container.clone(), index))
+    }
+
     fn storage(&self) -> &SlotStorage {
         &self.storage
     }

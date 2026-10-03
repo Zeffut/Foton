@@ -14,6 +14,7 @@ public final class SimpleSkullMeta extends SimpleItemMeta implements SkullMeta {
     @Override
     public void setOwnerProfile(PlayerProfile value) {
         profile = value;
+        unsupportedChange("profile");
     }
 
     @Override

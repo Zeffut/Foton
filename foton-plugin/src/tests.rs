@@ -17,6 +17,7 @@ fn config() -> PluginHostConfig {
         api_jar: PathBuf::from("/nowhere/foton-plugin-api.jar"),
         library_directory: None,
         plugin_directory: PathBuf::from("/nowhere/plugins"),
+        item_snapshot_limit: PluginHostConfig::DEFAULT_ITEM_SNAPSHOT_LIMIT,
     }
 }
 
@@ -107,15 +108,19 @@ fn login_attempt_lifecycle_crosses_the_rust_java_bridge() {
             api_jar,
             library_directory: Some(repository.join("plugin-api/lib")),
             plugin_directory: plugins.path().to_owned(),
+            item_snapshot_limit: PluginHostConfig::DEFAULT_ITEM_SNAPSHOT_LIMIT,
         },
         &Weak::new(),
     )
     .expect("the test JVM should start");
 
+    crate::item_bridge::jvm_tests::check(&host.vm);
+
     assert!(
         forward::login_lifecycle_bridge_check(&host.vm),
         "Rust login/abort/join calls did not reach the Java attempt lifecycle"
     );
+    crate::item_bridge::jvm_tests::check_terminal(&host);
     drop(host);
     assert!(
         !JVM_RUNTIMES.lock().is_empty(),

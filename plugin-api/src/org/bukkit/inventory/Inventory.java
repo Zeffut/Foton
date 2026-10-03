@@ -46,20 +46,22 @@ public interface Inventory {
     default java.util.HashMap<Integer, ItemStack> removeItem(ItemStack... items) {
         java.util.HashMap<Integer, ItemStack> leftover = new java.util.HashMap<>();
         if (items == null) return leftover;
+        ItemStack[] contents = getContents();
         for (int input = 0; input < items.length; input++) {
             ItemStack wanted = items[input];
             if (wanted == null || wanted.getType().isAir()) continue;
             int remaining = wanted.getAmount();
             for (int slot = 0; slot < getSize() && remaining > 0; slot++) {
-                ItemStack current = getItem(slot);
+                ItemStack current = contents[slot];
                 if (current == null || !current.isSimilar(wanted)) continue;
                 int removed = Math.min(remaining, current.getAmount());
                 current.setAmount(current.getAmount() - removed);
-                setItem(slot, current.getAmount() <= 0 ? null : current);
+                contents[slot] = current.getAmount() <= 0 ? null : current;
                 remaining -= removed;
             }
             if (remaining > 0) { ItemStack rest = wanted.clone(); rest.setAmount(remaining); leftover.put(input, rest); }
         }
+        setContents(contents);
         return leftover;
     }
 

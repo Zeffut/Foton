@@ -27,6 +27,7 @@
 use std::ffi::{CString, NulError, c_void};
 use std::fs::{read_dir, symlink_metadata};
 use std::io;
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::{Arc, LazyLock, Weak};
@@ -47,6 +48,7 @@ use tokio::{
 
 mod enchantment;
 mod forward;
+mod item_bridge;
 mod item_components;
 mod natives;
 mod via;
@@ -110,9 +112,18 @@ pub struct PluginHostConfig {
     pub library_directory: Option<PathBuf>,
     /// Where plugin jars are found.
     pub plugin_directory: PathBuf,
+    /// Maximum retained item snapshots and independent in-flight candidates.
+    /// This is a cardinality limit, not a bound on retained bytes.
+    pub item_snapshot_limit: NonZeroUsize,
 }
 
 impl PluginHostConfig {
+    /// Initial operational limit; unrelated to Vanilla inventory sizes.
+    pub const DEFAULT_ITEM_SNAPSHOT_LIMIT: NonZeroUsize = match NonZeroUsize::new(4096) {
+        Some(limit) => limit,
+        None => NonZeroUsize::MIN,
+    };
+
     /// The shared library holding the runtime, for this platform's layout.
     fn runtime_library(&self) -> PathBuf {
         let name = if cfg!(target_os = "windows") {
@@ -255,11 +266,25 @@ impl PluginHost {
             JavaVM::from_raw(raw_vm)?
         };
 
+        item_bridge::initialize(config.item_snapshot_limit);
         natives::bind(server.clone());
         let host = Self { vm: Arc::new(vm) };
         if let Err(error) = host.register_natives() {
+            if let Ok(store) = item_bridge::store() {
+                store.close();
+            }
             eprintln!("native registration failed: {error:?}");
             return Err(error);
+        }
+        let binding = host.vm.attach_current_thread().and_then(|mut env| {
+            env.call_static_method(HOST_CLASS, "bindItemBridge", "()V", &[])
+                .map(|_| ())
+        });
+        if let Err(error) = binding {
+            if let Ok(store) = item_bridge::store() {
+                store.close();
+            }
+            return Err(error.into());
         }
         // Foton's events reach plugins only once this is done, which is why it
         // happens before any plugin is loaded rather than after.
@@ -402,9 +427,15 @@ impl PluginHost {
 
     /// Marks an actual server shutdown before connections and plugins are drained.
     pub fn mark_stopping(&self) -> Result<(), PluginHostError> {
-        let mut env = self.vm.attach_current_thread()?;
-        env.call_static_method(HOST_CLASS, "markStopping", "()V", &[])?;
-        Ok(())
+        let result = (|| {
+            let mut env = self.vm.attach_current_thread()?;
+            env.call_static_method(HOST_CLASS, "markStopping", "()V", &[])?;
+            Ok(())
+        })();
+        if result.is_err() {
+            Self::seal_item_operations();
+        }
+        result
     }
 
     /// Disables every loaded plugin, newest first.
@@ -413,9 +444,32 @@ impl PluginHost {
     ///
     /// Returns an error when the Java side cannot be reached at all.
     pub fn disable_all(&self) -> Result<(), PluginHostError> {
-        let mut env = self.vm.attach_current_thread()?;
-        env.call_static_method(HOST_CLASS, "disableAll", "()V", &[])?;
-        Ok(())
+        let result = (|| {
+            let mut env = self.vm.attach_current_thread()?;
+            env.call_static_method(HOST_CLASS, "disableAll", "()V", &[])?;
+            Ok(())
+        })();
+        if result.is_err() {
+            Self::seal_item_operations();
+        }
+        result
+    }
+
+    /// Failure fallback: prevent further item work even when Java teardown failed.
+    /// This does not make plugin teardown successful or synchronously drain work.
+    pub fn seal_item_operations() {
+        if let Ok(store) = item_bridge::store() {
+            store.close();
+        }
+    }
+
+    /// Outer async shutdown barrier, required before external world teardown.
+    /// Java must first request terminal close after its invocation drain; on a
+    /// failed handshake the caller must seal admission and report that failure.
+    pub async fn drain_item_operations() {
+        if let Ok(store) = item_bridge::store() {
+            store.drained().await;
+        }
     }
 }
 

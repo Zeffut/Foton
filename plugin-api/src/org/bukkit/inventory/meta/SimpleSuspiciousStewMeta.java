@@ -14,10 +14,10 @@ public final class SimpleSuspiciousStewMeta extends SimpleItemMeta implements Su
         if (effect == null) return false;
         if (overwrite) removeCustomEffect(effect.getType());
         else for (PotionEffect current : effects) if (current.getType() == effect.getType()) return false;
-        effects.add(effect); return true;
+        effects.add(effect); unsupportedChange("stew_effects"); return true;
     }
-    @Override public boolean removeCustomEffect(PotionEffectType type) { return effects.removeIf(effect -> effect.getType() == type); }
-    @Override public boolean clearCustomEffects() { boolean had = !effects.isEmpty(); effects.clear(); return had; }
+    @Override public boolean removeCustomEffect(PotionEffectType type) { boolean changed = effects.removeIf(effect -> effect.getType() == type); if (changed) unsupportedChange("stew_effects"); return changed; }
+    @Override public boolean clearCustomEffects() { boolean had = !effects.isEmpty(); effects.clear(); if (had) unsupportedChange("stew_effects"); return had; }
     @Override public SimpleSuspiciousStewMeta clone() { SimpleSuspiciousStewMeta copy = (SimpleSuspiciousStewMeta) super.clone(); copy.effects = new ArrayList<>(effects); return copy; }
     @Override public boolean equals(Object other) { return other instanceof SimpleSuspiciousStewMeta meta && super.equals(other) && effects.equals(meta.effects); }
     @Override public int hashCode() { return java.util.Objects.hash(super.hashCode(), effects); }
