@@ -4,7 +4,8 @@ Explicit user requirement, 2026-10-03. Source audit uses the unchanged Zelda
 Git object `3c324d63c502eb18242af7c771baa11ea1c2915c`, not its dirty working
 checkout. Paper 1.21.11 build 132 is the plugin behavior/ABI oracle; Foton's
 native mechanics use Minecraft 26.2 source and extracted data. This document
-records requirements and gaps, not passing runtime evidence.
+records requirements and gaps; the separately identified Paper-only oracle
+below is reference evidence, not a Foton compatibility pass.
 
 ## Actual Zelda workflows
 
@@ -133,6 +134,29 @@ set. They must not remove the effective modifiers or UNBREAKABLE component.
 The later adapter needs clone/donor/collision/slot tests, then actual equipped
 protection and durability comparisons, including unequip/re-equip and original
 plastron restoration. Source-established native wiring alone is not that proof.
+
+### Executed Paper attribute reference
+
+One isolated Paper1.21.11 build132 run completed70 assertions with two expected
+exceptions, then saved and stopped cleanly. Its fixture mirrors the pinned
+Zelda Piaf modifier/enchantment/unbreakable operations for iron, diamond and
+netherite donors. It proves the default-versus-empty patch distinction, exact
+custom modifier keys/values/groups, clone and donor independence, duplicate
+rejection, immutable getters, and tooltip-only hiding. Official item bytes
+restore equal items with the tested components; deep independence after byte
+restore was not tested by mutating the restored result.
+
+Evidence is retained at
+`%TEMP%/Foton-Armor-Paper-oracle-2c80113b96374e2d93da95d883340ca6/`.
+Source/runtime/API inputs match the pinned item-state oracle. The original
+wrapper exited1 only at its final hash check because Paper rewrote the mutable
+server.properties file. A separate read-only post-check exited0, verifying
+immutable inputs, raw assertions, isolated loopback configuration and clean
+stop without rerunning the server. The initial configuration's hash, but not
+its original contents, was retained; the report records that limitation.
+
+These results do not establish equipped protection, damage, durability wear,
+rendering, player events, Foton transport or unchanged Zelda gameplay.
 
 ## Bounded delivery and acceptance
 
