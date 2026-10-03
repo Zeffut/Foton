@@ -92,6 +92,26 @@ heap estimator. Borrowed traversal must check actual recursive item/text/NBT
 edges before recursive clone; choose admission depth from verified call-stack
 tests and document any restriction rather than calling it a vanilla constant.
 
+## Block-state conversion dependency
+
+Paper derives specialized block-state metadata from the component keys read by
+a fresh native block entity. Across materials it clears specialized positive
+values, while preserving common fields, unrelated opaque data and independently
+copied removal markers. Clearing only BLOCK_ENTITY_DATA is not equivalent.
+
+Foton's current container implicit-component readers are incomplete: recording
+their reads would miss container, lock and loot fields. The initial carrier
+therefore rejects conversions needing that unavailable partition before any
+mutation. Same-material untouched state remains preserved; null/empty metadata
+still uses its earlier whole-patch clear path. Genuine implicit-component
+transfer must precede full BlockStateMeta conversion support.
+
+The existing synthetic shulker block-state object also aliases mutable contents
+and bypasses edit tracking. The carrier prerequisite replaces unsupported
+get/set materialization with explicit refusal and preserves common metadata in
+clone. Real detached/live block states remain a later implementation, not a
+compatibility claim made by this safety boundary.
+
 ## Persistence is a separate boundary
 
 Never put epoch, lease IDs, native pointers or runtime numeric registry IDs in

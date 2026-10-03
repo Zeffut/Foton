@@ -101,6 +101,21 @@ Creative include-data pick currently lacks its whole transfer: save custom NBT,
 strip component-backed fields, set typed BLOCK_ENTITY_DATA, overlay collected
 components, then insert the item. An unused tag-removal hook is not support.
 
+### Dependent Paper metadata conversion
+
+Complete implicit application also supplies a later BlockStateMeta dependency.
+Paper discovers specialized component keys by recording every key a fresh
+block entity queries, even when no value is present. Foton already records
+reads, but current container implementations omit CONTAINER/LOCK/CONTAINER_LOOT
+semantics; exposing that incomplete set would misclassify metadata.
+
+After completing the native readers, verify the consumed-key contract before
+using it for Java cross-material conversion. Common handled metadata and
+unrelated opaque values survive, specialized positive values may be dropped,
+and negative patch markers follow their separate copy semantics. Until this
+foundation is complete, the live item carrier explicitly refuses conversions
+that would require guessing that partition.
+
 ## Required evidence
 
 Use real existing component fixtures, not invented registry data. Cover sparse
