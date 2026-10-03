@@ -1,0 +1,116 @@
+use super::*;
+use crate::test_support::fresh_test_world;
+use foton_registry::potion_brewing::potion_item;
+use foton_registry::{init_vanilla_registry, vanilla_blocks, vanilla_potions};
+
+fn stand(world: &Arc<World>) -> BrewingStandBlockEntity {
+    init_vanilla_registry();
+    let stand = BrewingStandBlockEntity::new(
+        Arc::downgrade(world),
+        BlockPos::new(2, 64, 3),
+        vanilla_blocks::BREWING_STAND.default_state(),
+    );
+    {
+        let mut container = stand.container.lock();
+        container.items[0] = potion_item(&vanilla_items::POTION, &vanilla_potions::WATER);
+        container.items[SLOT_INGREDIENT] = ItemStack::new(&vanilla_items::NETHER_WART);
+        container.items[SLOT_FUEL] = ItemStack::new(&vanilla_items::BLAZE_POWDER);
+        container.last_bottle_flags = container.bottle_flags();
+    }
+    stand
+}
+
+#[test]
+fn cancellation_keeps_inputs_but_spends_cycle_fuel_and_allows_inventory_access() {
+    let world = fresh_test_world("brew_cancel");
+    let stand = stand(&world);
+    stand.tick_with_brew_event(&world, |_| panic!("a cycle starts before it completes"));
+    for _ in 1..potion_brewing::BREWING_TIME_TICKS {
+        stand.tick_with_brew_event(&world, |_| panic!("brew completed too early"));
+    }
+    let mut called = false;
+    stand.tick_with_brew_event(&world, |event| {
+        called = true;
+        assert_eq!(event.fuel(), potion_brewing::FUEL_USES - 1);
+        assert_eq!(event.position(), stand.get_block_pos());
+        let mut container = stand
+            .container
+            .try_lock()
+            .expect("event holds no container lock");
+        assert_eq!(container.brew_time, 0);
+        assert_eq!(
+            container.items[0],
+            potion_item(&vanilla_items::POTION, &vanilla_potions::WATER)
+        );
+        assert_eq!(
+            event.results()[0],
+            potion_item(&vanilla_items::POTION, &vanilla_potions::AWKWARD)
+        );
+        // Direct inventory edits survive cancellation, as on Paper.
+        container.items[SLOT_FUEL] = ItemStack::new(&vanilla_items::BLAZE_POWDER);
+        event.set_cancelled(true);
+    });
+    assert!(called);
+    let container = stand.container.lock();
+    assert_eq!(container.brew_time, 0);
+    assert_eq!(container.fuel, potion_brewing::FUEL_USES - 1);
+    assert!(container.items[SLOT_INGREDIENT].is(&vanilla_items::NETHER_WART));
+    assert!(container.items[SLOT_FUEL].is(&vanilla_items::BLAZE_POWDER));
+    assert_eq!(
+        container.items[0],
+        potion_item(&vanilla_items::POTION, &vanilla_potions::WATER)
+    );
+    drop(container);
+    stand.tick_with_brew_event(&world, |_| {
+        panic!("the next cycle starts without completing")
+    });
+    assert_eq!(stand.container.lock().fuel, potion_brewing::FUEL_USES - 2);
+    assert_eq!(
+        stand.data.brew_time.load(Ordering::Relaxed),
+        potion_brewing::BREWING_TIME_TICKS
+    );
+}
+
+#[test]
+fn changed_results_replace_bottles_and_shortened_list_clears_remaining_slots() {
+    let world = fresh_test_world("brew_results");
+    let stand = stand(&world);
+    {
+        let mut container = stand.container.lock();
+        container.items[1] = container.items[0].clone();
+        container.items[2] = container.items[0].clone();
+        container.brew_time = 1;
+        container.fuel = 7;
+        container.last_bottle_flags = container.bottle_flags();
+    }
+    let result = potion_item(&vanilla_items::LINGERING_POTION, &vanilla_potions::HEALING);
+    stand.tick_with_brew_event(&world, |event| {
+        event.set_results(vec![result.clone()]);
+    });
+    let container = stand.container.lock();
+    assert_eq!(container.items[0], result);
+    assert!(container.items[1].is_empty());
+    assert!(container.items[2].is_empty());
+    assert!(container.items[SLOT_INGREDIENT].is_empty());
+    assert_eq!(container.fuel, 7);
+}
+
+#[test]
+fn accepted_completion_spends_original_ingredient_and_returns_its_remainder() {
+    let world = fresh_test_world("brew_remainder");
+    let stand = stand(&world);
+    let mut container = stand.container.lock();
+    let mut original = ItemStack::new(&vanilla_items::DRAGON_BREATH);
+    original.set_count(2);
+    container.items[SLOT_INGREDIENT] = ItemStack::new(&vanilla_items::DIRT);
+    let result = potion_item(&vanilla_items::LINGERING_POTION, &vanilla_potions::HEALING);
+    let dropped = container.brew(original, vec![result.clone()]);
+    assert_eq!(container.items[0], result);
+    assert!(container.items[SLOT_INGREDIENT].is(&vanilla_items::DRAGON_BREATH));
+    assert_eq!(container.items[SLOT_INGREDIENT].count(), 1);
+    assert!(
+        dropped
+            .expect("remaining dragon breath requires a dropped bottle")
+            .is(&vanilla_items::GLASS_BOTTLE)
+    );
+}

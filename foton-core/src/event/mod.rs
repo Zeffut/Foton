@@ -28,6 +28,7 @@ use foton_utils::locks::SyncRwLock;
 use rustc_hash::FxHashMap;
 
 pub mod block;
+mod brew;
 pub mod command;
 /// A command a player typed, before the server has read it.
 pub mod command_preprocess;
@@ -46,6 +47,7 @@ pub use block::{
     BlockFadeEvent, BlockFromToEvent, BlockGrowEvent, BlockIgniteEvent, BlockPlaceEvent,
     BlockPreDispenseEvent, BlockSpreadEvent, LeavesDecayEvent, PistonEvent, SignChangeEvent,
 };
+pub use brew::BrewEvent;
 pub use command::{AsyncTabCompleteEvent, CommandEvent};
 pub use command_preprocess::PlayerCommandPreprocessEvent;
 pub use entity::{

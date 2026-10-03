@@ -27,6 +27,7 @@ use simdnbt::borrow::{BaseNbtCompound as BorrowedNbtCompound, NbtCompound as Nbt
 use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
 
 use crate::block_entity::{BlockEntity, BlockEntityBase, BlockEntityName, ImplicitComponentInput};
+use crate::event::BrewEvent;
 use crate::inventory::container::{Container, SlotsForFace};
 use crate::inventory::lock::{ContainerRef, SharedContainer};
 use crate::world::World;
@@ -136,20 +137,28 @@ impl BrewingStandContainer {
             .any(|bottle| !bottle.is_empty() && potion_brewing::has_mix(bottle, ingredient))
     }
 
-    /// Converts every bottle the ingredient applies to and spends it.
+    /// Computes candidate results without changing the stand's input slots.
+    fn brew_results(&self) -> Vec<ItemStack> {
+        self.items[..BOTTLE_SLOTS]
+            .iter()
+            .map(|bottle| potion_brewing::mix_with(&self.items[SLOT_INGREDIENT], bottle))
+            .collect()
+    }
+
+    /// Installs the accepted results and spends the original ingredient.
     ///
     /// Vanilla parity: `BrewingStandBlockEntity.doBrew`. Returns the remainder
     /// the caller has to drop when the ingredient slot could not hold it, which
     /// is how a dragon's breath leaves its empty bottle behind.
-    fn brew(&mut self) -> Option<ItemStack> {
-        let ingredient = self.items[SLOT_INGREDIENT].clone();
-        for slot in 0..BOTTLE_SLOTS {
-            self.items[slot] = potion_brewing::mix_with(&ingredient, &self.items[slot]);
+    fn brew(&mut self, mut ingredient: ItemStack, results: Vec<ItemStack>) -> Option<ItemStack> {
+        let mut results = results.into_iter();
+        for bottle in &mut self.items[..BOTTLE_SLOTS] {
+            *bottle = results.next().unwrap_or_else(ItemStack::empty);
         }
 
-        let remainder = self.items[SLOT_INGREDIENT].item().get_crafting_remainder();
-        let count = self.items[SLOT_INGREDIENT].count() - 1;
-        self.items[SLOT_INGREDIENT].set_count(count);
+        let remainder = ingredient.item().get_crafting_remainder();
+        ingredient.set_count(ingredient.count() - 1);
+        self.items[SLOT_INGREDIENT] = ingredient;
 
         if remainder.is_empty() {
             return None;
@@ -209,14 +218,8 @@ impl BrewingStandBlockEntity {
     pub fn custom_name(&self) -> Option<TextComponent> {
         self.name.custom_name()
     }
-}
 
-impl BlockEntity for BrewingStandBlockEntity {
-    fn base(&self) -> &BlockEntityBase {
-        &self.base
-    }
-
-    fn tick(&self, world: &Arc<World>) {
+    fn tick_with_brew_event(&self, world: &Arc<World>, fire: impl FnOnce(&mut BrewEvent)) {
         let pos = self.get_block_pos();
         let mut container = self.container.lock();
 
@@ -240,8 +243,21 @@ impl BlockEntity for BrewingStandBlockEntity {
                 .is_none_or(|started| !container.items[SLOT_INGREDIENT].is(started.item()));
 
             if container.brew_time == 0 && brewable {
-                remainder = container.brew();
-                world.level_event(SOUND_BREWING_STAND_BREW, pos, 0, None);
+                let ingredient = container.items[SLOT_INGREDIENT].clone();
+                let mut event = BrewEvent::new(
+                    world.key.to_string(),
+                    pos,
+                    container.fuel,
+                    container.brew_results(),
+                );
+                // Plugins may read or mutate this same inventory in the callback.
+                drop(container);
+                fire(&mut event);
+                container = self.container.lock();
+                if let Some(results) = event.into_results() {
+                    remainder = container.brew(ingredient, results);
+                    world.level_event(SOUND_BREWING_STAND_BREW, pos, 0, None);
+                }
             } else if !brewable || ingredient_swapped {
                 container.brew_time = 0;
             }
@@ -274,6 +290,16 @@ impl BlockEntity for BrewingStandBlockEntity {
             }
             world.set_block(pos, state, UpdateFlags::UPDATE_CLIENTS);
         }
+    }
+}
+
+impl BlockEntity for BrewingStandBlockEntity {
+    fn base(&self) -> &BlockEntityBase {
+        &self.base
+    }
+
+    fn tick(&self, world: &Arc<World>) {
+        self.tick_with_brew_event(world, |event| world.fire_event(event));
     }
 
     fn pre_remove_side_effects(&self, pos: BlockPos, _state: BlockStateId) {
@@ -447,6 +473,10 @@ impl Container for BrewingStandContainer {
 }
 
 #[cfg(test)]
+#[path = "brewing_stand_event_tests.rs"]
+mod event_tests;
+
+#[cfg(test)]
 mod tests {
     use foton_registry::potion_brewing::potion_item;
     use foton_registry::{init_vanilla_registry, vanilla_potions};
@@ -471,6 +501,10 @@ mod tests {
         potion_item(&vanilla_items::POTION, &vanilla_potions::WATER)
     }
 
+    fn brew(stand: &mut BrewingStandContainer) -> Option<ItemStack> {
+        stand.brew(stand.items[SLOT_INGREDIENT].clone(), stand.brew_results())
+    }
+
     #[test]
     fn one_ingredient_converts_every_bottle_it_applies_to() {
         let mut stand = container();
@@ -480,7 +514,7 @@ mod tests {
         stand.items[SLOT_INGREDIENT] = ItemStack::new(&vanilla_items::NETHER_WART);
 
         assert!(stand.is_brewable());
-        assert!(stand.brew().is_none());
+        assert!(brew(&mut stand).is_none());
 
         // Both filled bottles converted; the ingredient was spent once.
         for slot in 0..2 {
@@ -505,7 +539,7 @@ mod tests {
         stand.items[SLOT_INGREDIENT] = ItemStack::new(&vanilla_items::NETHER_WART);
 
         assert!(stand.is_brewable());
-        stand.brew();
+        brew(&mut stand);
 
         let untouched = stand.items[1]
             .get(POTION_CONTENTS)
@@ -608,7 +642,7 @@ mod tests {
         stand.items[SLOT_INGREDIENT] = breath;
 
         assert!(stand.is_brewable());
-        let dropped = stand.brew();
+        let dropped = brew(&mut stand);
 
         assert!(stand.items[0].is(&vanilla_items::LINGERING_POTION));
         // The last dragon's breath leaves its empty bottle in the slot rather
