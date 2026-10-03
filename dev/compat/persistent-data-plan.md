@@ -70,6 +70,33 @@ The public byte format must never contain process lease IDs or registry wire
 identities. Verify native simdnbt interchange, duplicate keys, modern mixed
 list representation, raw float values and modified UTF explicitly.
 
+### Executed numeric and list reference cases
+
+A standalone probe of the pinned Paper132 NBT classes passed 36 assertions
+under Java21. It started no server or world and does not test Foton. Final
+source/classes are retained in
+`%TEMP%/Foton-PdcNbt-MicroOracle-6ab2eded6cce4055a916956a1a0561f7/`;
+the controller's direct captured rerun is recorded in the implementation
+ledger, separately from the probe's earlier transcribed attempt notes.
+
+- Float/double `valueOf` and NBT reads normalize negative zero to positive
+  zero; direct tag constructors retain its sign. Direct negative-zero tags
+  therefore compare differently before and after serialization/readback.
+  NaN payload variants compare/hash equally and write canonical NaN bits.
+- Modern mixed lists wrap non-compound entries. Genuine sole-empty-key
+  compounds require an extra wrapper on write so one unwrapping step on
+  read preserves the original compound. A supplied physical single wrapper
+  instead decodes to its scalar value; raw wrapper shape is not a semantic
+  identity that can be copied blindly into the Java typed model.
+- Empty lists normalize their declared element kind to END after read,
+  including the tested unsupported kind99 with count0. This is not evidence
+  that unknown nonempty list types are accepted.
+
+These cases supplement, not replace, the public PDC server oracle. Native
+raw invalid modified-UTF values require explicit handling: preserving an
+untouched item snapshot does not authorize decoding unreadable data as an
+empty Java string when a plugin edits its PDC.
+
 ## Delivery gates
 
 1. Complete type/adapter/view declarations and standalone typed store/codec,

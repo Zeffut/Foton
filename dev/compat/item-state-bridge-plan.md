@@ -46,6 +46,13 @@ unrelated native components and full custom data on each explicit edit.
 Paper's donor-meta, null-meta, type-change and empty-state behavior must be
 observed before wiring those transitions, not inferred from native emptiness.
 
+The first carrier slice transports the mutation groups already supported by
+the native codec. Existing Java-only attribute, flag and subtype setters are
+not proof of native support: attempted unsupported edits must fail explicitly
+before commit, while untouched native values remain intact. Their actual
+editing implementations remain separate armor/component work. This temporary
+limitation must be reported, never counted as complete ItemMeta compatibility.
+
 Stage complete item/bulk/event responses before committing any mutation.
 Merchant offers, death drops, crafter results/remainders and inventory arrays
 must not silently skip malformed elements or partially update. Missing/stale
