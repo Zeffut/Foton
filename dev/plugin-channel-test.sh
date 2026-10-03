@@ -5,6 +5,17 @@ set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$repo/dev/paper-api-test-lib.sh"
 if [ "${1:-}" = "--isolated" ]; then
+  [ "$#" -eq 5 ] || { echo 'Invalid isolated probe arguments' >&2; exit 1; }
+  current_netns="$(readlink /proc/self/ns/net)"
+  parent_netns="$(readlink "/proc/$PPID/ns/net")"
+  initial_netns="$(readlink /proc/1/ns/net)"
+  links="$(ip -o link show)"
+  loopback="$(ip -o link show lo)"
+  if [ "$current_netns" = "$parent_netns" ] || [ "$current_netns" = "$initial_netns" ] ||
+    [ "$links" != "$loopback" ] || [[ "$loopback" != *'<LOOPBACK,UP'* ]]; then
+    echo 'Refusing to start probe outside an isolated, loopback-only network namespace' >&2
+    exit 1
+  fi
   scratch="$2"
   binary="$3"
   java_home="$4"
@@ -120,5 +131,5 @@ command -v ip >/dev/null || {
   echo 'iproute2 is required to bring up loopback in the isolated network namespace' >&2
   exit 1
 }
-unshare -n bash -c 'ip link set lo up; exec bash "$@"' bash \
+unshare -n bash -c 'ip link set lo up && exec bash "$@"' bash \
   "$repo/dev/plugin-channel-test.sh" --isolated "$scratch" "$binary" "$java_home" "$port"
