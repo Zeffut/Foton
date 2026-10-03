@@ -1,11 +1,12 @@
 {
-  "plugin": "ZeldaCiv@0.1.0#release",
+  "plugin": "ZeldaCiv@0.1.0#github-3c324d63",
   "server_version": "26.2",
   "setup": {
     "seed": 8675309,
     "startup_timeout_seconds": 180,
     "jars": [
-      {"artifact": "ZeldaCiv@0.1.0#release"}
+      {"artifact": "voicechat@2.6.20#bukkit"},
+      {"artifact": "ZeldaCiv@0.1.0#github-3c324d63"}
     ]
   },
   "actions": [
@@ -18,7 +19,7 @@
     {"type": "optional_integrations"}
   ],
   "observations": {
-    "startup_order": ["ZeldaCiv"],
+    "startup_order": ["voicechat", "ZeldaCiv"],
     "events": ["player", "entity", "inventory"],
     "items": ["components", "pdc", "merchant_result"],
     "server_state": ["team", "scoreboard", "region", "displays", "mounts"],

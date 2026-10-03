@@ -4,6 +4,8 @@
 
 **Goal:** Make unchanged Paper plugin JARs function on Foton with Paper-equivalent behavior, reaching 100% of a pinned market certification corpus that includes Observer and Zelda Civ.
 
+**Zelda Civ version-bridge decision (2026-10-03):** The unchanged Zelda Civ JAR built from `origin/main` at `3c324d63c502eb18242af7c771baa11ea1c2915c` is compiled against Paper API 1.21.11. It enables with Simple Voice Chat 2.6.20 on Paper 1.21.11 build 132, but fails on Paper 26.2 build 129 at the inherited `BookMeta.pages(List<Component>)` method. Foton targets Minecraft 26.2, so its Zelda milestone explicitly includes a real backward Paper 1.21.11 API/behavior bridge; matching only Paper 26.2 does not satisfy this user requirement. Keep the 1.21.11 and 26.2 Paper oracles separate. See `dev/compat/zelda-civ-baseline.md` for pinned artifacts and observations.
+
 **Architecture:** Foton's Rust state remains authoritative. A versioned Java Bukkit/Paper/CraftBukkit bridge exposes live state and a real packet pipeline; plugin loading reproduces Paper's descriptor, dependency, library, bootstrap and lifecycle phases. Every claimed capability is compared with a pinned Paper build using the same plugin JAR and scenario.
 
 **Tech Stack:** nightly Rust workspace, JNI, Java 25 runtime for the Paper 26.2 target (Java 21 oracle for Paper 1.21.11), Netty 4.2.15.Final, Paper API/official Paper server as oracle, Python 3 standard library for corpus tooling, Bash/PowerShell CI, FotonExtractor and generated vanilla source.
@@ -128,7 +130,8 @@ These are relative sizes, not calendar promises. Task 1 establishes the denomina
 **Interfaces:** each member row is classified `implemented_and_tested`, `missing`, `wrong_behavior`, `not_reachable_on_target_version` or `requires_internal_adapter`, with its plugin audience, native owner, Paper reference test and proof. A field/method is `implemented_and_tested` only after runtime invocation and meaningful state assertion.
 
 - [ ] Inventory all 5,973 current public references and refresh the upstream Paper API ABI for the target version. Add reflection/service discoveries and Observer/Zelda singleton references. Diff the published Foton JAR against Paper by owner/name/JVM descriptor, access and inheritance, including constants and exceptions.
-- [ ] Prioritize independently reviewable vertical slices by dependent plugins and native foundation, starting with Observer's 30 and Zelda's 241 missing members. For each slice: write the failing plugin/behavior test, implement the actual Rust-backed or pure Java behavior, compare with Paper, then mark the row proven.
+- [ ] Prioritize independently reviewable vertical slices by dependent plugins and native foundation. Observer's historical count was 30; the pinned GitHub Zelda JAR currently yields 238 static linkage diagnostics after MiniMessage was packaged (16 kind, 53 class and 169 member occurrences), not the older local JAR's 241-member observation. For each slice: write the failing plugin/behavior test, implement the actual Rust-backed or pure Java behavior, compare with Paper, then mark the row proven.
+- [ ] Preserve Paper 1.21.11 binary entry points used by the pinned Zelda JAR, even where Paper 26.2 removed them (first observed: `BookMeta.pages(List<Component>)`; Zelda's same book construction also uses component title and author). Exercise each through the unchanged JAR and compare its state with the 1.21.11 oracle; a load-only shim or lossy conversion is not a pass.
 - [ ] Keep the public-API backlog at zero `missing` and zero `wrong_behavior` for the target version before the public-surface milestone. Re-run `python dev/plugin_api_usage.py <corpus-dir> --gap plugin-api/build/foton-plugin-api.jar` after every slice.
 
 ### Task 8: Finish item, inventory, component and merchant semantics
@@ -212,8 +215,10 @@ These are relative sizes, not calendar promises. Task 1 establishes the denomina
 
 **Interfaces:** the selected unmodified Zelda JAR has zero missing referenced public members; its behavior is checked with optional integrations absent and with each pinned companion plugin present.
 
-- [ ] Drive the 241 missing signatures to zero with reviewed capability slices. Run the same Zelda workflow on Paper and Foton: start game, team/scoreboard updates, map/region interactions, custom items and inventories, recipes/merchants, displays/mounts and restart persistence.
+- [ ] Drive the pinned Zelda JAR's current linkage diagnostics to zero with reviewed capability slices; also cover reflective and runtime calls that static scanning misses. Run the same Zelda workflow on Paper and Foton: start game, team/scoreboard updates, map/region interactions, custom items and inventories, recipes/merchants, displays/mounts and restart persistence.
 - [ ] Verify an unsupported optional integration degrades exactly as on Paper; then add its actual companion JAR and exercise the integration. Preserve current dirty Zelda checkout files.
+- [ ] Include the exact Simple Voice Chat 2.6.20 companion in the startup/co-installation gate: the pinned Zelda JAR eagerly links `VoicechatPlugin` despite declaring `softdepend`, and Paper 1.21.11 fails to load Zelda without the companion. Foton must support the real companion and its Bukkit/CraftBukkit-facing adapter, not a fake voice-chat class or version string.
+- [ ] For Voice Chat's versioned compatibility path, expose Foton's product version separately from the truthful Bukkit/Minecraft API version; implement the server handle, player messaging-channel bridge, player handle and downstream command/chat hooks through Foton's real networking/scheduler state. Boot with the unmodified duo, then connect two 1.21.11 clients and verify voice handshake, UDP authentication, Zelda microphone/distance callbacks, audio and reconnect against Paper. Startup or Voice Chat's reduced Bukkit fallback alone does not pass this gate.
 - [ ] Certify each distributed JAR variant separately for linkage and one full primary variant for behavior; do not count three build outputs as three different products.
 
 ### Task 16: Expand to the market corpus and co-installation matrix

@@ -51,6 +51,23 @@
     {
       "name": "ZeldaCiv",
       "version": "0.1.0",
+      "variant": "github-3c324d63",
+      "sha256": "7fca812a4e1705fc8814c948e82b31df110d68d8544052f01fd7779b6b803bd1",
+      "local_path": "C:/Users/Zeffu/AppData/Local/Temp/Foton-compat-corpus/zelda-civ-3c324d63/zelda-civ-0.1.0-3c324d63.jar",
+      "source": "Zeffut/zelda-civ origin/main 3c324d63c502eb18242af7c771baa11ea1c2915c; detached Maven build with 141 passing tests",
+      "license": "not_verified (no project license file in the inspected checkout)",
+      "descriptor": "plugin.yml",
+      "api_version": "1.21",
+      "paper_build": "paper:1.21.11:132",
+      "dependencies": [{"artifact": "voicechat@2.6.20#bukkit", "sha256": "b63c4389ccfb37dff1d631f91e0bb1b983bcdb55609e7a26c22bb9442976a9fa", "required": true}],
+      "scenarios": ["startup with Voice Chat", "domain and team display", "item PDC restart", "custom inventory", "entity and player events", "merchant and recipe", "mounts", "region interaction", "optional integrations"],
+      "uses_internals": "manual_review_required",
+      "reflection_review": "not_tested",
+      "tested_foton_build": null
+    },
+    {
+      "name": "ZeldaCiv",
+      "version": "0.1.0",
       "variant": "release",
       "sha256": "df133e05cbc395659fc305e41352ed0971d8ee28f7334ad19d9e0b5cd33dae4f",
       "local_path": "C:/Users/Zeffu/Desktop/Projets/zelda-civ/target/zelda-civ-0.1.0.jar",
@@ -138,6 +155,20 @@
       "paper_build": "not_recorded",
       "dependencies": [],
       "scenarios": ["optional integration"]
+    },
+    {
+      "name": "voicechat",
+      "version": "2.6.20",
+      "variant": "bukkit",
+      "sha256": "b63c4389ccfb37dff1d631f91e0bb1b983bcdb55609e7a26c22bb9442976a9fa",
+      "local_path": "C:/Users/Zeffu/AppData/Local/Temp/Foton-Zelda-Paper-reference-voicechat-3c324d63-20261003/plugins/voicechat-bukkit-2.6.20.jar",
+      "source": "official Simple Voice Chat 2.6.20 Bukkit release, https://modrinth.com/plugin/simple-voice-chat/version/7wUBXQ5w",
+      "license": "not_verified (exact artifact license needs review)",
+      "descriptor": "plugin.yml",
+      "api_version": "not_verified",
+      "paper_build": "paper:1.21.11:132",
+      "dependencies": [],
+      "scenarios": ["startup", "voicechat API extension registration", "coinstall with ZeldaCiv"]
     },
     {
       "name": "voicechat",
