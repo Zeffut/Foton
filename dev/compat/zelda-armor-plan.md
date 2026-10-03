@@ -41,7 +41,7 @@ the Piaf replacement; do not invent an armor feature to fill an audit table.
 | Trim access | ITEMS_TRIMMABLE_ARMOR tag, TRIM data-component access, ItemStack.hasData and stack PDC view are missing; ordinary armor selects plain meta instead of ArmorMeta |
 | Native item bridge | Armor trims and ItemMeta custom attribute modifiers do not cross the existing inventory codec; item flags also need preservation |
 | Equipment lifecycle | PlayerArmorChangeEvent is absent; timing and mutation of related drop/death/armor-stand events need real scenarios |
-| Dropped items | Current drop-event response carries cancellation but not Zelda's changed Item entity stack |
+| Dropped items | Direct UUID-backed setItemStack already reaches the native entity; full component fidelity remains unverified, and cancellation restores the original instead of the listener-modified stack |
 | Chestplate backup | Current Foton-specific serializeAsBytes omits PDC, trims, custom modifiers and opaque data components |
 | Combat/appearance | Native armor/equipment/damage foundations exist, but Java-created replacement equipment must actually affect protection and be visible to both clients |
 
@@ -83,6 +83,28 @@ atomic consumers and separate persistent item bytes all need their own proof.
 The [complete persistent-data contract](persistent-data-plan.md) records the
 type, copying, retained-view and public NBT-byte requirements for owner markers.
 
+### Equipment events and dropped objects
+
+Paper132 fires PlayerArmorChangeEvent from LivingEntity's tick-time equipment
+diff, for players and the four humanoid armor slots only. The event is not
+cancellable; its old/new stacks are independent Bukkit copies, including
+non-null empty items. Mutating these copies does not write back to equipment.
+Foton already has an owned equipment-diff result before attribute refresh and
+tracker updates, so event delivery belongs there rather than in each click,
+drag, hotbar or dispenser handler. Dispatch must occur without an inventory
+or equipment lock held across plugin callbacks. Zelda schedules its cleanup
+for the next task execution; that order still needs a real fixture.
+
+The earlier audit incorrectly treated the drop event's cancellation-only
+return as proof that item edits were lost. FotonItem.setItemStack already
+reaches the actual ItemEntity by UUID, including pending spawns. This direct
+write needs the canonical codec and runtime proof, not a duplicate returned
+stack field. A separate source-verified mismatch remains: Paper cancellation
+restores the entity's current, potentially listener-modified stack, whereas
+Foton restores its pre-event clone. Foton also fires ItemSpawnEvent earlier
+than PlayerDropItemEvent; verify Paper's actual spawn-event insertion before
+changing that order. Entity removal and cancellation need explicit fixtures.
+
 ## Bounded delivery and acceptance
 
 1. Implement exact trim/tag/PDC-view/data-presence API behavior and real typed
@@ -101,8 +123,9 @@ type, copying, retained-view and public NBT-byte requirements for owner markers.
    silently add migrations for old Foton-specific data without demonstrated
    need; compatibility with the declared Paper input format is a separate
    requirement. Test recovery with an occupied slot and malformed backup.
-4. Deliver the real armor-change event and writable dropped-item behavior at
-   the native transition, with correct scheduling/cancellation and cleanup.
+4. Deliver the real armor-change event and verify writable dropped-item
+   behavior at the native transition, with correct scheduling/cancellation
+   and cleanup.
    Cover click/drag/shift/hotbar changes, cursor/offhand/ender chest/container/
    armor stand, other-player pickup, quit/rejoin and both death modes. No
    standalone event class without native delivery counts as support.
