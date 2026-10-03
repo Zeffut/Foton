@@ -7943,7 +7943,9 @@ pub(crate) fn describe_slot(stack: &ItemStack) -> String {
         value.push('\u{1d}');
         value.push_str("unbreakable");
     }
-    if let Some(model) = stack.get(ITEM_MODEL) {
+    if stack.patch().get_entry(ITEM_MODEL.key()).is_some()
+        && let Some(model) = stack.get(ITEM_MODEL)
+    {
         value.push('\u{1d}');
         let _ = write!(
             value,
@@ -14584,7 +14586,9 @@ mod slot_bridge_tests {
     };
     use foton_registry::data_components::{
         components::{CustomData, Filterable, WritableBookContent, WrittenBookContent},
-        vanilla_components::{CUSTOM_DATA, WRITABLE_BOOK_CONTENT, WRITTEN_BOOK_CONTENT},
+        vanilla_components::{
+            CUSTOM_DATA, ITEM_MODEL, WRITABLE_BOOK_CONTENT, WRITTEN_BOOK_CONTENT,
+        },
     };
     use foton_registry::{init_vanilla_registry, item_stack::ItemStack, vanilla_items};
     use simdnbt::{
@@ -14757,6 +14761,65 @@ mod slot_bridge_tests {
             assert_eq!(book.pages()[0].raw(), &page, "{mode} page");
             assert!(!book.resolved(), "{mode} must retain unresolved state");
         }
+    }
+
+    #[test]
+    fn java_created_books_remain_similar_after_native_canonicalization() {
+        init_vanilla_registry();
+        for (mode, resolved) in [("book-new", false), ("book-new-resolved", true)] {
+            let created = java_round_trip(mode, &[]);
+            assert_eq!(
+                created.len(),
+                1,
+                "Java book creation should return one item"
+            );
+            let stack = parse_slot(&created[0]).expect("Java-created book should parse");
+            let book = stack
+                .get(WRITTEN_BOOK_CONTENT)
+                .expect("written book content");
+            assert_eq!(book.generation(), 0);
+            assert_eq!(book.resolved(), resolved);
+            let native = describe_slot(&stack);
+            assert!(native.contains(&format!("bookresolved={resolved}")));
+            assert!(
+                !native.contains("bookrawhex="),
+                "unfiltered book needs no raw NBT"
+            );
+            assert!(
+                !native.contains("itemmodelhex="),
+                "default model is not item meta"
+            );
+            let verified = java_round_trip("book-new-verify", &[created[0].clone(), native]);
+            assert_eq!(verified.len(), 1);
+            let edited = parse_slot(&verified[0]).expect("edited Java book should parse");
+            let edited_book = edited.get(WRITTEN_BOOK_CONTENT).expect("edited content");
+            assert_eq!(edited_book.title().raw(), "Livre retouché");
+            assert_eq!(edited_book.author(), "Auteur retouché");
+            assert_eq!(edited_book.resolved(), resolved);
+        }
+    }
+
+    #[test]
+    fn slot_bridge_emits_only_explicit_item_model_overrides() {
+        init_vanilla_registry();
+        let mut stack = ItemStack::new(&vanilla_items::WRITTEN_BOOK);
+        let default = stack
+            .get(ITEM_MODEL)
+            .expect("default written book model")
+            .clone();
+        assert!(!describe_slot(&stack).contains("itemmodelhex="));
+
+        stack.set(
+            ITEM_MODEL,
+            "zeldaciv:cuisine".parse().expect("custom model key"),
+        );
+        let described = describe_slot(&stack);
+        assert!(described.contains("itemmodelhex="));
+        assert_eq!(parse_slot(&described), Some(stack.clone()));
+
+        stack.set(ITEM_MODEL, default);
+        assert!(stack.patch().get_entry(ITEM_MODEL.key()).is_none());
+        assert!(!describe_slot(&stack).contains("itemmodelhex="));
     }
 
     #[test]

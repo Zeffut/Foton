@@ -13,11 +13,11 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
     private String title;
     private String author;
     private List<Component> pages = new ArrayList<>();
-    private Generation generation;
+    private Generation generation = Generation.ORIGINAL;
     /** Original native content, including filtered projections unavailable in Bukkit. */
     private String nativeBookPassthrough;
     /** Native resolution survives ordinary BookMeta edits, independently of filtered content. */
-    private Boolean nativeBookResolved;
+    private boolean nativeBookResolved;
 
     public String nativeBookPassthrough() {
         return nativeBookPassthrough;
@@ -28,11 +28,11 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
         nativeBookPassthrough = value;
     }
 
-    public Boolean nativeBookResolved() {
+    public boolean nativeBookResolved() {
         return nativeBookResolved;
     }
 
-    public void setNativeBookResolved(Boolean value) {
+    public void setNativeBookResolved(boolean value) {
         nativeBookResolved = value;
     }
 
@@ -127,8 +127,13 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
     }
 
     @Override
+    public boolean hasGeneration() {
+        return generation != Generation.ORIGINAL;
+    }
+
+    @Override
     public void setGeneration(Generation value) {
-        generation = value;
+        generation = value == null ? Generation.ORIGINAL : value;
         nativeBookPassthrough = null;
     }
 
@@ -203,14 +208,13 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
             && java.util.Objects.equals(author, book.author)
             && pages.equals(book.pages)
             && generation == book.generation
-            && java.util.Objects.equals(nativeBookPassthrough, book.nativeBookPassthrough)
-            && java.util.Objects.equals(nativeBookResolved, book.nativeBookResolved);
+            && nativeBookResolved == book.nativeBookResolved;
     }
 
     @Override
     public int hashCode() {
         return java.util.Objects.hash(super.hashCode(), title, author, pages, generation,
-            nativeBookPassthrough, nativeBookResolved);
+            nativeBookResolved);
     }
 
     private int index(int page) {

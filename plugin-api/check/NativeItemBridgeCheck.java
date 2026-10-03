@@ -8,6 +8,50 @@ public final class NativeItemBridgeCheck {
         BufferedReader input = new BufferedReader(
             new InputStreamReader(System.in, StandardCharsets.UTF_8));
         String first = input.readLine();
+        if (args[0].equals("book-new") || args[0].equals("book-new-resolved")) {
+            var item = new org.bukkit.inventory.ItemStack(org.bukkit.Material.WRITTEN_BOOK);
+            var book = (org.bukkit.inventory.meta.BookMeta) item.getItemMeta();
+            book.setTitle("Livre de Cuisine");
+            book.setAuthor("Les cuisiniers d'Hyrule");
+            book.pages(java.util.List.of(net.kyori.adventure.text.Component.text("Radis")));
+            if (args[0].equals("book-new-resolved"))
+                ((org.bukkit.inventory.meta.SimpleBookMeta) book).setNativeBookResolved(true);
+            item.setItemMeta(book);
+            System.out.println(foton.FotonInventory.encode(item));
+            return;
+        }
+        if (args[0].equals("book-new-verify")) {
+            var original = foton.FotonInventory.decode(first);
+            var restored = foton.FotonInventory.decode(input.readLine());
+            if (original == null || restored == null)
+                throw new AssertionError("Java book did not survive native bridge");
+            var firstBook = (org.bukkit.inventory.meta.SimpleBookMeta) original.getItemMeta();
+            var secondBook = (org.bukkit.inventory.meta.SimpleBookMeta) restored.getItemMeta();
+            if (firstBook.getGeneration() != org.bukkit.inventory.meta.BookMeta.Generation.ORIGINAL
+                    || secondBook.getGeneration() != org.bukkit.inventory.meta.BookMeta.Generation.ORIGINAL
+                    || firstBook.hasGeneration() || secondBook.hasGeneration())
+                throw new AssertionError("Default book generation changed across native bridge");
+            if (!original.isSimilar(restored) || original.hashCode() != restored.hashCode())
+                throw new AssertionError("Canonical native book differs from Java-created book: "
+                    + "meta=" + firstBook.equals(secondBook)
+                    + ", title=" + firstBook.getTitle() + "/" + secondBook.getTitle()
+                    + ", author=" + firstBook.getAuthor() + "/" + secondBook.getAuthor()
+                    + ", pages=" + firstBook.pages() + "/" + secondBook.pages()
+                    + ", generation=" + firstBook.getGeneration() + "/" + secondBook.getGeneration()
+                    + ", resolved=" + firstBook.nativeBookResolved() + "/" + secondBook.nativeBookResolved()
+                    + ", raw=" + firstBook.nativeBookPassthrough() + "/" + secondBook.nativeBookPassthrough()
+                    + ", source=" + first + ", canonical=" + foton.FotonInventory.encode(restored));
+            firstBook.setTitle("Livre retouché");
+            secondBook.setTitle("Livre retouché");
+            firstBook.setAuthor("Auteur retouché");
+            secondBook.setAuthor("Auteur retouché");
+            original.setItemMeta(firstBook);
+            restored.setItemMeta(secondBook);
+            if (!original.isSimilar(restored) || original.hashCode() != restored.hashCode())
+                throw new AssertionError("Cover edits broke canonical book equality");
+            System.out.println(foton.FotonInventory.encode(restored));
+            return;
+        }
         if (args[0].equals("reject")) {
             try {
                 foton.FotonInventory.decode(first);

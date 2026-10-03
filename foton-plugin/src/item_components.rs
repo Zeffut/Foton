@@ -65,8 +65,8 @@ fn book_resolved(metadata: &[&str]) -> Option<bool> {
         .iter()
         .find_map(|part| part.strip_prefix("bookresolved="))
     {
-        Some("true") | None => Some(true),
-        Some("false") => Some(false),
+        Some("true") => Some(true),
+        Some("false") | None => Some(false),
         Some(_) => None,
     }
 }
@@ -95,7 +95,6 @@ pub(crate) fn describe(stack: &ItemStack, out: &mut String) -> Option<()> {
             );
         }
         if book.title().filtered().is_some()
-            || !book.resolved()
             || book.pages().iter().any(|page| page.filtered().is_some())
         {
             push_book_raw(out, book.clone().to_nbt_tag());
