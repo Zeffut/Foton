@@ -59,7 +59,7 @@ pub(crate) fn check(env: &mut JNIEnv<'_>) {
     let invalid = env
         .new_object_array(2, "foton/item/MerchantOfferMutation", JObject::null())
         .expect("invalid second recipe");
-    env.set_object_array_element(&invalid, 0, input)
+    env.set_object_array_element(&invalid, 0, &input)
         .expect("valid first recipe");
     assert!(
         prepare(env, &invalid).is_err(),
@@ -69,6 +69,66 @@ pub(crate) fn check(env: &mut JNIEnv<'_>) {
         source[0].result(),
         &output,
         "staging leaves source unmodified"
+    );
+
+    // JNI admission validates independently of the Java DTO constructor.
+    let malformed = env
+        .new_object(
+            "foton/item/MerchantOfferMutation",
+            "(Lorg/bukkit/inventory/MerchantRecipe;)V",
+            &[JValue::Object(&recipe)],
+        )
+        .expect("second owning offer");
+    let empty = env
+        .call_static_method(
+            "foton/item/ItemMutation",
+            "empty",
+            "()Lfoton/item/ItemMutation;",
+            &[],
+        )
+        .expect("empty result mutation")
+        .l()
+        .expect("mutation");
+    env.set_field(
+        &malformed,
+        "result",
+        "Lfoton/item/ItemMutation;",
+        JValue::Object(&empty),
+    )
+    .expect("malformed native ingress fixture");
+    env.set_object_array_element(&invalid, 1, malformed)
+        .expect("invalid trailing result");
+    let mut destination = source.clone();
+    let refused = match prepare(env, &invalid) {
+        Ok(batch) => {
+            destination = batch.offers;
+            false
+        }
+        Err(ItemBridgeError::InvalidEdit("empty merchant result")) => true,
+        Err(error) => panic!("wrong empty-result error: {error:?}"),
+    };
+    assert!(refused, "whole mixed batch must reject empty result");
+    assert_eq!(
+        destination, source,
+        "invalid result leaves destination unchanged"
+    );
+    let invalid_source: MerchantOffers = vec![MerchantOffer::with_uses(
+        ItemCost::new(&vanilla_items::EMERALD, 1),
+        None,
+        ItemStack::empty(),
+        0,
+        8,
+        0,
+        0.0,
+        0,
+    )]
+    .into();
+    assert!(
+        matches!(
+            capture(&invalid_source),
+            Err(ItemBridgeError::NativeState(_))
+        ),
+        "preexisting invalid offers refuse explicitly, never emit unreadable transfers"
     );
 
     assert!(

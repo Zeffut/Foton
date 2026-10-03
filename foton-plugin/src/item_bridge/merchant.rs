@@ -70,6 +70,9 @@ fn prepare(env: &mut JNIEnv<'_>, values: &JObjectArray<'_>) -> Result<OfferBatch
             .get_field(&value, "result", "Lfoton/item/ItemMutation;")?
             .l()?;
         let mut result = mutation::materialize(env, &result)?;
+        if result.stack.is_empty() {
+            return Err(ItemBridgeError::InvalidEdit("empty merchant result"));
+        }
         let mut costs = costs.into_iter();
         let first = costs
             .next()
@@ -139,6 +142,9 @@ fn capture(offers: &MerchantOffers) -> Result<Vec<CapturedOffer>, ItemBridgeErro
     offers
         .iter()
         .map(|offer| {
+            if offer.result().is_empty() {
+                return Err(ItemBridgeError::NativeState("empty merchant result".into()));
+            }
             Ok(CapturedOffer {
                 result: store
                     .capture(offer.result())

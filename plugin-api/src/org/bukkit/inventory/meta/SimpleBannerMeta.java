@@ -12,7 +12,7 @@ public final class SimpleBannerMeta extends SimpleItemMeta implements BannerMeta
     @Override public void setBaseColor(DyeColor value) { baseColor = value == null ? DyeColor.WHITE : value; unsupportedChange("banner"); }
     @Override public List<Pattern> getPatterns() { return List.copyOf(patterns); }
     @Override public void addPattern(Pattern pattern) { if (pattern != null) { patterns.add(pattern); unsupportedChange("banner"); } }
-    @Override public boolean removePattern(int index) { if (index < 0 || index >= patterns.size()) return false; patterns.remove(index); unsupportedChange("banner"); return true; }
+    @Override public boolean removePattern(int index) { if (nativeState().hasNativeBase()) unsupportedChange("banner"); if (index < 0 || index >= patterns.size()) return false; patterns.remove(index); unsupportedChange("banner"); return true; }
     @Override public void setPatterns(List<Pattern> values) { patterns = values == null ? new ArrayList<>() : new ArrayList<>(values); unsupportedChange("banner"); }
         @Override public SimpleBannerMeta clone() { SimpleBannerMeta copy = (SimpleBannerMeta) super.clone(); copy.patterns = new ArrayList<>(patterns); return copy; }
     @Override public boolean equals(Object other) {

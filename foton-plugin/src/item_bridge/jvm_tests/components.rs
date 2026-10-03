@@ -13,7 +13,7 @@ use jni::{
 
 use crate::item_bridge::{mutation, snapshot::Candidate, transfer};
 
-fn java_item<'local>(env: &mut JNIEnv<'local>, item: &ItemStack) -> JObject<'local> {
+pub(super) fn java_item<'local>(env: &mut JNIEnv<'local>, item: &ItemStack) -> JObject<'local> {
     let transfer = transfer::capture(env, item).expect("component fixture capture");
     env.call_static_method(
         "foton/FotonInventory",
@@ -26,7 +26,7 @@ fn java_item<'local>(env: &mut JNIEnv<'local>, item: &ItemStack) -> JObject<'loc
     .expect("item")
 }
 
-fn native_item(env: &mut JNIEnv<'_>, item: &JObject<'_>) -> Candidate {
+pub(super) fn native_item(env: &mut JNIEnv<'_>, item: &JObject<'_>) -> Candidate {
     let value = env
         .call_method(item, "nativeMutation", "()Lfoton/item/ItemMutation;", &[])
         .expect("owning component mutation")

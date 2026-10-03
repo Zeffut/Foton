@@ -103,7 +103,7 @@ fn load_offer(compound: &simdnbt::borrow::NbtCompound<'_, '_>) -> Option<Merchan
         compound.int("demand").unwrap_or(0),
     );
     offer.set_special_price_diff(compound.int("specialPrice").unwrap_or(0));
-    offer.set_reward_exp(compound.byte("rewardExp").map_or(true, |value| value != 0));
+    offer.set_reward_exp(compound.byte("rewardExp") != Some(0));
     Some(offer)
 }
 

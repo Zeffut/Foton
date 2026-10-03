@@ -530,12 +530,7 @@ public final class Native {
     public static native boolean openCartographyTable(String uuid, String world, int x, int y, int z);
     public static native void damagePlayer(String uuid, double amount, String sourceUuid);
 
-    /** One inventory slot as `minecraft:name count`, or the empty string.
-     *
-     * A string rather than an object: building a Java object from Rust means
-     * naming a constructor by signature, and a signature that drifts is a
-     * NoSuchMethodError at the worst possible moment.
-     */
+    /** One owning native item snapshot, or null for an empty inventory slot. */
     public static native foton.item.ItemTransfer inventorySlot(String uuid, int slot);
 
     /** Writes one inventory slot. An empty string empties it. */

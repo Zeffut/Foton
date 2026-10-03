@@ -69,7 +69,7 @@ public class MerchantRecipe {
                 if (second != null && !second.getType().isAir()) recipe.ingredients.add(second);
             }
             return recipe;
-        } catch (NumberFormatException error) {
+        } catch (IllegalArgumentException error) {
             return null;
         }
     }

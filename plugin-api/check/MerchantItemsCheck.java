@@ -24,5 +24,13 @@ final class MerchantItemsCheck {
         Checks.expect(MerchantRecipe.decode("minecraft:diamond 1|0|8|0|minecraft:emerald 2|") != null, "represented legacy offer");
         Checks.expect(MerchantRecipe.decode("minecraft:diamond 1|0|8|0|minecraft:emerald 2|broken") == null, "malformed second cost must reject whole legacy record");
         Checks.expect(MerchantRecipe.decode("minecraft:diamond 1|0|8|0|minecraft:emerald 0|") == null, "zero legacy cost must reject whole record");
+        for (int count : new int[]{0, -1})
+            Checks.expect(MerchantRecipe.decode("minecraft:diamond " + count + "|0|8|0|minecraft:emerald 2|") == null, "invalid result count must reject whole legacy record");
+        for (ItemStack empty : new ItemStack[]{null, zero, new ItemStack(Material.AIR)}) {
+            MerchantRecipe invalid = new MerchantRecipe(empty, 8);
+            invalid.addIngredient(new ItemStack(Material.EMERALD));
+            try { new foton.item.MerchantOfferMutation(invalid); throw new AssertionError("empty merchant result accepted"); }
+            catch (IllegalArgumentException expected) { }
+        }
     }
 }

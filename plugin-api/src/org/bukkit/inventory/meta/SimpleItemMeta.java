@@ -220,7 +220,7 @@ public class SimpleItemMeta implements Damageable {
     }
 
     @Override public void removeItemFlags(org.bukkit.inventory.ItemFlag... flags) {
-        if (flags != null) for (org.bukkit.inventory.ItemFlag flag : flags) if (flag != null && itemFlags.remove(flag)) unsupportedChange("item_flags");
+        if (flags != null) for (org.bukkit.inventory.ItemFlag flag : flags) if (flag != null && (itemFlags.remove(flag) || nativeState().hasNativeBase())) unsupportedChange("item_flags");
     }
 
     @Override public boolean hasItemFlag(org.bukkit.inventory.ItemFlag flag) { return itemFlags.contains(flag); }
@@ -230,11 +230,13 @@ public class SimpleItemMeta implements Damageable {
         attributes.computeIfAbsent(attribute, ignored -> new java.util.ArrayList<>()).add(modifier); unsupportedChange("attribute_modifiers"); return true;
     }
     @Override public boolean removeAttributeModifier(org.bukkit.attribute.Attribute attribute, org.bukkit.attribute.AttributeModifier modifier) {
+        if (nativeState().hasNativeBase()) unsupportedChange("attribute_modifiers");
         java.util.List<org.bukkit.attribute.AttributeModifier> values = attributes.get(attribute);
         if (values == null || !values.remove(modifier)) return false;
         unsupportedChange("attribute_modifiers"); return true;
     }
     @Override public boolean removeAttributeModifier(org.bukkit.attribute.Attribute attribute) {
+        if (nativeState().hasNativeBase()) unsupportedChange("attribute_modifiers");
         if (attributes.remove(attribute) == null) return false;
         unsupportedChange("attribute_modifiers"); return true;
     }

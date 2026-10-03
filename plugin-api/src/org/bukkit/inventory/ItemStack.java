@@ -395,13 +395,6 @@ public class ItemStack implements Cloneable {
         return meta != null;
     }
 
-    /** A copy of the meta, or a fresh empty one.
-     *
-     * A copy because Bukkit's is: a plugin mutates what it gets and then calls
-     * setItemMeta, and a plugin that forgets the second call sees no change.
-     * That is a trap, it is Bukkit's trap, and behaving differently here would
-     * make plugins written against it silently wrong instead.
-     */
     /** Whether this stack holds nothing.
      *
      * <p>Air or a non-positive count. Plugins use it instead of the
@@ -432,6 +425,7 @@ public class ItemStack implements Cloneable {
         return current == null ? null : current.displayName();
     }
 
+    /** Returns detached metadata; edits take effect only after setItemMeta. */
     public ItemMeta getItemMeta() {
         if (isEmpty()) return new SimpleItemMeta();
         return meta == null ? emptyMeta() : meta.clone();

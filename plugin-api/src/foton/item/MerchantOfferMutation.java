@@ -21,7 +21,8 @@ public final class MerchantOfferMutation {
             ingredients[index] = cost.nativeMutation();
         }
         org.bukkit.inventory.ItemStack output = recipe.getResult();
-        result = output == null ? ItemMutation.empty() : output.nativeMutation();
+        if (output == null || output.isEmpty()) throw new IllegalArgumentException("empty merchant result");
+        result = output.nativeMutation();
         uses = recipe.getUses(); maxUses = recipe.getMaxUses(); demand = recipe.getDemand();
         experience = recipe.getVillagerExperience(); priceMultiplier = recipe.getPriceMultiplier();
         rewardExperience = recipe.hasExperienceReward(); specialPrice = recipe.getSpecialPrice();

@@ -9,6 +9,7 @@ use text_components::TextComponent;
 
 mod components;
 mod java_thread;
+mod unsupported;
 
 /// Runs in the host's one real JVM rather than treating lease IDs as portable strings.
 pub(crate) fn check(vm: &JavaVM) {
@@ -46,6 +47,7 @@ pub(crate) fn check(vm: &JavaVM) {
     init_vanilla_registry();
     foton_core::behavior::init_behaviors();
     components::check(&mut env);
+    unsupported::check(&mut env);
     super::merchant::check(&mut env);
     java_thread::check(&mut env);
     check_gc_shared_referent(&mut env);
