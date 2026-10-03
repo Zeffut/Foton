@@ -15,6 +15,8 @@ use std::{
 
 use foton_registry::blocks::block_state_ext::BlockStateExt;
 use foton_registry::blocks::properties::{BlockStateProperties, BoolProperty};
+use foton_registry::data_components::vanilla_components::LOCK;
+use foton_registry::item_predicate::LockCode;
 use foton_registry::item_stack::ItemStack;
 use foton_registry::level_events::SOUND_BREWING_STAND_BREW;
 use foton_registry::{potion_brewing, vanilla_block_entity_types, vanilla_items};
@@ -22,14 +24,15 @@ use foton_utils::types::UpdateFlags;
 use foton_utils::{
     BlockPos, BlockStateId, Direction, DowncastType, DowncastTypeKey, locks::SyncMutex,
 };
-use simdnbt::ToNbtTag;
 use simdnbt::borrow::{BaseNbtCompound as BorrowedNbtCompound, NbtCompound as NbtCompoundView};
 use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
+use simdnbt::{FromNbtTag, ToNbtTag};
 
 use crate::block_entity::{BlockEntity, BlockEntityBase, BlockEntityName, ImplicitComponentInput};
 use crate::event::BrewEvent;
 use crate::inventory::container::{Container, SlotsForFace};
 use crate::inventory::lock::{ContainerRef, SharedContainer};
+use crate::item_predicate;
 use crate::world::World;
 use foton_registry::data_components::DataComponentMap;
 use std::array;
@@ -94,6 +97,7 @@ pub struct BrewingStandBlockEntity {
     /// Vanilla parity: the `name` of `BaseContainerBlockEntity`, the anvil
     /// name this block was placed with.
     name: BlockEntityName,
+    lock_code: SyncMutex<LockCode>,
 }
 
 /// Items and brewing state, held under one lock because a tick mutates both.
@@ -202,6 +206,7 @@ impl BrewingStandBlockEntity {
             container,
             data: Arc::new(BrewingStandDataSlots::default()),
             name: BlockEntityName::new(),
+            lock_code: SyncMutex::new(LockCode::NO_LOCK),
         }
     }
 
@@ -217,6 +222,24 @@ impl BrewingStandBlockEntity {
     #[must_use]
     pub fn custom_name(&self) -> Option<TextComponent> {
         self.name.custom_name()
+    }
+
+    /// Captures the typed key predicate without exposing mutable state.
+    #[must_use]
+    pub fn lock_code(&self) -> LockCode {
+        self.lock_code.lock().clone()
+    }
+
+    /// Replaces the key predicate and marks the owning chunk for persistence.
+    pub fn set_lock_code(&self, lock_code: LockCode) {
+        *self.lock_code.lock() = lock_code;
+        self.set_changed();
+    }
+
+    /// Vanilla parity: `LockCode.unlocksWith`, including an empty main hand.
+    #[must_use]
+    pub fn unlocks_with(&self, stack: &ItemStack) -> bool {
+        item_predicate::matches(self.lock_code.lock().predicate(), stack)
     }
 
     fn tick_with_brew_event(&self, world: &Arc<World>, fire: impl FnOnce(&mut BrewEvent)) {
@@ -321,6 +344,10 @@ impl BlockEntity for BrewingStandBlockEntity {
     fn load_additional(&self, nbt: &BorrowedNbtCompound<'_>) {
         let nbt_view: NbtCompoundView<'_, '_> = nbt.into();
         self.name.load(&nbt_view);
+        *self.lock_code.lock() = nbt_view
+            .get("lock")
+            .and_then(LockCode::from_nbt_tag)
+            .unwrap_or(LockCode::NO_LOCK);
         let mut container = self.container.lock();
         container.items.fill(ItemStack::empty());
 
@@ -350,6 +377,11 @@ impl BlockEntity for BrewingStandBlockEntity {
 
     fn save_additional(&self, nbt: &mut NbtCompound) {
         self.name.save(nbt);
+        while nbt.remove("lock").is_some() {}
+        let lock_code = self.lock_code();
+        if lock_code != LockCode::NO_LOCK {
+            nbt.insert("lock", lock_code.to_nbt_tag());
+        }
         let container = self.container.lock();
         let mut items: Vec<NbtCompound> = Vec::new();
         for (slot, item) in container.items.iter().enumerate() {
@@ -379,18 +411,18 @@ impl BlockEntity for BrewingStandBlockEntity {
         self.name.display_name(default_name)
     }
 
-    /// Vanilla parity: the `CUSTOM_NAME` half of
-    /// `BaseContainerBlockEntity.collectImplicitComponents`. `CONTAINER` and
-    /// `LOCK` are not collected: no vanilla loot table asks this block for
-    /// either, and Foton has no lock on a container yet.
+    /// Vanilla name/key components. CONTAINER transfer awaits the shared
+    /// fallible live-stack conversion foundation.
     fn collect_implicit_components(&self, components: &mut DataComponentMap) {
         self.name.collect_implicit_components(components);
+        let lock_code = self.lock_code();
+        components.set(LOCK, (lock_code != LockCode::NO_LOCK).then_some(lock_code));
     }
 
-    /// Vanilla parity: the `CUSTOM_NAME` half of
-    /// `BaseContainerBlockEntity.applyImplicitComponents`.
+    /// Vanilla name/key component application; absence clears a previous key.
     fn apply_implicit_components(&self, input: &ImplicitComponentInput<'_>) {
         self.name.apply_implicit_components(input);
+        *self.lock_code.lock() = input.get_or_default(LOCK, LockCode::NO_LOCK);
     }
 }
 
@@ -471,6 +503,10 @@ impl Container for BrewingStandContainer {
 
     fn set_changed(&mut self) {}
 }
+
+#[cfg(test)]
+#[path = "brewing_stand_lock_tests.rs"]
+mod lock_tests;
 
 #[cfg(test)]
 #[path = "brewing_stand_event_tests.rs"]

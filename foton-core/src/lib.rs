@@ -36,6 +36,7 @@ pub mod entity;
 pub mod event;
 pub mod fluid;
 pub mod inventory;
+pub mod item_predicate;
 pub mod level_data;
 pub mod map;
 pub mod permission;

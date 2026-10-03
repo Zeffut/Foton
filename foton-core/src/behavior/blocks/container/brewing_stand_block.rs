@@ -5,10 +5,13 @@
 use std::sync::{Arc, Weak};
 
 use foton_macros::block_behavior;
+use foton_protocol::packets::game::SoundSource;
 use foton_registry::block_entity_type::BlockEntityTypeRef;
 use foton_registry::blocks::BlockRef;
 use foton_registry::blocks::properties::Direction;
+use foton_registry::sound_events;
 use foton_registry::vanilla_block_entity_types;
+use foton_utils::types::InteractionHand;
 use foton_utils::{BlockPos, BlockStateId, Downcast as _, translations};
 use text_components::TextComponent;
 
@@ -17,6 +20,7 @@ use crate::behavior::block::{BlockBehavior, BlockEntityCreation};
 use crate::behavior::context::{BlockHitResult, BlockPlaceContext, InteractionResult};
 use crate::block_entity::entities::BrewingStandBlockEntity;
 use crate::block_entity::{BLOCK_ENTITIES, BlockEntityTicker};
+use crate::entity::Entity;
 use crate::inventory::container::calculate_redstone_signal_from_container;
 use crate::inventory::lock::{ContainerLockGuard, ContainerRef};
 use crate::inventory::menu::kinds::brewing_stand;
@@ -52,26 +56,46 @@ impl BlockBehavior for BrewingStandBlock {
         pos: BlockPos,
         player: &Player,
         _hit_result: &BlockHitResult,
-        _inv: &mut InventoryAccess,
+        inv: &mut InventoryAccess,
     ) -> InteractionResult {
         let Some(block_entity) = world.get_block_entity(pos) else {
-            return InteractionResult::Pass;
+            return InteractionResult::Success;
         };
         let Some(stand) = block_entity.downcast_ref::<BrewingStandBlockEntity>() else {
-            return InteractionResult::Pass;
+            return InteractionResult::Success;
         };
+        let title = block_entity.display_name(TextComponent::translated(
+            translations::CONTAINER_BREWING.msg(),
+        ));
+        if !player.is_spectator()
+            && !inv.with_inventory(|inventory| {
+                stand.unlocks_with(inventory.get_item_in_hand(InteractionHand::MainHand))
+            })
+        {
+            player.send_overlay_message(
+                &translations::CONTAINER_IS_LOCKED
+                    .message([title])
+                    .component(),
+            );
+            world.play_sound(
+                &sound_events::BLOCK_CHEST_LOCKED,
+                SoundSource::Blocks,
+                pos,
+                1.0,
+                1.0,
+                None,
+            );
+            return InteractionResult::Success;
+        }
         let Some(container_ref) = ContainerRef::from_block_entity(block_entity.clone()) else {
-            return InteractionResult::Pass;
+            return InteractionResult::Success;
         };
 
         let data = stand.data();
         let inventory = player.inventory.clone();
-        player.open_menu(
-            block_entity.display_name(TextComponent::translated(
-                translations::CONTAINER_BREWING.msg(),
-            )),
-            move |context| brewing_stand(inventory, context.container_id, container_ref, data),
-        );
+        player.open_menu(title, move |context| {
+            brewing_stand(inventory, context.container_id, container_ref, data)
+        });
 
         // TODO: award the INTERACT_WITH_BREWINGSTAND stat once player statistics
         // exist.
