@@ -26,6 +26,7 @@ from its Modrinth 2.6.20 release. The Paper builds are pinned in
 | Foton `4982ede6d72c4711d36b713d3ae3c04d969f2aa2`, Minecraft 26.2 | 21 | With both JARs, Voice Chat rejected Foton's version and could not find its expected server adapter `getServer`; Zelda then failed to discover its shaded SQLite driver through `DriverManager`; cleanup exposed missing `Entity.getScoreboardTags()`. Foton itself stopped cleanly. |
 | Foton `c964da1ac98c9bfdeb4b0d2936e70bbdef3be779`, Minecraft 26.2 | 21 | With the unchanged pair, SQLite initialized Zelda's databases (`zones.db` and `players.db`), then Zelda failed with `NoSuchFieldError: CreatureSpawnEvent$SpawnReason.BEEHIVE` in `VanillaSuppressor`. Voice Chat still rejected the Foton version and reflective `getServer`. Neither plugin enabled; no commands, delayed tasks or client behavior were tested. Foton stopped cleanly. |
 | Foton `4f4b18e3c44b8ac8f42b3cebe42c7fb689a747ac`, Minecraft 26.2 | 21 | SQLite and the BEEHIVE class initialization pass. Zelda next fails with `NoClassDefFoundError: org/bukkit/event/enchantment/PrepareItemEnchantEvent` while registering `VanillaSuppressor`. Voice Chat recognizes `26.2.build.0-foton`, then fails on reflective `FotonServer.getServer`. Neither plugin enabled. Foton saved the fresh world and stopped with exit 0. |
+| Foton post-enchantment snapshot associated with `03263af45097977140bb9a32f0247763e1fc73eb`, Minecraft 26.2 | 21 | The unchanged Zelda JAR passes the previous enchantment-class blocker, then fails on `NoClassDefFoundError: org/bukkit/event/inventory/BrewEvent` during the same listener registration. Voice Chat still fails on `FotonServer.getServer`. Neither plugin enabled. Foton starts, saves 2,025 chunks and 0 players, and stops cleanly with exit 0. |
 
 The Paper 1.21.11 control log has SHA-256
 `4df833cb79abce77f162b394df594c5b11410bac98bdaa6351311cec960cb721`.
@@ -49,6 +50,19 @@ and Java stderr SHA-256 is
 This no-client run does not validate the channel registration path; a separate
 review found an invalid NUL-splitting regex in that snapshot.
 
+The post-enchantment run is retained under
+`%TEMP%/Foton-Zelda-Foton-enchant-03263af45-20261003/baseline-report.md`.
+Its frozen binary SHA-256 is
+`1def34826d8e40ffaf56dffa6bf1e17daf120523006756bf3a8f638ce08fb5dd`,
+API SHA-256 is
+`21f45a774ef8b91421eb663eb93e6a1cd8169b649dd4374a67077974730d481b`,
+and Java stderr SHA-256 is
+`c534d698776d80d7fe2d414c2dd874cafa35167227c3fe5fa7c58975c7e984f6`.
+These artifacts were built before their corresponding commits, then frozen
+before later review fixes. Source association uses the recorded build report,
+source state and timestamps; the hashes identify the executed artifacts.
+This run establishes the new startup blocker, not live enchanting behavior.
+
 ## Acceptance path
 
 1. Supply SQLite through Foton's host JVM classpath and prove a real plugin can
@@ -70,9 +84,12 @@ review found an invalid NUL-splitting regex in that snapshot.
    Repeat each scenario on both Paper 1.21.11 and Foton. The static linkage
    scan reported 238 references after MiniMessage was packaged, but this is
    diagnostic only and omits reflective/runtime interactions.
-   The current boot blocker, `PrepareItemEnchantEvent`, must be emitted by the
-   real enchanting table and apply cancellation/offer changes: Zelda's pinned
-   listener cancels preparation unless the player has `zeldaciv.bypass`.
+   The latest boot blocker is `BrewEvent`. The native completion event exists,
+   but the Java event needs a real `BrewingStand`/`Container` holder with
+   snapshot/update, lock and inventory semantics. Adding an empty event class
+   would only move the reflection failure. The preceding enchantment slice
+   has real native and Paper-compiled fixture tests, while review fixes and
+   the integrated suite remain separate acceptance gates.
 
 The compatibility target is the *unchanged pinned Zelda JAR*, not a promise
 that every version of every plugin works. A newer Zelda commit requires a new
