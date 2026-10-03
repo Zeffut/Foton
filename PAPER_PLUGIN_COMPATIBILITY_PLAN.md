@@ -142,6 +142,7 @@ These are relative sizes, not calendar promises. Task 1 establishes the denomina
 
 - [ ] Add Zelda scenarios for a custom item with PDC and unknown components through storage/restart; a custom GUI close/reopen; smithing/trim; brewing; cursor mutation; and a merchant trade with villager experience. Make each fail independently when its component or event is dropped.
 - [ ] Implement missing `ItemMeta`, `DataComponents`, trim, `MerchantRecipe`, cursor and menu APIs from matching Paper source and `minecraft-src/`/FotonExtractor data. Extend the native slot format without truncating unknown data and without hardcoded registry IDs.
+- [ ] Carry recipe result components/PDC through the typed `ItemStackTemplate`, generated vanilla recipe data, plugin add/get/list/remove operations, crafting output and inventory persistence. Zelda's `LivreCuisine` registers a component-rich written book and uses `removeRecipe` then `addRecipe` to replace it; a material/count-only result or permanently disabled key loses the book on craft/reload. Existing extracted vanilla results with components must also survive generation.
 - [ ] Run focused Java checks, native round-trip tests, `bash dev/all-tests.sh` inventory cases, then the Zelda Paper differential scenarios. Require a restart assertion for persisted changes.
 
 ### Task 9: Finish entity, world, display, geometry and scheduler semantics
