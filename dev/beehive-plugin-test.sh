@@ -9,7 +9,16 @@ command -v javac >/dev/null
 command -v jar >/dev/null
 
 temp_root="$(realpath "${TMPDIR:-/tmp}")"
-scratch="$(mktemp -d "$temp_root/foton-beehive-plugin.XXXXXX")"
+isolated_mode=false
+if [ "${1:-}" = "--isolated" ]; then
+  isolated_mode=true
+  scratch="$2"
+  binary="$3"
+  java_home="$4"
+  port="$5"
+else
+  scratch="$(mktemp -d "$temp_root/foton-beehive-plugin.XXXXXX")"
+fi
 server_pid=""
 cleanup() {
   if [ -n "$server_pid" ] && kill -0 "$server_pid" 2>/dev/null; then
@@ -19,6 +28,9 @@ cleanup() {
       sleep 1
     done
     kill -9 "$server_pid" 2>/dev/null || true
+  fi
+  if [ "$isolated_mode" = true ]; then
+    return
   fi
   if [ "${FOTON_BEEHIVE_KEEP_SCRATCH:-0}" = 1 ]; then
     echo "Beehive probe logs retained in $scratch" >&2
@@ -30,27 +42,40 @@ cleanup() {
 }
 trap cleanup EXIT
 
-paper_api_jar="$(paper_api_prepare "${FOTON_PAPER_API_JAR:-}" "$scratch")"
-cd "$repo"
-bash dev/build-plugin-api.sh > "$scratch/api-build.log" 2>&1 || {
-  tail -n 40 "$scratch/api-build.log" >&2
-  exit 1
-}
-cargo build --quiet -p foton
+if [ "${1:-}" != "--isolated" ]; then
+  paper_api_jar="$(paper_api_prepare "${FOTON_PAPER_API_JAR:-}" "$scratch")"
+  cd "$repo"
+  bash dev/build-plugin-api.sh > "$scratch/api-build.log" 2>&1 || {
+    tail -n 40 "$scratch/api-build.log" >&2
+    exit 1
+  }
+  cargo build --quiet -p foton
 
-target_dir="${CARGO_TARGET_DIR:-$repo/target}"
-binary="$target_dir/debug/foton"
-[ -x "$binary" ] || { echo "Foton binary was not built: $binary" >&2; exit 1; }
-mkdir -p "$scratch/classes" "$scratch/plugins" "$scratch/run/config"
-javac --release 21 -cp "$paper_api_jar:$repo/plugin-api/lib/*" \
-  -d "$scratch/classes" \
-  "$repo/dev/fixtures/beehive-spawn-plugin/BeehiveSpawnProbe.java"
-cp "$repo/dev/fixtures/beehive-spawn-plugin/plugin.yml" "$scratch/classes/"
-jar --create --file "$scratch/plugins/BeehiveSpawnProbe.jar" -C "$scratch/classes" .
+  target_dir="${CARGO_TARGET_DIR:-$repo/target}"
+  binary="$target_dir/debug/foton"
+  [ -x "$binary" ] || { echo "Foton binary was not built: $binary" >&2; exit 1; }
+  mkdir -p "$scratch/classes" "$scratch/plugins" "$scratch/run/config"
+  javac --release 21 -cp "$paper_api_jar:$repo/plugin-api/lib/*" \
+    -d "$scratch/classes" \
+    "$repo/dev/fixtures/beehive-spawn-plugin/BeehiveSpawnProbe.java"
+  cp "$repo/dev/fixtures/beehive-spawn-plugin/plugin.yml" "$scratch/classes/"
+  jar --create --file "$scratch/plugins/BeehiveSpawnProbe.jar" -C "$scratch/classes" .
 
-java_binary="$(readlink -f "$(command -v java)")"
-java_home="$(dirname "$(dirname "$java_binary")")"
-port="${FOTON_BEEHIVE_TEST_PORT:-25597}"
+  java_binary="$(readlink -f "$(command -v java)")"
+  java_home="$(dirname "$(dirname "$java_binary")")"
+  port="${FOTON_BEEHIVE_TEST_PORT:-25597}"
+  command -v unshare >/dev/null || {
+    echo 'unshare is required to isolate the beehive probe server' >&2
+    exit 1
+  }
+  command -v ip >/dev/null || {
+    echo 'iproute2 is required to bring up isolated loopback' >&2
+    exit 1
+  }
+  unshare -n bash -c 'ip link set lo up; exec bash "$@"' bash \
+    "$repo/dev/beehive-plugin-test.sh" --isolated "$scratch" "$binary" "$java_home" "$port"
+  exit 0
+fi
 cd "$scratch/run"
 "$binary" > "$scratch/config-generation.log" 2>&1 < /dev/null &
 generation_pid=$!
