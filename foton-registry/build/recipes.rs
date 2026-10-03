@@ -19,58 +19,10 @@ use heck::{ToShoutySnakeCase, ToSnakeCase};
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
 use rustc_hash::FxHashMap;
-use serde::Deserialize;
 use serde_json::Value;
 
-#[derive(Deserialize, Debug)]
-struct RecipeJson {
-    #[serde(rename = "type")]
-    recipe_type: String,
-    #[serde(default)]
-    category: Option<String>,
-    // Shaped recipe fields
-    #[serde(default)]
-    key: Option<serde_json::Map<String, Value>>,
-    #[serde(default)]
-    pattern: Option<Vec<String>>,
-    // Shapeless recipe fields
-    #[serde(default)]
-    ingredients: Option<Vec<Value>>,
-    // Cooking recipe fields
-    #[serde(default)]
-    ingredient: Option<Value>,
-    // Smithing recipe fields
-    #[serde(default)]
-    template: Option<Value>,
-    #[serde(default)]
-    base: Option<Value>,
-    #[serde(default)]
-    addition: Option<Value>,
-    #[serde(default)]
-    cookingtime: Option<i32>,
-    #[serde(default)]
-    experience: Option<f32>,
-    // Common fields
-    #[serde(default)]
-    result: Option<RecipeResult>,
-    #[serde(default)]
-    show_notification: Option<bool>,
-}
-
-#[derive(Deserialize, Debug)]
-struct RecipeResult {
-    id: String,
-    #[serde(default = "default_count")]
-    count: i32,
-    #[serde(default)]
-    components: Option<serde_json::Map<String, Value>>,
-}
-
-impl RecipeResult {
-    fn components(&self) -> Option<serde_json::Map<String, Value>> {
-        self.components.clone()
-    }
-}
+mod json;
+use json::{RecipeJson, RecipePattern, read_recipe_json};
 
 fn result_tokens(
     item: &Ident,
@@ -135,10 +87,6 @@ fn result_tokens(
             Err(error) => panic!("Invalid extracted recipe {} result: {}", #name, error),
         }
     }
-}
-
-const fn default_count() -> i32 {
-    1
 }
 
 /// Represents a parsed ingredient from JSON.
@@ -245,7 +193,9 @@ struct SmeltingRecipeData {
 
 /// Parses a shaped recipe from JSON.
 fn parse_shaped_recipe(recipe_name: &str, recipe: &RecipeJson) -> Option<ShapedRecipeData> {
-    let pattern = recipe.pattern.as_ref()?;
+    let RecipePattern::Grid(pattern) = recipe.pattern.as_ref()? else {
+        return None;
+    };
     let key = recipe.key.as_ref()?;
     let result = recipe.result.as_ref()?;
 
@@ -730,15 +680,8 @@ pub(crate) fn build() -> TokenStream {
                     .and_then(|s| s.to_str())
                     .unwrap_or("unknown");
 
-                let content = match fs::read_to_string(&path) {
-                    Ok(c) => c,
-                    Err(_) => continue,
-                };
-
-                let recipe: RecipeJson = match serde_json::from_str(&content) {
-                    Ok(r) => r,
-                    Err(_) => continue,
-                };
+                let recipe = read_recipe_json(&path)
+                    .unwrap_or_else(|error| panic!("Invalid extracted recipe: {error}"));
 
                 match recipe.recipe_type.as_str() {
                     "minecraft:crafting_shaped" => {
