@@ -82,6 +82,8 @@ public final class PluginHost {
         PaperBootstrapRunner bootstrap;
         DependencyClassLoader dependencies;
         Map<String, java.lang.ref.WeakReference<PluginState>> providers = Map.of();
+        // Guarded by lifecycle; registration reserves identity before graph readiness.
+        boolean serverDependenciesReady;
         JavaPlugin plugin;
         Status status = Status.DISCOVERED;
         boolean enableAttempted;
@@ -243,9 +245,13 @@ public final class PluginHost {
             }
         }
         for (PreparedBootstrap unused : bootstraps.values()) closeUnpublished(unused.loader());
-        // Every same-batch state exists now, including AFTER/OMIT providers.
-        // Bind generations before any constructor can resolve dependency classes.
-        for (PluginState state : prepared.values()) bindProviders(state);
+        synchronized (lifecycle) {
+            // Connect the entire SERVER graph, including transitive AFTER/OMIT
+            // providers, before any live consumer can enter a new provider loader.
+            // No foreign loader callbacks run inside this publication boundary.
+            for (PluginState state : prepared.values()) bindProviders(state);
+            for (PluginState state : prepared.values()) state.serverDependenciesReady = true;
+        }
         for (DiscoveredPlugin plugin : ordered) {
             PluginState state = prepared.get(plugin);
             if (state == null) continue;
@@ -1234,7 +1240,11 @@ public final class PluginHost {
                                 loader = bootstrapLoaders.get(alias);
                             } else {
                                 PluginState provider = boundProvider(serverProviders, dependency);
-                                loader = provider == null ? null : provider.loader;
+                                // A reserved generation is temporarily absent until the whole
+                                // batch is connected. Never wait on preparation callbacks or
+                                // begin defining its classes against an incomplete graph.
+                                loader = provider == null || !provider.serverDependenciesReady
+                                    ? null : provider.loader;
                             }
                             if (loader != null) available.add(loader);
                         }

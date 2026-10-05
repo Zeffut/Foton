@@ -27,6 +27,7 @@ public final class PaperLoading {
                 catch (java.lang.reflect.InvocationTargetException error) { throw error.getCause(); }
             }));
         try {
+            DependencyReadiness.check(root.resolve("readiness"));
             lateOptionalProviders(root.resolve("late-bukkit"), false, false);
             lateOptionalProviders(root.resolve("late-paper"), true, false);
             lateOptionalProviders(root.resolve("failed-then-late-bukkit"), false, true);

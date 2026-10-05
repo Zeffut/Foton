@@ -44,6 +44,16 @@ joined-classpath dependency can acquire its first registered provider later.
 The binding occurs when that provider's selected identity and loader are
 registered, before construction/publication, not at the consumer's first class
 lookup. A preparation that fails before loader registration is not availability.
+Registration reserves the generation; class visibility starts only after all
+prepared loaders in that batch have their SERVER dependency maps connected,
+before any plugin constructor runs. This is one batch-wide readiness boundary,
+including transitive AFTER/OMIT dependencies. While preparation is in progress,
+a reserved provider is skipped by dependency class lookup: an explicit lookup
+with no other eligible source returns `ClassNotFoundException` without entering
+that provider's class definition. A fresh lookup can succeed once the graph is
+ready. Lookup never waits for preparation callbacks or holds the lifecycle
+monitor while invoking a foreign class loader. This does not promise retry of
+a JVM symbolic reference or static initializer that a caller already failed.
 Once bound, an expired weak reference remains a retired binding: neither a
 replacement generation nor a surviving unselected alias competitor can take over.
 
