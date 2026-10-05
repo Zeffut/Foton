@@ -144,8 +144,21 @@ public final class PermissionRegistry {
                 else live.add(permissible);
             }
         }
-        for (Permissible permissible : live) permissible.recalculatePermissions();
-        FotonPlayer.recalculateAllPermissions();
+        Throwable failure = null;
+        for (Permissible permissible : live) {
+            try { permissible.recalculatePermissions(); }
+            catch (RuntimeException | Error error) {
+                if (failure == null) failure = error;
+                else if (failure != error) failure.addSuppressed(error);
+            }
+        }
+        try { FotonPlayer.recalculateAllPermissions(); }
+        catch (RuntimeException | Error error) {
+            if (failure == null) failure = error;
+            else if (failure != error) failure.addSuppressed(error);
+        }
+        if (failure instanceof RuntimeException error) throw error;
+        if (failure instanceof Error error) throw error;
     }
 
     private static void apply(Map<String, Boolean> result, String name, boolean value,

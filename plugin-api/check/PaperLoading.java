@@ -32,14 +32,25 @@ public final class PaperLoading {
             equal(PluginHost.loadAll(original.toString()), 1, "original alias provider loads");
             equal(PluginHost.byName("Obsolete").getName(), "Retained", "original alias resolves");
             Path incremental = root.resolve("incremental");
-            fixture(incremental, "Independent", false, "", null);
+            fixture(incremental, "Independent", false, "provides: [StableAlias]\n", null);
             equal(PluginHost.loadAll(incremental.toString()), 1, "incremental independent plugin loads");
             equal(PluginHost.byName("Obsolete").getName(), "Retained", "incremental discovery preserves live alias");
-            PluginHost.disableAll();
+            PluginHost.cleanup(PluginHost.byName("Retained"));
+            equal(PluginHost.byName("Obsolete"), null, "retired alias disappears with independent plugin still live");
+            Path successor = root.resolve("successor");
+            fixture(successor, "Successor", false, "provides: [Obsolete]\n", null);
+            fixture(successor, "SuccessorConsumer", false, "depend: [Obsolete]\n", null);
+            equal(PluginHost.loadAll(successor.toString()), 2, "retired alias can serve a new provider and consumer");
+            equal(PluginHost.byName("StableAlias"), PluginHost.byName("Independent"), "unrelated live alias not rebound");
+            equal(Class.forName("fixture.Successor", false, PluginHost.byName("SuccessorConsumer").getClass().getClassLoader()),
+                PluginHost.byName("Successor").getClass(), "consumer classpath uses replacement alias provider");
+            equal(PluginHost.byName("Obsolete").getName(), "Successor", "new alias owner selected");
+            PluginHost.cleanup(PluginHost.byName("SuccessorConsumer"));
+            PluginHost.cleanup(PluginHost.byName("Successor"));
             Path replacement = root.resolve("replacement-without-alias");
             fixture(replacement, "Retained", false, "", null);
             equal(PluginHost.loadAll(replacement.toString()), 1, "replacement provider loads");
-            equal(PluginHost.byName("Obsolete"), null, "obsolete alias removed after complete teardown");
+            equal(PluginHost.byName("Obsolete"), null, "obsolete alias not resurrected while independent plugin remains");
             equal(PluginHost.byName("Retained").getName(), "Retained", "replacement real name resolves");
             PluginHost.disableAll();
             Path collision = root.resolve("collision");

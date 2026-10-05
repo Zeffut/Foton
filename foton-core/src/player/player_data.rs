@@ -28,7 +28,7 @@ use super::{
 
 /// Current data version for player saves.
 /// Increment when making breaking changes to the format.
-pub const PLAYER_DATA_VERSION: i32 = 12;
+pub const PLAYER_DATA_VERSION: i32 = 13;
 
 /// Persistent player data saved by Foton's storage backend.
 ///

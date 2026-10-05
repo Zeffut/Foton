@@ -11,6 +11,7 @@ public final class PaperBootstrap {
     private PaperBootstrap() {}
     public static void main(String[] args) throws Exception { check(); }
     public static void check() throws Exception {
+        LegacyLoggerAbiCheck.check();
         configuredHandlers();
         Path root = Files.createTempDirectory("foton-paper-bootstrap-");
         var serverField = org.bukkit.Bukkit.class.getDeclaredField("server");
@@ -83,6 +84,10 @@ public final class PaperBootstrap {
             Path defaults = root.resolve("default");
             fixture(defaults, "Default", "default", "");
             equal(PluginHost.loadAll(defaults.toString()), 1, "default createPlugin constructs no-arg main");
+            PluginHost.disableAll();
+            Path nullFallback = root.resolve("null-fallback");
+            fixture(nullFallback, "NullFallback", "null", "");
+            equal(PluginHost.loadAll(nullFallback.toString()), 1, "explicit null createPlugin uses ordinary main construction");
             PluginHost.disableAll();
             Path dependency = root.resolve("dependency");
             fixture(dependency, "Provider", "bootstrap", "");
@@ -200,6 +205,7 @@ public final class PaperBootstrap {
                   late();
                   trace("create");
                   if ("FAILURE".equals("default")) return io.papermc.paper.plugin.bootstrap.PluginBootstrap.super.createPlugin(context);
+                  if ("FAILURE".equals("null")) return null;
                   Main plugin = new Main("custom");
                   if ("FAILURE".equals("create")) throw new IllegalStateException("fixture create");
                   return plugin;

@@ -319,7 +319,8 @@ public final class FotonInventory implements PlayerInventory {
             }
             java.util.ArrayList<String> lore = new java.util.ArrayList<>();
             for (String field : encoded) if (field.startsWith("lorehex=")) lore.add(new String(hexDecode(field.substring(8)), java.nio.charset.StandardCharsets.UTF_8));
-            if (!lore.isEmpty()) meta.setLore(lore);
+            // Rich projection is authoritative; legacy lore is only its plain fallback.
+            if (!lore.isEmpty() && java.util.Arrays.stream(encoded).noneMatch(field -> field.startsWith("lorejsonhex="))) meta.setLore(lore);
             if (meta instanceof org.bukkit.inventory.meta.BookMeta book) {
                 java.util.ArrayList<net.kyori.adventure.text.Component> pages = new java.util.ArrayList<>();
                 String nativeBook = null;

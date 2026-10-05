@@ -46,7 +46,8 @@ use foton_utils::{BlockPos, Identifier};
 
 const PLAYER_MAGIC: [u8; 4] = *b"STLP";
 const GLOBAL_MAGIC: [u8; 4] = *b"STLG";
-const PLAYER_STORAGE_VERSION: u16 = 12;
+// Both integration parents used 12 for incompatible positional schemas. Never guess.
+const PLAYER_STORAGE_VERSION: u16 = 13;
 const GLOBAL_STORAGE_VERSION: u16 = 3;
 const GLOBAL_PLAYER_DATA_VERSION: i32 = 2;
 /// Largest compressed player data file accepted from disk.
@@ -451,6 +452,11 @@ impl FilePlayerDataStorage {
         let path = Self::player_file(&self.domain_players_dir(domain)?, uuid);
         let lock = self.file_lock(&path);
         let _guard = lock.lock().await;
+        // Incompatible formats are not corruption. Do not rename a backup or heal
+        // a primary over either parent's ambiguous v12 data.
+        for candidate in [&path, &Self::atomic_backup_path(&path)] {
+            Self::reject_ambiguous_player_version(candidate).await?;
+        }
         if !Self::recover_missing_atomic_path_locked(&path).await? {
             return Ok(None);
         }
@@ -463,6 +469,30 @@ impl FilePlayerDataStorage {
         }
         log::debug!("Loaded player data for {uuid} in domain {domain}");
         Ok(Some(data))
+    }
+
+    async fn reject_ambiguous_player_version(path: &Path) -> io::Result<()> {
+        let mut file = match fs::File::open(path).await {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        let mut header = [0; 6];
+        match file.read_exact(&mut header).await {
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => return Ok(()),
+            Err(error) => return Err(error),
+        }
+        if header[..4] == PLAYER_MAGIC && u16::from_le_bytes([header[4], header[5]]) == 12 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "unsupported player data storage version 12 at {}; ambiguous parent layouts, no automatic migration",
+                    path.display()
+                ),
+            ));
+        }
+        Ok(())
     }
 
     async fn load_global(&self, uuid: Uuid) -> io::Result<Option<GlobalPlayerData>> {
@@ -1689,6 +1719,70 @@ mod tests {
                 settings: [true, false, false, true, false, false, true, true],
             }
         );
+    }
+
+    #[tokio::test]
+    async fn ambiguous_v12_is_rejected_without_recovery_or_file_loss() {
+        // Both immutable parents used STLP/12 and payload/12. C has no tags
+        // field; I inserts Vec<String> after on_ground in wincode's positional layout.
+        let current = sample_player_file(12);
+        let incoming_payload = wincode::serialize(&current).expect("incoming layout");
+        let prefix = wincode::serialize(&(
+            current.data_version,
+            current.pos,
+            current.motion,
+            current.rotation,
+            current.on_ground,
+        ))
+        .expect("common positional prefix");
+        let empty_tags = wincode::serialize(&Vec::<String>::new()).expect("empty tags");
+        let mut current_parent_payload = incoming_payload.clone();
+        current_parent_payload.drain(prefix.len()..prefix.len() + empty_tags.len());
+        let c = encode_file(PLAYER_MAGIC, 12, Ok(current_parent_payload)).expect("C format 12");
+        let i = encode_file(PLAYER_MAGIC, 12, Ok(incoming_payload)).expect("I format 12");
+        for bytes in [&c, &i, &b"STLP\x0c\x00not even compressed".to_vec()] {
+            let error = decode_player_file(bytes)
+                .err()
+                .expect("reject 12 before schema/decompression");
+            assert!(error.to_string().contains("storage version 12"), "{error}");
+        }
+        let root = temp_storage_root("ambiguous-v12");
+        let storage = FilePlayerDataStorage::new(root.clone())
+            .await
+            .expect("storage");
+        let path = FilePlayerDataStorage::player_file(
+            &storage.domain_players_dir("minecraft").expect("domain"),
+            Uuid::from_u128(12),
+        );
+        fs::create_dir_all(path.parent().expect("parent"))
+            .await
+            .expect("directory");
+        let backup = FilePlayerDataStorage::atomic_backup_path(&path);
+        let modern =
+            encode_player_file(&sample_player_file(PLAYER_DATA_VERSION)).expect("modern file");
+        // A valid modern backup must not overwrite an incompatible primary either.
+        for (primary, saved) in [(&c, &i), (&i, &c), (&c, &modern)] {
+            fs::write(&path, primary).await.expect("primary fixture");
+            fs::write(&backup, saved).await.expect("backup fixture");
+            let error = storage
+                .load_domain("minecraft", Uuid::from_u128(12))
+                .await
+                .expect_err("incompatible data is not a fresh player");
+            assert!(error.to_string().contains("storage version 12"), "{error}");
+            assert_eq!(fs::read(&path).await.expect("primary retained"), *primary);
+            assert_eq!(fs::read(&backup).await.expect("backup retained"), *saved);
+        }
+        fs::remove_file(&path)
+            .await
+            .expect("simulate absent fixture primary");
+        fs::write(&backup, &c).await.expect("old backup fixture");
+        storage
+            .load_domain("minecraft", Uuid::from_u128(12))
+            .await
+            .expect_err("old backup must not be promoted");
+        assert!(!fs::try_exists(&path).await.expect("primary remains absent"));
+        assert_eq!(fs::read(&backup).await.expect("unmoved backup"), c);
+        fs::remove_dir_all(root).await.expect("fixture cleanup");
     }
 
     fn sample_player_file(data_version: i32) -> PlayerDataFile {

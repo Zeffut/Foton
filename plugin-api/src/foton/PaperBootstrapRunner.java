@@ -37,8 +37,7 @@ final class PaperBootstrapRunner {
     }
 
     JavaPlugin createPlugin() {
-        return java.util.Objects.requireNonNull(bootstrap.createPlugin(context),
-            "Paper PluginBootstrap.createPlugin returned null");
+        return bootstrap.createPlugin(context);
     }
 
     void seedCommands(FotonCommands destination) {

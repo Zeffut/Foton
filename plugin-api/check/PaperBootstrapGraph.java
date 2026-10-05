@@ -67,9 +67,19 @@ public final class PaperBootstrapGraph {
                 "visible:AlphaConsumer:false;bootstrap:AlphaConsumer;",
                 "construct:AlphaConsumer;", 1);
         verify(root.resolve("required-missing"), 0, "", "", 0);
-        verify(root.resolve("failed-provider"), 1,
-                "bootstrap:FailProvider;visible:AlphaConsumer:true;bootstrap:AlphaConsumer;",
-                "construct:AlphaConsumer;", 1);
+        verify(root.resolve("failed-provider"), 0,
+                "bootstrap:FailProvider;", "", 0);
+        verify(root.resolve("required-chain"), 0, "bootstrap:FailProvider;", "", 0);
+        verify(root.resolve("late-cycle-failure"), 0,
+            "visible:AlphaConsumer:true;bootstrap:AlphaConsumer;bootstrap:FailProvider;", "", 0);
+        verify(root.resolve("successful-bootstrap-cycle"), 2,
+            "bootstrap:ZuluProvider;visible:AlphaConsumer:true;bootstrap:AlphaConsumer;",
+            "construct:AlphaConsumer;construct:ZuluProvider;", 2);
+        verify(root.resolve("optional-failure"), 2,
+            "bootstrap:FailProvider;visible:AlphaConsumer:true;bootstrap:AlphaConsumer;bootstrap:ZuluProvider;",
+            "construct:AlphaConsumer;construct:ZuluProvider;", 2);
+        verify(root.resolve("command-failure"), 0,
+            "bootstrap:CommandFailProvider;visible:AlphaConsumer:true;bootstrap:AlphaConsumer;", "", 0);
         verify(root.resolve("no-bootstrapper"), 1, "", "construct:NoBootstrapConsumer;", 1);
         verify(root.resolve("server-missing-bootstrap"), 0,
                 "visible:AlphaConsumer:false;bootstrap:AlphaConsumer;", "", 0);
@@ -106,7 +116,8 @@ public final class PaperBootstrapGraph {
                 "missing bootstrap provider has no consumer lifecycle");
         }
         Object consumerLoader = System.getProperties().remove("foton.bootstrap.graph.consumerLoader");
-        if (plugins.getFileName().toString().equals("server-missing-bootstrap")) {
+        if (plugins.getFileName().toString().equals("server-missing-bootstrap")
+                || plugins.getFileName().toString().equals("late-cycle-failure")) {
             equal(consumerLoader instanceof ClassLoader, true, "server-rejected bootstrap loader captured");
             equal(((ClassLoader) consumerLoader).getResource("paper-plugin.yml"), null,
                 "server-rejected bootstrap loader closed after discovery");
@@ -170,6 +181,10 @@ public final class PaperBootstrapGraph {
                 public void bootstrap(io.papermc.paper.plugin.bootstrap.BootstrapContext context) {
                   String name = context.getConfiguration().getName();
                   trace("bootstrap:" + name);
+                  if (name.equals("CommandFailProvider")) {
+                    context.getLifecycleManager().registerEventHandler(io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents.COMMANDS,
+                        event -> { throw new IllegalStateException("provider command fixture failure"); });
+                  }
                   if (name.equals("FailProvider")) {
                     System.getProperties().put("foton.bootstrap.graph.failedLoader", getClass().getClassLoader());
                     throw new IllegalStateException("provider fixture failure");
@@ -223,6 +238,26 @@ public final class PaperBootstrapGraph {
         caseJar(root, compiled, "failed-provider", "FailProvider", true, "");
         caseJar(root, compiled, "failed-provider", "AlphaConsumer", false,
             "dependencies:\n  bootstrap:\n    FailProvider:\n      load: BEFORE\n");
+        caseJar(root, compiled, "late-cycle-failure", "FailProvider", true,
+            "dependencies:\n  bootstrap:\n    AlphaConsumer: {}\n");
+        caseJar(root, compiled, "late-cycle-failure", "AlphaConsumer", false,
+            "dependencies:\n  bootstrap:\n    FailProvider: {}\n");
+        caseJar(root, compiled, "successful-bootstrap-cycle", "ZuluProvider", true,
+            "dependencies:\n  bootstrap:\n    AlphaConsumer:\n      load: BEFORE\n");
+        caseJar(root, compiled, "successful-bootstrap-cycle", "AlphaConsumer", false,
+            "dependencies:\n  bootstrap:\n    ZuluProvider:\n      load: BEFORE\n");
+        caseJar(root, compiled, "required-chain", "FailProvider", true, "provides: [FailedAlias]\n");
+        caseJar(root, compiled, "required-chain", "AlphaConsumer", false,
+            "dependencies:\n  bootstrap:\n    FailedAlias:\n      load: BEFORE\n");
+        caseJar(root, compiled, "required-chain", "OmegaConsumer", false,
+            "dependencies:\n  bootstrap:\n    AlphaConsumer:\n      load: BEFORE\n");
+        caseJar(root, compiled, "optional-failure", "FailProvider", true, "");
+        caseJar(root, compiled, "optional-failure", "AlphaConsumer", false,
+            "dependencies:\n  bootstrap:\n    FailProvider:\n      load: BEFORE\n      required: false\n");
+        caseJar(root, compiled, "optional-failure", "ZuluProvider", true, "");
+        caseJar(root, compiled, "command-failure", "CommandFailProvider", true, "");
+        caseJar(root, compiled, "command-failure", "AlphaConsumer", false,
+            "dependencies:\n  bootstrap:\n    CommandFailProvider:\n      load: BEFORE\n");
         caseJar(root, compiled, "no-bootstrapper", "NoBootstrapConsumer", false,
             "dependencies:\n  bootstrap:\n    MissingProvider: {}\n");
         caseJar(root, compiled, "server-missing-bootstrap", "AlphaConsumer", false,

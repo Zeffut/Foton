@@ -320,8 +320,9 @@ public final class PluginHost {
                 System.out.println("[host] " + jar.getName() + " bootstrap descriptor failed: " + error);
             }
         }
-        List<String> bootstrapOrder = new PluginDependencyGraph(descriptors)
-            .order(PaperPluginDescriptor.Phase.BOOTSTRAP);
+        PluginDependencyGraph graph = new PluginDependencyGraph(descriptors);
+        List<String> bootstrapOrder = graph.order(PaperPluginDescriptor.Phase.BOOTSTRAP);
+        Set<String> failed = new HashSet<>();
         Map<String, org.bukkit.plugin.java.PluginClassLoader> bootstrapLoaders =
             new java.util.concurrent.ConcurrentHashMap<>();
         Map<String, BootstrapCandidate> ready = new java.util.LinkedHashMap<>();
@@ -340,14 +341,15 @@ public final class PluginHost {
                 bootstrapLoaders.put(key, loader);
                 ready.put(key, new BootstrapCandidate(loader, dependencies, jar, paper));
             } catch (Throwable error) {
+                failed.add(key);
                 System.out.println("[host] " + jar.getName() + " bootstrap classloader failed: " + error);
                 if (loader != null) closeUnpublished(loader);
             }
         }
-        List<org.bukkit.plugin.java.PluginClassLoader> failed = new ArrayList<>();
+        propagateBootstrapFailures(ready, graph.providers(), failed);
         for (String key : bootstrapOrder) {
             BootstrapCandidate candidate = ready.get(key);
-            if (candidate == null) continue;
+            if (candidate == null || failed.contains(key)) continue;
             try {
                 PaperBootstrapRunner runner = new PaperBootstrapRunner(candidate.jar(),
                     candidate.descriptor(), candidate.loader());
@@ -356,27 +358,55 @@ public final class PluginHost {
                     candidate.dependencies()));
             } catch (Throwable error) {
                 System.out.println("[host] " + candidate.jar().getName() + " bootstrap failed: " + error);
-                failed.add(candidate.loader());
+                failed.add(key);
+                propagateBootstrapFailures(ready, graph.providers(), failed);
             }
         }
-        var entries = prepared.entrySet().iterator();
-        while (entries.hasNext()) {
-            var entry = entries.next();
+        for (String key : bootstrapOrder) {
+            BootstrapCandidate candidate = ready.get(key);
+            if (candidate == null || failed.contains(key)) continue;
+            PreparedBootstrap bootstrap = prepared.get(candidate.jar());
+            if (bootstrap == null) continue;
             try {
-                entry.getValue().runner().commands();
+                bootstrap.runner().commands();
             } catch (Throwable error) {
-                System.out.println("[host] " + entry.getKey().getName() + " bootstrap commands failed: " + error);
-                failed.add(entry.getValue().loader());
-                entries.remove();
+                System.out.println("[host] " + candidate.jar().getName() + " bootstrap commands failed: " + error);
+                failed.add(key);
+                propagateBootstrapFailures(ready, graph.providers(), failed);
             }
         }
-        // A failed provider remains available to later bootstrap callbacks on
-        // Paper. Keep its loader through the command phase, then release it.
-        for (var loader : failed) closeUnpublished(loader);
+        // Ordering recovery never turns actual required-provider failure into
+        // success. Retire earlier cycle consumers too, before SERVER construction.
+        for (String key : failed) {
+            BootstrapCandidate candidate = ready.get(key);
+            if (candidate == null) continue;
+            prepared.remove(candidate.jar());
+            closeUnpublished(candidate.loader());
+        }
         // Bootstrap visibility ends here. A surviving plugin loader must not
         // retain every sibling (including failed, closed loaders) for its lifetime.
         bootstrapLoaders.clear();
         return prepared;
+    }
+
+    private static void propagateBootstrapFailures(Map<String, BootstrapCandidate> ready,
+            Map<String, String> providers, Set<String> failed) {
+        boolean changed;
+        do {
+            changed = false;
+            for (var entry : ready.entrySet()) {
+                if (failed.contains(entry.getKey())) continue;
+                for (String dependency : PluginDependencyGraph.required(entry.getValue().descriptor(),
+                        PaperPluginDescriptor.Phase.BOOTSTRAP)) {
+                    String provider = providers.getOrDefault(pluginKey(dependency), pluginKey(dependency));
+                    if (!failed.contains(provider)) continue;
+                    System.out.println("[host] " + entry.getValue().descriptor().getName()
+                        + " rejected: required BOOTSTRAP provider failed: " + dependency);
+                    changed |= failed.add(entry.getKey());
+                    break;
+                }
+            }
+        } while (changed);
     }
 
     private static List<String> bootstrapDependencies(PaperPluginDescriptor descriptor) {
@@ -686,6 +716,8 @@ public final class PluginHost {
                 ? pluginsDirectory : jar.getParentFile(), descriptor.getName());
             JavaPlugin candidate = state.bootstrap == null
                 ? constructMain(descriptor, loader) : state.bootstrap.createPlugin();
+            // Foton's existing explicit-null fallback uses the same owning loader.
+            if (candidate == null) candidate = constructMain(descriptor, loader);
             if (state.bootstrap != null
                     && (candidate.getClass().getClassLoader() != loader || loader.getPlugin() != candidate)) {
                 throw new IllegalStateException("createPlugin must return the JavaPlugin constructed by its own loader");
@@ -861,6 +893,16 @@ public final class PluginHost {
         }
     }
 
+    private static void addKotlinSerializationCompanion(List<URL> urls, Path cache,
+            MavenCoordinate coordinate) throws Exception {
+        if (coordinate.group.equals("org.jetbrains.kotlinx")
+                && coordinate.artifact.equals("kotlinx-serialization-json-jvm")) {
+            URL companion = resolveLibrary(cache, new MavenCoordinate(coordinate.group,
+                "kotlinx-serialization-core-jvm", coordinate.version)).toUri().toURL();
+            if (!urls.contains(companion)) urls.add(companion);
+        }
+    }
+
     private static URL[] pluginUrls(File jar, PluginDescriptionFile descriptor) throws Exception {
         List<URL> urls = new ArrayList<>();
         urls.add(jar.toURI().toURL());
@@ -883,6 +925,7 @@ public final class PluginHost {
                     Path existing = cached.cachePath(cache);
                     if (validJar(existing)) {
                         urls.add(existing.toUri().toURL());
+                        addKotlinSerializationCompanion(urls, cache, cached);
                         continue;
                     }
                 }
@@ -899,11 +942,7 @@ public final class PluginHost {
             for (String declaration : declarations) {
                 MavenCoordinate coordinate = MavenCoordinate.parse(declaration).runtimeVariant();
                 urls.add(resolveLibrary(cache, coordinate).toUri().toURL());
-                if (coordinate.group.equals("org.jetbrains.kotlinx")
-                        && coordinate.artifact.equals("kotlinx-serialization-json-jvm")) {
-                    urls.add(resolveLibrary(cache, new MavenCoordinate(coordinate.group,
-                        "kotlinx-serialization-core-jvm", coordinate.version)).toUri().toURL());
-                }
+                addKotlinSerializationCompanion(urls, cache, coordinate);
             }
         }
         if (loaderName != null) {
@@ -1601,6 +1640,8 @@ public final class PluginHost {
 
     private static void unpublishLocked(Plugin plugin) {
         removePublishedLocked(plugin);
+        String retired = pluginKey(plugin.getName());
+        selectedProviders.entrySet().removeIf(entry -> entry.getValue().equals(retired));
         org.bukkit.plugin.java.PluginClassLoader loader = loadersByPlugin.get(plugin);
         if (loader != null) pluginLoaders.entrySet().removeIf(entry -> entry.getValue() == loader);
         PluginState metadata = statesByPlugin.get(plugin);

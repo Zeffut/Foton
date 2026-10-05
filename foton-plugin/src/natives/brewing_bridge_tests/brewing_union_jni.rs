@@ -1,15 +1,18 @@
 use super::*;
 use crate::natives::TICK_THREAD;
+use crate::scoreboard_natives::jvm_tests as scoreboard_jvm_tests;
 use crate::{PluginHost, PluginHostConfig, forward::spawn_bridge_tests::live_test_server};
 use foton_core::server::Server;
 use foton_registry::data_components::{
     DataComponentPatch, components::CustomData, vanilla_components::CUSTOM_DATA,
 };
+use foton_registry::vanilla_recipes::RECIPES;
 use jni::{
     JNIEnv,
     objects::{JByteArray, JString, JValue},
 };
 use simdnbt::owned::NbtCompound;
+use std::sync::LazyLock;
 use std::{
     env,
     error::Error,
@@ -54,6 +57,7 @@ fn start_host(scratch: &TempDir, server: &Arc<Server>) -> TestResult<PluginHost>
             .arg("-d")
             .arg(scratch.path())
             .arg(root.join("plugin-api/src/foton/Native.java"))
+            .arg(root.join("plugin-api/check/BrewingGetterStackCheck.java"))
             .status()?
             .success()
     );
@@ -64,6 +68,9 @@ fn start_host(scratch: &TempDir, server: &Arc<Server>) -> TestResult<PluginHost>
             .arg("-C")
             .arg(scratch.path())
             .arg("foton/Native.class")
+            .arg("-C")
+            .arg(scratch.path())
+            .arg("BrewingGetterStackCheck.class")
             .status()?
             .success()
     );
@@ -99,6 +106,34 @@ fn getter(
     };
     let result = env
         .call_static_method("foton/Native", method, signature, &args)?
+        .l()?;
+    if result.is_null() {
+        return Ok(None);
+    }
+    Ok(Some(env.convert_byte_array(JByteArray::from(result))?))
+}
+
+fn java_thread_getter(
+    env: &mut JNIEnv<'_>,
+    name: &JString<'_>,
+    pos: BlockPos,
+    slot: Option<(u64, i32)>,
+) -> TestResult<Option<Vec<u8>>> {
+    let result = env
+        .call_static_method(
+            "BrewingGetterStackCheck",
+            "get",
+            "(Ljava/lang/String;IIIJIZ)[B",
+            &[
+                JValue::Object(name),
+                JValue::Int(pos.x()),
+                JValue::Int(pos.y()),
+                JValue::Int(pos.z()),
+                JValue::Long(slot.map_or(0, |(identity, _)| identity as i64)),
+                JValue::Int(slot.map_or(0, |(_, slot)| slot)),
+                JValue::Bool(u8::from(slot.is_some())),
+            ],
+        )?
         .l()?;
     if result.is_null() {
         return Ok(None);
@@ -164,6 +199,10 @@ fn assert_live_contract(
     assert!(stand.apply_state_snapshot(state));
     let identity = stand.identity();
     let bytes = getter(env, name, pos, None)?.ok_or("snapshot resolved")?;
+    assert_eq!(
+        java_thread_getter(env, name, pos, None)?,
+        Some(bytes.clone())
+    );
     let decoded = decode_brewing_snapshot(&bytes).ok_or("snapshot decoded")?;
     assert_eq!(
         (
@@ -177,6 +216,10 @@ fn assert_live_contract(
     assert_eq!(decoded.custom_name, Some(TextComponent::plain("brewer")));
     assert_eq!(decoded.items[0], raw);
     let bytes = getter(env, name, pos, Some((identity, 0)))?.ok_or("live item resolved")?;
+    assert_eq!(
+        java_thread_getter(env, name, pos, Some((identity, 0)))?,
+        Some(bytes.clone())
+    );
     assert_eq!(read_brewing_item(&bytes), Some(raw));
     for slot in [
         Some((identity.wrapping_add(1), 0)),
@@ -273,15 +316,26 @@ fn brewing_union_actual_jni_getters_reject_without_deep_clones() -> TestResult {
     if env::var_os(CHILD).is_none() {
         let status = Command::new(env::current_exe()?)
             .args(["--exact", "natives::brewing_bridge_tests::brewing_union_jni::brewing_union_actual_jni_getters_reject_without_deep_clones", "--nocapture"])
-            // This isolated debug fixture builds a complete server and large reference
-            // snapshots. Match the dedicated stacks used by the neighboring boundary
-            // fixtures; allocation budgets and production JVM stacks are unchanged.
-            .env("RUST_MIN_STACK", (32 << 20).to_string())
+            // JNI assertions run on the ordinary libtest stack, regardless of caller settings.
+            .env_remove("RUST_MIN_STACK")
             .env(CHILD, "1").status()?;
         assert!(status.success(), "actual JNI allocation child failed");
         return Ok(());
     }
+    // Cold generated Recipes::init has large aggregate debug frames. Initialize
+    // only that fixture prerequisite on a dedicated stack; never enlarge the
+    // thread invoking JNI (or any production/JVM stack).
+    thread::Builder::new()
+        .name("brewing-recipe-fixture".into())
+        .stack_size(32 << 20)
+        .spawn(|| {
+            LazyLock::force(&RECIPES);
+        })?
+        .join()
+        .expect("recipe fixture initialization");
+    eprintln!("brewing phase: before live_test_server");
     let (_storage, server) = live_test_server()?;
+    eprintln!("brewing phase: before loaded_bridge_world");
     let world = loaded_bridge_world();
     server
         .worlds
@@ -295,9 +349,19 @@ fn brewing_union_actual_jni_getters_reject_without_deep_clones() -> TestResult {
         .map(|w| LoadedBridgeWorld::new(Arc::clone(w.world())))
         .collect();
     let scratch = tempfile::tempdir()?;
+    eprintln!("brewing phase: before start_host");
     let host = start_host(&scratch, &server)?;
+    eprintln!("brewing phase: before attach_current_thread");
     let mut env = host.vm.attach_current_thread()?;
     let name = env.new_string(world.key.to_string())?;
+    scoreboard_jvm_tests::check(
+        &mut env,
+        &name,
+        server
+            .scoreboards
+            .get(world.domain())
+            .ok_or("domain scoreboard")?,
+    );
     let pos = BlockPos::new(3, 64, 3);
     assert!(world.set_block(
         pos,
@@ -308,7 +372,9 @@ fn brewing_union_actual_jni_getters_reject_without_deep_clones() -> TestResult {
     let stand = entity
         .downcast_ref::<BrewingStandBlockEntity>()
         .ok_or("brewing stand type")?;
+    eprintln!("brewing phase: before assert_live_contract");
     assert_live_contract(&mut env, &name, pos, stand)?;
+    eprintln!("brewing phase: before scalar/apply");
     assert_scalar_and_apply_allocations(&mut env, &name, pos, stand)?;
     let mut failures = Vec::new();
     for case in [
@@ -320,6 +386,10 @@ fn brewing_union_actual_jni_getters_reject_without_deep_clones() -> TestResult {
     ] {
         install_oversized(stand, case);
         let slot = case.starts_with("live").then_some((stand.identity(), 0));
+        assert!(
+            java_thread_getter(&mut env, &name, pos, slot)?.is_none(),
+            "ordinary JVM thread rejects {case}"
+        );
         let stats = allocation_counter::measure(|| {
             assert!(
                 getter(&mut env, &name, pos, slot)

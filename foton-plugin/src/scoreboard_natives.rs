@@ -17,7 +17,9 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use text_components::TextComponent;
 
-use crate::natives::{server, string_array, to_java};
+use crate::natives::{
+    adventure_component_from_json, adventure_component_to_json, server, string_array, to_java,
+};
 
 fn text(env: &mut JNIEnv<'_>, value: &JString<'_>) -> Option<String> {
     env.get_string(value).ok().map(Into::into)
@@ -125,10 +127,7 @@ pub(crate) extern "system" fn remove_team_entry(
 }
 
 fn component_json(component: Option<&TextComponent>) -> Option<String> {
-    component.map_or_else(
-        || Some(String::new()),
-        |component| serde_json::to_string(component).ok(),
-    )
+    component.map_or_else(|| Some(String::new()), adventure_component_to_json)
 }
 
 fn serialized<T: Serialize>(value: &T) -> Option<String> {
@@ -167,8 +166,8 @@ pub(crate) extern "system" fn team_property(
         let options = scoreboard.team_options(&team);
         match property.as_str() {
             "displayName" => display.display_name.as_ref().map_or_else(
-                || serde_json::to_string(&TextComponent::plain(team.name().to_owned())).ok(),
-                |name| serde_json::to_string(name).ok(),
+                || adventure_component_to_json(&TextComponent::plain(team.name().to_owned())),
+                adventure_component_to_json,
             ),
             "prefix" => component_json(display.prefix.as_ref()),
             "suffix" => component_json(display.suffix.as_ref()),
@@ -185,11 +184,13 @@ pub(crate) extern "system" fn team_property(
 }
 
 /// A component property's new value: empty clears it, anything else is JSON text.
-fn parse_component(value: &str) -> Result<Option<TextComponent>, serde_json::Error> {
+fn parse_component(value: &str) -> Result<Option<TextComponent>, &'static str> {
     if value.is_empty() {
         return Ok(None);
     }
-    serde_json::from_str(value).map(Some)
+    adventure_component_from_json(value)
+        .map(Some)
+        .ok_or("invalid Adventure component")
 }
 
 fn apply_display(display: &mut TeamDisplay, property: &str, value: &str) -> Option<()> {
@@ -246,6 +247,9 @@ pub(crate) extern "system" fn set_team_property(
     .flatten();
     jboolean::from(changed.is_some())
 }
+
+#[cfg(test)]
+pub(crate) mod jvm_tests;
 
 #[cfg(test)]
 mod tests {

@@ -85,7 +85,9 @@ location with `FOTON_PLUGIN_API_JAR` or `FOTON_PLUGIN_LIBRARY_DIRECTORY` when
 running a custom build. The library override is a platform path list.
 Source builds also load `plugin-api/build/runtime-libs`, populated by
 `bash dev/fetch-plugin-runtime-libs.sh`, for Paper's additional runtime
-libraries such as the MySQL driver. SQLite is included in the 31 pinned primary dependencies;
+libraries such as the MySQL driver. See the [integration migration boundaries](dev/compat/integration-migrations-2026-10-05.md)
+for plugin ABI changes and the incompatible version-12 player-save refusal.
+SQLite is included in the 48 pinned runtime dependencies;
 duplicate pinned names in additional directories do not enter the classpath. With no FOTON_PLUGIN_DIRECTORY, Foton neither opens
 the runtime bundle nor starts a JVM, so the normal server path is unchanged.
 

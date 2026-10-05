@@ -4,7 +4,7 @@ use crate::natives as bridge_native_bridge;
 use foton_registry::data_components::vanilla_components as bridge_vanilla_components;
 use foton_registry::data_components::{
     ComponentData,
-    components::{CustomModelData, ItemEnchantments, TooltipDisplay},
+    components::{BannerPatternLayers, CustomModelData, ItemEnchantments, TooltipDisplay},
 };
 use foton_registry::items as bridge_items;
 use foton_registry::vanilla_items as bridge_vanilla_items;
@@ -343,6 +343,9 @@ fn decode_edit(
                     "enchantments" | "stored_enchantments" => {
                         Operation::Set(ComponentData::new(ItemEnchantments::empty()))
                     }
+                    "banner_patterns" => {
+                        Operation::Set(ComponentData::new(BannerPatternLayers::empty()))
+                    }
                     "custom_data" => Operation::Remove,
                     _ => return Err(ItemBridgeError::InvalidEdit("missing SET value")),
                 }
@@ -360,6 +363,32 @@ mod tests {
         data_components::vanilla_components::{ATTRIBUTE_MODIFIERS, DAMAGE, TOOLTIP_DISPLAY},
         init_vanilla_registry, vanilla_items,
     };
+
+    #[test]
+    fn empty_banner_set_is_typed_and_malformed_layers_still_fail() {
+        init_vanilla_registry();
+        let base = bridge_native_bridge::parse_slot(
+            "minecraft:iron_chestplate 1\u{1d}pattern=minecraft:cross,red",
+        )
+        .expect("pattern");
+        let edit = decode_edit(
+            &base,
+            "minecraft:iron_chestplate 1",
+            "banner_patterns",
+            "SET",
+        )
+        .expect("explicit empty SET");
+        assert!(matches!(edit.operation, Operation::Set(_)));
+        assert!(
+            decode_edit(
+                &base,
+                "minecraft:iron_chestplate 1\u{1d}pattern=not_a_pattern,red",
+                "banner_patterns",
+                "SET"
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn migrated_component_journals_preserve_opaque_state_and_distinguish_remove_reset() {

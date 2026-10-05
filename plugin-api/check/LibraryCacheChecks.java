@@ -23,9 +23,12 @@ import java.util.jar.JarOutputStream;
 public final class LibraryCacheChecks {
     private LibraryCacheChecks() {}
 
+    public static void main(String[] args) throws Exception { check(); }
+
     public static void check() throws Exception {
         Path work = Files.createTempDirectory("foton-library-cache-check.");
         try {
+            cachedKotlinDescriptorCompanion(work);
             byte[] complete = libraryBytes();
             failedDownloadDoesNotPublish(work, complete);
             partialDownloadDoesNotPublish(work, complete);
@@ -34,6 +37,43 @@ public final class LibraryCacheChecks {
             concurrentDownloadsPublishOneCompleteJar(work, complete);
         } finally {
             deleteTree(work);
+        }
+    }
+
+    private static void cachedKotlinDescriptorCompanion(Path work) throws Exception {
+        // Offline fixture classes model JSON's actual dependency on its core JVM companion.
+        Path classes = Files.createDirectories(work.resolve("kotlin-classes"));
+        Path core = work.resolve("Core.java"), json = work.resolve("Json.java");
+        Files.writeString(core, "package cachedfixture; public class Core { public static String value() { return \"core reached\"; } }");
+        Files.writeString(json, "package cachedfixture; public class Json { public static String value() { return Core.value(); } }");
+        expect(javax.tools.ToolProvider.getSystemJavaCompiler().run(null, null, null,
+            "--release", "21", "-d", classes.toString(), core.toString(), json.toString()) == 0, "cached fixture compile");
+        Path cache = work.resolve(".foton-libraries/org/jetbrains/kotlinx");
+        for (String artifact : java.util.List.of("core", "json")) {
+            String name = "kotlinx-serialization-" + artifact + "-jvm";
+            Path target = cache.resolve(name + "/1/" + name + "-1.jar");
+            Files.createDirectories(target.getParent());
+            String entry = "cachedfixture/" + (artifact.equals("core") ? "Core" : "Json") + ".class";
+            try (var jar = new JarOutputStream(Files.newOutputStream(target))) {
+                jar.putNextEntry(new JarEntry(entry));
+                Files.copy(classes.resolve(entry), jar);
+                jar.closeEntry();
+            }
+        }
+        Path plugin = work.resolve("cached.jar");
+        Files.write(plugin, libraryBytes());
+        var urls = PluginHost.class.getDeclaredMethod("pluginUrls", java.io.File.class,
+            org.bukkit.plugin.PluginDescriptionFile.class);
+        urls.setAccessible(true);
+        for (String suffix : java.util.List.of("", "-jvm")) {
+            var descriptor = new org.bukkit.plugin.PluginDescriptionFile(new java.io.StringReader(
+                "name: Cached\nversion: 1\nmain: cachedfixture.Json\nlibraries: [org.jetbrains.kotlinx:kotlinx-serialization-json" + suffix + ":1]\n"));
+            URL[] resolved = (URL[]) urls.invoke(null, plugin.toFile(), descriptor);
+            expect(resolved.length == 3, "cached descriptor requires JSON and core exactly once");
+            try (var loader = new java.net.URLClassLoader(resolved, null)) {
+                expect(loader.loadClass("cachedfixture.Json").getMethod("value").invoke(null).equals("core reached"),
+                    "cached JSON must link to its core companion");
+            }
         }
     }
 

@@ -8,13 +8,13 @@ import java.nio.file.Path;
  * bootstrapper reads its own metadata and data directory from here rather than
  * from the plugin it has not built yet.
  */
-public interface PluginProviderContext extends foton.LegacyPluginLoggerContext {
+public interface PluginProviderContext {
     io.papermc.paper.plugin.configuration.PluginMeta getConfiguration();
 
     /** Where the plugin may keep its files. */
     Path getDataDirectory();
 
-    net.kyori.adventure.text.logger.slf4j.ComponentLogger getLogger();
+    org.slf4j.Logger getLogger();
 
     /** The jar the plugin was loaded from. */
     Path getPluginSource();
