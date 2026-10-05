@@ -57,7 +57,10 @@ final class FotonTeam implements Team {
     @Override public void displayName(Component value) { set("displayName", json(value)); }
 
     @Override public Component prefix() { return component(property("prefix")); }
-    @Override public void prefix(Component value) { set("prefix", json(value)); }
+    @Override public void prefix(Component value) {
+        if (value == null) throw new IllegalArgumentException("prefix cannot be null");
+        set("prefix", json(value));
+    }
     @Override public Component suffix() { return component(property("suffix")); }
     @Override public void suffix(Component value) { set("suffix", json(value)); }
 
@@ -127,7 +130,7 @@ final class FotonTeam implements Team {
 
     @Override
     public void addEntry(String entry) {
-        if (entry == null) throw new IllegalArgumentException("entry cannot be null");
+        if (entry == null || entry.isEmpty()) throw new IllegalArgumentException("entry cannot be null or empty");
         property("color");
         if (!Native.scoreboardAddTeamEntry(world, name, entry)) {
             throw new IllegalArgumentException("cannot add entry '" + entry + "' to team " + name);
@@ -138,7 +141,7 @@ final class FotonTeam implements Team {
 
     @Override
     public boolean removeEntry(String entry) {
-        if (entry == null) throw new IllegalArgumentException("entry cannot be null");
+        if (entry == null || entry.isEmpty()) throw new IllegalArgumentException("entry cannot be null or empty");
         property("color");
         return Native.scoreboardRemoveTeamEntry(world, name, entry);
     }

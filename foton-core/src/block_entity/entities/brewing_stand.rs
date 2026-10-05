@@ -38,6 +38,7 @@ use crate::block_entity::{
 use crate::event::BrewEvent;
 use crate::inventory::container::{Container, SlotsForFace};
 use crate::inventory::lock::{ContainerLockGuard, ContainerRef, SharedContainer};
+use crate::item_predicate;
 use crate::world::World;
 use foton_registry::data_components::{
     DataComponentMap,
@@ -254,7 +255,15 @@ impl BrewingStandContainer {
             .any(|bottle| !bottle.is_empty() && potion_brewing::has_mix(bottle, ingredient))
     }
 
-    /// Converts every bottle the ingredient applies to and spends it.
+    /// Computes candidate results without changing the stand's input slots.
+    fn brew_results(&self) -> Vec<ItemStack> {
+        self.items[..BOTTLE_SLOTS]
+            .iter()
+            .map(|bottle| potion_brewing::mix_with(&self.items[SLOT_INGREDIENT], bottle))
+            .collect()
+    }
+
+    /// Installs the accepted results and spends the original ingredient.
     ///
     /// Vanilla parity: `BrewingStandBlockEntity.doBrew`. Returns the remainder
     /// the caller has to drop when the ingredient slot could not hold it, which
@@ -276,9 +285,10 @@ impl BrewingStandContainer {
             return None;
         }
 
-        let remainder = self.items[SLOT_INGREDIENT].item().get_crafting_remainder();
-        let count = self.items[SLOT_INGREDIENT].count() - 1;
-        self.items[SLOT_INGREDIENT].set_count(count);
+        let mut ingredient = self.items[SLOT_INGREDIENT].clone();
+        let remainder = ingredient.item().get_crafting_remainder();
+        ingredient.set_count(ingredient.count() - 1);
+        self.items[SLOT_INGREDIENT] = ingredient;
 
         if remainder.is_empty() {
             return None;
@@ -288,18 +298,6 @@ impl BrewingStandContainer {
             return None;
         }
         Some(remainder)
-    }
-
-    /// What each bottle becomes with the current ingredient.
-    ///
-    /// Vanilla parity: the `mix` loop of `BrewingStandBlockEntity.doBrew`,
-    /// taken out so Paper's `BrewEvent` can offer the results first.
-    fn brew_results(&self) -> Vec<ItemStack> {
-        let ingredient = &self.items[SLOT_INGREDIENT];
-        self.items[..BOTTLE_SLOTS]
-            .iter()
-            .map(|bottle| potion_brewing::mix_with(ingredient, bottle))
-            .collect()
     }
 
     /// Returns which bottle slots are occupied.
@@ -524,6 +522,24 @@ impl BrewingStandBlockEntity {
         self.container.lock().custom_name.clone()
     }
 
+    /// Captures the typed key predicate without exposing mutable state.
+    #[must_use]
+    pub fn lock_code(&self) -> LockCode {
+        self.container.lock().lock.clone()
+    }
+
+    /// Replaces the key predicate and marks the owning chunk for persistence.
+    pub fn set_lock_code(&self, lock_code: LockCode) {
+        self.container.lock().lock = lock_code;
+        self.set_changed();
+    }
+
+    /// Vanilla parity: `LockCode.unlocksWith`, including an empty main hand.
+    #[must_use]
+    pub fn unlocks_with(&self, stack: &ItemStack) -> bool {
+        item_predicate::matches(self.container.lock().lock.predicate(), stack)
+    }
+
     fn is_current_in(&self, world: &World, pos: BlockPos) -> bool {
         world
             .get_block_entity(pos)
@@ -622,7 +638,6 @@ impl BrewingStandBlockEntity {
             world.set_block(pos, state, UpdateFlags::UPDATE_CLIENTS);
         }
     }
-
     fn publish_data(&self, container: &BrewingStandContainer) {
         self.data
             .brew_time
@@ -966,6 +981,14 @@ impl Container for BrewingStandContainer {
 }
 
 #[cfg(test)]
+#[path = "brewing_stand_lock_tests.rs"]
+mod lock_tests;
+
+#[cfg(test)]
+#[path = "brewing_stand_event_tests.rs"]
+mod event_tests;
+
+#[cfg(test)]
 mod tests {
     use crate::behavior::init_behaviors;
     use crate::block_entity::{SharedBlockEntity, init_block_entities};
@@ -1088,7 +1111,9 @@ mod tests {
         assert!(event.contents()[SLOT_FUEL].is_empty());
         assert_eq!(event.results().len(), 1);
         assert_eq!(event.fuel_level(), 7);
+        assert_eq!(event.fuel(), 7);
         assert!(event.is_cancelled());
+        assert!(event.into_results().is_none());
     }
 
     #[test]

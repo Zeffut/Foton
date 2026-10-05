@@ -423,11 +423,17 @@ impl VillagerEntity {
     /// Vanilla parity: `AbstractVillager.getOffers`, which lazily builds the
     /// list and then calls `updateTrades`.
     pub fn offers(&self) -> MerchantOffers {
+        self.with_offers(Clone::clone)
+    }
+
+    /// Borrows initialized offers under their storage guard. The reader must be
+    /// synchronous and must not invoke Java or reenter this merchant.
+    pub fn with_offers<R>(&self, reader: impl FnOnce(&MerchantOffers) -> R) -> R {
         if !self.merchant.offers_built() {
             self.update_trades();
             self.merchant.mark_offers_built();
         }
-        self.merchant.offers().lock().clone()
+        reader(&self.merchant.offers().lock())
     }
 
     /// Rolls the trades this profession offers at this level and adds them.

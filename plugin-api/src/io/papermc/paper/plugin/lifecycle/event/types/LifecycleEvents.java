@@ -5,7 +5,7 @@ import io.papermc.paper.registry.RegistryKey;
 
 public final class LifecycleEvents {
     private LifecycleEvents() {}
-    public static final LifecycleEventType.Prioritizable<ReloadableRegistrarEvent> COMMANDS = new Type<>();
+    public static final LifecycleEventType.Prioritizable<ReloadableRegistrarEvent<io.papermc.paper.command.brigadier.Commands>> COMMANDS = new Type<>();
 
     /** The tag lifecycle. `LifecycleEvents.TAGS.postFlatten(registry)` is how a
      * plugin says it wants to add to that registry's tags. */

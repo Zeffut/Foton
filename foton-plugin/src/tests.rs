@@ -4,6 +4,7 @@
 //! are driven from a single place and the rest assert on what can be decided
 //! without starting anything.
 
+use crate::item_bridge as bridge_item_bridge;
 use std::env;
 use std::fs::{copy, create_dir_all, read_dir, remove_file, write};
 use std::path::PathBuf;
@@ -21,6 +22,7 @@ fn config() -> PluginHostConfig {
         api_jar: PathBuf::from("/nowhere/foton-plugin-api.jar"),
         library_directories: Vec::new(),
         plugin_directory: PathBuf::from("/nowhere/plugins"),
+        item_snapshot_limit: PluginHostConfig::DEFAULT_ITEM_SNAPSHOT_LIMIT,
     }
 }
 
@@ -159,6 +161,23 @@ fn the_class_path_is_ordered() {
             "netty-resolver-4.2.15.Final.jar",
             "netty-codec-base-4.2.15.Final.jar",
             "sqlite-jdbc-3.49.1.0.jar",
+            "auto-service-annotations-1.1.1.jar",
+            "maven-resolver-api-1.9.18.jar",
+            "maven-resolver-spi-1.9.18.jar",
+            "maven-resolver-util-1.9.18.jar",
+            "maven-resolver-impl-1.9.18.jar",
+            "maven-resolver-named-locks-1.9.18.jar",
+            "maven-resolver-connector-basic-1.9.18.jar",
+            "maven-resolver-provider-3.9.6.jar",
+            "maven-model-3.9.6.jar",
+            "maven-model-builder-3.9.6.jar",
+            "maven-repository-metadata-3.9.6.jar",
+            "maven-artifact-3.9.6.jar",
+            "maven-builder-support-3.9.6.jar",
+            "plexus-utils-3.5.1.jar",
+            "plexus-interpolation-1.26.jar",
+            "javax.inject-1.jar",
+            "commons-lang3-3.20.0.jar",
         ],
         "the API jar leads, then the manifest order is stable"
     );
@@ -189,15 +208,19 @@ fn login_attempt_lifecycle_crosses_the_rust_java_bridge() {
             api_jar,
             library_directories: vec![repository.join("plugin-api/lib")],
             plugin_directory: plugins.path().to_owned(),
+            item_snapshot_limit: PluginHostConfig::DEFAULT_ITEM_SNAPSHOT_LIMIT,
         },
         &Weak::new(),
     )
     .expect("the test JVM should start");
 
+    bridge_item_bridge::jvm_tests::check(&host.vm);
+
     assert!(
         forward::login_lifecycle_bridge_check(&host.vm),
         "Rust login/abort/join calls did not reach the Java attempt lifecycle"
     );
+    bridge_item_bridge::jvm_tests::check_terminal(&host);
     drop(host);
     assert!(
         !JVM_RUNTIMES.lock().is_empty(),

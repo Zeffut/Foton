@@ -23,8 +23,9 @@ public final class FotonLifecycle {
 
     /** One registrar and handler cursor shared by the two phases of an enable cycle. */
     static Runnable commandDispatcher(JavaPlugin plugin) {
-        Commands commands = new FotonCommands();
-        ReloadableRegistrarEvent event = () -> commands;
+        FotonCommands commands = new FotonCommands();
+        PluginHost.seedBootstrapCommands(plugin, commands);
+        ReloadableRegistrarEvent<Commands> event = () -> commands;
         Runnable dispatch = plugin.getLifecycleManager().incrementalDispatch(LifecycleEvents.COMMANDS, event);
         java.util.Set<String> published = new java.util.HashSet<>();
         return () -> {

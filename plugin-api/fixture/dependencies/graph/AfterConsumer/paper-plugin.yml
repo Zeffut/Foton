@@ -1,5 +1,6 @@
 name: AfterConsumer
 version: 1
+api-version: '26.2'
 main: fixture.dependencies.DependencyPlugins$AfterConsumer
 dependencies:
   server:

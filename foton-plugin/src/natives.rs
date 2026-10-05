@@ -9,7 +9,10 @@
 //! World mutations remain scheduler-owned; narrowly scoped plugin registries
 //! (such as runtime recipes) expose their own synchronized write path.
 
+use crate::enchantment;
+use crate::item_bridge as bridge_item_bridge;
 use crate::packet_tap;
+use foton_registry::data_components::vanilla_components as bridge_vanilla_components;
 use foton_utils::serial::budget;
 use std::borrow::Cow;
 use std::fmt::Write;
@@ -67,7 +70,6 @@ use foton_core::entity::entities::mobs::passive::BeeEntity;
 use foton_core::entity::entities::mobs::passive::CatEntity;
 use foton_core::entity::entities::mobs::passive::ChickenEntity;
 use foton_core::entity::entities::mobs::passive::CowEntity;
-use foton_core::entity::entities::mobs::passive::NautilusEntity;
 use foton_core::entity::entities::mobs::passive::PigEntity;
 use foton_core::entity::entities::mobs::passive::SheepEntity;
 use foton_core::entity::entities::mobs::passive::ZombieNautilusEntity;
@@ -87,9 +89,6 @@ use foton_core::entity::entities::objects::items::FallingBlockEntity;
 use foton_core::entity::entities::objects::items::ItemEntity;
 use foton_core::entity::entities::objects::projectiles::FireworkRocketEntity;
 use foton_core::entity::entities::objects::projectiles::{ArrowEntity, ArrowPickup};
-use foton_core::entity::entities::objects::projectiles::{
-    LargeFireballEntity, SmallFireballEntity,
-};
 use foton_core::entity::entities::objects::vehicles::{BoatEntity, RaftEntity};
 use foton_core::entity::spawn_util::{
     SpawnEntityInitialization, create_entity_at, create_entity_at_initialized, prepare_then_publish,
@@ -100,9 +99,7 @@ use foton_core::entity::{
     owner_uuid, set_owner_uuid, set_tamed, start_riding_entities,
 };
 use foton_core::event::TeleportPoint;
-use foton_core::inventory::container::Container;
 use foton_core::inventory::equipment::EquipmentSlot;
-use foton_core::inventory::lock::{ContainerLockGuard, ContainerRef};
 use foton_core::inventory::menu::kinds::anvil;
 use foton_core::inventory::menu::kinds::cartography;
 use foton_core::inventory::menu::kinds::crafting;
@@ -135,13 +132,13 @@ use foton_registry::blocks::block_state_ext::BlockStateExt;
 use foton_registry::blocks::properties::BlockStateProperties;
 use foton_registry::data_components::DataComponentPatch;
 use foton_registry::data_components::components::{
-    CustomModelData, ItemEnchantments, ItemLore, SuspiciousStewEffect, SuspiciousStewEffects,
-    TooltipDisplay,
+    CustomData, CustomModelData, ItemEnchantments, ItemLore, SuspiciousStewEffect,
+    SuspiciousStewEffects, TooltipDisplay,
 };
 use foton_registry::data_components::vanilla_components::{
-    CUSTOM_MODEL_DATA, DAMAGE, ENCHANTMENTS, FIREWORKS, FireworkExplosion, FireworkExplosionShape,
-    Fireworks, ITEM_MODEL, ITEM_NAME, LORE, POTION_CONTENTS, STORED_ENCHANTMENTS, TOOLTIP_DISPLAY,
-    TOOLTIP_STYLE, UNBREAKABLE, WRITABLE_BOOK_CONTENT, WRITTEN_BOOK_CONTENT,
+    CUSTOM_DATA, CUSTOM_MODEL_DATA, CUSTOM_NAME, ENCHANTMENTS, FIREWORKS, FireworkExplosion,
+    FireworkExplosionShape, Fireworks, ITEM_MODEL, ITEM_NAME, LORE, POTION_CONTENTS,
+    STORED_ENCHANTMENTS, TOOLTIP_DISPLAY, TOOLTIP_STYLE, UNBREAKABLE,
 };
 use foton_registry::enchantment::{Enchantment, EnchantmentRef};
 use foton_registry::entity_type::EntityTypeRef;
@@ -153,11 +150,11 @@ use foton_registry::game_rules::GameRuleValue;
 use foton_registry::item_predicate::LockCode;
 use foton_registry::item_stack::ItemStack;
 use foton_registry::mob_effect::MobEffect;
+use foton_registry::particle_type::ParticleData;
 use foton_registry::recipe::{
     CraftingCategory, CraftingInput, Ingredient, RecipeResult, ShapedRecipe, ShapelessRecipe,
 };
 use foton_registry::stat::{CustomStatRef, Stat};
-use foton_registry::trading::ItemCost;
 use foton_registry::trading::MerchantOffer;
 use foton_registry::vanilla_block_entity_types::BREWING_STAND as BREWING_STAND_BLOCK_ENTITY;
 use foton_registry::vanilla_block_entity_types::SIGN;
@@ -169,7 +166,10 @@ use foton_registry::{
 use foton_utils::codec::VarInt;
 use foton_utils::entity_events::EntityStatus;
 use foton_utils::locks::{SyncMutex, SyncRwLock};
-use foton_utils::nbt::{merge_nbt_compounds, parse_snbt_compound, to_canonical_snbt};
+use foton_utils::nbt::{
+    merge_nbt_compounds, parse_snbt_compound, to_canonical_snbt, vanilla_nbt_compound_heap_size,
+    vanilla_nbt_heap_size,
+};
 use foton_utils::serial::{OptionalNbt, ReadFrom as _, WriteTo as _};
 use foton_utils::serial::{budget::DecodeBudget, text_stream::write_bounded};
 use foton_utils::text::DisplayResolutor;
@@ -195,8 +195,10 @@ use jni::sys::{
     jobjectArray, jstring,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
-use simdnbt::owned::NbtCompound;
+use sha2::{Digest as _, Sha256};
+use simdnbt::Mutf8Str;
 use simdnbt::owned::NbtTag;
+use simdnbt::owned::{NbtCompound, read_tag};
 use text_components::{TextComponent, content::Content as TextContent};
 use uuid::Uuid;
 
@@ -444,7 +446,7 @@ fn to_position(env: &mut JNIEnv<'_>, at: Option<[f64; 5]>) -> jdoubleArray {
 }
 
 /// Resolves a world by the key a plugin holds it under.
-fn world(env: &mut JNIEnv<'_>, name: &JString<'_>) -> Option<Arc<World>> {
+pub(crate) fn world(env: &mut JNIEnv<'_>, name: &JString<'_>) -> Option<Arc<World>> {
     let text: String = env.get_string(name).ok()?.into();
     let key: Identifier = text.parse().ok()?;
     server()?.worlds.get_owned(&key)
@@ -759,7 +761,13 @@ extern "system" fn tag_values(
 
 /// `foton.Native.serverVersion`
 extern "system" fn server_version(mut env: JNIEnv<'_>, _class: JClass<'_>) -> jstring {
-    to_java(&mut env, Some(env!("CARGO_PKG_VERSION").to_owned()))
+    to_java(&mut env, Some(bukkit_api_version()))
+}
+
+/// Paper 26.2 uses `26.2.build.<build>-stable`, whereas Foton has no Paper
+/// build number. Keep the target API detectable without claiming Paper's build.
+fn bukkit_api_version() -> String {
+    format!("{}.build.0-foton", foton_utils::MC_VERSION)
 }
 
 /// `foton.Native.minecraftVersion`
@@ -1191,7 +1199,7 @@ extern "system" fn send_block_change(
     });
 }
 
-fn entity_by_uuid(uuid: &Uuid) -> Option<(Arc<World>, SharedEntity)> {
+pub(crate) fn entity_by_uuid(uuid: &Uuid) -> Option<(Arc<World>, SharedEntity)> {
     let server = server()?;
     for snapshot in server.worlds.snapshots() {
         let world = snapshot.world();
@@ -1386,77 +1394,6 @@ extern "system" fn entity_tnt_source(
         return null_mut();
     };
     to_java(&mut env, Some(source.uuid().to_string()))
-}
-
-extern "system" fn entity_item_stack(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-) -> jstring {
-    let Ok(text) = env.get_string(&uuid) else {
-        return null_mut();
-    };
-    let Ok(id) = text
-        .to_str()
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .ok_or(())
-    else {
-        return null_mut();
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return null_mut();
-    };
-    if let Some(item) = entity.as_ref().downcast_ref::<ItemEntity>() {
-        return to_java(&mut env, Some(describe_slot(&item.get_item())));
-    }
-    if let Some(frame) = entity.as_ref().downcast_ref::<ItemFrameEntity>() {
-        return to_java(&mut env, Some(describe_slot(&frame.framed_item())));
-    }
-    if let Some(fireball) = entity.as_ref().downcast_ref::<LargeFireballEntity>() {
-        return to_java(&mut env, Some(describe_slot(&fireball.item())));
-    }
-    if let Some(fireball) = entity.as_ref().downcast_ref::<SmallFireballEntity>() {
-        return to_java(&mut env, Some(describe_slot(&fireball.item())));
-    }
-    null_mut()
-}
-
-extern "system" fn set_entity_item_stack(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    item: JString<'_>,
-) {
-    let Ok(text) = env.get_string(&uuid) else {
-        return;
-    };
-    let Ok(id) = text
-        .to_str()
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .ok_or(())
-    else {
-        return;
-    };
-    let Ok(encoded) = env.get_string(&item) else {
-        return;
-    };
-    let Some(stack) = parse_slot(encoded.to_str().unwrap_or_default()) else {
-        return;
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return;
-    };
-    if let Some(item) = entity.as_ref().downcast_ref::<ItemEntity>() {
-        item.set_item(stack);
-    } else if let Some(frame) = entity.as_ref().downcast_ref::<ItemFrameEntity>() {
-        frame.set_item(stack);
-    } else if let Some(fireball) = entity.as_ref().downcast_ref::<LargeFireballEntity>() {
-        fireball.set_item(stack);
-    } else if let Some(fireball) = entity.as_ref().downcast_ref::<SmallFireballEntity>() {
-        fireball.set_item(stack);
-    }
 }
 
 extern "system" fn set_item_unlimited_lifetime(
@@ -2190,54 +2127,6 @@ extern "system" fn villager_experience(
                 .map(VillagerEntity::villager_xp)
         })
         .unwrap_or(0)
-}
-
-extern "system" fn set_villager_offers(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    offers: JObjectArray<'_>,
-) {
-    let Ok(text) = env.get_string(&uuid) else {
-        return;
-    };
-    let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
-        return;
-    };
-    let Some(values) = read_string_array(&mut env, &offers) else {
-        return;
-    };
-    let mut parsed = Vec::with_capacity(values.len());
-    for value in values {
-        let fields = value.split('|').collect::<Vec<_>>();
-        if fields.len() < 6 {
-            continue;
-        }
-        let Some(result) = parse_slot(fields[0]) else {
-            continue;
-        };
-        let Some(cost_a) = parse_slot(fields[4]) else {
-            continue;
-        };
-        let cost_b = if fields[5].is_empty() {
-            None
-        } else {
-            parse_slot(fields[5])
-        };
-        let uses = fields[1].parse().unwrap_or(0).max(0);
-        let max_uses = fields[2].parse().unwrap_or(1).max(1);
-        let demand = fields[3].parse().unwrap_or(0);
-        let first = ItemCost::new(cost_a.item(), cost_a.count());
-        let second = cost_b.map(|stack| ItemCost::new(stack.item(), stack.count()));
-        parsed.push(MerchantOffer::with_uses(
-            first, second, result, uses, max_uses, 0, 0.05, demand,
-        ));
-    }
-    if let Some((_, entity)) = entity_by_uuid(&id)
-        && let Some(villager) = entity.as_ref().downcast_ref::<VillagerEntity>()
-    {
-        villager.merchant().set_offers(parsed.into());
-    }
 }
 
 extern "system" fn reset_villager_offers(
@@ -3529,150 +3418,6 @@ extern "system" fn pig_set_saddle(
         ItemStack::empty()
     };
     pig.set_item_slot(EquipmentSlot::Saddle, saddle);
-}
-
-extern "system" fn mount_inventory_slot(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    slot: jint,
-) -> jstring {
-    let Ok(text) = env.get_string(&uuid) else {
-        return null_mut();
-    };
-    let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
-        return null_mut();
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return null_mut();
-    };
-    let equipment_slot = if slot == 0 {
-        EquipmentSlot::Saddle
-    } else if slot == 1 {
-        EquipmentSlot::Body
-    } else {
-        return null_mut();
-    };
-    let mut value = None;
-    if let Some(mount) = entity.as_ref().downcast_ref::<HorseEntity>() {
-        mount.with_equipment_slot(equipment_slot, &mut |item| {
-            value = Some(describe_slot(item));
-        });
-    } else if let Some(mount) = entity.as_ref().downcast_ref::<NautilusEntity>() {
-        mount.with_equipment_slot(equipment_slot, &mut |item| {
-            value = Some(describe_slot(item));
-        });
-    } else if let Some(mount) = entity.as_ref().downcast_ref::<ZombieNautilusEntity>() {
-        mount.with_equipment_slot(equipment_slot, &mut |item| {
-            value = Some(describe_slot(item));
-        });
-    }
-    to_java(&mut env, value)
-}
-
-extern "system" fn set_mount_inventory_slot(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    slot: jint,
-    item: JString<'_>,
-) {
-    let Ok(text) = env.get_string(&uuid) else {
-        return;
-    };
-    let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
-        return;
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return;
-    };
-    let Ok(encoded) = env.get_string(&item) else {
-        return;
-    };
-    let Some(stack) = parse_slot(encoded.to_str().unwrap_or_default()) else {
-        return;
-    };
-    let equipment_slot = if slot == 0 {
-        EquipmentSlot::Saddle
-    } else if slot == 1 {
-        EquipmentSlot::Body
-    } else {
-        return;
-    };
-    if let Some(mount) = entity.as_ref().downcast_ref::<HorseEntity>() {
-        mount.set_item_slot(equipment_slot, stack);
-    } else if let Some(mount) = entity.as_ref().downcast_ref::<NautilusEntity>() {
-        mount.set_item_slot(equipment_slot, stack);
-    } else if let Some(mount) = entity.as_ref().downcast_ref::<ZombieNautilusEntity>() {
-        mount.set_item_slot(equipment_slot, stack);
-    }
-}
-
-extern "system" fn horse_inventory_slot(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    slot: jint,
-) -> jstring {
-    let Ok(text) = env.get_string(&uuid) else {
-        return null_mut();
-    };
-    let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
-        return null_mut();
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return null_mut();
-    };
-    let Some(horse) = entity.as_ref().downcast_ref::<HorseEntity>() else {
-        return null_mut();
-    };
-    let equipment_slot = if slot == 0 {
-        EquipmentSlot::Saddle
-    } else if slot == 1 {
-        EquipmentSlot::Body
-    } else {
-        return null_mut();
-    };
-    let mut value = None;
-    horse.with_equipment_slot(equipment_slot, &mut |item| {
-        value = Some(describe_slot(item));
-    });
-    to_java(&mut env, value)
-}
-
-extern "system" fn set_horse_inventory_slot(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    slot: jint,
-    item: JString<'_>,
-) {
-    let Ok(text) = env.get_string(&uuid) else {
-        return;
-    };
-    let Some(id) = text.to_str().ok().and_then(|value| value.parse().ok()) else {
-        return;
-    };
-    let Some((_, entity)) = entity_by_uuid(&id) else {
-        return;
-    };
-    let Some(horse) = entity.as_ref().downcast_ref::<HorseEntity>() else {
-        return;
-    };
-    let Ok(encoded) = env.get_string(&item) else {
-        return;
-    };
-    let Some(stack) = parse_slot(encoded.to_str().unwrap_or_default()) else {
-        return;
-    };
-    let equipment_slot = if slot == 0 {
-        EquipmentSlot::Saddle
-    } else if slot == 1 {
-        EquipmentSlot::Body
-    } else {
-        return;
-    };
-    horse.set_item_slot(equipment_slot, stack);
 }
 
 extern "system" fn entity_has_chest(
@@ -5307,6 +5052,47 @@ extern "system" fn mushroom_cow_variant<'a>(
     }
 }
 
+extern "system" fn spawn_particle(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    world_name: JString<'_>,
+    particle: JString<'_>,
+    x: jdouble,
+    y: jdouble,
+    z: jdouble,
+    count: jint,
+    ox: jdouble,
+    oy: jdouble,
+    oz: jdouble,
+    speed: jdouble,
+) {
+    let Ok(world_text): Result<String, _> = env.get_string(&world_name).map(Into::into) else {
+        return;
+    };
+    let Ok(particle_text): Result<String, _> = env.get_string(&particle).map(Into::into) else {
+        return;
+    };
+    let Ok(world_key) = world_text.parse::<Identifier>() else {
+        return;
+    };
+    let Ok(particle_key) = particle_text.parse::<Identifier>() else {
+        return;
+    };
+    let Some(world) = server().and_then(|server| server.worlds.get_owned(&world_key)) else {
+        return;
+    };
+    let Some(particle_type) = REGISTRY.particle_types.by_key(&particle_key) else {
+        return;
+    };
+    world.send_particles(
+        ParticleData::simple(particle_type),
+        DVec3::new(x, y, z),
+        count,
+        DVec3::new(ox, oy, oz),
+        speed,
+    );
+}
+
 extern "system" fn set_block_display_block(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -6550,6 +6336,47 @@ extern "system" fn set_entity_persistent(
     }
 }
 
+extern "system" fn entity_add_scoreboard_tag(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    tag: JString<'_>,
+) -> jboolean {
+    let Ok(text) = env.get_string(&uuid) else {
+        return 0;
+    };
+    let Ok(id) = Uuid::parse_str(text.to_str().unwrap_or_default()) else {
+        return 0;
+    };
+    let Ok(tag) = env.get_string(&tag) else {
+        return 0;
+    };
+    jboolean::from(
+        entity_by_uuid(&id)
+            .is_some_and(|(_, entity)| entity.add_tag(tag.to_string_lossy().into_owned())),
+    )
+}
+
+extern "system" fn entity_remove_scoreboard_tag(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    tag: JString<'_>,
+) -> jboolean {
+    let Ok(text) = env.get_string(&uuid) else {
+        return 0;
+    };
+    let Ok(id) = Uuid::parse_str(text.to_str().unwrap_or_default()) else {
+        return 0;
+    };
+    let Ok(tag) = env.get_string(&tag) else {
+        return 0;
+    };
+    jboolean::from(
+        entity_by_uuid(&id).is_some_and(|(_, entity)| entity.remove_tag(&tag.to_string_lossy())),
+    )
+}
+
 extern "system" fn entity_remove_when_far_away(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -7497,56 +7324,6 @@ extern "system" fn entity_set_merchant_offer_demand(
     jboolean::from(mutate_villager_offer(uuid, index, |offer| {
         offer.set_demand(demand);
     }))
-}
-
-extern "system" fn entity_merchant_recipes(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-) -> jobjectArray {
-    let Ok(text) = env.get_string(&uuid) else {
-        return null_mut();
-    };
-    let Ok(uuid) = text
-        .to_str()
-        .ok()
-        .and_then(|value| uuid::Uuid::parse_str(value).ok())
-        .ok_or(())
-    else {
-        return null_mut();
-    };
-    let Some(server) = server() else {
-        return null_mut();
-    };
-    for snapshot in server.worlds.snapshots() {
-        let world = snapshot.world();
-        let Some(entity) = world.get_entity_by_uuid(&uuid) else {
-            continue;
-        };
-        let Some(villager) = entity.as_ref().downcast_ref::<VillagerEntity>() else {
-            continue;
-        };
-        let offers = villager.offers();
-        let values = offers
-            .iter()
-            .map(|offer| {
-                format!(
-                    "{} {}|{}|{}|{}|{} {}|{} {}",
-                    offer.result().item().key,
-                    offer.result().count(),
-                    offer.uses(),
-                    offer.max_uses(),
-                    offer.demand(),
-                    offer.cost_a().item().key,
-                    offer.cost_a().count(),
-                    offer.cost_b().item().key,
-                    offer.cost_b().count()
-                )
-            })
-            .collect::<Vec<_>>();
-        return string_array(&mut env, &values);
-    }
-    null_mut()
 }
 
 extern "system" fn iron_golem_player_created(
@@ -8828,25 +8605,274 @@ fn append_potion_effects(value: &mut String, stack: &ItemStack) {
     }
 }
 
+const BUKKIT_PDC_TAG: &str = "PublicBukkitValues";
+const MAX_PDC_ENTRIES: usize = 1_024;
+const MAX_PDC_KEY_BYTES: usize = 1_024;
+const MAX_PDC_STRING_BYTES: usize = 65_535;
+const MAX_PDC_RAW_BYTES: usize = 2_097_152;
+const MAX_SLOT_BRIDGE_BYTES: usize = 8_388_608;
+const MAX_SLOT_METADATA_FIELDS: usize = 4_096;
+const PDC_IDENTITY_FIELD_BYTES: usize = 77;
+// An error in the item bridge, never an empty or writable item description.
+pub(crate) const SLOT_METADATA_LIMIT_ERROR: &str = "!foton:item-metadata-limit";
+
+fn push_pdc_fields(value: &mut String, stack: &ItemStack) -> bool {
+    let Some(custom_data) = stack.get(CUSTOM_DATA) else {
+        return true;
+    };
+    if vanilla_nbt_compound_heap_size(custom_data.as_compound())
+        .is_none_or(|size| size > MAX_PDC_RAW_BYTES as u64)
+    {
+        return false;
+    }
+    let custom_data = NbtTag::Compound(custom_data.copy_tag());
+    let mut raw = Vec::new();
+    custom_data.write(&mut raw);
+    if raw.len() > MAX_PDC_RAW_BYTES || raw.len() * 2 + value.len() + 11 > MAX_SLOT_BRIDGE_BYTES {
+        return false;
+    }
+    value.push('\u{1d}');
+    value.push_str("pdcrawhex=");
+    value.push_str(&hex_encode(&raw));
+    let Some(custom_data_compound) = custom_data.compound() else {
+        return false;
+    };
+    let Some(values) = custom_data_compound.compound(BUKKIT_PDC_TAG) else {
+        return push_custom_data_identity(value, custom_data, &[]);
+    };
+    let mut exposed_keys = Vec::new();
+    for (key, tag) in values.iter().take(MAX_PDC_ENTRIES) {
+        let key = key.to_string();
+        // Java NamespacedKey parsing must retain this exact key. Bare names
+        // acquire a namespace there; rejected or normalized keys stay opaque.
+        if key.len() > MAX_PDC_KEY_BYTES
+            || !key.split_once(':').is_some_and(|(namespace, path)| {
+                !namespace.is_empty() && !path.is_empty() && Identifier::validate(namespace, path)
+            })
+        {
+            continue;
+        }
+        let encoded_key = hex_encode(key.as_bytes());
+        let field = match tag {
+            NbtTag::String(string) if string.len() <= MAX_PDC_STRING_BYTES => {
+                let decoded = string.to_string();
+                if Mutf8Str::from_str(&decoded).as_bytes() != string.as_bytes() {
+                    continue;
+                }
+                format!("pdcstrhex={encoded_key}:{}", hex_encode(decoded.as_bytes()))
+            }
+            NbtTag::Byte(byte) => format!("pdcbyte={encoded_key}:{byte}"),
+            NbtTag::Int(integer) => format!("pdcint={encoded_key}:{integer}"),
+            _ => continue,
+        };
+        if value.len() + field.len() + 1 + PDC_IDENTITY_FIELD_BYTES > MAX_SLOT_BRIDGE_BYTES {
+            break;
+        }
+        value.push('\u{1d}');
+        value.push_str(&field);
+        exposed_keys.push(key);
+    }
+    push_custom_data_identity(value, custom_data, &exposed_keys)
+}
+
+fn push_custom_data_identity(
+    value: &mut String,
+    custom_data: NbtTag,
+    exposed_keys: &[String],
+) -> bool {
+    let NbtTag::Compound(mut identity_data) = custom_data else {
+        return false;
+    };
+    match identity_data.remove(BUKKIT_PDC_TAG) {
+        Some(NbtTag::Compound(mut persistent_data)) => {
+            for key in exposed_keys {
+                persistent_data.remove(key);
+            }
+            if !persistent_data.is_empty() {
+                identity_data.insert(BUKKIT_PDC_TAG, persistent_data);
+            }
+        }
+        Some(other) => {
+            identity_data.insert(BUKKIT_PDC_TAG, other);
+        }
+        None => {}
+    }
+    if identity_data.is_empty() {
+        return true;
+    }
+    let Some(canonical) = to_canonical_snbt(&NbtTag::Compound(identity_data)) else {
+        return false;
+    };
+    let identity = hex_encode(&Sha256::digest(canonical.as_bytes()));
+    if value.len() + PDC_IDENTITY_FIELD_BYTES > MAX_SLOT_BRIDGE_BYTES {
+        return false;
+    }
+    value.push('\u{1d}');
+    value.push_str("pdcidentity=");
+    value.push_str(&identity);
+    true
+}
+
+fn decode_hex_utf8(value: &str, maximum_bytes: usize) -> Option<String> {
+    String::from_utf8(decode_hex(value, maximum_bytes)?).ok()
+}
+
+fn decode_hex(value: &str, maximum_bytes: usize) -> Option<Vec<u8>> {
+    if !value.len().is_multiple_of(2) || value.len() / 2 > maximum_bytes {
+        return None;
+    }
+    (0..value.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(value.get(index..index + 2)?, 16).ok())
+        .collect()
+}
+
+fn decode_pdc_field(field: &str) -> Option<(String, NbtTag)> {
+    let (kind, payload) = if let Some(payload) = field.strip_prefix("pdcstrhex=") {
+        ("string", payload)
+    } else if let Some(payload) = field.strip_prefix("pdcbyte=") {
+        ("byte", payload)
+    } else {
+        ("int", field.strip_prefix("pdcint=")?)
+    };
+    let (encoded_key, value) = payload.split_once(':')?;
+    let key = decode_hex_utf8(encoded_key, MAX_PDC_KEY_BYTES)?;
+    let key: Identifier = key.parse().ok()?;
+    let tag = match kind {
+        "string" => {
+            let value: simdnbt::Mutf8String = decode_hex_utf8(value, MAX_PDC_STRING_BYTES)?.into();
+            if value.len() > MAX_PDC_STRING_BYTES {
+                return None;
+            }
+            NbtTag::String(value)
+        }
+        "byte" => NbtTag::Byte(value.parse().ok()?),
+        "int" => NbtTag::Int(value.parse().ok()?),
+        _ => return None,
+    };
+    Some((key.to_string(), tag))
+}
+
+fn apply_pdc_fields(stack: &mut ItemStack, metadata: &[&str]) -> Option<()> {
+    let raw = match metadata
+        .iter()
+        .find_map(|field| field.strip_prefix("pdcrawhex="))
+    {
+        Some(encoded) => {
+            let bytes = decode_hex(encoded, MAX_PDC_RAW_BYTES)?;
+            let mut cursor = Cursor::new(bytes.as_slice());
+            let tag = read_tag(&mut cursor).ok()?;
+            if cursor.position() != bytes.len() as u64
+                || vanilla_nbt_heap_size(&tag)? > MAX_PDC_RAW_BYTES as u64
+            {
+                return None;
+            }
+            Some(tag.into_compound()?)
+        }
+        None => None,
+    };
+    let has_raw = raw.is_some();
+    let projected_full_data = metadata.iter().any(|field| field.starts_with("customhex="));
+    let mut custom_data = raw.filter(|_| !projected_full_data).unwrap_or_else(|| {
+        stack
+            .get(CUSTOM_DATA)
+            .map(CustomData::copy_tag)
+            .unwrap_or_default()
+    });
+    let mut persistent_data = match custom_data.remove(BUKKIT_PDC_TAG) {
+        Some(NbtTag::Compound(values)) => values,
+        Some(other) => {
+            custom_data.insert(BUKKIT_PDC_TAG, other);
+            NbtCompound::new()
+        }
+        None => NbtCompound::new(),
+    };
+    let mut decoded_fields = 0;
+    let mut changed_keys = FxHashSet::default();
+    for encoded in metadata
+        .iter()
+        .filter_map(|field| field.strip_prefix("pdcremove="))
+    {
+        let key = decode_hex_utf8(encoded, MAX_PDC_KEY_BYTES)?
+            .parse::<Identifier>()
+            .ok()?;
+        if !changed_keys.insert(key.to_string()) || changed_keys.len() > MAX_PDC_ENTRIES {
+            return None;
+        }
+        persistent_data.remove(&key.to_string());
+        decoded_fields += 1;
+    }
+    for field in metadata.iter().filter(|field| {
+        field.starts_with("pdcstrhex=")
+            || field.starts_with("pdcbyte=")
+            || field.starts_with("pdcint=")
+    }) {
+        let (key, tag) = decode_pdc_field(field)?;
+        if !changed_keys.insert(key.clone()) || changed_keys.len() > MAX_PDC_ENTRIES {
+            return None;
+        }
+        persistent_data.remove(&key);
+        persistent_data.insert(key, tag);
+        decoded_fields += 1;
+    }
+    if !has_raw && decoded_fields == 0 {
+        return Some(());
+    }
+
+    if !persistent_data.is_empty() {
+        custom_data.remove(BUKKIT_PDC_TAG);
+        custom_data.insert(BUKKIT_PDC_TAG, persistent_data);
+    }
+    if custom_data.is_empty() {
+        stack.remove(CUSTOM_DATA);
+    } else {
+        stack.set(CUSTOM_DATA, CustomData::try_from_compound(custom_data)?);
+    }
+    Some(())
+}
+
+fn append_plain_lore(stack: &ItemStack, value: &mut String) {
+    if let Some(lore) = stack.get(LORE) {
+        for line in lore.lines() {
+            value.push('\u{1d}');
+            value.push_str("lorehex=");
+            for byte in line.to_string().as_bytes() {
+                let _ = write!(value, "{byte:02x}");
+            }
+        }
+    }
+}
+
 pub(crate) fn describe_slot(stack: &ItemStack) -> String {
     if stack.is_empty() {
         return String::new();
     }
     let mut value = format!("{} {}", stack.item().key, stack.count());
-    if let Some(damage) = stack.get(DAMAGE).copied().filter(|damage| *damage != 0) {
-        value.push('\u{1d}');
-        let _ = write!(value, "damage={damage}");
+    if let Some(damage) = stack.get(bridge_vanilla_components::DAMAGE) {
+        let _ = write!(value, "\u{1d}damage={damage}");
     }
     if let Some(opaque) = stack.opaque_nbt() {
+        if opaque.len() > (MAX_SLOT_BRIDGE_BYTES - value.len() - 8) / 2 {
+            return SLOT_METADATA_LIMIT_ERROR.to_owned();
+        }
         value.push('\u{1d}');
         value.push_str("nbthex=");
         value.push_str(&hex_encode(opaque.as_bytes()));
     }
+    if !push_pdc_fields(&mut value, stack) {
+        return SLOT_METADATA_LIMIT_ERROR.to_owned();
+    }
+    if item_components::describe_name(stack, &mut value).is_none() {
+        return SLOT_METADATA_LIMIT_ERROR.to_owned();
+    }
+    append_plain_lore(stack, &mut value);
     if stack.has(UNBREAKABLE) {
         value.push('\u{1d}');
         value.push_str("unbreakable");
     }
-    if let Some(model) = stack.get(ITEM_MODEL) {
+    if stack.patch().get_entry(ITEM_MODEL.key()).is_some()
+        && let Some(model) = stack.get(ITEM_MODEL)
+    {
         value.push('\u{1d}');
         let _ = write!(
             value,
@@ -8908,8 +8934,19 @@ pub(crate) fn describe_slot(stack: &ItemStack) -> String {
             );
         }
     }
-    item_components::describe(stack, &mut value);
+    if item_components::describe(stack, &mut value).is_none() {
+        return SLOT_METADATA_LIMIT_ERROR.to_owned();
+    }
     append_potion_effects(&mut value, stack);
+    checked_slot_description(value)
+}
+
+fn checked_slot_description(value: String) -> String {
+    if value.len() > MAX_SLOT_BRIDGE_BYTES
+        || value.split('\u{1d}').count() > MAX_SLOT_METADATA_FIELDS + 1
+    {
+        return SLOT_METADATA_LIMIT_ERROR.to_owned();
+    }
     value
 }
 
@@ -8938,15 +8975,18 @@ extern "system" fn item_translation_key(
               several functions"
 )]
 pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
+    REGISTRY.get()?;
+    if text == SLOT_METADATA_LIMIT_ERROR || text.len() > MAX_SLOT_BRIDGE_BYTES {
+        return None;
+    }
+    bridge_item_bridge::legacy::validate(text)?;
     let mut encoded = text.trim().split('\u{1d}');
     let text = encoded.next().unwrap_or_default();
-    let metadata = encoded.collect::<Vec<_>>();
-    if metadata
-        .iter()
-        .filter(|value| value.starts_with("lorehex="))
-        .count()
-        > 256
-    {
+    let metadata = encoded
+        .by_ref()
+        .take(MAX_SLOT_METADATA_FIELDS + 1)
+        .collect::<Vec<_>>();
+    if metadata.len() > MAX_SLOT_METADATA_FIELDS || encoded.next().is_some() {
         return None;
     }
     if text.is_empty() {
@@ -8972,7 +9012,7 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
         .find_map(|value| value.strip_prefix("damage="))
         .and_then(|value| value.parse::<i32>().ok());
     if let Some(damage) = damage {
-        stack.set_damage_value(damage);
+        stack.set(bridge_vanilla_components::DAMAGE, damage);
     }
     if let Some(encoded) = metadata
         .iter()
@@ -8986,6 +9026,13 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
             use foton_registry::data_components::vanilla_components::CUSTOM_NAME;
             stack.set(CUSTOM_NAME, TextComponent::plain(name));
         }
+    }
+    if let Some(encoded) = metadata
+        .iter()
+        .find_map(|value| value.strip_prefix("namejsonhex="))
+    {
+        let json = String::from_utf8(hex_decode(encoded)).ok()?;
+        stack.set(CUSTOM_NAME, adventure_component_from_json(&json)?);
     }
     let lore_lines = metadata
         .iter()
@@ -9096,75 +9143,32 @@ pub(crate) fn parse_slot(text: &str) -> Option<ItemStack> {
     if !stored.is_empty() {
         stack.set(STORED_ENCHANTMENTS, stored);
     }
-    item_components::parse(&mut stack, &metadata);
+    item_components::parse(&mut stack, &metadata)?;
+    apply_pdc_fields(&mut stack, &metadata)?;
     let effects = metadata
         .iter()
         .find_map(|value| value.strip_prefix("potioneffects="))
         .or_else(|| {
-            metadata.iter().copied().find(|value| {
-                !value.contains('=') && *value != "hidetooltip" && *value != "unbreakable"
-            })
+            metadata
+                .iter()
+                .copied()
+                .find(|value| value.contains(',') && !value.contains('='))
         });
-    let base_potion = metadata
+    let base_potion = match metadata
         .iter()
         .find_map(|value| value.strip_prefix("basepotionhex="))
-        .and_then(|encoded| String::from_utf8(hex_decode(encoded)).ok())
-        .and_then(|name| name.parse::<Identifier>().ok())
-        .and_then(|key| REGISTRY.potions.by_key(&key))
-        .map(RegistryReference::new);
-    let mut custom = Vec::new();
-    if let Some(effects) = effects {
-        use foton_registry::mob_effect::instance::MobEffectInstance;
-        for field in effects.split(';') {
-            let parts = field.split(',').collect::<Vec<_>>();
-            let (name, duration, amplifier, ambient, show_particles, show_icon) = match parts[..] {
-                [name, duration, amplifier] => (name, duration, amplifier, false, true, true),
-                [
-                    name,
-                    duration,
-                    amplifier,
-                    ambient,
-                    show_particles,
-                    show_icon,
-                ] => {
-                    let (Ok(ambient), Ok(show_particles), Ok(show_icon)) = (
-                        ambient.parse::<bool>(),
-                        show_particles.parse::<bool>(),
-                        show_icon.parse::<bool>(),
-                    ) else {
-                        continue;
-                    };
-                    (
-                        name,
-                        duration,
-                        amplifier,
-                        ambient,
-                        show_particles,
-                        show_icon,
-                    )
-                }
-                _ => continue,
-            };
-            let (Ok(duration), Ok(amplifier)) = (duration.parse(), amplifier.parse()) else {
-                continue;
-            };
-            let Ok(key) = format!("minecraft:{name}").parse() else {
-                continue;
-            };
-            let Some(effect) = REGISTRY.mob_effects.by_key(&key) else {
-                continue;
-            };
-            custom.push(MobEffectInstance::new(
-                effect,
-                duration,
-                amplifier,
-                ambient,
-                show_particles,
-                show_icon,
-                None,
-            ));
+    {
+        Some(encoded) => {
+            let name = decode_hex_utf8(encoded, MAX_SLOT_BRIDGE_BYTES)?;
+            let key: Identifier = name.parse().ok()?;
+            Some(RegistryReference::new(REGISTRY.potions.by_key(&key)?))
         }
-    }
+        None => None,
+    };
+    let custom = match effects {
+        Some(effects) => bridge_item_bridge::legacy::parse_effects(effects)?,
+        None => Vec::new(),
+    };
     if base_potion.is_some() || !custom.is_empty() {
         use foton_registry::data_components::components::PotionContents;
         stack.set(
@@ -9461,7 +9465,7 @@ extern "system" fn recipe_result(
     let value = env.get_string(&key).ok().and_then(|text| {
         let key = text.to_str().ok()?.parse().ok()?;
         let recipe = foton_registry::REGISTRY.recipes.result_by_id(&key)?;
-        Some(format!("{}|{}", recipe.item.key(), recipe.count))
+        Some(format!("{}|{}", recipe.item().key(), recipe.count()))
     });
     to_java(&mut env, value)
 }
@@ -9507,6 +9511,9 @@ extern "system" fn recipe_add_shapeless(
     if count <= 0 {
         return jboolean::from(false);
     }
+    let Ok(result) = RecipeResult::try_new(result_item, count) else {
+        return jboolean::from(false);
+    };
     let Ok(length) = env.get_array_length(&ingredients) else {
         return jboolean::from(false);
     };
@@ -9535,10 +9542,7 @@ extern "system" fn recipe_add_shapeless(
                 id: key,
                 category: CraftingCategory::Misc,
                 ingredients,
-                result: RecipeResult {
-                    item: result_item,
-                    count,
-                },
+                result,
                 // Bukkit's defaults: a recipe that sets neither is ungrouped
                 // and filed under misc, and it unlocks with a toast.
                 show_notification: true,
@@ -9576,6 +9580,9 @@ extern "system" fn recipe_add_shaped(
     if count <= 0 {
         return jboolean::from(false);
     }
+    let Ok(result) = RecipeResult::try_new(result_item, count) else {
+        return jboolean::from(false);
+    };
     let Some(rows) = read_string_array(&mut env, &shape) else {
         return jboolean::from(false);
     };
@@ -9642,10 +9649,7 @@ extern "system" fn recipe_add_shaped(
         width,
         rows.len(),
         pattern,
-        RecipeResult {
-            item: result_item,
-            count,
-        },
+        result,
         true,
         Cow::Borrowed(""),
     )))
@@ -9659,8 +9663,8 @@ extern "system" fn recipe_list(mut env: JNIEnv<'_>, _class: JClass<'_>) -> jobje
             format!(
                 "{}|{}|{}",
                 recipe.id(),
-                recipe.result().item.key(),
-                recipe.result().count
+                recipe.result().item().key(),
+                recipe.result().count()
             )
         })
         .collect();
@@ -9726,61 +9730,6 @@ extern "system" fn block_passable(
     })
 }
 
-/// Returns the item currently stored in a lectern, without discarding its book type.
-extern "system" fn lectern_book(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    name: JString<'_>,
-    x: jint,
-    y: jint,
-    z: jint,
-) -> jstring {
-    let value = world(&mut env, &name).and_then(|world| {
-        let entity = world.get_block_entity(BlockPos::new(x, y, z))?;
-        let lectern = entity.downcast_ref::<LecternBlockEntity>()?;
-        let book = lectern.book();
-        (!book.is_empty()).then(|| describe_slot(&book))
-    });
-    to_java(&mut env, value)
-}
-
-/// Returns the plain pages currently stored in a lectern book.
-extern "system" fn lectern_book_pages(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    name: JString<'_>,
-    x: jint,
-    y: jint,
-    z: jint,
-) -> jobjectArray {
-    let Some(world) = world(&mut env, &name) else {
-        return null_mut();
-    };
-    let Some(entity) = world.get_block_entity(BlockPos::new(x, y, z)) else {
-        return null_mut();
-    };
-    let Some(lectern) = entity.downcast_ref::<LecternBlockEntity>() else {
-        return null_mut();
-    };
-    let book = lectern.book();
-    let pages: Vec<String> = if let Some(written) = book.get(WRITTEN_BOOK_CONTENT) {
-        written
-            .pages()
-            .iter()
-            .map(|page| page.get(false).to_plain(&DisplayResolutor))
-            .collect()
-    } else if let Some(writable) = book.get(WRITABLE_BOOK_CONTENT) {
-        writable
-            .pages()
-            .iter()
-            .map(|page| page.get(false).clone())
-            .collect()
-    } else {
-        Vec::new()
-    };
-    string_array(&mut env, &pages)
-}
-
 /// Removes the book from a lectern and returns the slot to its vanilla empty state.
 extern "system" fn lectern_clear_book(
     mut env: JNIEnv<'_>,
@@ -9800,39 +9749,6 @@ extern "system" fn lectern_clear_book(
         return;
     };
     let _ = lectern.take_book();
-}
-
-/// Sets a lectern book from the API's item encoding; non-book items are rejected.
-extern "system" fn lectern_set_book(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    name: JString<'_>,
-    x: jint,
-    y: jint,
-    z: jint,
-    item: JString<'_>,
-) -> jboolean {
-    let Ok(text) = env.get_string(&item) else {
-        return 0;
-    };
-    let Some(book) = parse_slot(&String::from(text)) else {
-        return 0;
-    };
-    if *book.item() != *vanilla_items::WRITABLE_BOOK && *book.item() != *vanilla_items::WRITTEN_BOOK
-    {
-        return 0;
-    }
-    let Some(world) = world(&mut env, &name) else {
-        return 0;
-    };
-    let Some(entity) = world.get_block_entity(BlockPos::new(x, y, z)) else {
-        return 0;
-    };
-    let Some(lectern) = entity.downcast_ref::<LecternBlockEntity>() else {
-        return 0;
-    };
-    lectern.set_book(book);
-    1
 }
 
 /// `foton.Native.setBlock`
@@ -10030,40 +9946,7 @@ extern "system" fn open_menu_top_slot_count(
         .unwrap_or(-1)
 }
 
-extern "system" fn open_menu_slot(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    slot: jint,
-) -> jstring {
-    let item = usize::try_from(slot).ok().and_then(|slot| {
-        player(&mut env, &uuid).and_then(|player| player.open_container_item(slot))
-    });
-    to_java(&mut env, item.map(|stack| describe_slot(&stack)))
-}
-
 /// `foton.Native.openMenuType`
-extern "system" fn set_open_menu_slot(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    slot: jint,
-    item: JString<'_>,
-) -> jboolean {
-    let Ok(text) = env.get_string(&item) else {
-        return 0;
-    };
-    let Some(stack) = parse_slot(&String::from(text)) else {
-        return 0;
-    };
-    let Ok(slot) = usize::try_from(slot) else {
-        return 0;
-    };
-    jboolean::from(
-        player(&mut env, &uuid).is_some_and(|player| player.set_open_container_item(slot, stack)),
-    )
-}
-
 /// Native open menu type
 extern "system" fn open_menu_title(
     mut env: JNIEnv<'_>,
@@ -10390,88 +10273,6 @@ extern "system" fn set_allow_flight(
     if let Some(player) = player(&mut env, &uuid) {
         player.abilities.lock().may_fly = value != 0;
         player.send_abilities();
-    }
-}
-
-/// `foton.Native.inventorySlot`
-extern "system" fn inventory_slot(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    slot: jint,
-) -> jstring {
-    let described = player(&mut env, &uuid).and_then(|player| {
-        let slot = usize::try_from(slot).ok()?;
-        let inventory = player.inventory.lock();
-        (slot < inventory.get_container_size()).then(|| describe_slot(inventory.get_item(slot)))
-    });
-    to_java(&mut env, described)
-}
-
-/// `foton.Native.setInventorySlot`
-extern "system" fn set_inventory_slot(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    slot: jint,
-    item: JString<'_>,
-) {
-    let Some(player) = player(&mut env, &uuid) else {
-        return;
-    };
-    let Ok(text) = env.get_string(&item) else {
-        return;
-    };
-    let text: String = text.into();
-    let Some(stack) = parse_slot(&text) else {
-        return;
-    };
-    let Ok(slot) = usize::try_from(slot) else {
-        return;
-    };
-    let mut inventory = player.inventory.lock();
-    if slot < inventory.get_container_size() {
-        inventory.set_item(slot, stack);
-    }
-}
-
-extern "system" fn ender_chest_slot(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    slot: jint,
-) -> jstring {
-    let described = player(&mut env, &uuid).and_then(|player| {
-        let slot = usize::try_from(slot).ok()?;
-        let inventory = player.ender_chest.lock();
-        (slot < inventory.get_container_size()).then(|| describe_slot(inventory.get_item(slot)))
-    });
-    to_java(&mut env, described)
-}
-
-extern "system" fn set_ender_chest_slot(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    uuid: JString<'_>,
-    slot: jint,
-    item: JString<'_>,
-) {
-    let Some(player) = player(&mut env, &uuid) else {
-        return;
-    };
-    let Ok(text) = env.get_string(&item) else {
-        return;
-    };
-    let text: String = text.into();
-    let Some(stack) = parse_slot(&text) else {
-        return;
-    };
-    let Ok(slot) = usize::try_from(slot) else {
-        return;
-    };
-    let mut inventory = player.ender_chest.lock();
-    if slot < inventory.get_container_size() {
-        inventory.set_item(slot, stack);
     }
 }
 
@@ -11539,70 +11340,6 @@ extern "system" fn jukebox_is_playing(
     u8::from(playing)
 }
 
-extern "system" fn jukebox_record(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    name: JString<'_>,
-    x: jint,
-    y: jint,
-    z: jint,
-) -> jstring {
-    let value = world(&mut env, &name)
-        .and_then(|world| world.get_block_entity(BlockPos::new(x, y, z)))
-        .and_then(|entity| {
-            entity
-                .downcast_ref::<JukeboxBlockEntity>()
-                .map(|jukebox| describe_slot(&jukebox.item()))
-        });
-    to_java(&mut env, value)
-}
-
-extern "system" fn jukebox_set_record(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    name: JString<'_>,
-    x: jint,
-    y: jint,
-    z: jint,
-    encoded: JString<'_>,
-) {
-    let Ok(encoded): Result<String, _> = env.get_string(&encoded).map(Into::into) else {
-        return;
-    };
-    let Some(world) = world(&mut env, &name) else {
-        return;
-    };
-    let Some(entity) = world.get_block_entity(BlockPos::new(x, y, z)) else {
-        return;
-    };
-    let Some(jukebox) = entity.downcast_ref::<JukeboxBlockEntity>() else {
-        return;
-    };
-    let item = parse_slot(&encoded).unwrap_or_else(ItemStack::empty);
-    jukebox.insert(&world, item);
-}
-
-extern "system" fn hopper_inventory_slot(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    name: JString<'_>,
-    x: jint,
-    y: jint,
-    z: jint,
-    slot: jint,
-) -> jstring {
-    let value = world(&mut env, &name).and_then(|world| {
-        let entity = world.get_block_entity(BlockPos::new(x, y, z))?;
-        let container = ContainerRef::from_block_entity(entity)?;
-        let guard = ContainerLockGuard::lock_all(&[&container]);
-        guard.get(container.container_id()).and_then(|c| {
-            (slot >= 0 && (slot as usize) < c.get_container_size())
-                .then(|| describe_slot(c.get_item(slot as usize)))
-        })
-    });
-    to_java(&mut env, value)
-}
-
 /// `foton.Native.craftingRecipe`: the key of the recipe a square crafting
 /// grid `width` wide makes, the stacks row by row, or null when none does.
 extern "system" fn crafting_recipe(
@@ -12451,41 +12188,6 @@ extern "system" fn brewing_stand_state(
         });
     to_java(&mut env, value)
 }
-
-extern "system" fn hopper_set_inventory_slot(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    name: JString<'_>,
-    x: jint,
-    y: jint,
-    z: jint,
-    slot: jint,
-    item: JString<'_>,
-) {
-    let Ok(item): Result<String, _> = env.get_string(&item).map(Into::into) else {
-        return;
-    };
-    let Some(stack) = parse_slot(&item) else {
-        return;
-    };
-    let Some(world) = world(&mut env, &name) else {
-        return;
-    };
-    let Some(entity) = world.get_block_entity(BlockPos::new(x, y, z)) else {
-        return;
-    };
-    let Some(container) = ContainerRef::from_block_entity(entity) else {
-        return;
-    };
-    let mut guard = ContainerLockGuard::lock_all(&[&container]);
-    if slot >= 0
-        && let Some(c) = guard.get_mut(container.container_id())
-        && (slot as usize) < c.get_container_size()
-    {
-        c.set_item(slot as usize, stack);
-    }
-}
-
 /// `foton.Native.signLines`
 extern "system" fn sign_lines(
     mut env: JNIEnv<'_>,
@@ -12994,34 +12696,6 @@ extern "system" fn world_loaded_chunk_coords(
     string_array(&mut env, &coords)
 }
 
-/// `foton.Native.worldDropItem`
-extern "system" fn world_drop_item(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    name: JString<'_>,
-    x: jdouble,
-    y: jdouble,
-    z: jdouble,
-    item: JString<'_>,
-) -> jstring {
-    let Some(world) = world(&mut env, &name) else {
-        return null_mut();
-    };
-    let Ok(item) = env.get_string(&item) else {
-        return null_mut();
-    };
-    let Ok(item) = item.to_str() else {
-        return null_mut();
-    };
-    let Some(stack) = parse_slot(item) else {
-        return null_mut();
-    };
-    let Some(entity) = world.spawn_item(glam::DVec3::new(x, y, z), stack) else {
-        return null_mut();
-    };
-    to_java(&mut env, Some(entity.uuid().to_string()))
-}
-
 /// `foton.Native.worldAutoSave`
 extern "system" fn world_auto_save(
     mut env: JNIEnv<'_>,
@@ -13064,6 +12738,346 @@ extern "system" fn world_folder(
         return null_mut();
     };
     value.into_raw()
+}
+
+pub(crate) fn adventure_component_from_json(encoded: &str) -> Option<TextComponent> {
+    let mut value = serde_json::from_str::<serde_json::Value>(encoded).ok()?;
+    normalize_adventure_component(&mut value)?;
+    normalize_adventure_colors(&mut value, true);
+    serde_json::from_value(value).ok()
+}
+
+pub(crate) fn adventure_component_to_json(component: &TextComponent) -> Option<String> {
+    let mut value = serde_json::to_value(component).ok()?;
+    normalize_adventure_colors(&mut value, false);
+    serde_json::to_string(&value).ok()
+}
+
+fn normalize_adventure_component(value: &mut serde_json::Value) -> Option<()> {
+    match value {
+        serde_json::Value::String(_) => {
+            let serde_json::Value::String(text) = value.take() else {
+                return None;
+            };
+            *value = serde_json::json!({ "text": text });
+        }
+        serde_json::Value::Array(_) => {
+            let serde_json::Value::Array(mut components) = value.take() else {
+                return None;
+            };
+            for component in &mut components {
+                normalize_adventure_component(component)?;
+            }
+            *value = serde_json::json!({ "text": "", "extra": components });
+        }
+        serde_json::Value::Object(fields) => {
+            normalize_component_list(fields.get_mut("extra"))?;
+            normalize_component_list(fields.get_mut("with"))?;
+            if let Some(separator) = fields.get_mut("separator") {
+                normalize_adventure_component(separator)?;
+            }
+            if (fields.contains_key("sprite") || fields.contains_key("player"))
+                && let Some(fallback) = fields.get_mut("fallback")
+            {
+                normalize_adventure_component(fallback)?;
+            }
+            normalize_adventure_hover(fields.get_mut("hover_event"))?;
+        }
+        _ => return None,
+    }
+    Some(())
+}
+
+fn normalize_component_list(value: Option<&mut serde_json::Value>) -> Option<()> {
+    let Some(value) = value else {
+        return Some(());
+    };
+    let serde_json::Value::Array(components) = value else {
+        return None;
+    };
+    for component in components {
+        normalize_adventure_component(component)?;
+    }
+    Some(())
+}
+
+fn normalize_adventure_hover(value: Option<&mut serde_json::Value>) -> Option<()> {
+    let Some(serde_json::Value::Object(hover)) = value else {
+        return Some(());
+    };
+    match hover.get("action").and_then(serde_json::Value::as_str) {
+        Some("show_text") => {
+            if !hover.contains_key("value")
+                && let Some(contents) = hover.remove("contents")
+            {
+                hover.insert("value".to_owned(), contents);
+            }
+            normalize_adventure_component(hover.get_mut("value")?)
+        }
+        Some("show_entity") => {
+            if let Some(name) = hover.get_mut("name") {
+                normalize_adventure_component(name)?;
+            }
+            Some(())
+        }
+        _ => Some(()),
+    }
+}
+
+fn normalize_adventure_colors(value: &mut serde_json::Value, decode: bool) {
+    match value {
+        serde_json::Value::Array(values) => {
+            for value in values {
+                normalize_adventure_colors(value, decode);
+            }
+        }
+        serde_json::Value::Object(fields) => {
+            for value in fields.values_mut() {
+                normalize_adventure_colors(value, decode);
+            }
+            let Some(color) = fields.get_mut("color") else {
+                return;
+            };
+            if decode {
+                let serde_json::Value::String(encoded) = color else {
+                    return;
+                };
+                let Some(hex) = encoded.strip_prefix('#') else {
+                    return;
+                };
+                if hex.len() != 6 {
+                    return;
+                }
+                let Ok(rgb) = u32::from_str_radix(hex, 16) else {
+                    return;
+                };
+                *color = serde_json::json!({
+                    "rgb": [rgb >> 16, (rgb >> 8) & 0xff, rgb & 0xff]
+                });
+            } else {
+                let serde_json::Value::Object(encoded) = color else {
+                    return;
+                };
+                let Some(serde_json::Value::Array(rgb)) = encoded.get("rgb") else {
+                    return;
+                };
+                if rgb.len() != 3 {
+                    return;
+                }
+                let Some(red) = rgb[0].as_u64().filter(|value| *value <= 255) else {
+                    return;
+                };
+                let Some(green) = rgb[1].as_u64().filter(|value| *value <= 255) else {
+                    return;
+                };
+                let Some(blue) = rgb[2].as_u64().filter(|value| *value <= 255) else {
+                    return;
+                };
+                *color = serde_json::Value::String(format!("#{red:02x}{green:02x}{blue:02x}"));
+            }
+        }
+        _ => {}
+    }
+}
+
+/// `foton.Native.scoreboardTeamPrefix`
+extern "system" fn scoreboard_team_prefix(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    world_name: JString<'_>,
+    team_name: JString<'_>,
+) -> jstring {
+    let Ok(world_name): Result<String, _> = env.get_string(&world_name).map(Into::into) else {
+        return null_mut();
+    };
+    let Ok(team_name): Result<String, _> = env.get_string(&team_name).map(Into::into) else {
+        return null_mut();
+    };
+    let prefix = server().and_then(|server| {
+        let key: Identifier = world_name.parse().ok()?;
+        let world = server.worlds.get_owned(&key)?;
+        let scoreboard = server.scoreboards.get(world.domain())?;
+        let team = scoreboard.team(&team_name)?;
+        let snapshot = scoreboard.team_snapshot(&team)?;
+        adventure_component_to_json(&snapshot.prefix)
+    });
+    to_java(&mut env, prefix)
+}
+
+/// `foton.Native.scoreboardSetTeamPrefix`
+extern "system" fn scoreboard_set_team_prefix(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    world_name: JString<'_>,
+    team_name: JString<'_>,
+    prefix: JString<'_>,
+) -> jboolean {
+    let Ok(world_name): Result<String, _> = env.get_string(&world_name).map(Into::into) else {
+        return 0;
+    };
+    let Ok(team_name): Result<String, _> = env.get_string(&team_name).map(Into::into) else {
+        return 0;
+    };
+    let Ok(prefix): Result<String, _> = env.get_string(&prefix).map(Into::into) else {
+        return 0;
+    };
+    let Some(prefix) = adventure_component_from_json(&prefix) else {
+        return 0;
+    };
+    jboolean::from(server().is_some_and(|server| {
+        let Ok(key) = world_name.parse::<Identifier>() else {
+            return false;
+        };
+        let Some(world) = server.worlds.get_owned(&key) else {
+            return false;
+        };
+        let domain = world.domain();
+        let Some(scoreboard) = server.scoreboards.get(domain) else {
+            return false;
+        };
+        let Some(team) = scoreboard.team(&team_name) else {
+            return false;
+        };
+        scoreboard.set_team_prefix(&team, prefix)
+    }))
+}
+
+/// `foton.Native.scoreboardAddTeam`
+extern "system" fn scoreboard_add_team(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    world_name: JString<'_>,
+    team_name: JString<'_>,
+) -> jboolean {
+    let Ok(world_name): Result<String, _> = env.get_string(&world_name).map(Into::into) else {
+        return 0;
+    };
+    let Ok(team_name): Result<String, _> = env.get_string(&team_name).map(Into::into) else {
+        return 0;
+    };
+    jboolean::from(server().is_some_and(|server| {
+        let Ok(key) = world_name.parse::<Identifier>() else {
+            return false;
+        };
+        let Some(world) = server.worlds.get_owned(&key) else {
+            return false;
+        };
+        let domain = world.domain();
+        let Some(scoreboard) = server.scoreboards.get(domain) else {
+            return false;
+        };
+        scoreboard.add_team(team_name).is_ok()
+    }))
+}
+
+/// `foton.Native.scoreboardRemoveTeam`
+extern "system" fn scoreboard_remove_team(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    world_name: JString<'_>,
+    team_name: JString<'_>,
+) -> jboolean {
+    let Ok(world_name): Result<String, _> = env.get_string(&world_name).map(Into::into) else {
+        return 0;
+    };
+    let Ok(team_name): Result<String, _> = env.get_string(&team_name).map(Into::into) else {
+        return 0;
+    };
+    jboolean::from(server().is_some_and(|server| {
+        let Ok(key) = world_name.parse::<Identifier>() else {
+            return false;
+        };
+        let Some(world) = server.worlds.get_owned(&key) else {
+            return false;
+        };
+        let domain = world.domain();
+        let Some(scoreboard) = server.scoreboards.get(domain) else {
+            return false;
+        };
+        let Some(team) = scoreboard.team(&team_name) else {
+            return false;
+        };
+        scoreboard.remove_team(&team)
+    }))
+}
+
+/// `foton.Native.scoreboardAddEntry`
+extern "system" fn scoreboard_add_entry(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    world_name: JString<'_>,
+    team_name: JString<'_>,
+    entry: JString<'_>,
+) -> jboolean {
+    let Ok(world_name): Result<String, _> = env.get_string(&world_name).map(Into::into) else {
+        return 0;
+    };
+    let Ok(team_name): Result<String, _> = env.get_string(&team_name).map(Into::into) else {
+        return 0;
+    };
+    let Ok(entry): Result<String, _> = env.get_string(&entry).map(Into::into) else {
+        return 0;
+    };
+    jboolean::from(server().is_some_and(|server| {
+        let Ok(key) = world_name.parse::<Identifier>() else {
+            return false;
+        };
+        let Some(world) = server.worlds.get_owned(&key) else {
+            return false;
+        };
+        let domain = world.domain();
+        let Some(scoreboard) = server.scoreboards.get(domain) else {
+            return false;
+        };
+        let Some(team) = scoreboard.team(&team_name) else {
+            return false;
+        };
+        let holder = ScoreHolder::new(entry.clone());
+        let previous = scoreboard.holder_team_name(&holder);
+        if previous.as_deref() == Some(team.name()) {
+            return false;
+        }
+        if scoreboard.add_holder_to_team(&holder, &team).is_err() {
+            return false;
+        }
+        true
+    }))
+}
+
+/// `foton.Native.scoreboardRemoveEntry`
+extern "system" fn scoreboard_remove_entry(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    world_name: JString<'_>,
+    team_name: JString<'_>,
+    entry: JString<'_>,
+) -> jboolean {
+    let Ok(world_name): Result<String, _> = env.get_string(&world_name).map(Into::into) else {
+        return 0;
+    };
+    let Ok(team_name): Result<String, _> = env.get_string(&team_name).map(Into::into) else {
+        return 0;
+    };
+    let Ok(entry): Result<String, _> = env.get_string(&entry).map(Into::into) else {
+        return 0;
+    };
+    jboolean::from(server().is_some_and(|server| {
+        let Ok(key) = world_name.parse::<Identifier>() else {
+            return false;
+        };
+        let Some(world) = server.worlds.get_owned(&key) else {
+            return false;
+        };
+        let domain = world.domain();
+        let Some(scoreboard) = server.scoreboards.get(domain) else {
+            return false;
+        };
+        let holder = ScoreHolder::new(entry.clone());
+        if scoreboard.holder_team_name(&holder).as_deref() != Some(team_name.as_str()) {
+            return false;
+        }
+        scoreboard.remove_holder_from_team(&holder)
+    }))
 }
 
 /// `foton.Native.scoreboardTeamEntries`
@@ -13571,6 +13585,76 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
 
     let mut bindings = vec![
         method(
+            "itemMetaKind",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            bridge_item_bridge::meta_kind::query as *mut c_void,
+        ),
+        method(
+            "itemComponentState",
+            "(Lfoton/item/ItemMutation;Ljava/lang/String;)I",
+            bridge_item_bridge::public_components::state as *mut c_void,
+        ),
+        method(
+            "editItemComponent",
+            "(Lfoton/item/ItemMutation;Ljava/lang/String;Z)Lfoton/item/ItemTransfer;",
+            bridge_item_bridge::public_components::edit as *mut c_void,
+        ),
+        method(
+            "itemCustomModelData",
+            "(Lfoton/item/ItemMutation;)Lio/papermc/paper/datacomponent/item/CustomModelData;",
+            bridge_item_bridge::public_components::model as *mut c_void,
+        ),
+        method(
+            "itemDurability",
+            "(Lfoton/item/ItemMutation;)I",
+            bridge_item_bridge::queries::durability as *mut c_void,
+        ),
+        method(
+            "setItemDurability",
+            "(Lfoton/item/ItemMutation;I)Lfoton/item/ItemTransfer;",
+            bridge_item_bridge::transitions::durability as *mut c_void,
+        ),
+        method(
+            "rebaseItem",
+            "(Lfoton/item/ItemMutation;Ljava/lang/String;Z)Lfoton/item/ItemTransfer;",
+            bridge_item_bridge::transitions::rebase as *mut c_void,
+        ),
+        method(
+            "convertItemMeta",
+            "(Lfoton/item/ItemMutation;Lfoton/item/ItemMutation;Ljava/lang/String;Z)Lfoton/item/ItemTransfer;",
+            bridge_item_bridge::transitions::convert_meta as *mut c_void,
+        ),
+        method(
+            "itemHasMeta",
+            "(Lfoton/item/ItemMutation;)Z",
+            bridge_item_bridge::queries::has_meta as *mut c_void,
+        ),
+        method(
+            "itemsSimilar",
+            "(Lfoton/item/ItemMutation;Lfoton/item/ItemMutation;)Z",
+            bridge_item_bridge::queries::similar as *mut c_void,
+        ),
+        method(
+            "itemDamage",
+            "(Lfoton/item/ItemMutation;)Ljava/lang/Integer;",
+            bridge_item_bridge::queries::damage as *mut c_void,
+        ),
+        method(
+            "setPlayerInventorySlots",
+            "(Ljava/lang/String;Z[I[Lfoton/item/ItemMutation;)V",
+            bridge_item_bridge::inventory::set_slots as *mut c_void,
+        ),
+        method(
+            "closeItemSnapshots",
+            "()V",
+            bridge_item_bridge::transfer::close as *mut c_void,
+        ),
+        method(
+            "releaseItemLease",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            bridge_item_bridge::transfer::release as *mut c_void,
+        ),
+        method(
             "mergeItemSnbt",
             "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
             merge_item_snbt as *mut c_void,
@@ -13888,18 +13972,18 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method(
             "jukeboxSetRecord",
-            "(Ljava/lang/String;IIILjava/lang/String;)V",
-            jukebox_set_record as *mut c_void,
+            "(Ljava/lang/String;IIILfoton/item/ItemMutation;)V",
+            bridge_item_bridge::block_item::set_jukebox as *mut c_void,
         ),
         method(
             "jukeboxRecord",
-            "(Ljava/lang/String;III)Ljava/lang/String;",
-            jukebox_record as *mut c_void,
+            "(Ljava/lang/String;III)Lfoton/item/ItemTransfer;",
+            bridge_item_bridge::block_item::jukebox as *mut c_void,
         ),
         method(
             "hopperInventorySlot",
-            "(Ljava/lang/String;IIII)Ljava/lang/String;",
-            hopper_inventory_slot as *mut c_void,
+            "(Ljava/lang/String;IIII)Lfoton/item/ItemTransfer;",
+            bridge_item_bridge::block_inventory::get as *mut c_void,
         ),
         method("isFuel", "(Ljava/lang/String;)Z", is_fuel as *mut c_void),
         method(
@@ -13949,8 +14033,13 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method(
             "hopperSetInventorySlot",
-            "(Ljava/lang/String;IIIILjava/lang/String;)V",
-            hopper_set_inventory_slot as *mut c_void,
+            "(Ljava/lang/String;IIIILfoton/item/ItemMutation;)V",
+            bridge_item_bridge::block_inventory::set as *mut c_void,
+        ),
+        method(
+            "blockInventorySetContents",
+            "(Ljava/lang/String;III[Lfoton/item/ItemMutation;)V",
+            bridge_item_bridge::block_inventory::set_contents as *mut c_void,
         ),
         method(
             "hopperCustomName",
@@ -14084,8 +14173,38 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method(
             "worldDropItem",
-            "(Ljava/lang/String;DDDLjava/lang/String;)Ljava/lang/String;",
-            world_drop_item as *mut c_void,
+            "(Ljava/lang/String;DDDLfoton/item/ItemMutation;)Ljava/lang/String;",
+            bridge_item_bridge::entity::drop_item as *mut c_void,
+        ),
+        method(
+            "scoreboardTeamPrefix",
+            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            scoreboard_team_prefix as *mut c_void,
+        ),
+        method(
+            "scoreboardSetTeamPrefix",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+            scoreboard_set_team_prefix as *mut c_void,
+        ),
+        method(
+            "scoreboardAddTeam",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            scoreboard_add_team as *mut c_void,
+        ),
+        method(
+            "scoreboardRemoveTeam",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            scoreboard_remove_team as *mut c_void,
+        ),
+        method(
+            "scoreboardAddEntry",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+            scoreboard_add_entry as *mut c_void,
+        ),
+        method(
+            "scoreboardRemoveEntry",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+            scoreboard_remove_entry as *mut c_void,
         ),
         method(
             "scoreboardTeamEntries",
@@ -14954,23 +15073,33 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method(
             "mountInventorySlot",
-            "(Ljava/lang/String;I)Ljava/lang/String;",
-            mount_inventory_slot as *mut c_void,
+            "(Ljava/lang/String;I)Lfoton/item/ItemTransfer;",
+            bridge_item_bridge::mounts::get as *mut c_void,
         ),
         method(
             "setMountInventorySlot",
-            "(Ljava/lang/String;ILjava/lang/String;)V",
-            set_mount_inventory_slot as *mut c_void,
+            "(Ljava/lang/String;ILfoton/item/ItemMutation;)V",
+            bridge_item_bridge::mounts::set as *mut c_void,
         ),
         method(
             "horseInventorySlot",
-            "(Ljava/lang/String;I)Ljava/lang/String;",
-            horse_inventory_slot as *mut c_void,
+            "(Ljava/lang/String;I)Lfoton/item/ItemTransfer;",
+            bridge_item_bridge::mounts::get_horse as *mut c_void,
         ),
         method(
             "setHorseInventorySlot",
-            "(Ljava/lang/String;ILjava/lang/String;)V",
-            set_horse_inventory_slot as *mut c_void,
+            "(Ljava/lang/String;ILfoton/item/ItemMutation;)V",
+            bridge_item_bridge::mounts::set_horse as *mut c_void,
+        ),
+        method(
+            "setMountInventoryContents",
+            "(Ljava/lang/String;[Lfoton/item/ItemMutation;)V",
+            bridge_item_bridge::mounts::set_contents as *mut c_void,
+        ),
+        method(
+            "spawnParticle",
+            "(Ljava/lang/String;Ljava/lang/String;DDDIDDDD)V",
+            spawn_particle as *mut c_void,
         ),
         method(
             "setBlockDisplayBlock",
@@ -15114,13 +15243,13 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method(
             "entityItemStack",
-            "(Ljava/lang/String;)Ljava/lang/String;",
-            entity_item_stack as *mut c_void,
+            "(Ljava/lang/String;)Lfoton/item/ItemTransfer;",
+            bridge_item_bridge::entity::get as *mut c_void,
         ),
         method(
             "setEntityItemStack",
-            "(Ljava/lang/String;Ljava/lang/String;)V",
-            set_entity_item_stack as *mut c_void,
+            "(Ljava/lang/String;Lfoton/item/ItemMutation;)V",
+            bridge_item_bridge::entity::set as *mut c_void,
         ),
         method(
             "setItemUnlimitedLifetime",
@@ -15429,6 +15558,16 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             set_entity_persistent as *mut c_void,
         ),
         method(
+            "entityAddScoreboardTag",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            entity_add_scoreboard_tag as *mut c_void,
+        ),
+        method(
+            "entityRemoveScoreboardTag",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            entity_remove_scoreboard_tag as *mut c_void,
+        ),
+        method(
             "entityRemoveWhenFarAway",
             "(Ljava/lang/String;)Z",
             entity_remove_when_far_away as *mut c_void,
@@ -15555,13 +15694,13 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method(
             "entityMerchantRecipes",
-            "(Ljava/lang/String;)[Ljava/lang/String;",
-            entity_merchant_recipes as *mut c_void,
+            "(Ljava/lang/String;)[Lfoton/item/MerchantOfferTransfer;",
+            bridge_item_bridge::merchant::get as *mut c_void,
         ),
         method(
             "setVillagerOffers",
-            "(Ljava/lang/String;[Ljava/lang/String;)V",
-            set_villager_offers as *mut c_void,
+            "(Ljava/lang/String;[Lfoton/item/MerchantOfferMutation;)V",
+            bridge_item_bridge::merchant::set as *mut c_void,
         ),
         method(
             "entitySetMerchantOfferUses",
@@ -15595,8 +15734,8 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method(
             "openMenuSlot",
-            "(Ljava/lang/String;I)Ljava/lang/String;",
-            open_menu_slot as *mut c_void,
+            "(Ljava/lang/String;I)Lfoton/item/ItemTransfer;",
+            bridge_item_bridge::menu::get as *mut c_void,
         ),
         method(
             "openMenuTopSlotCount",
@@ -15604,9 +15743,9 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             open_menu_top_slot_count as *mut c_void,
         ),
         method(
-            "setOpenMenuSlot",
-            "(Ljava/lang/String;ILjava/lang/String;)Z",
-            set_open_menu_slot as *mut c_void,
+            "setOpenMenuItems",
+            "(Ljava/lang/String;[I[Lfoton/item/ItemMutation;Z)V",
+            bridge_item_bridge::menu::set as *mut c_void,
         ),
         method(
             "openMenuType",
@@ -15617,6 +15756,36 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "openMenuTitle",
             "(Ljava/lang/String;)Ljava/lang/String;",
             open_menu_title as *mut c_void,
+        ),
+        method(
+            "enchantmentView",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            enchantment::view as *mut c_void,
+        ),
+        method(
+            "setEnchantmentView",
+            "(Ljava/lang/String;JLjava/lang/String;)Z",
+            enchantment::set_view as *mut c_void,
+        ),
+        method(
+            "enchantmentItem",
+            "(Ljava/lang/String;JI)Ljava/lang/String;",
+            enchantment::item as *mut c_void,
+        ),
+        method(
+            "enchantmentTitle",
+            "(Ljava/lang/String;J)Ljava/lang/String;",
+            enchantment::title as *mut c_void,
+        ),
+        method(
+            "setEnchantmentItem",
+            "(Ljava/lang/String;JILjava/lang/String;)Z",
+            enchantment::set_item as *mut c_void,
+        ),
+        method(
+            "closeEnchantmentView",
+            "(Ljava/lang/String;J)Z",
+            enchantment::close as *mut c_void,
         ),
         method(
             "updateInventory",
@@ -15710,23 +15879,23 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method(
             "inventorySlot",
-            "(Ljava/lang/String;I)Ljava/lang/String;",
-            inventory_slot as *mut c_void,
+            "(Ljava/lang/String;I)Lfoton/item/ItemTransfer;",
+            bridge_item_bridge::inventory::inventory_slot as *mut c_void,
         ),
         method(
             "setInventorySlot",
-            "(Ljava/lang/String;ILjava/lang/String;)V",
-            set_inventory_slot as *mut c_void,
+            "(Ljava/lang/String;ILfoton/item/ItemMutation;)V",
+            bridge_item_bridge::inventory::set_inventory_slot as *mut c_void,
         ),
         method(
             "enderChestSlot",
-            "(Ljava/lang/String;I)Ljava/lang/String;",
-            ender_chest_slot as *mut c_void,
+            "(Ljava/lang/String;I)Lfoton/item/ItemTransfer;",
+            bridge_item_bridge::inventory::ender_chest_slot as *mut c_void,
         ),
         method(
             "setEnderChestSlot",
-            "(Ljava/lang/String;ILjava/lang/String;)V",
-            set_ender_chest_slot as *mut c_void,
+            "(Ljava/lang/String;ILfoton/item/ItemMutation;)V",
+            bridge_item_bridge::inventory::set_ender_chest_slot as *mut c_void,
         ),
         method(
             "spellcasterSpell",
@@ -15855,13 +16024,13 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method(
             "lecternBook",
-            "(Ljava/lang/String;III)Ljava/lang/String;",
-            lectern_book as *mut c_void,
+            "(Ljava/lang/String;III)Lfoton/item/ItemTransfer;",
+            bridge_item_bridge::block_item::lectern as *mut c_void,
         ),
         method(
             "lecternBookPages",
             "(Ljava/lang/String;III)[Ljava/lang/String;",
-            lectern_book_pages as *mut c_void,
+            bridge_item_bridge::block_item::pages as *mut c_void,
         ),
         method(
             "lecternClearBook",
@@ -15870,8 +16039,8 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method(
             "lecternSetBook",
-            "(Ljava/lang/String;IIILjava/lang/String;)Z",
-            lectern_set_book as *mut c_void,
+            "(Ljava/lang/String;IIILfoton/item/ItemMutation;)Z",
+            bridge_item_bridge::block_item::set_lectern as *mut c_void,
         ),
         method(
             "biomeKey",
@@ -17041,6 +17210,17 @@ pub(crate) mod entity_bridge_tests {
                 Some(signature)
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::bukkit_api_version;
+
+    #[test]
+    fn bukkit_version_identifies_target_api_without_claiming_a_paper_build() {
+        assert_eq!(bukkit_api_version(), "26.2.build.0-foton");
+        assert_ne!(bukkit_api_version(), env!("CARGO_PKG_VERSION"));
     }
 }
 
@@ -18294,3 +18474,654 @@ mod brewing_bridge_tests {
 #[cfg(test)]
 #[path = "task_one_tests.rs"]
 mod task_one_tests;
+
+#[cfg(test)]
+mod scoreboard_bridge_tests {
+    use text_components::TextComponent;
+
+    use super::{adventure_component_from_json, adventure_component_to_json};
+
+    #[test]
+    fn adventure_primitive_text_is_a_native_component() {
+        let component = adventure_component_from_json(r#""[staff] ""#)
+            .expect("Adventure's primitive text form should be accepted");
+        assert_eq!(component, TextComponent::plain("[staff] "));
+        assert_round_trip(r#""[staff] ""#);
+    }
+
+    #[test]
+    fn adventure_primitive_extra_and_hover_text_are_normalized_recursively() {
+        let tree = r#"{"text":"a","extra":["b"]}"#;
+        let component =
+            adventure_component_from_json(tree).expect("primitive children should be accepted");
+        assert_eq!(component, {
+            let mut expected = TextComponent::plain("a");
+            expected.children.push(TextComponent::plain("b"));
+            expected
+        });
+        assert_round_trip(tree);
+        assert_round_trip(r#"{"hover_event":{"action":"show_text","value":"tip"},"text":"a"}"#);
+    }
+
+    #[test]
+    fn adventure_hex_colors_round_trip_through_the_native_component() {
+        let encoded = r##"{"color":"#123456","bold":true,"text":"[staff] "}"##;
+        let component = adventure_component_from_json(encoded)
+            .expect("Adventure component JSON should be accepted");
+        let restored = adventure_component_to_json(&component)
+            .expect("native component should serialize for Adventure");
+        let expected: serde_json::Value =
+            serde_json::from_str(encoded).expect("fixture should be valid JSON");
+        let actual: serde_json::Value =
+            serde_json::from_str(&restored).expect("result should be valid JSON");
+        assert_eq!(actual, expected);
+    }
+
+    fn assert_round_trip(encoded: &str) {
+        let component = adventure_component_from_json(encoded)
+            .expect("Adventure component JSON should be accepted");
+        let restored_json = adventure_component_to_json(&component)
+            .expect("native component should serialize for Adventure");
+        let restored = adventure_component_from_json(&restored_json)
+            .expect("serialized native component should be accepted again");
+        assert_eq!(component, restored, "component changed during round-trip");
+    }
+}
+
+#[cfg(test)]
+mod slot_bridge_tests {
+    use super::{
+        MAX_SLOT_BRIDGE_BYTES, PDC_IDENTITY_FIELD_BYTES, describe_slot, hex_encode, parse_slot,
+        push_pdc_fields,
+    };
+    use foton_registry::data_components::{
+        components::{CustomData, Filterable, WritableBookContent, WrittenBookContent},
+        vanilla_components::{
+            CUSTOM_DATA, ITEM_MODEL, WRITABLE_BOOK_CONTENT, WRITTEN_BOOK_CONTENT,
+        },
+    };
+    use foton_registry::{init_vanilla_registry, item_stack::ItemStack, vanilla_items};
+    use simdnbt::{
+        Mutf8Str,
+        owned::{NbtCompound, NbtTag},
+    };
+    use std::{
+        env::join_paths,
+        io::Write as _,
+        path::Path,
+        process::{Command, Stdio},
+        slice,
+        sync::OnceLock,
+    };
+
+    fn java_round_trip(mode: &str, descriptions: &[String]) -> Vec<String> {
+        static JAVA_API_BUILT: OnceLock<()> = OnceLock::new();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("workspace root");
+        // CI runs Rust tests before the Java check; always exercise current
+        // sources, including on a clean checkout with no prebuilt API JAR.
+        JAVA_API_BUILT.get_or_init(|| {
+            let build = Command::new("bash")
+                .arg(root.join("dev/build-plugin-api.sh"))
+                .current_dir(root)
+                .output()
+                .expect("build the Java API for native bridge regressions");
+            assert!(
+                build.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&build.stdout),
+                String::from_utf8_lossy(&build.stderr)
+            );
+        });
+        let classpath = join_paths([
+            root.join("plugin-api/build/foton-plugin-api.jar"),
+            root.join("plugin-api/lib/*"),
+        ])
+        .expect("Java classpath");
+        let mut child = Command::new("java")
+            .arg("--class-path")
+            .arg(classpath)
+            .arg(root.join("plugin-api/check/NativeItemBridgeCheck.java"))
+            .arg(mode)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("Java is required for the native item bridge regression");
+        {
+            let mut input = child.stdin.take().expect("Java stdin");
+            for description in descriptions {
+                writeln!(input, "{description}").expect("write native item description");
+            }
+        }
+        let output = child.wait_with_output().expect("Java bridge check");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout)
+            .expect("Java UTF-8 output")
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    #[test]
+    fn opaque_keys_keep_identity_through_the_actual_java_bridge() {
+        init_vanilla_registry();
+        for key in [":bad", "bare_key"] {
+            let stacks: Vec<_> = ["one", "two"]
+                .into_iter()
+                .map(|value| {
+                    let mut values = NbtCompound::new();
+                    values.insert(key, value);
+                    if key == "bare_key" {
+                        values.insert("minecraft:bare_key", "common");
+                    }
+                    let mut data = NbtCompound::new();
+                    data.insert("PublicBukkitValues", values);
+                    let mut stack = ItemStack::new(&vanilla_items::PAPER);
+                    stack.set(
+                        CUSTOM_DATA,
+                        CustomData::try_from_compound(data).expect("valid data"),
+                    );
+                    stack
+                })
+                .collect();
+            let descriptions: Vec<_> = stacks.iter().map(describe_slot).collect();
+            let restored = java_round_trip("distinct", &descriptions);
+            assert_eq!(restored.len(), stacks.len(), "Java stdout: {restored:?}");
+            for (encoded, original) in restored.iter().zip(stacks) {
+                assert_eq!(parse_slot(encoded).expect("round trip item"), original);
+            }
+        }
+    }
+
+    #[test]
+    fn zelda_book_survives_the_actual_java_bridge() {
+        init_vanilla_registry();
+        let page = r#"{"text":"Radis","font":"minecraft:cuisine","color":"gold"}"#;
+        let cover = r#"{"text":"Livre de Cuisine","color":"gold","italic":false}"#;
+        let encoded = format!(
+            "minecraft:written_book 1\u{1d}booktitlehex={}\u{1d}bookauthorhex={}\u{1d}bookgen=0\u{1d}bookpagehex={}\u{1d}namejsonhex={}\u{1d}pdcint={}:3",
+            hex_encode(b"Livre de Cuisine"),
+            hex_encode(b"Les cuisiniers d'Hyrule"),
+            hex_encode(page.as_bytes()),
+            hex_encode(cover.as_bytes()),
+            hex_encode(b"zeldaciv:livre_cuisine"),
+        );
+        let mut original = parse_slot(&encoded).expect("Zelda book should parse");
+        let page = original.get(WRITTEN_BOOK_CONTENT).expect("page").pages()[0]
+            .raw()
+            .clone();
+        original.set(
+            WRITTEN_BOOK_CONTENT,
+            WrittenBookContent::new(
+                Filterable::new(
+                    "Livre de Cuisine".to_owned(),
+                    Some("Livre filtré".to_owned()),
+                ),
+                "Les cuisiniers d'Hyrule".to_owned(),
+                0,
+                vec![Filterable::new(
+                    page.clone(),
+                    Some(text_components::TextComponent::plain("Censuré".to_owned())),
+                )],
+                false,
+            )
+            .expect("filtered native book"),
+        );
+        let native = describe_slot(&original);
+        assert!(
+            native.contains("bookrawhex="),
+            "filtered book needs native passthrough"
+        );
+        let returned = java_round_trip("book", slice::from_ref(&native));
+        assert_eq!(returned.len(), 1, "Java book check should return one item");
+        let restored = parse_slot(&returned[0]).expect("Java's book should parse again");
+        assert_eq!(
+            restored, original,
+            "Java book bridge changed vanilla components"
+        );
+        let edited = java_round_trip("book-edit", slice::from_ref(&native));
+        assert_eq!(edited.len(), 1, "Java book edit should return one item");
+        let changed = parse_slot(&edited[0]).expect("edited Java book should parse");
+        let book = changed
+            .get(WRITTEN_BOOK_CONTENT)
+            .expect("edited book component");
+        assert_eq!(book.title().raw(), "Livre refait");
+        assert!(book.title().filtered().is_none());
+        assert!(book.pages()[0].filtered().is_none());
+        assert!(!book.resolved());
+
+        for (mode, title, author) in [
+            ("book-title-edit", "Titre changé", "Les cuisiniers d'Hyrule"),
+            ("book-author-edit", "Livre de Cuisine", "Auteur changé"),
+        ] {
+            let edited = java_round_trip(mode, slice::from_ref(&native));
+            assert_eq!(edited.len(), 1, "{mode} should return one book");
+            let changed = parse_slot(&edited[0]).expect("edited cover should parse");
+            let book = changed
+                .get(WRITTEN_BOOK_CONTENT)
+                .expect("edited book component");
+            assert_eq!(book.title().raw(), title, "{mode} title");
+            assert_eq!(book.author(), author, "{mode} author");
+            assert_eq!(book.pages()[0].raw(), &page, "{mode} page");
+            assert!(!book.resolved(), "{mode} must retain unresolved state");
+        }
+    }
+
+    #[test]
+    fn java_created_books_remain_similar_after_native_canonicalization() {
+        init_vanilla_registry();
+        for (mode, resolved) in [("book-new", false), ("book-new-resolved", true)] {
+            let created = java_round_trip(mode, &[]);
+            assert_eq!(
+                created.len(),
+                1,
+                "Java book creation should return one item"
+            );
+            let stack = parse_slot(&created[0]).expect("Java-created book should parse");
+            let book = stack
+                .get(WRITTEN_BOOK_CONTENT)
+                .expect("written book content");
+            assert_eq!(book.generation(), 0);
+            assert_eq!(book.resolved(), resolved);
+            let native = describe_slot(&stack);
+            assert!(native.contains(&format!("bookresolved={resolved}")));
+            assert!(
+                !native.contains("bookrawhex="),
+                "unfiltered book needs no raw NBT"
+            );
+            assert!(
+                !native.contains("itemmodelhex="),
+                "default model is not item meta"
+            );
+            let verified = java_round_trip("book-new-verify", &[created[0].clone(), native]);
+            assert_eq!(verified.len(), 1);
+            let edited = parse_slot(&verified[0]).expect("edited Java book should parse");
+            let edited_book = edited.get(WRITTEN_BOOK_CONTENT).expect("edited content");
+            assert_eq!(edited_book.title().raw(), "Livre retouché");
+            assert_eq!(edited_book.author(), "Auteur retouché");
+            assert_eq!(edited_book.resolved(), resolved);
+        }
+    }
+
+    #[test]
+    fn slot_bridge_emits_only_explicit_item_model_overrides() {
+        init_vanilla_registry();
+        let mut stack = ItemStack::new(&vanilla_items::WRITTEN_BOOK);
+        let default = stack
+            .get(ITEM_MODEL)
+            .expect("default written book model")
+            .clone();
+        assert!(!describe_slot(&stack).contains("itemmodelhex="));
+
+        stack.set(
+            ITEM_MODEL,
+            "zeldaciv:cuisine".parse().expect("custom model key"),
+        );
+        let described = describe_slot(&stack);
+        assert!(described.contains("itemmodelhex="));
+        assert_eq!(parse_slot(&described), Some(stack.clone()));
+
+        stack.set(ITEM_MODEL, default);
+        assert!(stack.patch().get_entry(ITEM_MODEL.key()).is_none());
+        assert!(!describe_slot(&stack).contains("itemmodelhex="));
+    }
+
+    #[test]
+    fn filtered_writable_book_survives_the_actual_java_bridge() {
+        init_vanilla_registry();
+        let mut original = ItemStack::new(&vanilla_items::WRITABLE_BOOK);
+        original.set(
+            WRITABLE_BOOK_CONTENT,
+            WritableBookContent::new(vec![Filterable::new(
+                "visible".to_owned(),
+                Some("filtered".to_owned()),
+            )])
+            .expect("writable book"),
+        );
+        let returned = java_round_trip("writable", &[describe_slot(&original)]);
+        assert_eq!(returned.len(), 1);
+        assert_eq!(parse_slot(&returned[0]), Some(original));
+    }
+
+    #[test]
+    fn opaque_non_compound_bukkit_value_survives_an_unmodified_bridge() {
+        init_vanilla_registry();
+        let mut data = NbtCompound::new();
+        data.insert("PublicBukkitValues", NbtTag::Long(42));
+        let mut stack = ItemStack::new(&vanilla_items::PAPER);
+        stack.set(
+            CUSTOM_DATA,
+            CustomData::try_from_compound(data).expect("valid data"),
+        );
+        let restored = parse_slot(&describe_slot(&stack)).expect("opaque data should parse");
+        assert_eq!(restored, stack);
+    }
+
+    #[test]
+    fn item_pdc_round_trips_without_replacing_opaque_nbt() {
+        init_vanilla_registry();
+        let key = |value: &str| hex_encode(value.as_bytes());
+        let value = |value: &str| hex_encode(value.as_bytes());
+        let encoded = format!(
+            "minecraft:paper 1\u{1d}nbthex={}\u{1d}pdcstrhex={}:{}\u{1d}pdcbyte={}:1\u{1d}pdcint={}:125",
+            hex_encode(b"{user:{untouched:1b}}"),
+            key("zeldaciv:action"),
+            value("tele\0port🚀\u{1d}\u{1e}\u{1f}"),
+            key("zeldaciv:marker"),
+            key("zeldaciv:amount"),
+        );
+
+        let stack = parse_slot(&encoded).expect("item bridge data should parse");
+        assert_eq!(stack.opaque_nbt(), Some("{user:{untouched:1b}}"));
+        let persistent_data = stack
+            .get(CUSTOM_DATA)
+            .and_then(|data| data.as_compound().compound("PublicBukkitValues"))
+            .expect("Bukkit item data should use vanilla custom_data");
+        assert_eq!(
+            persistent_data
+                .string("zeldaciv:action")
+                .map(ToString::to_string),
+            Some("tele\0port🚀\u{1d}\u{1e}\u{1f}".to_owned())
+        );
+        assert_eq!(persistent_data.byte("zeldaciv:marker"), Some(1));
+        assert_eq!(persistent_data.int("zeldaciv:amount"), Some(125));
+
+        let described = describe_slot(&stack);
+        let reparsed = parse_slot(&described).expect("described item should parse again");
+        assert_eq!(reparsed, stack);
+
+        let NbtTag::Compound(saved) = stack.to_nbt_tag_ref() else {
+            panic!("a non-empty item must persist as a compound");
+        };
+        let saved_pdc = saved
+            .compound("components")
+            .and_then(|components| components.compound("minecraft:custom_data"))
+            .and_then(|custom_data| custom_data.compound("PublicBukkitValues"))
+            .expect("persistent item encoding should retain Bukkit data");
+        assert_eq!(saved_pdc.int("zeldaciv:amount"), Some(125));
+    }
+
+    #[test]
+    fn malformed_pdc_fields_reject_the_complete_item_input() {
+        init_vanilla_registry();
+        assert!(parse_slot(
+            "minecraft:paper 1\u{1d}nbthex=7b666f6f3a31627d\u{1d}pdcstrhex=7a656c64616369763a616374696f6e:ff",
+        ).is_none(), "malformed PDC must not be silently dropped while other fields survive");
+    }
+
+    #[test]
+    fn unknown_pdc_tags_survive_a_supported_entry_edit_and_removal() {
+        init_vanilla_registry();
+        let mut nested = NbtCompound::new();
+        nested.insert("kept", 7);
+        let mut original = NbtCompound::new();
+        original.insert("zeldaciv:action", "old");
+        original.insert("another:long", NbtTag::Long(9));
+        original.insert("another:compound", nested);
+        let mut custom_data = NbtCompound::new();
+        custom_data.insert("PublicBukkitValues", original);
+        custom_data.insert("unrelated_sibling", NbtTag::Long(41));
+        let mut raw = Vec::new();
+        NbtTag::Compound(custom_data).write(&mut raw);
+        let edited = format!(
+            "minecraft:paper 1\u{1d}pdcrawhex={}\u{1d}pdcstrhex={}:{}",
+            hex_encode(&raw),
+            hex_encode(b"zeldaciv:action"),
+            hex_encode(b"new"),
+        );
+
+        let stack = parse_slot(&edited).expect("opaque native PDC should parse");
+        let values = stack
+            .get(CUSTOM_DATA)
+            .and_then(|data| data.as_compound().compound("PublicBukkitValues"))
+            .expect("mixed PDC should remain present");
+        assert_eq!(
+            values.string("zeldaciv:action").map(ToString::to_string),
+            Some("new".to_owned())
+        );
+        assert_eq!(values.get("another:long"), Some(&NbtTag::Long(9)));
+        assert_eq!(
+            values
+                .compound("another:compound")
+                .and_then(|value| value.int("kept")),
+            Some(7)
+        );
+        assert_eq!(
+            stack
+                .get(CUSTOM_DATA)
+                .and_then(|data| data.as_compound().get("unrelated_sibling")),
+            Some(&NbtTag::Long(41))
+        );
+
+        let mut without_supported = describe_slot(&stack)
+            .split('\u{1d}')
+            .filter(|field| {
+                !field.starts_with("pdcstrhex=")
+                    && !field.starts_with("pdcbyte=")
+                    && !field.starts_with("pdcint=")
+            })
+            .collect::<Vec<_>>()
+            .join("\u{1d}");
+        without_supported.push('\u{1d}');
+        without_supported.push_str("pdcremove=");
+        without_supported.push_str(&hex_encode(b"zeldaciv:action"));
+        let removed = parse_slot(&without_supported).expect("supported PDC removal should parse");
+        let values = removed
+            .get(CUSTOM_DATA)
+            .and_then(|data| data.as_compound().compound("PublicBukkitValues"))
+            .expect("unknown PDC should survive supported removal");
+        assert!(values.get("zeldaciv:action").is_none());
+        assert_eq!(values.get("another:long"), Some(&NbtTag::Long(9)));
+        assert!(values.compound("another:compound").is_some());
+        assert_eq!(
+            removed
+                .get(CUSTOM_DATA)
+                .and_then(|data| data.as_compound().get("unrelated_sibling")),
+            Some(&NbtTag::Long(41))
+        );
+    }
+
+    #[test]
+    fn unknown_custom_data_has_a_canonical_bridge_identity() {
+        init_vanilla_registry();
+        let describe = |unknown: i64, visible: &str, reverse: bool| {
+            let mut persistent_data = NbtCompound::new();
+            if reverse {
+                persistent_data.insert("zeldaciv:unknown", NbtTag::Long(unknown));
+                persistent_data.insert("zeldaciv:visible", visible);
+            } else {
+                persistent_data.insert("zeldaciv:visible", visible);
+                persistent_data.insert("zeldaciv:unknown", NbtTag::Long(unknown));
+            }
+            let mut custom_data = NbtCompound::new();
+            if reverse {
+                custom_data.insert("sibling", 7);
+                custom_data.insert("PublicBukkitValues", persistent_data);
+            } else {
+                custom_data.insert("PublicBukkitValues", persistent_data);
+                custom_data.insert("sibling", 7);
+            }
+            let custom_data = CustomData::try_from_compound(custom_data)
+                .expect("test custom data should be valid");
+            let mut stack = ItemStack::new(&vanilla_items::PAPER);
+            stack.set(CUSTOM_DATA, custom_data);
+            describe_slot(&stack)
+        };
+        let identity = |description: &str| {
+            description
+                .split('\u{1d}')
+                .find_map(|field| field.strip_prefix("pdcidentity="))
+                .expect("unknown custom data should have an identity")
+                .to_owned()
+        };
+
+        let first = identity(&describe(1, "first", false));
+        let same_unknown = identity(&describe(1, "second", true));
+        let different_unknown = identity(&describe(2, "first", false));
+        assert_eq!(first, same_unknown);
+        assert_ne!(first, different_unknown);
+    }
+
+    #[test]
+    fn exposed_fields_reserve_identity_space_at_the_bridge_limit() {
+        init_vanilla_registry();
+        let encode = |unknown: i64| {
+            let key = "zeldaciv:visible";
+            let mut persistent_data = NbtCompound::new();
+            persistent_data.insert(key, "x");
+            persistent_data.insert("zeldaciv:unknown", NbtTag::Long(unknown));
+            let mut custom_data = NbtCompound::new();
+            custom_data.insert("PublicBukkitValues", persistent_data);
+            let tag = NbtTag::Compound(custom_data);
+            let mut raw = Vec::new();
+            tag.write(&mut raw);
+            let NbtTag::Compound(custom_data) = tag else {
+                panic!("test custom data must remain a compound");
+            };
+            let custom_data = CustomData::try_from_compound(custom_data)
+                .expect("test custom data should be valid");
+            let mut stack = ItemStack::new(&vanilla_items::PAPER);
+            stack.set(CUSTOM_DATA, custom_data);
+
+            let raw_field_bytes = 1 + "pdcrawhex=".len() + raw.len() * 2;
+            let exposed_field_bytes = 1
+                + "pdcstrhex=".len()
+                + hex_encode(key.as_bytes()).len()
+                + 1
+                + hex_encode(b"x").len();
+            let prefix_bytes = MAX_SLOT_BRIDGE_BYTES
+                - raw_field_bytes
+                - exposed_field_bytes
+                - PDC_IDENTITY_FIELD_BYTES;
+            let mut encoded = "x".repeat(prefix_bytes);
+            push_pdc_fields(&mut encoded, &stack);
+            assert_eq!(encoded.len(), MAX_SLOT_BRIDGE_BYTES);
+            assert!(encoded.contains("\u{1d}pdcstrhex="));
+            encoded
+        };
+        let identity = |encoded: &str| {
+            encoded
+                .split('\u{1d}')
+                .find_map(|field| field.strip_prefix("pdcidentity="))
+                .expect("the reserved identity field must be present")
+                .to_owned()
+        };
+
+        let first = encode(1);
+        let second = encode(2);
+        assert_ne!(identity(&first), identity(&second));
+    }
+
+    #[test]
+    fn oversized_custom_data_is_rejected_before_bridge_encoding() {
+        init_vanilla_registry();
+        let mut custom_data = NbtCompound::new();
+        custom_data.insert(
+            "oversized",
+            NbtTag::ByteArray(vec![0; super::MAX_PDC_RAW_BYTES]),
+        );
+        let custom_data = CustomData::try_from_compound(custom_data)
+            .expect("test custom data should be structurally valid");
+        let mut stack = ItemStack::new(&vanilla_items::PAPER);
+        stack.set(CUSTOM_DATA, custom_data);
+
+        assert_java_rejects_without_replacing_slot(stack);
+    }
+
+    fn assert_java_rejects_without_replacing_slot(mut slot: ItemStack) {
+        let original = slot.to_nbt_tag_ref();
+        let described = describe_slot(&slot);
+        let returned = java_round_trip("reject", &[described]);
+        assert_eq!(returned.len(), 1);
+        let parsed = parse_slot(&returned[0]);
+        assert!(
+            parsed.is_none(),
+            "a rejected read must not become a writable empty item"
+        );
+        if let Some(replacement) = parsed {
+            slot = replacement;
+        }
+        assert_eq!(slot.to_nbt_tag_ref(), original);
+    }
+
+    #[test]
+    fn total_bridge_budget_failure_is_not_a_metadata_free_item() {
+        init_vanilla_registry();
+        let mut data = NbtCompound::new();
+        data.insert("preserved", 42);
+        let mut stack = ItemStack::new(&vanilla_items::PAPER);
+        stack.set(
+            CUSTOM_DATA,
+            CustomData::try_from_compound(data).expect("valid data"),
+        );
+        stack.set_opaque_nbt(Some("x".repeat(MAX_SLOT_BRIDGE_BYTES / 2 - 16)));
+        assert_java_rejects_without_replacing_slot(stack);
+    }
+
+    #[test]
+    fn raw_passthrough_keeps_supported_entries_that_were_not_exposed() {
+        init_vanilla_registry();
+        let mut values = NbtCompound::new();
+        for index in 0..1_026 {
+            values.insert(format!("bulk:key_{index}"), format!("value_{index}"));
+        }
+        let oversized_key = format!("bulk:{}", "x".repeat(1_025));
+        values.insert(oversized_key.clone(), "oversized-key-value");
+        let mut custom_data = NbtCompound::new();
+        custom_data.insert("PublicBukkitValues", values);
+        let custom_data =
+            CustomData::try_from_compound(custom_data).expect("test custom data should be valid");
+        let mut stack = ItemStack::new(&vanilla_items::PAPER);
+        stack.set(CUSTOM_DATA, custom_data);
+
+        let reparsed = parse_slot(&describe_slot(&stack)).expect("large PDC should round-trip");
+        let values = reparsed
+            .get(CUSTOM_DATA)
+            .and_then(|data| data.as_compound().compound("PublicBukkitValues"))
+            .expect("raw PDC should remain");
+        assert_eq!(values.len(), 1_027);
+        assert_eq!(
+            values.string("bulk:key_1025").map(ToString::to_string),
+            Some("value_1025".to_owned())
+        );
+        assert_eq!(
+            values.string(&oversized_key).map(ToString::to_string),
+            Some("oversized-key-value".to_owned())
+        );
+    }
+
+    #[test]
+    fn pdc_string_limit_matches_the_nbt_modified_utf_limit() {
+        init_vanilla_registry();
+        let key = hex_encode(b"zeldaciv:value");
+        let accepted_value = "\0".repeat(32_767) + "a";
+        let accepted = format!(
+            "minecraft:paper 1\u{1d}pdcstrhex={key}:{}",
+            hex_encode(accepted_value.as_bytes())
+        );
+        let accepted = parse_slot(&accepted).expect("65,535 modified UTF-8 bytes should fit");
+        assert_eq!(
+            accepted
+                .get(CUSTOM_DATA)
+                .and_then(|data| data.as_compound().compound("PublicBukkitValues"))
+                .and_then(|values| values.string("zeldaciv:value"))
+                .map(Mutf8Str::len),
+            Some(65_535)
+        );
+
+        let rejected = format!(
+            "minecraft:paper 1\u{1d}pdcstrhex={key}:{}",
+            hex_encode("\0".repeat(32_768).as_bytes())
+        );
+        assert!(
+            parse_slot(&rejected).is_none(),
+            "oversized PDC must reject the complete input, not silently disappear"
+        );
+    }
+}

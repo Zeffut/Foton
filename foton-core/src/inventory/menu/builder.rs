@@ -52,7 +52,7 @@ use crate::player::player_inventory::PlayerInventory;
 /// Given to every [`Section`] and [`DataSlot`] a [`MenuBuilder`] creates, so
 /// a handle can never act on a [`Menu`] it wasn't made for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct MenuInstanceId(u64);
+pub(crate) struct MenuInstanceId(pub(super) u64);
 
 impl MenuInstanceId {
     /// Creates a new unique `MenuInstanceId`

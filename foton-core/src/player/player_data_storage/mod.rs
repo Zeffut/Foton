@@ -119,6 +119,7 @@ struct PlayerDataFile {
     motion: [f64; 3],
     rotation: [f32; 2],
     on_ground: bool,
+    tags: Vec<String>,
     fall_flying: bool,
     remaining_fire_ticks: i32,
     ticks_frozen: i32,
@@ -997,12 +998,12 @@ impl PlayerDataFile {
             .ender_items
             .iter()
             .map(SlotFile::from_persistent)
-            .collect::<io::Result<_>>()?;
+            .collect::<io::Result<Vec<_>>>()?;
         let inventory = data
             .inventory
             .iter()
             .map(SlotFile::from_persistent)
-            .collect::<io::Result<_>>()?;
+            .collect::<io::Result<Vec<_>>>()?;
 
         let file = Self {
             data_version: data.data_version,
@@ -1010,6 +1011,7 @@ impl PlayerDataFile {
             motion: data.motion,
             rotation: data.rotation,
             on_ground: data.on_ground,
+            tags: data.tags.clone(),
             fall_flying: data.fall_flying,
             remaining_fire_ticks: data.remaining_fire_ticks,
             ticks_frozen: data.ticks_frozen,
@@ -1129,6 +1131,7 @@ impl PlayerDataFile {
             motion: self.motion,
             rotation: self.rotation,
             on_ground: self.on_ground,
+            tags: self.tags,
             fall_flying: self.fall_flying,
             remaining_fire_ticks: self.remaining_fire_ticks,
             ticks_frozen: self.ticks_frozen,
@@ -1695,6 +1698,7 @@ mod tests {
             motion: [0.0, 0.0, 0.0],
             rotation: [90.0, 10.0],
             on_ground: true,
+            tags: Vec::new(),
             fall_flying: false,
             remaining_fire_ticks: 0,
             ticks_frozen: 0,
@@ -1750,6 +1754,21 @@ mod tests {
             },
             living_nbt: Vec::new(),
         }
+    }
+
+    #[test]
+    fn scoreboard_tags_survive_the_player_file_round_trip() {
+        let mut data = sample_player_file(PLAYER_DATA_VERSION)
+            .into_persistent()
+            .expect("sample player data should decode");
+        data.tags = vec!["zelda:member".to_owned(), String::new()];
+
+        let file = PlayerDataFile::from_persistent(&data).expect("tags should encode");
+        let encoded = encode_player_file(&file).expect("player file should encode");
+        let decoded = decode_player_file(&encoded).expect("player file should decode");
+        let restored = decoded.into_persistent().expect("tags should decode");
+
+        assert_eq!(restored.tags, data.tags);
     }
 
     fn sample_persistent_entity() -> PersistentEntity {

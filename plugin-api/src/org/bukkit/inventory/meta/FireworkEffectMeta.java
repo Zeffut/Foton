@@ -8,5 +8,5 @@ public interface FireworkEffectMeta extends ItemMeta {
     void setEffect(FireworkEffect effect);
     @Override FireworkEffectMeta clone();
 
-    default java.util.Map<String,Object> serialize() { return java.util.Collections.emptyMap(); }
+    default java.util.Map<String,Object> serialize() { throw new UnsupportedOperationException("specialized metadata persistence"); }
 }

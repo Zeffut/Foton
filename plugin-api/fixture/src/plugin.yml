@@ -12,3 +12,15 @@ commands:
     description: Runs only for whoever holds the permission.
     permission: fixture.guarded
     permission-message: You may not do that.
+permissions:
+  fixture.operator:
+    default: op
+    children:
+      fixture.inherited: true
+      fixture.denied: false
+  fixture.visitor:
+    default: not op
+  fixture.always:
+    default: true
+  fixture.never:
+    default: false

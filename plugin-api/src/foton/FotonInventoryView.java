@@ -6,7 +6,7 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryView;
 
 /** Live view facade for the menu currently installed on one player. */
-public final class FotonInventoryView implements InventoryView {
+public class FotonInventoryView implements InventoryView {
     private final FotonPlayer player;
     private final Inventory top;
     private String title;
@@ -19,7 +19,7 @@ public final class FotonInventoryView implements InventoryView {
     }
 
     private static Inventory liveTop(String owner) {
-        FotonCustomInventory custom = FotonCustomInventory.viewedBy(owner);
+        FotonCustomInventory custom = FotonCustomInventory.openForViewer(owner);
         if (custom != null) return custom;
         String menuType = Native.openMenuType(owner);
         if ("minecraft:crafting".equals(menuType)) return new FotonCraftingInventory(owner);

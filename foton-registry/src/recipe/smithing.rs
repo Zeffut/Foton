@@ -44,10 +44,7 @@ impl SmithingTransformRecipe {
     /// rather than a fresh result being made from nothing.
     #[must_use]
     pub fn assemble(&self, base: &ItemStack) -> ItemStack {
-        let mut upgraded = base.clone();
-        upgraded.set_item(&self.result.item.key);
-        upgraded.set_count(self.result.count);
-        upgraded
+        self.result.apply_to(base)
     }
 }
 
@@ -55,6 +52,9 @@ impl SmithingTransformRecipe {
 mod tests {
     use foton_utils::Identifier;
 
+    use crate::data_components::{
+        DataComponentPatch, vanilla_components::ENCHANTMENT_GLINT_OVERRIDE,
+    };
     use crate::recipe::{Ingredient, RecipeResult};
     use crate::{init_vanilla_registry, item_stack::ItemStack, vanilla_items};
 
@@ -66,10 +66,8 @@ mod tests {
             template: Ingredient::Item(&vanilla_items::NETHERITE_UPGRADE_SMITHING_TEMPLATE),
             base: Ingredient::Item(&vanilla_items::DIAMOND_PICKAXE),
             addition: Ingredient::Item(&vanilla_items::NETHERITE_INGOT),
-            result: RecipeResult {
-                item: &vanilla_items::NETHERITE_PICKAXE,
-                count: 1,
-            },
+            result: RecipeResult::try_new(&vanilla_items::NETHERITE_PICKAXE, 1)
+                .expect("valid smithing result"),
             show_notification: true,
         }
     }
@@ -125,6 +123,30 @@ mod tests {
                     .get_level(&Identifier::vanilla_static("fortune"))),
             3,
             "Fortune III should survive the upgrade"
+        );
+    }
+
+    #[test]
+    fn smithing_result_patch_overrides_base_but_keeps_other_components() {
+        init_vanilla_registry();
+        let mut recipe = netherite_pickaxe_recipe();
+        let mut patch = DataComponentPatch::new();
+        patch.set(ENCHANTMENT_GLINT_OVERRIDE, true);
+        recipe.result = RecipeResult::try_with_patch(&vanilla_items::NETHERITE_PICKAXE, 1, patch)
+            .expect("valid result patch");
+
+        let mut base = ItemStack::new(&vanilla_items::DIAMOND_PICKAXE);
+        base.set(ENCHANTMENT_GLINT_OVERRIDE, false);
+        base.set_enchantments(&[(Identifier::vanilla_static("fortune"), 3)], false);
+        let upgraded = recipe.assemble(&base);
+
+        assert_eq!(upgraded.get(ENCHANTMENT_GLINT_OVERRIDE), Some(&true));
+        assert_eq!(
+            upgraded
+                .get_enchantments_for_crafting()
+                .map_or(0, |enchantments| enchantments
+                    .get_level(&Identifier::vanilla_static("fortune"))),
+            3
         );
     }
 }

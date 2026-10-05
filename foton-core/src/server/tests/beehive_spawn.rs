@@ -8,7 +8,7 @@ use crate::world::game_event::{GameEventContext, GameEventListener};
 use foton_registry::game_events::GameEventRef;
 use foton_registry::packets::play::C_SOUND;
 use foton_registry::{sound_events, vanilla_game_events};
-use foton_utils::{Downcast as _, SectionPos, WorldAabb};
+use foton_utils::{SectionPos, WorldAabb};
 use std::sync::atomic::AtomicUsize;
 
 struct ExitEvents(Arc<AtomicUsize>);

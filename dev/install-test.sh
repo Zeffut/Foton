@@ -47,6 +47,7 @@ adventure-text-serializer-gson-5.2.0.jar
 adventure-text-serializer-json-5.2.0.jar
 adventure-text-serializer-legacy-5.2.0.jar
 adventure-text-serializer-plain-5.2.0.jar
+auto-service-annotations-1.1.1.jar
 annotations-26.1.0.jar
 brigadier-1.3.10.jar
 error_prone_annotations-2.47.0.jar
@@ -67,8 +68,24 @@ netty-resolver-4.2.15.Final.jar
 netty-transport-4.2.15.Final.jar
 option-1.1.0.jar
 slf4j-api-2.0.17.jar
-snakeyaml-2.2.jar
 sqlite-jdbc-3.49.1.0.jar
+snakeyaml-2.2.jar
+maven-resolver-api-1.9.18.jar
+maven-resolver-spi-1.9.18.jar
+maven-resolver-util-1.9.18.jar
+maven-resolver-impl-1.9.18.jar
+maven-resolver-named-locks-1.9.18.jar
+maven-resolver-connector-basic-1.9.18.jar
+maven-resolver-provider-3.9.6.jar
+maven-model-3.9.6.jar
+maven-model-builder-3.9.6.jar
+maven-repository-metadata-3.9.6.jar
+maven-artifact-3.9.6.jar
+maven-builder-support-3.9.6.jar
+plexus-utils-3.5.1.jar
+plexus-interpolation-1.26.jar
+javax.inject-1.jar
+commons-lang3-3.20.0.jar
 EOF
 }
 
@@ -316,7 +333,7 @@ grep -q 'incomplete or invalid runtime manifest' "$SCRATCH/truncated.log"
 grep -q '^library old adventure-api-5.2.0.jar$' "$INSTALL/plugin-runtime/lib/adventure-api-5.2.0.jar"
 
 # A self-consistent but shortened bundle is also invalid: the supported host
-# runtime is the API plus exactly thirty dependency jars.
+# runtime is the API plus exactly forty-eight dependency jars.
 write_runtime "$ASSETS/runtime" v9.8.7 shortened
 rm "$ASSETS/runtime/lib/netty-codec-base-4.2.15.Final.jar"
 sed -i.bak '/lib\/netty-codec-base-4\.2\.15\.Final\.jar$/d' "$ASSETS/runtime/SHA256SUMS"
@@ -326,7 +343,7 @@ if (
   cd "$INSTALL"
   bash "$REPO/site/static/install.sh" --update > "$SCRATCH/shortened.log" 2>&1
 ); then
-  echo 'installer accepted a runtime with only twenty-nine dependency jars' >&2
+  echo 'installer accepted a runtime with only forty-seven dependency jars' >&2
   exit 1
 fi
 grep -q 'unsafe or unexpected archive entry' "$SCRATCH/shortened.log"
@@ -376,7 +393,7 @@ if (
 fi
 
 # The count alone is not the runtime contract. A self-consistent archive with
-# thirty jars but one unexpected name must be rejected before replacement.
+# forty-eight jars but one unexpected name must be rejected before replacement.
 write_runtime "$ASSETS/runtime" v9.8.7 renamed-jar
 mv "$ASSETS/runtime/lib/failureaccess-1.0.3.jar" "$ASSETS/runtime/lib/unexpected-1.0.jar"
 (

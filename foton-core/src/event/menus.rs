@@ -4,118 +4,12 @@
 use foton_registry::item_stack::ItemStack;
 use foton_registry::trading::MerchantOffer;
 use foton_utils::downcast::{DowncastType, DowncastTypeKey};
-use foton_utils::{BlockPos, Identifier};
 use uuid::Uuid;
 
 use super::Event;
 
-/// One of the three offers an enchanting table shows.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct EnchantOffer {
-    /// The enchantment the screen names as a clue.
-    pub enchantment: Identifier,
-    /// Its level.
-    pub level: i32,
-    /// The experience levels the offer requires.
-    pub cost: i32,
-}
-
-/// An enchanting table has worked out its offers for the item put in it.
-///
-/// Paper parity: `PrepareItemEnchantEvent`, fired from `slotsChanged` once
-/// the three costs and clues are rolled. It starts cancelled for an item that
-/// cannot be enchanted; cancelling blanks every offer, and each offer a
-/// listener changes is what the screen shows and what a click is priced at.
-pub struct PrepareItemEnchantEvent {
-    player: Uuid,
-    world: String,
-    table: BlockPos,
-    item: ItemStack,
-    offers: [Option<EnchantOffer>; 3],
-    bonus: i32,
-    cancelled: bool,
-}
-
-// SAFETY: This Foton-owned key uniquely identifies the concrete Rust type.
-unsafe impl DowncastType for PrepareItemEnchantEvent {
-    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/prepare_item_enchant");
-}
-
-impl Event for PrepareItemEnchantEvent {
-    fn is_cancelled(&self) -> bool {
-        self.cancelled
-    }
-}
-
-impl PrepareItemEnchantEvent {
-    /// Creates the event, cancelled already when `enchantable` is false.
-    #[must_use]
-    pub const fn new(
-        player: Uuid,
-        world: String,
-        table: BlockPos,
-        item: ItemStack,
-        offers: [Option<EnchantOffer>; 3],
-        bonus: i32,
-        enchantable: bool,
-    ) -> Self {
-        Self {
-            player,
-            world,
-            table,
-            item,
-            offers,
-            bonus,
-            cancelled: !enchantable,
-        }
-    }
-
-    /// Who is enchanting.
-    #[must_use]
-    pub const fn player(&self) -> Uuid {
-        self.player
-    }
-
-    /// The table's world.
-    #[must_use]
-    pub fn world(&self) -> &str {
-        &self.world
-    }
-
-    /// Where the table stands.
-    #[must_use]
-    pub const fn table(&self) -> BlockPos {
-        self.table
-    }
-
-    /// The item to enchant.
-    #[must_use]
-    pub const fn item(&self) -> &ItemStack {
-        &self.item
-    }
-
-    /// The three offers; `None` where the row is empty.
-    #[must_use]
-    pub const fn offers(&self) -> &[Option<EnchantOffer>; 3] {
-        &self.offers
-    }
-
-    /// Replaces the offers.
-    pub fn set_offers(&mut self, offers: [Option<EnchantOffer>; 3]) {
-        self.offers = offers;
-    }
-
-    /// The enchanting power of the shelves around the table.
-    #[must_use]
-    pub const fn bonus(&self) -> i32 {
-        self.bonus
-    }
-
-    /// Blanks the offers, or shows them again.
-    pub const fn set_cancelled(&mut self, cancelled: bool) {
-        self.cancelled = cancelled;
-    }
-}
+/// Compatibility names for the canonical typed enchanting event.
+pub use super::enchantment::{EnchantmentOffer as EnchantOffer, PrepareItemEnchantEvent};
 
 /// A smithing table has worked out what its three inputs make.
 ///

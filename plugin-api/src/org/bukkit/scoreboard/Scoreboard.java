@@ -5,7 +5,6 @@ import java.util.Set;
 /** Scoreboard view for one Foton domain: the scoreboard {@code /team} uses there. */
 public interface Scoreboard {
     Team getEntryTeam(String entry);
-
     default Objective getObjective(DisplaySlot slot) { return null; }
 
     /** The team with this name, or null. */

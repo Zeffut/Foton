@@ -14,8 +14,8 @@ public final class FotonEnderChestInventory implements Inventory {
     @Override public InventoryHolder getHolder() { try { return new FotonPlayer(java.util.UUID.fromString(owner)); } catch (IllegalArgumentException e) { return null; } }
     @Override public int getSize() { return 27; }
     @Override public InventoryType getType() { return InventoryType.ENDER_CHEST; }
-    @Override public ItemStack getItem(int slot) { return FotonInventory.decode(Native.enderChestSlot(owner, slot)); }
-    @Override public void setItem(int slot, ItemStack item) { Native.setEnderChestSlot(owner, slot, FotonInventory.encode(item)); }
+    @Override public ItemStack getItem(int slot) { return FotonInventory.decodeTransfer(Native.enderChestSlot(owner, slot)); }
+    @Override public void setItem(int slot, ItemStack item) { Native.setEnderChestSlot(owner, slot, FotonInventory.mutation(item)); }
     @Override
     public HashMap<Integer, ItemStack> addItem(ItemStack... items) {
         HashMap<Integer, ItemStack> left = new HashMap<>();
@@ -49,9 +49,9 @@ public final class FotonEnderChestInventory implements Inventory {
         return left;
     }
     @Override public ItemStack[] getContents() { ItemStack[] out = new ItemStack[getSize()]; for (int i = 0; i < out.length; i++) out[i] = getItem(i); return out; }
-    @Override public void setContents(ItemStack[] items) { for (int i = 0; i < getSize(); i++) setItem(i, items != null && i < items.length ? items[i] : null); }
+    @Override public void setContents(ItemStack[] items) { FotonInventory.setPlayerContents(owner, true, getSize(), items); }
     @Override public boolean contains(Material material) { return first(material) >= 0; }
     @Override public int first(Material material) { if (material == null) return -1; for (int i = 0; i < getSize(); i++) if (getItem(i) != null && getItem(i).getType() == material) return i; return -1; }
-    @Override public void clear() { for (int i = 0; i < getSize(); i++) clear(i); }
+    @Override public void clear() { setContents(null); }
     @Override public void clear(int slot) { if (slot >= 0 && slot < getSize()) setItem(slot, null); }
 }

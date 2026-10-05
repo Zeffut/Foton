@@ -29,7 +29,7 @@ use foton_utils::{
 use glam::DVec3;
 use text_components::TextComponent;
 
-fn menu_top_slot_count(menu: &Menu) -> Option<usize> {
+pub(super) fn menu_top_slot_count(menu: &Menu) -> Option<usize> {
     if menu.container_id() == INVENTORY_MENU_CONTAINER_ID && menu.menu_type().is_none() {
         // Vanilla InventoryMenu exposes the result plus the 2x2 crafting grid.
         return Some(5);
@@ -40,23 +40,6 @@ fn menu_top_slot_count(menu: &Menu) -> Option<usize> {
             .len()
             .saturating_sub(PlayerInventory::MAIN.len() + PlayerInventory::HOTBAR.len())
     })
-}
-
-fn menu_metadata(menu: &Menu) -> (usize, Option<String>, Vec<ItemStack>) {
-    let top_slot_count = menu_top_slot_count(menu).unwrap_or(0);
-    let menu_type = menu.menu_type().map(|menu_type| menu_type.key.to_string());
-    let snapshot = {
-        let guard = menu.behavior().lock_all_containers();
-        (0..top_slot_count)
-            .filter_map(|index| {
-                menu.behavior()
-                    .slots()
-                    .get(index)
-                    .map(|slot| slot.get_item(&guard).clone())
-            })
-            .collect()
-    };
-    (top_slot_count, menu_type, snapshot)
 }
 
 use crate::{
@@ -76,7 +59,8 @@ use crate::{
 
 use super::{
     DeferredMenuAction, MenuItemDisposition, MenuOpenContext, MenuRemovalStatus, OpenMenuDispatch,
-    OpenMenuUnavailable, PendingMenuOpen, PlayerInventory, PreparedMenu, TerminalMenuRemoval,
+    OpenMenuReadSource, OpenMenuUnavailable, PendingMenuOpen, PlayerInventory, PreparedMenu,
+    TerminalMenuRemoval,
 };
 
 impl Player {
@@ -202,7 +186,7 @@ impl Player {
         }
     }
 
-    fn take_open_menu_for_callback(
+    pub(super) fn take_open_menu_for_callback(
         &self,
         expected_container_id: Option<i32>,
     ) -> Result<Menu, OpenMenuUnavailable> {
@@ -242,28 +226,32 @@ impl Player {
                 .collect()
         };
         OpenMenuDispatch {
+            instance: menu.behavior().instance_id(),
             overrides_player_slots: menu.overrides_player_slots(),
             top_slot_count,
             menu_type: menu.menu_type().map(|menu_type| menu_type.key.to_string()),
-            snapshot,
+            reads: OpenMenuReadSource::Snapshot(snapshot),
+            live_reads_supported: menu
+                .behavior()
+                .slots()
+                .iter()
+                .take(top_slot_count)
+                .all(|slot| slot.live_read_source().is_some()),
             actions: Vec::new(),
         }
     }
 
-    fn finish_open_menu_callback(&self, menu: Menu) {
-        let metadata = menu_metadata(&menu);
+    pub(super) fn finish_open_menu_callback(&self, menu: Menu) {
         let actions = {
             let mut open_menu = self.open_menu.lock();
-            let Some(mut dispatch) = open_menu.dispatch.take() else {
+            let Some(dispatch) = open_menu.dispatch.take() else {
                 open_menu.menu = Some(menu);
                 return;
             };
-            dispatch.top_slot_count = metadata.0;
-            dispatch.menu_type = metadata.1;
-            dispatch.snapshot = metadata.2;
             if let Some(terminal_removal) = open_menu.terminal_removal.as_mut() {
-                Self::queue_deferred_menus(terminal_removal, dispatch.actions);
+                let discarded = Self::queue_deferred_menus(terminal_removal, dispatch.actions);
                 drop(open_menu);
+                drop(discarded);
                 self.finish_terminal_menu_main_cleanup(Some(menu));
                 return;
             }
@@ -282,8 +270,9 @@ impl Player {
                 return;
             };
             if let Some(terminal_removal) = open_menu.terminal_removal.as_mut() {
-                Self::queue_deferred_menus(terminal_removal, dispatch.actions);
+                let discarded = Self::queue_deferred_menus(terminal_removal, dispatch.actions);
                 drop(open_menu);
+                drop(discarded);
                 self.finish_terminal_menu_main_cleanup(None);
                 return;
             }
@@ -297,12 +286,11 @@ impl Player {
     fn run_deferred_menu_actions(&self, actions: Vec<DeferredMenuAction>) {
         for action in actions {
             match action {
-                DeferredMenuAction::Close { send_packet } => {
-                    if send_packet {
-                        self.close_container();
-                    } else {
-                        self.do_close_container();
-                    }
+                DeferredMenuAction::Close {
+                    send_packet,
+                    expected_instance,
+                } => {
+                    self.close_open_menu(send_packet, expected_instance);
                 }
                 DeferredMenuAction::Open(prepared) => {
                     self.execute_menu_open(*prepared);
@@ -311,8 +299,10 @@ impl Player {
                     let PreparedMenu { title, menu } = *prepared;
                     self.open_prepared_menu(title, menu);
                 }
-                DeferredMenuAction::SetSlot { index, stack } => {
-                    let _ = self.set_open_container_item(index, stack);
+                DeferredMenuAction::SetItems(batch) => {
+                    if let Err(error) = self.set_open_container_items(batch) {
+                        log::warn!("Deferred menu item batch refused: {error:?}");
+                    }
                 }
             }
         }
@@ -323,15 +313,17 @@ impl Player {
     fn queue_deferred_menus(
         terminal_removal: &mut TerminalMenuRemoval,
         actions: Vec<DeferredMenuAction>,
-    ) {
-        terminal_removal
-            .pending_menus
-            .extend(actions.into_iter().filter_map(|action| match action {
-                DeferredMenuAction::Install(prepared) => Some(prepared.menu),
-                DeferredMenuAction::Close { .. }
-                | DeferredMenuAction::Open(_)
-                | DeferredMenuAction::SetSlot { .. } => None,
-            }));
+    ) -> Vec<DeferredMenuAction> {
+        let mut discarded = Vec::new();
+        for action in actions {
+            match action {
+                DeferredMenuAction::Install(prepared) => {
+                    terminal_removal.pending_menus.push(prepared.menu);
+                }
+                action => discarded.push(action),
+            }
+        }
+        discarded
     }
 
     fn begin_menu_open_operation(&self) -> bool {
@@ -897,10 +889,17 @@ impl Player {
                     .collect()
             };
             open_menu.dispatch = Some(OpenMenuDispatch {
+                instance: menu.behavior().instance_id(),
                 overrides_player_slots: menu.overrides_player_slots(),
                 top_slot_count,
                 menu_type,
-                snapshot,
+                reads: OpenMenuReadSource::Snapshot(snapshot),
+                live_reads_supported: menu
+                    .behavior()
+                    .slots()
+                    .iter()
+                    .take(top_slot_count)
+                    .all(|slot| slot.live_read_source().is_some()),
                 actions: Vec::new(),
             });
             break;
@@ -982,7 +981,7 @@ impl Player {
     /// Based on Java's `ServerPlayer::closeContainer`.
     /// This sends a close packet to the client.
     pub fn close_container(&self) {
-        self.close_open_menu(true);
+        self.close_open_menu(true, None);
     }
 
     /// Internal close container logic without sending a packet.
@@ -990,7 +989,7 @@ impl Player {
     /// Based on Java's `ServerPlayer::doCloseContainer`.
     /// Called when the client sends a close packet or when opening a new menu.
     pub fn do_close_container(&self) {
-        self.close_open_menu(false);
+        self.close_open_menu(false, None);
     }
 
     /// Removes both the base inventory menu and any external menu.
@@ -1095,20 +1094,36 @@ impl Player {
         self.try_finish_terminal_menu_removal();
     }
 
-    fn close_open_menu(&self, send_packet: bool) {
+    pub(super) fn close_open_menu(
+        &self,
+        send_packet: bool,
+        expected_instance: Option<u64>,
+    ) -> bool {
         let menu = {
             let mut open_menu = self.open_menu.lock();
             if open_menu.terminal_removal.is_some() {
-                return;
+                return false;
             }
             if let Some(dispatch) = open_menu.dispatch.as_mut() {
-                dispatch
-                    .actions
-                    .push(DeferredMenuAction::Close { send_packet });
-                return;
+                if expected_instance.is_some_and(|expected| dispatch.instance != expected) {
+                    return false;
+                }
+                dispatch.actions.push(DeferredMenuAction::Close {
+                    send_packet,
+                    expected_instance,
+                });
+                return true;
+            }
+            if expected_instance.is_some_and(|expected| {
+                open_menu
+                    .menu
+                    .as_ref()
+                    .is_none_or(|menu| menu.behavior().instance_id() != expected)
+            }) {
+                return false;
             }
             let Some(menu) = open_menu.menu.take() else {
-                return;
+                return false;
             };
             open_menu.title = None;
             // Bukkit parity: `InventoryCloseEvent` shows the inventory being
@@ -1128,6 +1143,7 @@ impl Player {
         self.fire_event(&mut close_event);
         self.remove_open_menu(&mut menu);
         self.finish_open_menu_removal();
+        true
     }
 
     fn remove_open_menu(&self, menu: &mut Menu) {
@@ -1205,9 +1221,27 @@ impl Player {
     /// Returns a copy of one slot from the top inventory of the open menu.
     #[must_use]
     pub fn open_container_item(&self, index: usize) -> Option<ItemStack> {
+        self.with_open_container_item(index, Clone::clone)
+    }
+
+    /// Borrows a live or dispatch-snapshot slot under the menu/container guards.
+    /// The callback must be synchronous and must not call Java, reenter the menu,
+    /// or invoke entity/world callbacks. Construct external DTOs after it returns.
+    pub fn with_open_container_item<R>(
+        &self,
+        index: usize,
+        read: impl FnOnce(&ItemStack) -> R,
+    ) -> Option<R> {
         let open_menu = self.open_menu.lock();
         if let Some(dispatch) = open_menu.dispatch.as_ref() {
-            return dispatch.snapshot.get(index).cloned();
+            return match &dispatch.reads {
+                OpenMenuReadSource::Snapshot(snapshot) => snapshot.get(index).map(read),
+                OpenMenuReadSource::Live(sources) => {
+                    let source = sources.get(index)?.clone();
+                    drop(open_menu);
+                    source.container.with_stored_item(source.index, read)
+                }
+            };
         }
         let menu = open_menu.menu.as_ref()?;
         let top_count = menu_top_slot_count(menu)?;
@@ -1216,7 +1250,7 @@ impl Player {
             return None;
         }
         let guard = menu.behavior().lock_all_containers();
-        Some(slot.get_item(&guard).clone())
+        Some(read(slot.get_item(&guard)))
     }
 
     /// Replaces one slot in the currently open external menu.
@@ -1224,34 +1258,8 @@ impl Player {
     /// The menu owns the slot policy and its backing containers, so mutation
     /// goes through the slot abstraction rather than bypassing menu rules.
     pub fn set_open_container_item(&self, index: usize, stack: ItemStack) -> bool {
-        let mut open_menu = self.open_menu.lock();
-        if let Some(dispatch) = open_menu.dispatch.as_mut() {
-            if index >= dispatch.top_slot_count {
-                return false;
-            }
-            dispatch
-                .actions
-                .push(DeferredMenuAction::SetSlot { index, stack });
-            return true;
-        }
-        let Some(menu) = open_menu.menu.as_ref() else {
-            return false;
-        };
-        let Some(top_count) = menu_top_slot_count(menu) else {
-            return false;
-        };
-        let Some(slot) = menu.behavior().slots().get(index) else {
-            return false;
-        };
-        if index >= top_count {
-            return false;
-        }
-        let mut guard = menu.behavior().lock_all_containers();
-        slot.set_item(&mut guard, stack);
-        drop(guard);
-        drop(open_menu);
-        self.broadcast_inventory_changes();
-        true
+        self.set_open_container_items(super::item_batch::single(index, stack))
+            .is_ok()
     }
 
     /// Runs the open menu's per-tick hook, if an external menu is open.

@@ -174,6 +174,7 @@ pub(crate) fn spawn_check_host() -> Result<(tempfile::TempDir, crate::PluginHost
         &crate::PluginHostConfig {
             java_home,
             api_jar: api,
+            item_snapshot_limit: crate::PluginHostConfig::DEFAULT_ITEM_SNAPSHOT_LIMIT,
             library_directories: vec![libraries],
             plugin_directory: scratch.path().join("plugins"),
         },

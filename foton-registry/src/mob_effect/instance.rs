@@ -157,6 +157,12 @@ impl PartialEq for MobEffectInstance {
 }
 
 impl MobEffectInstanceDetails {
+    /// Borrows the next fallback without cloning the recursive effect chain.
+    #[must_use]
+    pub fn hidden_effect(&self) -> Option<&Self> {
+        self.hidden_effect.as_deref()
+    }
+
     #[must_use]
     pub fn new(
         amplifier: i32,
@@ -199,11 +205,6 @@ impl MobEffectInstanceDetails {
     #[must_use]
     pub const fn show_icon(&self) -> bool {
         self.show_icon
-    }
-
-    #[must_use]
-    pub fn hidden_effect(&self) -> Option<&Self> {
-        self.hidden_effect.as_deref()
     }
 
     fn to_nbt_compound(&self) -> NbtCompound {

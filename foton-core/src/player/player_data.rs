@@ -48,6 +48,9 @@ pub struct PersistentPlayerData {
     /// Whether the player is on the ground.
     pub on_ground: bool,
 
+    /// Vanilla `Tags` shared by players and other entities.
+    pub tags: Vec<String>,
+
     /// Whether the player is elytra gliding.
     pub fall_flying: bool,
 
@@ -275,15 +278,13 @@ impl PersistentPlayerData {
         // Before the inventory lock below, not after: a player's equipment is a
         // view onto its own inventory, so `save_living` takes that same lock to
         // read the worn items and would hang waiting on this function.
-        let mut living = NbtCompound::new();
-        player.save_living(&mut living);
-        let mut living_nbt = Vec::new();
-        living.write(&mut living_nbt);
+        let living_nbt = Self::living_nbt_from_player(player);
 
         let pos = player.position();
         let (yaw, pitch) = player.rotation();
         let delta = player.velocity();
         let on_ground = player.on_ground();
+        let tags = player.tags();
         let fall_flying = player.is_fall_flying();
         let fire_freeze = player.fire_freeze_state();
         let abilities = player.abilities.lock();
@@ -337,6 +338,7 @@ impl PersistentPlayerData {
             motion: [delta.x, delta.y, delta.z],
             rotation: [yaw, pitch],
             on_ground,
+            tags,
             fall_flying,
             remaining_fire_ticks: fire_freeze.remaining_fire_ticks(),
             ticks_frozen: fire_freeze.ticks_frozen(),
@@ -382,6 +384,14 @@ impl PersistentPlayerData {
             recipe_book: player.saved_recipe_book(),
             living_nbt,
         }
+    }
+
+    fn living_nbt_from_player(player: &Player) -> Vec<u8> {
+        let mut living = NbtCompound::new();
+        player.save_living(&mut living);
+        let mut bytes = Vec::new();
+        living.write(&mut bytes);
+        bytes
     }
 
     /// Restores the shared living half before the player's own fields.
@@ -657,6 +667,7 @@ impl PersistentPlayerData {
         use glam::DVec3;
 
         self.apply_living_nbt(player);
+        player.base().set_tags(self.tags.iter().cloned());
 
         if restore_location {
             // Position

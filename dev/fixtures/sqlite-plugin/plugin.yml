@@ -1,0 +1,4 @@
+name: FotonSqliteProbe
+version: 1.0.0
+main: foton.fixture.sqlite.SqlitePlugin
+api-version: '1.21'

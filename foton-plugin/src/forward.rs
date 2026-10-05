@@ -11,16 +11,17 @@
 
 use std::sync::Arc;
 
-use crate::natives;
 use crate::natives::describe_slot;
 use crate::natives::parse_slot;
 use crate::relay::{self, component};
+use crate::{enchantment, natives};
 use foton_core::entity::Entity as _;
 use foton_core::entity::PluginSpawnReason;
 use foton_core::entity::conversion::ConversionReason;
 use foton_core::event::AsyncTabCompleteEvent;
 use foton_core::event::EntityTargetEvent;
 use foton_core::event::Event;
+use foton_core::event::EventPriority;
 use foton_core::event::ExplosionPrimeEvent;
 use foton_core::event::{
     AsyncPlayerPreLoginEvent, AsyncPlayerPreLoginResult, BlockBurnEvent, BlockDamageEvent,
@@ -41,8 +42,8 @@ use foton_core::event::{
     PlayerJoinEvent, PlayerLocaleChangeEvent, PlayerLoginAbortEvent, PlayerLoginEvent,
     PlayerMoveEvent, PlayerOpenSignCause, PlayerOpenSignEvent, PlayerPortalEvent, PlayerQuitEvent,
     PlayerRespawnEvent, PlayerSpawnLocationEvent, PlayerTakeLecternBookEvent, PortalCreateEvent,
-    PreCreatureSpawnEvent, PrepareItemCraftEvent, ProjectileLaunchEvent, ServerTickEvent,
-    SignChangeEvent, ThunderChangeEvent, WeatherChangeEvent,
+    PreCreatureSpawnEvent, PrepareItemCraftEvent, PrepareItemEnchantEvent, ProjectileLaunchEvent,
+    ServerTickEvent, SignChangeEvent, ThunderChangeEvent, WeatherChangeEvent,
 };
 use foton_core::event::{
     PlayerChangedWorldEvent, PlayerCommandSendEvent, PlayerGameModeChangeEvent, PlayerItemHeldEvent,
@@ -260,6 +261,35 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
         event.set_matrix(matrix);
         event.set_result(result);
     });
+
+    let jvm = Arc::clone(&vm);
+    events.listen::<PrepareItemEnchantEvent, _>(
+        owner(),
+        EventPriority::Normal,
+        true,
+        move |event| {
+            let Some(answer) = prepare_enchant_call(&jvm, event) else {
+                return;
+            };
+            let fields: Vec<_> = answer.split('\u{001f}').collect();
+            let [cancelled, state, item, lapis] = fields.as_slice() else {
+                return;
+            };
+            let (Some(state), Some(item), Some(lapis)) = (
+                enchantment::decode(state),
+                natives::parse_slot(item),
+                natives::parse_slot(lapis),
+            ) else {
+                return;
+            };
+            if !matches!(*cancelled, "0" | "1") {
+                return;
+            }
+            event.cancelled = *cancelled == "1";
+            event.state = state;
+            event.items = [item, lapis];
+        },
+    );
 
     let jvm = Arc::clone(&vm);
     events.on::<CrafterCraftEvent, _>(owner(), move |event| {
@@ -1033,6 +1063,7 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
         let message = event
             .message()
             .map(|message| json::to_json(message).to_string());
+        supported_channels_call(&jvm, &uuid);
         match join_call(&jvm, &uuid, event.player().id(), message.as_deref()) {
             Answer::Unreachable => {}
             Answer::Nothing => event.set_message(None),
@@ -1155,7 +1186,7 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
         let result = env.call_static_method(
             BRIDGE,
             "fireBlockExp",
-            "(Ljava/lang/String;IIILjava/lang/String;)Ljava/lang/String;",
+            "(Ljava/lang/String;IIII)Ljava/lang/String;",
             &[
                 JValue::Object(&world),
                 JValue::Int(event.position().x()),
@@ -1494,6 +1525,36 @@ fn interact_entity_call(vm: &JavaVM, player_uuid: &str, entity_uuid: &str) -> bo
     .unwrap_or(true)
 }
 
+fn prepare_enchant_call(vm: &JavaVM, event: &PrepareItemEnchantEvent) -> Option<String> {
+    let mut env = BridgeEnv::attach(vm)?;
+    let player = env.new_string(event.player_id.to_string()).ok()?;
+    let world = env.new_string(&event.world).ok()?;
+    let input = env
+        .new_string(natives::describe_slot(&event.items[0]))
+        .ok()?;
+    let lapis = env
+        .new_string(natives::describe_slot(&event.items[1]))
+        .ok()?;
+    let state = env
+        .new_string(format!(
+            "{}|{}",
+            event.menu_id,
+            enchantment::encode(&event.state)
+        ))
+        .ok()?;
+    let answer = env.call_static_method(
+        "foton/EnchantmentEventBridge", "prepare",
+        "(Ljava/lang/String;Ljava/lang/String;IIILjava/lang/String;Ljava/lang/String;ILjava/lang/String;Z)Ljava/lang/String;",
+        &[
+            JValue::Object(&player), JValue::Object(&world), JValue::Int(event.position.x()),
+            JValue::Int(event.position.y()), JValue::Int(event.position.z()), JValue::Object(&input),
+            JValue::Object(&lapis), JValue::Int(event.bonus), JValue::Object(&state), JValue::Bool(u8::from(event.cancelled)),
+        ],
+    ).ok()?.l().ok()?;
+    let value: String = env.get_string(&JString::from(answer)).ok()?.into();
+    Some(value)
+}
+
 fn prepare_craft_call(
     vm: &JavaVM,
     player_uuid: &str,
@@ -1543,7 +1604,7 @@ fn crafter_craft_call(
         BRIDGE,
         "fireCrafterCraft",
         "(Ljava/lang/String;IIILjava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
-        &[JValue::Object(&world), JValue::from(position.x()), JValue::from(position.y()), JValue::from(position.z()), JValue::Object(&recipe), JValue::Object(&result), JValue::Object(&remaining)],
+        &[JValue::Object(&world), JValue::Int(position.x()), JValue::Int(position.y()), JValue::Int(position.z()), JValue::Object(&recipe), JValue::Object(&result), JValue::Object(&remaining)],
     ).ok()?.l().ok().and_then(|value| {
         let binding = JString::from(value);
         let text = env.get_string(&binding).ok()?;
@@ -1600,12 +1661,12 @@ fn brew_call(
         "(Ljava/lang/String;IIILjava/lang/String;Ljava/lang/String;I)Ljava/lang/String;",
         &[
             JValue::Object(&world),
-            JValue::from(position.x()),
-            JValue::from(position.y()),
-            JValue::from(position.z()),
+            JValue::Int(position.x()),
+            JValue::Int(position.y()),
+            JValue::Int(position.z()),
             JValue::Object(&contents),
             JValue::Object(&results),
-            JValue::from(fuel_level),
+            JValue::Int(fuel_level),
         ],
     )
     .ok()?
@@ -1896,7 +1957,27 @@ fn entity_portal_call(vm: &JavaVM, event: &EntityPortalEvent) -> Option<(String,
     };
     let from = event.from_position();
     let to = event.to_position();
-    let value=env.call_static_method(BRIDGE, "fireEntityPortal", "(Ljava/lang/String;Ljava/lang/String;DDDDLjava/lang/String;DDDDLjava/lang/String;)Ljava/lang/String;", &[JValue::Object(&entity),JValue::Object(&from_world),JValue::Double(from.x),JValue::Double(from.y),JValue::Double(from.z),JValue::Object(&to_world),JValue::Double(to.x),JValue::Double(to.y),JValue::Double(to.z),JValue::Object(&portal_type)]).ok()?.l().ok()?;
+    let value = env
+        .call_static_method(
+            BRIDGE,
+            "fireEntityPortal",
+            "(Ljava/lang/String;Ljava/lang/String;DDDLjava/lang/String;DDDLjava/lang/String;)Ljava/lang/String;",
+            &[
+                JValue::Object(&entity),
+                JValue::Object(&from_world),
+                JValue::Double(from.x),
+                JValue::Double(from.y),
+                JValue::Double(from.z),
+                JValue::Object(&to_world),
+                JValue::Double(to.x),
+                JValue::Double(to.y),
+                JValue::Double(to.z),
+                JValue::Object(&portal_type),
+            ],
+        )
+        .ok()?
+        .l()
+        .ok()?;
     let text: String = env.get_string((&value).into()).ok()?.into();
     if text == "!" {
         return None;
@@ -3415,25 +3496,28 @@ fn spawn_location_call_named(
         world, position[0], position[1], position[2], rotation.0, rotation.1
     );
     let encoded = env.new_string(encoded).ok()?;
-    let signature = if method == "firePlayerRespawn" {
-        "(Ljava/lang/String;Ljava/lang/String;Z)Ljava/lang/String;"
+    let value = if method == "firePlayerRespawn" {
+        env.call_static_method(
+            BRIDGE,
+            "firePlayerRespawn",
+            "(Ljava/lang/String;Ljava/lang/String;Z)Ljava/lang/String;",
+            &[
+                JValue::Object(&uuid),
+                JValue::Object(&encoded),
+                JValue::Bool(anchor_spawn.into()),
+            ],
+        )
     } else {
-        "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;"
-    };
-    let args = if method == "firePlayerRespawn" {
-        vec![
-            JValue::Object(&uuid),
-            JValue::Object(&encoded),
-            JValue::Bool(anchor_spawn.into()),
-        ]
-    } else {
-        vec![JValue::Object(&uuid), JValue::Object(&encoded)]
-    };
-    let value = env
-        .call_static_method(BRIDGE, method, signature, &args)
-        .ok()?
-        .l()
-        .ok()?;
+        env.call_static_method(
+            BRIDGE,
+            "firePlayerSpawnLocation",
+            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            &[JValue::Object(&uuid), JValue::Object(&encoded)],
+        )
+    }
+    .ok()?
+    .l()
+    .ok()?;
     if value.is_null() {
         return None;
     }
@@ -3749,6 +3833,22 @@ fn plugin_message_call(vm: &JavaVM, uuid: &str, channel: &str, payload: &[u8]) {
 
 #[cfg(test)]
 pub(crate) mod spawn_bridge_tests;
+
+/// Paper advertises incoming channels after the play login packet, before `PlayerJoinEvent`.
+fn supported_channels_call(vm: &JavaVM, uuid: &str) {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
+        return;
+    };
+    let Ok(uuid) = env.new_string(uuid) else {
+        return;
+    };
+    let _ = env.call_static_method(
+        MESSENGER,
+        "sendSupportedChannels",
+        "(Ljava/lang/String;)V",
+        &[JValue::Object(&uuid)],
+    );
+}
 
 #[cfg(test)]
 mod brewing_union_tests {

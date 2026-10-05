@@ -25,11 +25,12 @@ pub fn brewing_stand(
 ) -> Menu {
     let container = container.into();
     let mut builder = MenuBuilder::new(&vanilla_menu_types::BREWING_STAND, container_id);
+    let mut stand_slots = builder.split(&container);
 
     // Vanilla parity: `BrewingStandMenu.PotionSlot`, which takes a filled potion
     // of any kind or an empty glass bottle and nothing else.
     let bottles = builder.section_with(
-        &container,
+        &mut stand_slots,
         3,
         SectionKind::restricted(|_slot, stack| {
             stack.is(&vanilla_items::POTION)
@@ -39,12 +40,12 @@ pub fn brewing_stand(
         }),
     );
     let ingredient = builder.section_with(
-        &container,
+        &mut stand_slots,
         1,
         SectionKind::restricted(|_slot, stack| potion_brewing::is_ingredient(stack)),
     );
     let fuel = builder.section_with(
-        &container,
+        &mut stand_slots,
         1,
         SectionKind::restricted(|_slot, stack| potion_brewing::is_brewing_fuel(stack)),
     );

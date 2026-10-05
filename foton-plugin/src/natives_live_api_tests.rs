@@ -53,6 +53,7 @@ fn generated_java_apis_are_safe_before_registry_publication() -> Result<(), Box<
         &PluginHostConfig {
             java_home,
             api_jar,
+            item_snapshot_limit: PluginHostConfig::DEFAULT_ITEM_SNAPSHOT_LIMIT,
             library_directories: vec![root.join("plugin-api/lib")],
             plugin_directory: root.join("plugin-api/build/no-plugins"),
         },
@@ -156,6 +157,7 @@ fn generated_java_apis_reach_live_registry_natives() -> Result<(), Box<dyn Error
         &PluginHostConfig {
             java_home,
             api_jar,
+            item_snapshot_limit: PluginHostConfig::DEFAULT_ITEM_SNAPSHOT_LIMIT,
             library_directories: vec![root.join("plugin-api/lib")],
             plugin_directory: root.join("plugin-api/build/no-plugins"),
         },

@@ -20,7 +20,8 @@ Compile-time versions below are the ones
 `io.papermc.paper:paper-api:26.2.build.121-stable` declares, read from its
 published POM and -- for the Adventure artifacts, whose versions the POM
 leaves to a BOM -- from `net.kyori:adventure-bom:5.2.0`. SQLite JDBC 3.49.1.0
-matches the target Paper server's host-runtime dependency.
+matches the target Paper server's host-runtime dependency. The Gson serializer
+and its implementation-only closure follow that serializer's published POM.
 
 That matters more than it looks. A plugin is compiled against real Paper, so
 the signatures it references are Paper's. Compiling our `org.bukkit` against a
@@ -46,6 +47,14 @@ kick reason, a server-list MOTD -- crosses to the Rust side as Minecraft's JSON
 text, and that is what this serializer writes and reads, colors and all. It
 pulls in `adventure-text-serializer-json`, `adventure-text-serializer-commons`
 and `net.kyori:option`, at the versions its POM and adventure-bom 5.2.0 name.
+
+`sqlite-jdbc:3.49.1.0` belongs on Foton's host JVM classpath, even when a
+plugin shades its own SQLite driver. `DriverManager` discovers service
+providers with the host system class loader and checks driver visibility from
+the caller. The parent-first plugin loader must therefore resolve the same
+driver class that `DriverManager` registered. Zelda Civ's own shaded driver
+does not by itself satisfy this requirement. Xerial's published POM marks
+SLF4J optional; the runtime already provides `slf4j-api:2.0.17`.
 
 `examination-api` and `examination-string` are gone rather than updated:
 Adventure 5 dropped the dependency, and `adventure-api:5.2.0` names neither.
@@ -79,6 +88,24 @@ missing or changed jar from Maven.
 
 ## Licenses
 
+Plugin Maven resolution uses the exact Maven Resolver 1.9.18 and Maven provider
+3.9.6 versions distributed by official Paper 26.2 build 129. Its 16 additional
+JARs are resolver `api`, `spi`, `util`, `impl`, `named-locks`, `connector-basic`;
+Maven `resolver-provider`, `model`, `model-builder`, `repository-metadata`,
+`artifact`, `builder-support`; `plexus-utils:3.5.1`,
+`plexus-interpolation:1.26`, `javax.inject:1`, and `commons-lang3:3.20.0`.
+Every coordinate, download path and SHA-256 is in `plugin-api/lib/manifest.txt`.
+The initial bytes came from the pinned Paper runtime; the restoration source is
+Paper's Maven mirror. Their Apache-2.0 license and embedded notices are retained;
+Plexus Utils additionally retains its Indiana, Javolution and ThoughtWorks
+licenses inside the unmodified JAR, as recorded in `THIRD-PARTY-NOTICES.txt`.
+
+Foton supplies a bounded HTTP transport to the real Maven graph resolver, so
+Apache HTTP Client is not a runtime dependency. Guice module classes and Sisu
+annotations are optional integrations: the runtime checker excludes only those
+specific reference owners. All other Maven dependencies must resolve through
+`jdeps` and the local HTTP/POM/JAR fixture in the Java API harness.
+
 Every license was read from the artifact itself or from the project's published
 POM, not from memory and not carried over from the previous version.
 
@@ -94,6 +121,7 @@ POM, not from memory and not carried over from the previous version.
 | adventure-text-serializer-json | 5.2.0 | MIT | PaperMC Maven POM |
 | adventure-text-serializer-commons | 5.2.0 | MIT | PaperMC Maven POM |
 | option (net.kyori) | 1.1.0 | MIT | PaperMC Maven POM |
+| auto-service-annotations | 1.1.1 | Apache-2.0 | Maven Central POM |
 | annotations (JetBrains) | 26.1.0 | Apache-2.0 | Maven Central POM |
 | brigadier | 1.3.10 | MIT | `LICENSE` in Mojang/brigadier |
 | gson | 2.14.0 | Apache-2.0 | POM inside the jar |

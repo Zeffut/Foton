@@ -102,8 +102,16 @@ final class Config {
         YamlConfiguration config = new YamlConfiguration();
         config.addDefault("limits.players", 10);
         Checks.same(config.getInt("limits.players"), 10, "a default answers a missing path");
+        Checks.expect(config.contains("limits.players"),
+            "contains includes a configured default");
+        Checks.expect(!config.contains("limits.players", true),
+            "contains can explicitly ignore defaults");
+        Checks.expect(!config.isSet("limits.players"),
+            "isSet ignores a value that exists only in defaults");
         config.set("limits.players", 30);
         Checks.same(config.getInt("limits.players"), 30, "a set value beats its default");
+        Checks.expect(config.contains("limits.players", true) && config.isSet("limits.players"),
+            "an explicitly set value is present even when defaults are ignored");
     }
 
     /** Saving and loading a real file, which is what saveConfig does. */

@@ -35,10 +35,12 @@ function New-Runtime {
     [System.IO.File]::WriteAllText((Join-Path $Path 'foton-plugin-api.jar'), "api $Marker`n")
     $libraries = @(
         'adventure-api-5.2.0.jar', 'adventure-key-5.2.0.jar',
+        'adventure-text-minimessage-5.2.0.jar',
         'adventure-text-logger-slf4j-5.2.0.jar', 'adventure-text-serializer-plain-5.2.0.jar',
-        'adventure-text-minimessage-5.2.0.jar', 'adventure-text-serializer-commons-5.2.0.jar',
-        'adventure-text-serializer-gson-5.2.0.jar', 'adventure-text-serializer-json-5.2.0.jar',
-        'adventure-text-serializer-legacy-5.2.0.jar', 'option-1.1.0.jar',
+        'adventure-text-serializer-json-5.2.0.jar', 'adventure-text-serializer-gson-5.2.0.jar',
+        'adventure-text-serializer-commons-5.2.0.jar', 'option-1.1.0.jar',
+        'auto-service-annotations-1.1.1.jar',
+        'adventure-text-serializer-legacy-5.2.0.jar',
         'annotations-26.1.0.jar', 'brigadier-1.3.10.jar',
         'error_prone_annotations-2.47.0.jar', 'failureaccess-1.0.3.jar',
         'gson-2.14.0.jar', 'guava-33.6.0-jre.jar', 'j2objc-annotations-3.1.jar',
@@ -47,7 +49,16 @@ function New-Runtime {
         'kotlin-stdlib-jdk8-1.8.20.jar',
         'netty-buffer-4.2.15.Final.jar', 'netty-codec-base-4.2.15.Final.jar',
         'netty-common-4.2.15.Final.jar', 'netty-resolver-4.2.15.Final.jar',
-        'netty-transport-4.2.15.Final.jar', 'slf4j-api-2.0.17.jar', 'snakeyaml-2.2.jar', 'sqlite-jdbc-3.49.1.0.jar'
+        'netty-transport-4.2.15.Final.jar', 'slf4j-api-2.0.17.jar',
+        'sqlite-jdbc-3.49.1.0.jar', 'snakeyaml-2.2.jar',
+        'maven-resolver-api-1.9.18.jar', 'maven-resolver-spi-1.9.18.jar',
+        'maven-resolver-util-1.9.18.jar', 'maven-resolver-impl-1.9.18.jar',
+        'maven-resolver-named-locks-1.9.18.jar', 'maven-resolver-connector-basic-1.9.18.jar',
+        'maven-resolver-provider-3.9.6.jar', 'maven-model-3.9.6.jar',
+        'maven-model-builder-3.9.6.jar', 'maven-repository-metadata-3.9.6.jar',
+        'maven-artifact-3.9.6.jar', 'maven-builder-support-3.9.6.jar',
+        'plexus-utils-3.5.1.jar', 'plexus-interpolation-1.26.jar',
+        'javax.inject-1.jar', 'commons-lang3-3.20.0.jar'
     )
     foreach ($name in $libraries) {
         [System.IO.File]::WriteAllText((Join-Path $Path "lib\$name"), "library $Marker $name`n")
@@ -262,7 +273,7 @@ try {
     if ($truncatedCode -eq 0) { throw 'installer accepted a truncated runtime manifest' }
     if ((Get-Content -Raw (Join-Path $Install 'plugin-runtime\lib\adventure-api-5.2.0.jar')).Trim() -ne 'library old adventure-api-5.2.0.jar') { throw 'truncated runtime changed the installed pair' }
 
-    # A manifest that honestly describes only twenty-nine jars still cannot redefine
+    # A manifest that honestly describes only forty-seven jars still cannot redefine
     # the supported runtime set.
     New-Runtime $RuntimeFixture 'v9.8.7' 'shortened'
     Remove-Item (Join-Path $RuntimeFixture 'lib\netty-codec-base-4.2.15.Final.jar')
@@ -271,7 +282,7 @@ try {
     New-ReleaseAssets $newGood
     Push-Location $Install
     try { $shortenedCode = Invoke-Installer (Join-Path $Scratch 'shortened.log') } finally { Pop-Location }
-    if ($shortenedCode -eq 0) { throw 'installer accepted only twenty-nine dependency jars' }
+    if ($shortenedCode -eq 0) { throw 'installer accepted only forty-seven dependency jars' }
     if ((Get-Content -Raw (Join-Path $Install 'plugin-runtime\lib\adventure-api-5.2.0.jar')).Trim() -ne 'library old adventure-api-5.2.0.jar') { throw 'shortened runtime changed the installed pair' }
 
     # A correctly checksummed extra jar cannot extend the supported runtime.

@@ -122,6 +122,10 @@ impl RestrictedSlot {
 }
 
 impl Slot for RestrictedSlot {
+    fn live_read_source(&self) -> Option<super::MenuSlotReadSource> {
+        self.base.live_read_source()
+    }
+
     fn storage(&self) -> &SlotStorage {
         self.base.storage()
     }

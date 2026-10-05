@@ -29,7 +29,7 @@ final class FotonScoreboard implements Scoreboard {
     public Set<Team> getTeams() {
         Set<Team> teams = new LinkedHashSet<>();
         String[] names = Native.scoreboardTeamNames(world);
-        if (names != null) for (String name : names) teams.add(new FotonTeam(world, name));
+        if (names != null) for (String name : names) if (name != null) teams.add(new FotonTeam(world, name));
         return Collections.unmodifiableSet(teams);
     }
 

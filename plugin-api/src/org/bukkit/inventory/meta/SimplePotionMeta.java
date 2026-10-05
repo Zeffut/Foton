@@ -15,16 +15,22 @@ public final class SimplePotionMeta extends SimpleItemMeta implements PotionMeta
     @Override public boolean addCustomEffect(PotionEffect effect, boolean overwrite) {
         if (effect == null) return false;
         for (int i = 0; i < effects.size(); i++) if (effects.get(i).getType().equals(effect.getType())) {
-            if (!overwrite) return false; effects.set(i, effect); return true;
+            if (!overwrite) return false; effects.set(i, effect); changed("potion_effects", true); return true;
         }
-        effects.add(effect); return true;
+        effects.add(effect); changed("potion_effects", true); return true;
     }
-    @Override public boolean removeCustomEffect(PotionEffectType type) { return effects.removeIf(e -> e.getType().equals(type)); }
+    @Override public boolean removeCustomEffect(PotionEffectType type) { boolean removed = effects.removeIf(e -> e.getType().equals(type)); if (removed || nativeState().hasNativeBase()) changed("potion_effects", true); return removed; }
+    @Override public boolean clearCustomEffects() {
+        boolean had = !effects.isEmpty();
+        effects.clear();
+        if (had || nativeState().hasNativeBase()) changed("potion_effects", true);
+        return had;
+    }
     @Override public boolean hasCustomEffect(PotionEffectType type) { return effects.stream().anyMatch(e -> e.getType().equals(type)); }
-    @Override public void setBasePotionData(PotionData data) { base = data; }
+    @Override public void setBasePotionData(PotionData data) { base = data; changed("potion_base", true); }
     @Override public PotionData getBasePotionData() { return base; }
     @Override public org.bukkit.Color getColor() { return color; }
-    @Override public void setColor(org.bukkit.Color color) { this.color = color; }
+    @Override public void setColor(org.bukkit.Color color) { this.color = color; unsupportedChange("potion_color"); }
         @Override public SimplePotionMeta clone() { SimplePotionMeta copy = (SimplePotionMeta) super.clone(); copy.effects = new ArrayList<>(effects); copy.base = base; copy.color = color; return copy; }
     @Override public boolean equals(Object other) {
         return other instanceof SimplePotionMeta meta && super.equals(other)

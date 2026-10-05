@@ -129,10 +129,9 @@ struct ObjectiveState {
 
 /// The options a team carries beyond its name.
 ///
-/// Vanilla parity: the settable fields of `PlayerTeam`. Only the two that
-/// change behaviour rather than presentation are stored so far; both default
-/// the way vanilla's constructor does, so a team created and never modified
-/// behaves like `/team add` with no `modify`.
+/// Vanilla parity: the settable fields of `PlayerTeam` currently used by
+/// Foton. They default the way vanilla's constructor does, so a team created
+/// and never modified behaves like `/team add` with no `modify`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct TeamOptions {
@@ -173,13 +172,61 @@ pub struct TeamDisplay {
     pub collision_rule: TeamCollisionRule,
 }
 
+/// Complete client-visible state for one scoreboard team.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScoreboardTeamSnapshot {
+    /// Unique scoreboard team name.
+    pub name: String,
+    /// Component rendered before every member's name.
+    pub prefix: text_components::TextComponent,
+    /// Whether members may damage each other.
+    pub allow_friendly_fire: bool,
+    /// Whether members can see invisible allies.
+    pub see_friendly_invisibles: bool,
+    /// Score-holder names currently assigned to the team.
+    pub entries: Vec<String>,
+    /// Complete presentation from the same locked snapshot.
+    pub parameters: TeamParameters,
+}
+
+impl ScoreboardTeamSnapshot {
+    /// Vanilla's packed flags: friendly fire is bit 0 and seeing invisible
+    /// allies is bit 1.
+    #[must_use]
+    pub const fn option_flags(&self) -> u8 {
+        (self.allow_friendly_fire as u8) | ((self.see_friendly_invisibles as u8) << 1)
+    }
+
+    fn packet_parameters(&self) -> TeamParameters {
+        self.parameters.clone()
+    }
+
+    /// Packet that creates this team and installs its complete membership.
+    #[must_use]
+    pub fn create_packet(&self) -> CSetPlayerTeam {
+        CSetPlayerTeam::create(
+            self.name.clone(),
+            self.packet_parameters(),
+            self.entries.clone(),
+        )
+    }
+
+    /// Packet that refreshes this team's presentation fields.
+    #[must_use]
+    pub fn update_packet(&self) -> CSetPlayerTeam {
+        CSetPlayerTeam::update(self.name.clone(), self.packet_parameters())
+    }
+}
+
 /// Reads `teams` whether it was written as a set of names or a map of options.
 ///
 /// Every scoreboard saved before team options existed holds a JSON array, and
 /// `deny_unknown_fields` gives no room to add a parallel field, so refusing the
 /// old shape would fail the load and cost the world its teams. An old team
 /// deserializes with vanilla's defaults, which is what it behaved like.
-fn deserialize_teams<'de, D>(deserializer: D) -> Result<BTreeMap<String, TeamOptions>, D::Error>
+fn deserialize_teams<'de, D>(
+    deserializer: D,
+) -> Result<BTreeMap<String, SavedTeamOptions>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -187,28 +234,89 @@ where
     #[serde(untagged)]
     enum TeamsRepr {
         Named(BTreeSet<String>),
-        WithOptions(BTreeMap<String, TeamOptions>),
+        WithOptions(BTreeMap<String, SavedTeamOptions>),
     }
 
     Ok(match TeamsRepr::deserialize(deserializer)? {
         TeamsRepr::Named(names) => names
             .into_iter()
-            .map(|name| (name, TeamOptions::default()))
+            .map(|name| (name, SavedTeamOptions::default()))
             .collect(),
         TeamsRepr::WithOptions(teams) => teams,
     })
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(from = "SavedScoreboard")]
 struct PersistentScoreboard {
     objectives: BTreeMap<String, ObjectiveState>,
     scores: BTreeMap<String, BTreeMap<String, ScoreboardScore>>,
-    #[serde(deserialize_with = "deserialize_teams")]
     teams: BTreeMap<String, TeamOptions>,
     holder_teams: BTreeMap<String, String>,
     /// Presentation, for teams whose look was ever changed from the default.
     team_display: BTreeMap<String, TeamDisplay>,
+}
+
+/// Incoming saves stored prefix alongside flags; runtime state has one prefix.
+#[derive(Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct SavedTeamOptions {
+    allow_friendly_fire: bool,
+    see_friendly_invisibles: bool,
+    prefix: Option<TextComponent>,
+}
+
+impl Default for SavedTeamOptions {
+    fn default() -> Self {
+        Self {
+            allow_friendly_fire: true,
+            see_friendly_invisibles: true,
+            prefix: None,
+        }
+    }
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct SavedScoreboard {
+    objectives: BTreeMap<String, ObjectiveState>,
+    scores: BTreeMap<String, BTreeMap<String, ScoreboardScore>>,
+    #[serde(deserialize_with = "deserialize_teams")]
+    teams: BTreeMap<String, SavedTeamOptions>,
+    holder_teams: BTreeMap<String, String>,
+    team_display: BTreeMap<String, TeamDisplay>,
+}
+
+impl From<SavedScoreboard> for PersistentScoreboard {
+    fn from(saved: SavedScoreboard) -> Self {
+        let mut display = saved.team_display;
+        let teams = saved
+            .teams
+            .into_iter()
+            .map(|(name, options)| {
+                if let Some(prefix) = options.prefix {
+                    display.entry(name.clone()).or_insert_with(|| TeamDisplay {
+                        prefix: Some(prefix),
+                        ..TeamDisplay::default()
+                    });
+                }
+                (
+                    name,
+                    TeamOptions {
+                        allow_friendly_fire: options.allow_friendly_fire,
+                        see_friendly_invisibles: options.see_friendly_invisibles,
+                    },
+                )
+            })
+            .collect();
+        Self {
+            objectives: saved.objectives,
+            scores: saved.scores,
+            teams,
+            holder_teams: saved.holder_teams,
+            team_display: display,
+        }
+    }
 }
 
 impl PersistentScoreboard {
@@ -396,10 +504,53 @@ impl Scoreboard {
         self.state.read().teams.keys().cloned().collect()
     }
 
+    /// Returns one team's presentation and membership as one coherent read.
+    #[must_use]
+    pub fn team_snapshot(&self, team: &ScoreboardTeam) -> Option<ScoreboardTeamSnapshot> {
+        let state = self.state.read();
+        let options = state.teams.get(team.name())?;
+        Some(ScoreboardTeamSnapshot {
+            name: team.name().to_owned(),
+            prefix: state.team_parameters(team.name()).prefix,
+            parameters: state.team_parameters(team.name()),
+            allow_friendly_fire: options.allow_friendly_fire,
+            see_friendly_invisibles: options.see_friendly_invisibles,
+            entries: state
+                .holder_teams
+                .iter()
+                .filter(|(_, assigned)| *assigned == team.name())
+                .map(|(holder, _)| holder.to_owned())
+                .collect(),
+        })
+    }
+
+    /// Returns all team snapshots in stable team-name order.
+    #[must_use]
+    pub fn team_snapshots(&self) -> Vec<ScoreboardTeamSnapshot> {
+        let state = self.state.read();
+        state
+            .teams
+            .iter()
+            .map(|(name, options)| ScoreboardTeamSnapshot {
+                name: name.clone(),
+                prefix: state.team_parameters(name).prefix,
+                parameters: state.team_parameters(name),
+                allow_friendly_fire: options.allow_friendly_fire,
+                see_friendly_invisibles: options.see_friendly_invisibles,
+                entries: state
+                    .holder_teams
+                    .iter()
+                    .filter(|(_, assigned)| *assigned == name)
+                    .map(|(holder, _)| holder.to_owned())
+                    .collect(),
+            })
+            .collect()
+    }
+
     /// Removes a team and every membership pointing at it.
     ///
-    /// Vanilla parity: `Scoreboard.removeTeam`, which calls `removeTeam` for
-    /// each member first. Leaving the memberships behind would make
+    /// Vanilla parity: `Scoreboard.removePlayerTeam`, which clears every
+    /// player-to-team mapping before reporting the team removal. Leaving the memberships behind would make
     /// `@e[team=<gone>]` keep matching, and re-creating the name would silently
     /// inherit the old roster.
     pub fn remove_team(&self, team: &ScoreboardTeam) -> bool {
@@ -503,7 +654,7 @@ impl Scoreboard {
     ///
     /// Vanilla parity: the team half of `PlayerList.updateEntireScoreboard`.
     #[must_use]
-    pub fn team_snapshot(&self) -> Vec<CSetPlayerTeam> {
+    pub fn team_snapshot_packets(&self) -> Vec<CSetPlayerTeam> {
         let state = self.state.read();
         state
             .teams
@@ -551,6 +702,30 @@ impl Scoreboard {
         });
     }
 
+    /// Replaces a team's client-visible prefix and reports whether it existed.
+    pub fn set_team_prefix(
+        &self,
+        team: &ScoreboardTeam,
+        prefix: text_components::TextComponent,
+    ) -> bool {
+        let mut state = self.state.write();
+        if !state.teams.contains_key(team.name()) {
+            return false;
+        }
+        let display = state
+            .team_display
+            .entry(team.name().to_owned())
+            .or_default();
+        if display.prefix.as_ref() == Some(&prefix) {
+            return true;
+        }
+        display.prefix = Some(prefix);
+        let parameters = state.team_parameters(team.name());
+        drop(state);
+        self.mark_dirty();
+        self.queue_team_update(team.name(), TeamMethod::Change(parameters));
+        true
+    }
     /// Returns whether two holders are on one team, and whether it lets them
     /// hurt each other.
     ///
@@ -609,18 +784,17 @@ impl Scoreboard {
         if !state.teams.contains_key(team.name()) {
             return Err(ScoreboardError::MissingTeam(team.name().to_owned()));
         }
-        if state
+        let previous = state
             .holder_teams
-            .insert(holder.name().to_owned(), team.name().to_owned())
-            .as_deref()
-            == Some(team.name())
-        {
+            .insert(holder.name().to_owned(), team.name().to_owned());
+        if previous.as_deref() == Some(team.name()) {
             return Ok(());
         }
         drop(state);
         self.mark_dirty();
-        // The client takes the holder off any previous team itself, as the
-        // server's own `addPlayerToTeam` does.
+        if let Some(previous) = previous {
+            self.queue_team_update(&previous, TeamMethod::Leave(vec![holder.name().to_owned()]));
+        }
         self.queue_team_update(
             team.name(),
             TeamMethod::Join(vec![holder.name().to_owned()]),
@@ -997,6 +1171,59 @@ mod tests {
         );
     }
 
+    #[test]
+    fn team_prefix_and_membership_produce_complete_client_packets() {
+        use foton_protocol::packets::game::TeamMethod;
+
+        let scoreboard = Scoreboard::new();
+        let team = scoreboard
+            .add_team("zc_admin")
+            .expect("team should be added");
+        let prefix = text_components::TextComponent::plain("[Admin] ");
+        assert!(scoreboard.set_team_prefix(&team, prefix.clone()));
+        scoreboard
+            .add_holder_to_team(&ScoreHolder::new("Zeffut"), &team)
+            .expect("member should join");
+
+        let snapshot = scoreboard
+            .team_snapshot(&team)
+            .expect("team should have a snapshot");
+        assert_eq!(snapshot.prefix, prefix);
+        assert_eq!(snapshot.entries, ["Zeffut"]);
+        assert_eq!(snapshot.option_flags(), 3);
+        let packet = snapshot.create_packet();
+        let TeamMethod::Add(parameters, players) = packet.method else {
+            panic!("snapshot must create a team packet");
+        };
+        assert_eq!(parameters.prefix, prefix);
+        assert_eq!(players, ["Zeffut"]);
+    }
+
+    #[test]
+    fn team_prefix_persists_with_the_domain_scoreboard() {
+        let scoreboard = Scoreboard::new();
+        let team = scoreboard.add_team("red").expect("team should be added");
+        let prefix = text_components::TextComponent::plain("R ");
+        assert!(scoreboard.set_team_prefix(&team, prefix.clone()));
+
+        let snapshot = scoreboard
+            .pending_save()
+            .expect("prefix mutation should dirty the scoreboard");
+        let encoded = serde_json::to_string(&snapshot.state).expect("scoreboard should serialize");
+        let persistent: PersistentScoreboard =
+            serde_json::from_str(&encoded).expect("scoreboard should deserialize");
+        let restored =
+            Scoreboard::from_persistent(persistent).expect("restored scoreboard should validate");
+        let restored_team = restored.team("red").expect("team should survive");
+        assert_eq!(
+            restored
+                .team_snapshot(&restored_team)
+                .expect("snapshot should survive")
+                .prefix,
+            prefix
+        );
+    }
+
     #[tokio::test]
     async fn persisted_scoreboard_round_trips_and_becomes_clean_after_save() {
         let unique = SystemTime::now()
@@ -1257,6 +1484,63 @@ mod tests {
         assert!(scoreboard.take_team_updates().is_empty());
     }
 
+    #[test]
+    fn membership_transfer_queues_one_leave_then_join_and_same_team_is_noop() {
+        use foton_protocol::packets::game::CSetPlayerTeam;
+        let scoreboard = Scoreboard::new();
+        let red = scoreboard.add_team("red").expect("red");
+        let blue = scoreboard.add_team("blue").expect("blue");
+        let holder = ScoreHolder::new("alice");
+        scoreboard
+            .add_holder_to_team(&holder, &red)
+            .expect("initial membership");
+        let _ = scoreboard.take_team_updates();
+        scoreboard
+            .add_holder_to_team(&holder, &blue)
+            .expect("transfer");
+        assert_eq!(
+            scoreboard.take_team_updates(),
+            vec![
+                CSetPlayerTeam::remove_player("red", "alice"),
+                CSetPlayerTeam::add_player("blue", "alice"),
+            ]
+        );
+        scoreboard
+            .add_holder_to_team(&holder, &blue)
+            .expect("same team");
+        assert!(scoreboard.take_team_updates().is_empty());
+    }
+
+    #[test]
+    fn both_parent_prefix_save_shapes_normalize_without_losing_presentation() {
+        for (display, expected) in [
+            ("", "incoming"),
+            (
+                r#", "team_display":{"red":{"prefix":{"text":"current"},"suffix":{"text":"!"}}}"#,
+                "current",
+            ),
+        ] {
+            let json = format!(
+                r#"{{"teams":{{"red":{{"prefix":{{"text":"incoming"}},"allow_friendly_fire":false}}}},"holder_teams":{{"alice":"red"}}{display}}}"#
+            );
+            let persistent: PersistentScoreboard =
+                serde_json::from_str(&json).expect("parent save shape");
+            let scoreboard = Scoreboard::from_persistent(persistent).expect("valid scoreboard");
+            let team = scoreboard.team("red").expect("team");
+            let snapshot = scoreboard.team_snapshot(&team).expect("snapshot");
+            assert_eq!(snapshot.prefix, TextComponent::plain(expected));
+            let parameters = scoreboard.state.read().team_parameters("red");
+            assert!(!parameters.allow_friendly_fire);
+            assert_eq!(scoreboard.team_entries(&team), vec!["alice"]);
+            if !display.is_empty() {
+                assert_eq!(parameters.suffix, TextComponent::plain("!"));
+            }
+            let saved = serde_json::to_value(&*scoreboard.state.read()).expect("save");
+            assert!(saved["teams"]["red"].get("prefix").is_none());
+            assert!(saved["team_display"]["red"].get("prefix").is_some());
+        }
+    }
+
     /// A joining client is sent every team with its members and its look.
     #[test]
     fn the_snapshot_carries_members_and_presentation() {
@@ -1275,7 +1559,7 @@ mod tests {
             }
         ));
 
-        let snapshot = scoreboard.team_snapshot();
+        let snapshot = scoreboard.team_snapshot_packets();
         let [packet] = snapshot.as_slice() else {
             panic!("one team, one packet: {snapshot:?}");
         };

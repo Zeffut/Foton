@@ -25,14 +25,16 @@ public final class FotonMerchant implements Merchant {
     public String handle() { return handle; }
 
     @Override public List<MerchantRecipe> getRecipes() {
-        String[] encoded = Native.merchantOffers(handle);
+        foton.item.MerchantOfferTransfer[] encoded = Native.merchantOffers(handle);
         if (encoded == null) return Collections.emptyList();
         ArrayList<MerchantRecipe> recipes = new ArrayList<>(encoded.length);
         for (int index = 0; index < encoded.length; index++) {
-            MerchantRecipe recipe = MerchantRecipe.decodeOffer(encoded[index]);
-            if (recipe == null) continue;
+            MerchantRecipe recipe = encoded[index].recipe(null, -1);
             int offer = index;
-            recipe.writeBackTo(changed -> Native.setMerchantOffer(handle, offer, changed.encodeOffer()));
+            recipe.writeBackTo(changed -> {
+                if (!Native.setMerchantOffer(handle, offer, new foton.item.MerchantOfferMutation(changed)))
+                    throw new IllegalStateException("merchant offer is no longer available");
+            });
             recipes.add(recipe);
         }
         return Collections.unmodifiableList(recipes);
@@ -40,11 +42,11 @@ public final class FotonMerchant implements Merchant {
 
     @Override public void setRecipes(List<MerchantRecipe> recipes) {
         List<MerchantRecipe> values = recipes == null ? List.of() : recipes;
-        String[] encoded = new String[values.size()];
+        foton.item.MerchantOfferMutation[] encoded = new foton.item.MerchantOfferMutation[values.size()];
         for (int index = 0; index < encoded.length; index++) {
             MerchantRecipe recipe = values.get(index);
             if (recipe == null) throw new IllegalArgumentException("recipe " + index + " is null");
-            encoded[index] = recipe.encodeOffer();
+            encoded[index] = new foton.item.MerchantOfferMutation(recipe);
         }
         if (!Native.setMerchantOffers(handle, encoded))
             throw new IllegalArgumentException("Each recipe needs a result and at least one ingredient");

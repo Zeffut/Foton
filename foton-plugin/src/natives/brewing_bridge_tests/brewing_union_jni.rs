@@ -71,6 +71,7 @@ fn start_host(scratch: &TempDir, server: &Arc<Server>) -> TestResult<PluginHost>
         &PluginHostConfig {
             java_home,
             api_jar,
+            item_snapshot_limit: PluginHostConfig::DEFAULT_ITEM_SNAPSHOT_LIMIT,
             library_directories: vec![root.join("plugin-api/lib")],
             plugin_directory: scratch.path().join("plugins"),
         },
@@ -272,6 +273,10 @@ fn brewing_union_actual_jni_getters_reject_without_deep_clones() -> TestResult {
     if env::var_os(CHILD).is_none() {
         let status = Command::new(env::current_exe()?)
             .args(["--exact", "natives::brewing_bridge_tests::brewing_union_jni::brewing_union_actual_jni_getters_reject_without_deep_clones", "--nocapture"])
+            // This isolated debug fixture builds a complete server and large reference
+            // snapshots. Match the dedicated stacks used by the neighboring boundary
+            // fixtures; allocation budgets and production JVM stacks are unchanged.
+            .env("RUST_MIN_STACK", (32 << 20).to_string())
             .env(CHILD, "1").status()?;
         assert!(status.success(), "actual JNI allocation child failed");
         return Ok(());

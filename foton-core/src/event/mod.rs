@@ -28,6 +28,7 @@ use foton_utils::locks::SyncRwLock;
 use rustc_hash::FxHashMap;
 
 pub mod block;
+mod brew;
 pub mod command;
 /// A command a player typed, before the server has read it.
 pub mod command_preprocess;
@@ -37,6 +38,7 @@ pub mod cooking;
 pub mod damage;
 /// What a block gives when a player breaks or picks from it.
 pub mod drops;
+mod enchantment;
 /// Events about entities that are not players.
 pub mod entity;
 /// Entities arriving in the world and leaving their vehicles.
@@ -60,11 +62,13 @@ pub use block::{
     BlockFadeEvent, BlockFromToEvent, BlockGrowEvent, BlockIgniteEvent, BlockPlaceEvent,
     BlockPreDispenseEvent, BlockSpreadEvent, LeavesDecayEvent, PistonEvent, SignChangeEvent,
 };
+pub use brew::BrewEvent;
 pub use command::{AsyncTabCompleteEvent, CommandEvent};
 pub use command_preprocess::PlayerCommandPreprocessEvent;
 pub use cooking::{FurnaceBurnEvent, FurnaceSmeltEvent, FurnaceStartSmeltEvent};
 pub use damage::EntityDamageEvent;
 pub use drops::{BlockDropItemEvent, PlayerHarvestBlockEvent};
+pub use enchantment::{EnchantmentOffer, EnchantmentViewState, PrepareItemEnchantEvent};
 pub use entity::{
     BlockExplodeEvent, CreatureSpawnEvent, EntityChangeBlockEvent, EntityDamageByEntityEvent,
     EntityDeathEvent, EntityExplodeEvent, EntityMountEvent, EntityPickupItemEvent,
@@ -79,11 +83,11 @@ pub use entity_lifecycle::{
 pub use equipment::{PlayerArmorChangeEvent, PlayerItemConsumeEvent};
 pub use fertilize::BlockFertilizeEvent;
 pub use inventory::{
-    BrewEvent, CrafterCraftEvent, CraftingClick, InventoryClickEvent, InventoryCloseEvent,
-    InventoryDragEvent, InventoryOpenEvent, PrepareGrindstoneEvent, PrepareItemCraftEvent,
+    CrafterCraftEvent, CraftingClick, InventoryClickEvent, InventoryCloseEvent, InventoryDragEvent,
+    InventoryOpenEvent, PrepareGrindstoneEvent, PrepareItemCraftEvent,
 };
 pub use lectern::PlayerTakeLecternBookEvent;
-pub use menus::{EnchantOffer, PlayerPurchaseEvent, PrepareItemEnchantEvent, PrepareSmithingEvent};
+pub use menus::{EnchantOffer, PlayerPurchaseEvent, PrepareSmithingEvent};
 pub use movement::{
     FailMoveReason, PlayerFailMoveEvent, PlayerTeleportEvent, PlayerToggleFlightEvent,
     PlayerVelocityEvent, TeleportCause, TeleportPoint,

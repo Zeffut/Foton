@@ -1,6 +1,6 @@
 use super::{
-    Arc, CEntityEvent, CSystemChat, CTabList, CTickingState, CTickingStep, Color, CommandSender,
-    CommandSource, DisplayResolutor, Entity, Modifier, Player, Server, SprintReport,
+    Arc, CEntityEvent, CSetPlayerTeam, CSystemChat, CTabList, CTickingState, CTickingStep, Color,
+    CommandSender, CommandSource, DisplayResolutor, Entity, Modifier, Player, Server, SprintReport,
     TabListTickStats, TextComponent, Uuid, client_permission_event, command_tree_packet,
     command_tree_packet_without, translations, visible_root_names,
 };
@@ -10,6 +10,34 @@ use crate::world::PlayerMap;
 use rustc_hash::FxHashSet;
 
 impl Server {
+    /// Sends one scoreboard-team operation to players in the owning domain.
+    ///
+    /// Unlike vanilla's server-wide scoreboard, each Foton domain has its own
+    /// scoreboard, so leaking this packet across domains would install teams
+    /// that do not exist for the receiving player.
+    pub fn broadcast_scoreboard_packet(&self, domain: &str, packet: CSetPlayerTeam) {
+        self.online_players.iter_players(|_, player| {
+            if player.get_world().domain() == domain {
+                player.send_packet(packet.clone());
+            }
+            true
+        });
+    }
+
+    /// Broadcasts a holder's team transition in vanilla's remove-before-add
+    /// order.
+    pub fn broadcast_scoreboard_membership_change(
+        &self,
+        domain: &str,
+        holder: &str,
+        previous_team: Option<&str>,
+        current_team: Option<&str>,
+    ) {
+        for packet in scoreboard_membership_packets(holder, previous_team, current_team) {
+            self.broadcast_scoreboard_packet(domain, packet);
+        }
+    }
+
     /// Logs and broadcasts a system chat message to online players.
     fn broadcast_system_chat(&self, message: &TextComponent, excluded_player: Option<Uuid>) {
         log::info!("{}", message.to_plain(&DisplayResolutor));
@@ -306,9 +334,50 @@ impl Server {
             }
         }
         if let Some(scoreboard) = self.scoreboards.get(entered) {
-            for team in scoreboard.team_snapshot() {
+            for team in scoreboard.team_snapshot_packets() {
                 player.send_packet(team);
             }
         }
+    }
+}
+
+fn scoreboard_membership_packets(
+    holder: &str,
+    previous_team: Option<&str>,
+    current_team: Option<&str>,
+) -> Vec<CSetPlayerTeam> {
+    let mut packets = Vec::with_capacity(2);
+    if let Some(previous_team) = previous_team {
+        packets.push(CSetPlayerTeam::remove_player(previous_team, holder));
+    }
+    if let Some(current_team) = current_team {
+        packets.push(CSetPlayerTeam::add_player(current_team, holder));
+    }
+    packets
+}
+
+#[cfg(test)]
+mod scoreboard_tests {
+    use foton_protocol::packets::game::{CSetPlayerTeam, TeamMethod};
+
+    use super::scoreboard_membership_packets;
+
+    #[test]
+    fn moving_a_holder_removes_the_old_team_before_adding_the_new_one() {
+        let packets = scoreboard_membership_packets("Zeffut", Some("old"), Some("new"));
+
+        assert_eq!(
+            packets,
+            [
+                CSetPlayerTeam {
+                    name: "old".to_owned(),
+                    method: TeamMethod::Leave(vec!["Zeffut".to_owned()]),
+                },
+                CSetPlayerTeam {
+                    name: "new".to_owned(),
+                    method: TeamMethod::Join(vec!["Zeffut".to_owned()]),
+                },
+            ]
+        );
     }
 }

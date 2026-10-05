@@ -50,6 +50,10 @@ public interface World extends org.bukkit.generator.WorldInfo, RegionAccessor, o
 
     org.bukkit.block.Block getBlockAt(int x, int y, int z);
 
+    default Material getType(int x, int y, int z) {
+        return getBlockAt(x, y, z).getType();
+    }
+
     org.bukkit.block.Block getBlockAt(Location location);
 
     Chunk getChunkAt(int x, int z);
@@ -374,7 +378,6 @@ public interface World extends org.bukkit.generator.WorldInfo, RegionAccessor, o
         }
     }
 
-    default Material getType(int x, int y, int z) { return getBlockAt(x, y, z).getType(); }
     default Material getType(Location location) { return getBlockAt(location).getType(); }
 
     /** Every entity whose box overlaps {@code box}. */

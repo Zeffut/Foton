@@ -64,8 +64,10 @@ public interface ItemMeta extends Cloneable, org.bukkit.persistence.PersistentDa
     default java.util.Map<org.bukkit.enchantments.Enchantment, Integer> getEnchants() {
         return java.util.Collections.emptyMap();
     }
+    default boolean hasEnchant(org.bukkit.enchantments.Enchantment enchantment) {
+        return getEnchants().containsKey(enchantment);
+    }
     default boolean hasEnchants() { return !getEnchants().isEmpty(); }
-    boolean hasEnchant(org.bukkit.enchantments.Enchantment enchantment);
 
     boolean hasEnchantmentGlintOverride();
     /** Whether the item glints regardless of enchantments; throws when unset. */
@@ -111,5 +113,5 @@ public interface ItemMeta extends Cloneable, org.bukkit.persistence.PersistentDa
     default void setHideTooltip(boolean hide) { }
 
     ItemMeta clone();
-    default java.util.Map<String,Object> serialize() { return java.util.Collections.emptyMap(); }
+    default java.util.Map<String,Object> serialize() { throw new UnsupportedOperationException("metadata persistence"); }
 }

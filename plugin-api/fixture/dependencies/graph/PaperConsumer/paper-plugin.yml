@@ -1,5 +1,6 @@
 name: PaperConsumer
 version: 1
+api-version: '26.2'
 main: fixture.dependencies.DependencyPlugins$PaperConsumer
 dependencies:
   bootstrap:

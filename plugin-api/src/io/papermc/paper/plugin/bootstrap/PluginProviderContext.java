@@ -14,7 +14,7 @@ public interface PluginProviderContext {
     /** Where the plugin may keep its files. */
     Path getDataDirectory();
 
-    org.slf4j.Logger getLogger();
+    net.kyori.adventure.text.logger.slf4j.ComponentLogger getLogger();
 
     /** The jar the plugin was loaded from. */
     Path getPluginSource();

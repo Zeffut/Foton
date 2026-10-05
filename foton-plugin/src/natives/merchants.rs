@@ -13,6 +13,7 @@
 //! plugin's custom item and not just its material.
 
 use std::ffi::c_void;
+use std::mem as bridge_mem;
 use std::ptr::null_mut;
 use std::sync::{Arc, OnceLock};
 
@@ -20,23 +21,30 @@ use foton_core::entity::Entity as _;
 use foton_core::entity::entities::{VillagerEntity, WanderingTraderEntity};
 use foton_core::player::Player;
 use foton_core::trading::{Merchant, open_trading_screen};
+#[cfg(test)]
 use foton_registry::data_component_predicate::DataComponentExactPredicate;
 use foton_registry::item_stack::ItemStack;
 use foton_registry::sound_event::SoundEventRef;
 use foton_registry::sound_events;
-use foton_registry::trading::{ItemCost, MerchantOffer, MerchantOffers};
+use foton_registry::trading::MerchantOffers;
+#[cfg(test)]
+use foton_registry::trading::{ItemCost, MerchantOffer};
 use foton_utils::Downcast as _;
 use foton_utils::locks::SyncMutex;
 use jni::JNIEnv;
-use jni::objects::{JClass, JObjectArray, JString};
+use jni::objects::{JClass, JObject, JObjectArray, JString};
 use jni::sys::{jboolean, jint, jobjectArray, jstring};
 use rustc_hash::FxHashMap;
 use text_components::TextComponent;
 use uuid::Uuid;
 
 use super::support::{component, entity, method, player, text};
-use super::{describe_slot, parse_slot, read_string_array, server, string_array, to_java};
+#[cfg(test)]
+use super::{describe_slot, parse_slot};
+use super::{server, to_java};
+use crate::item_bridge::{ItemBridgeError, merchant as owning};
 
+#[cfg(test)]
 const FIELD: char = '\u{1e}';
 
 /// A merchant with no mob behind it.
@@ -101,6 +109,7 @@ fn merchant(env: &mut JNIEnv<'_>, handle: &JString<'_>) -> Option<Arc<PluginMerc
 
 /// A cost that asks for exactly the given stack's item, count and components,
 /// as `CraftMerchantRecipe` builds one from a Bukkit ingredient.
+#[cfg(test)]
 fn cost(stack: &ItemStack) -> Option<ItemCost> {
     let components = DataComponentExactPredicate::all_of(&stack.patch().added())?;
     Some(ItemCost::with_components(
@@ -110,6 +119,7 @@ fn cost(stack: &ItemStack) -> Option<ItemCost> {
     ))
 }
 
+#[cfg(test)]
 fn encode(offer: &MerchantOffer) -> String {
     let cost_b = offer
         .item_cost_b()
@@ -130,6 +140,7 @@ fn encode(offer: &MerchantOffer) -> String {
     .join(&FIELD.to_string())
 }
 
+#[cfg(test)]
 fn decode(encoded: &str) -> Option<MerchantOffer> {
     let fields: Vec<&str> = encoded.split(FIELD).collect();
     let [
@@ -202,8 +213,15 @@ extern "system" fn merchant_offers(
     let Some(merchant) = merchant(&mut env, &handle) else {
         return null_mut();
     };
-    let values: Vec<String> = merchant.offers.lock().iter().map(encode).collect();
-    string_array(&mut env, &values)
+    // Capture under the lock; allocate Java owners after releasing it.
+    let captured = owning::capture(&merchant.offers.lock());
+    match captured.and_then(|offers| owning::transfers(&mut env, offers)) {
+        Ok(offers) => offers.into_raw(),
+        Err(error) => {
+            error.throw_java(&mut env);
+            null_mut()
+        }
+    }
 }
 
 /// Replaces every offer; `false`, changing nothing, if one does not decode.
@@ -216,19 +234,14 @@ extern "system" fn set_merchant_offers(
     let Some(merchant) = merchant(&mut env, &handle) else {
         return 0;
     };
-    let Some(encoded) = read_string_array(&mut env, &offers) else {
-        return 0;
+    let mut batch = match owning::prepare(&mut env, &offers) {
+        Ok(batch) => batch,
+        Err(error) => {
+            error.throw_java(&mut env);
+            return 0;
+        }
     };
-    let Some(decoded) = encoded
-        .iter()
-        .map(|offer| decode(offer))
-        .collect::<Option<Vec<_>>>()
-    else {
-        return 0;
-    };
-    let mut offers = MerchantOffers::new();
-    offers.extend(decoded);
-    merchant.override_offers(offers);
+    merchant.override_offers(bridge_mem::take(&mut batch.offers));
     1
 }
 
@@ -260,13 +273,21 @@ extern "system" fn set_merchant_offer(
     _class: JClass<'_>,
     handle: JString<'_>,
     index: jint,
-    encoded: JString<'_>,
+    value: JObject<'_>,
 ) -> jboolean {
     let Some(merchant) = merchant(&mut env, &handle) else {
         return 0;
     };
-    let Some(offer) = text(&mut env, &encoded).and_then(|value| decode(&value)) else {
-        return 0;
+    let staged = (|| -> Result<_, ItemBridgeError> {
+        let values = env.new_object_array(1, "foton/item/MerchantOfferMutation", &value)?;
+        owning::prepare(&mut env, &values)
+    })();
+    let mut batch = match staged {
+        Ok(batch) => batch,
+        Err(error) => {
+            error.throw_java(&mut env);
+            return 0;
+        }
     };
     let Ok(index) = usize::try_from(index) else {
         return 0;
@@ -275,7 +296,7 @@ extern "system" fn set_merchant_offer(
     let Some(slot) = offers.get_mut(index) else {
         return 0;
     };
-    *slot = offer;
+    *slot = batch.offers.remove(0);
     1
 }
 
@@ -334,17 +355,17 @@ pub(super) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method(
             "merchantOffers",
-            "(Ljava/lang/String;)[Ljava/lang/String;",
+            "(Ljava/lang/String;)[Lfoton/item/MerchantOfferTransfer;",
             merchant_offers as *mut c_void,
         ),
         method(
             "setMerchantOffers",
-            "(Ljava/lang/String;[Ljava/lang/String;)Z",
+            "(Ljava/lang/String;[Lfoton/item/MerchantOfferMutation;)Z",
             set_merchant_offers as *mut c_void,
         ),
         method(
             "setMerchantOffer",
-            "(Ljava/lang/String;ILjava/lang/String;)Z",
+            "(Ljava/lang/String;ILfoton/item/MerchantOfferMutation;)Z",
             set_merchant_offer as *mut c_void,
         ),
         method(

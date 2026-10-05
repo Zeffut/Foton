@@ -7,6 +7,6 @@ public interface ItemFrame extends Hanging {
     default void setItem(org.bukkit.inventory.ItemStack item) { setItem(item, false); }
     /** Puts an item in the frame, playing the placing sound when asked. */
     default void setItem(org.bukkit.inventory.ItemStack item, boolean playSound) {
-        foton.Native.setItemFrameItem(getUniqueId().toString(), foton.FotonInventory.encode(item), playSound);
+        foton.Native.setItemFrameItem(getUniqueId().toString(), foton.FotonInventory.mutation(item), playSound);
     }
 }

@@ -1,5 +1,6 @@
 //! Entity state a plugin reads and writes through `org.bukkit.entity`.
 
+use crate::item_bridge as bridge_item_bridge;
 use std::ffi::c_void;
 use std::ptr::null_mut;
 
@@ -22,7 +23,7 @@ use foton_utils::Direction;
 use foton_utils::Downcast as _;
 use glam::DVec3;
 use jni::JNIEnv;
-use jni::objects::{JClass, JObjectArray, JString};
+use jni::objects::{JClass, JObject, JObjectArray, JString};
 use jni::sys::{jboolean, jdouble, jdoubleArray, jint, jobjectArray, jstring};
 use uuid::Uuid;
 
@@ -349,26 +350,35 @@ extern "system" fn set_item_frame_item(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     uuid: JString<'_>,
-    item: JString<'_>,
+    item: JObject<'_>,
     play_sound: jboolean,
 ) {
-    let Some(stack) = text(&mut env, &item).and_then(|value| parse_slot(&value)) else {
-        return;
+    let candidate = match bridge_item_bridge::mutation::materialize(&mut env, &item) {
+        Ok(candidate) => candidate,
+        Err(error) => {
+            error.throw_java(&mut env);
+            return;
+        }
     };
     let Some((_, entity)) = entity(&mut env, &uuid) else {
         return;
     };
-    let sound = play_sound != 0 && !stack.is_empty();
     if let Some(frame) = entity.as_ref().downcast_ref::<ItemFrameEntity>() {
-        frame.set_item(stack);
-        if sound {
-            frame.play_add_item_sound();
-        }
+        candidate.commit(|stack| {
+            let sound = play_sound != 0 && !stack.is_empty();
+            frame.set_item(stack);
+            if sound {
+                frame.play_add_item_sound();
+            }
+        });
     } else if let Some(frame) = entity.as_ref().downcast_ref::<GlowItemFrameEntity>() {
-        frame.set_item(stack);
-        if sound {
-            frame.play_add_item_sound();
-        }
+        candidate.commit(|stack| {
+            let sound = play_sound != 0 && !stack.is_empty();
+            frame.set_item(stack);
+            if sound {
+                frame.play_add_item_sound();
+            }
+        });
     }
 }
 
@@ -907,7 +917,7 @@ pub(super) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method(
             "setItemFrameItem",
-            "(Ljava/lang/String;Ljava/lang/String;Z)V",
+            "(Ljava/lang/String;Lfoton/item/ItemMutation;Z)V",
             set_item_frame_item as *mut c_void,
         ),
         method(

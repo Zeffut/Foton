@@ -65,6 +65,12 @@ impl LecternBlockEntity {
         self.state.lock().book.clone()
     }
 
+    /// Pure synchronous storage read; do not invoke Java/world callbacks or reenter
+    /// this lectern. Construct external results after the storage guard releases.
+    pub fn with_book<R>(&self, read: impl FnOnce(&ItemStack) -> R) -> R {
+        read(&self.state.lock().book)
+    }
+
     /// Returns whether there is a readable book on the stand.
     ///
     /// Vanilla parity: `LecternBlockEntity.hasBook`, which asks whether the

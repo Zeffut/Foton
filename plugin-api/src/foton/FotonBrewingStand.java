@@ -35,7 +35,7 @@ public final class FotonBrewingStand extends FotonTileState implements BrewingSt
         ItemStack[] contents = new ItemStack[5];
         String world = block.getWorld().getName();
         for (int slot = 0; slot < contents.length; slot++) {
-            contents[slot] = FotonInventory.decode(Native.hopperInventorySlot(
+            contents[slot] = FotonInventory.decodeTransfer(Native.hopperInventorySlot(
                 world, block.getX(), block.getY(), block.getZ(), slot));
         }
         int brewingTime = 0;

@@ -1,0 +1,8 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": ["minecraft:bowl"],
+  "result": {
+    "id": "minecraft:suspicious_stew",
+    "components": ["minecraft:suspicious_stew_effects"]
+  }
+}

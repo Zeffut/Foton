@@ -79,6 +79,9 @@ CUSTOMISATION = "CUSTOMISATION"
 Contribuer = "Contribuer"
 construit = "construit"
 valide = "valide"
+# French words in representative Zelda plugin fixtures and their Rust checks.
+Radis = "Radis"
+Titre = "Titre"
 
 [default]
 locale = "en-us"

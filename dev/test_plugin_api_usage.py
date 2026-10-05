@@ -388,6 +388,12 @@ STUBS = {
         package org.bukkit;
         public enum Season { SPRING, SUMMER }
     """,
+    "org/bukkit/OnlyOne.java": """
+        package org.bukkit;
+        public final class OnlyOne {
+            public static void singleton() { }
+        }
+    """,
     "org/bukkit/command/CommandSender.java": """
         package org.bukkit.command;
         public interface CommandSender {
@@ -889,8 +895,15 @@ class CompatibilityEvidence(unittest.TestCase):
                 "DDDDLjava/lang/String;)Ljava/lang/String;",
             ),
         }:
-            self.assertIn(mismatch, roots)
+            self.assertNotIn(mismatch, roots)
             self.assertNotIn(mismatch, compiled)
+        for name, signature in (
+            ("fireBlockExp", "(Ljava/lang/String;IIII)Ljava/lang/String;"),
+            ("fireEntityPortal", "(Ljava/lang/String;Ljava/lang/String;DDDLjava/lang/String;DDDLjava/lang/String;)Ljava/lang/String;"),
+        ):
+            exact = ("foton/EventBridge", name, signature)
+            self.assertIn(exact, roots)
+            self.assertIn(exact, compiled)
 
     @unittest.skipUnless(
         (plugin_api_usage.REPO / "plugin-api/build/foton-plugin-api.jar").is_file(),
@@ -1338,6 +1351,79 @@ class ConstantPool(unittest.TestCase):
     def test_bytes_that_are_not_a_class_file_are_refused(self):
         with self.assertRaises(plugin_api_usage.NotAClassFile):
             plugin_api_usage.constant_pool(b"PK\\x03\\x04 this is a zip, not a class")
+
+
+@unittest.skipIf(shutil.which("javac") is None, "javac is needed to build the fixture")
+class ExtendedScanning(unittest.TestCase):
+    def test_single_plugin_gap_is_reported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            jar = build_jar({"example/Single.java": """
+                package example;
+                public class Single { public void call() { org.bukkit.OnlyOne.singleton(); } }
+            """}, root / "plugin")
+            api = build_jar({}, root / "api", drop="org/bukkit/OnlyOne.class")
+            per_plugin, _ = plugin_api_usage.gaps(jar, api)
+            self.assertIn("org/bukkit/OnlyOne#singleton()V", per_plugin[jar.name][1])
+
+    def test_class_descriptors_handles_indy_services_and_reflection_are_visible(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            jar = build_jar({"example/Uses.java": """
+                package example;
+                import org.bukkit.OnlyOne;
+                import org.bukkit.entity.Player;
+                import java.util.function.Supplier;
+                public class Uses {
+                    Player field;
+                    public Player echo(Player value) throws Exception {
+                        Class.forName("org.bukkit.OnlyOne");
+                        Supplier<String> ref = value::toString;
+                        Runnable lambda = OnlyOne::singleton;
+                        lambda.run(); ref.get();
+                        return value;
+                    }
+                }
+            """}, root / "fixture")
+            with zipfile.ZipFile(jar, "a") as archive:
+                archive.writestr("META-INF/services/org.bukkit.OnlyOne", "example.Uses\n")
+            details = plugin_api_usage.scan_details(jar)
+            self.assertIn("org/bukkit/OnlyOne#singleton()V", details["api"])
+            self.assertIn("org/bukkit/entity/Player", details["classes"])
+            self.assertIn("org/bukkit/OnlyOne", details["services"])
+            self.assertIn("org/bukkit/OnlyOne", details["reflection_names"])
+            self.assertTrue(details["method_handles"])
+            self.assertTrue(details["invokedynamic"])
+
+    def test_dynamic_reflection_requires_manual_review(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            jar = build_jar({"example/Dynamic.java": """
+                package example;
+                public class Dynamic {
+                    public Class<?> get(String name) throws Exception {
+                        return Class.forName("org.bukkit." + name);
+                    }
+                }
+            """}, root / "fixture")
+            details = plugin_api_usage.scan_details(jar)
+            self.assertTrue(details["manual_review"])
+
+    def test_mixed_static_and_dynamic_reflection_requires_manual_review(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            jar = build_jar({"example/Mixed.java": """
+                package example;
+                public class Mixed {
+                    public void get(String name) throws Exception {
+                        Class.forName("org.bukkit.OnlyOne");
+                        Class.forName(name);
+                    }
+                }
+            """}, root / "fixture")
+            details = plugin_api_usage.scan_details(jar)
+            self.assertIn("org/bukkit/OnlyOne", details["reflection_names"])
+            self.assertIn("example/Mixed.class", details["manual_review"])
 
 
 if __name__ == "__main__":

@@ -1198,6 +1198,20 @@ fn persistent_player_data_restores_independent_experience_fields_and_score() {
 }
 
 #[test]
+fn persistent_player_data_restores_scoreboard_tags() {
+    init_vanilla_registry();
+    let player = test_player(Arc::clone(test_world()));
+    assert!(player.add_tag("zelda:member".to_owned()));
+    let persistent = PersistentPlayerData::from_player(&player);
+
+    assert!(player.remove_tag("zelda:member"));
+    assert!(player.add_tag("temporary".to_owned()));
+    persistent.apply_to_player_without_location(&player);
+
+    assert_eq!(player.tags(), vec!["zelda:member".to_owned()]);
+}
+
+#[test]
 fn persistent_player_data_restores_the_enchantment_seed() {
     init_vanilla_registry();
     let player = test_player(Arc::clone(test_world()));

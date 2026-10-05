@@ -6,14 +6,13 @@ import io.papermc.paper.plugin.configuration.PluginMeta;
 import io.papermc.paper.plugin.lifecycle.event.FotonLifecycleEventManager;
 import java.nio.file.Path;
 import org.bukkit.plugin.PluginDescriptionFile;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
 
 /** Immutable context shared by a Paper bootstrapper's two startup callbacks. */
 public final class FotonBootstrapContext implements BootstrapContext, PluginProviderContext {
     private final PluginDescriptionFile metadata;
     private final Path dataDirectory;
-    private final Logger logger;
+    private final ComponentLogger logger;
     private final Path pluginSource;
     private final FotonLifecycleEventManager lifecycleManager;
 
@@ -21,9 +20,9 @@ public final class FotonBootstrapContext implements BootstrapContext, PluginProv
             PluginDescriptionFile metadata, Path dataDirectory, Path pluginSource) {
         this.metadata = metadata;
         this.dataDirectory = dataDirectory.toAbsolutePath().normalize();
-        this.logger = LoggerFactory.getLogger(metadata.getName());
+        this.logger = ComponentLogger.logger(metadata.getName());
         this.pluginSource = pluginSource.toAbsolutePath().normalize();
-        this.lifecycleManager = new FotonLifecycleEventManager();
+        this.lifecycleManager = new FotonLifecycleEventManager(true);
     }
 
     @Override
@@ -42,7 +41,7 @@ public final class FotonBootstrapContext implements BootstrapContext, PluginProv
     }
 
     @Override
-    public Logger getLogger() {
+    public ComponentLogger getLogger() {
         return logger;
     }
 

@@ -19,7 +19,33 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
     private String title;
     private String author;
     private List<Component> pages = new ArrayList<>();
-    private Generation generation;
+    private Generation generation = Generation.ORIGINAL;
+    /** Original native content, including filtered projections unavailable in Bukkit. */
+    private String nativeBookPassthrough;
+    /** Native resolution survives ordinary BookMeta edits, independently of filtered content. */
+    private boolean nativeBookResolved;
+
+    private void bookChanged() {
+        nativeBookPassthrough = null;
+        changed("book", true);
+    }
+
+    public String nativeBookPassthrough() {
+        return nativeBookPassthrough;
+    }
+
+    /** Called after the visible fields have been decoded from a native slot. */
+    public void setNativeBookPassthrough(String value) {
+        nativeBookPassthrough = value;
+    }
+
+    public boolean nativeBookResolved() {
+        return nativeBookResolved;
+    }
+
+    public void setNativeBookResolved(boolean value) {
+        nativeBookResolved = value;
+    }
 
     @Override
     public boolean hasTitle() {
@@ -37,6 +63,7 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
             return false;
         }
         title = value;
+        bookChanged();
         return true;
     }
 
@@ -53,6 +80,7 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
     @Override
     public void setAuthor(String value) {
         author = value;
+        bookChanged();
     }
 
     @Override
@@ -68,6 +96,7 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
     @Override
     public void setPage(int page, String data) {
         pages.set(index(page), Component.text(data == null ? "" : data));
+        bookChanged();
     }
 
     @Override
@@ -80,6 +109,7 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
         List<Component> answer = new ArrayList<>();
         if (value != null) for (String page : value) answer.add(Component.text(page == null ? "" : page));
         pages = answer;
+        bookChanged();
     }
 
     @Override
@@ -95,6 +125,7 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
         for (String page : added) {
             pages.add(Component.text(page == null ? "" : page));
         }
+        bookChanged();
     }
 
     @Override
@@ -108,8 +139,14 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
     }
 
     @Override
+    public boolean hasGeneration() {
+        return generation != Generation.ORIGINAL;
+    }
+
+    @Override
     public void setGeneration(Generation value) {
-        generation = value;
+        generation = value == null ? Generation.ORIGINAL : value;
+        bookChanged();
     }
 
     @Override
@@ -144,6 +181,7 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
         List<Component> answer = new ArrayList<>();
         if (value != null) for (Component page : value) answer.add(page == null ? Component.empty() : page);
         pages = answer;
+        bookChanged();
         return toBuilder().build();
     }
 
@@ -155,6 +193,7 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
     @Override
     public void page(int page, Component data) {
         pages.set(index(page), data == null ? Component.empty() : data);
+        bookChanged();
     }
 
     /** The book as Adventure models one, to hand to {@code Audience#openBook}. */
@@ -179,12 +218,14 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
             && java.util.Objects.equals(title, book.title)
             && java.util.Objects.equals(author, book.author)
             && pages.equals(book.pages)
-            && generation == book.generation;
+            && generation == book.generation
+            && nativeBookResolved == book.nativeBookResolved;
     }
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(super.hashCode(), title, author, pages, generation);
+        return java.util.Objects.hash(super.hashCode(), title, author, pages, generation,
+            nativeBookResolved);
     }
 
     /** A page as Bukkit's string API reads it: its text, with section-sign codes for any style. */
@@ -202,4 +243,5 @@ public final class SimpleBookMeta extends SimpleItemMeta implements WritableBook
         }
         return page - 1;
     }
+
 }

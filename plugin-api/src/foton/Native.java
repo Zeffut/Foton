@@ -19,6 +19,21 @@ import java.util.UUID;
  * and z from the next would get a point the player was never at.
  */
 public final class Native {
+    public static native boolean itemHasMeta(foton.item.ItemMutation item);
+    public static native boolean itemsSimilar(foton.item.ItemMutation left, foton.item.ItemMutation right);
+    public static native Integer itemDamage(foton.item.ItemMutation item);
+    public static native int itemComponentState(foton.item.ItemMutation item, String component);
+    public static native foton.item.ItemTransfer editItemComponent(foton.item.ItemMutation item, String component, boolean reset);
+    public static native io.papermc.paper.datacomponent.item.CustomModelData itemCustomModelData(foton.item.ItemMutation item);
+    public static native int itemDurability(foton.item.ItemMutation item);
+    public static native foton.item.ItemTransfer setItemDurability(foton.item.ItemMutation item, int damage);
+    public static native String itemMetaKind(String material);
+    public static native foton.item.ItemTransfer rebaseItem(foton.item.ItemMutation item, String material, boolean reset);
+    public static native foton.item.ItemTransfer convertItemMeta(foton.item.ItemMutation donor, foton.item.ItemMutation recipient, String material, boolean discardDye);
+    /** Internal Cleaner hook. A stale or already released lease is harmless. */
+    public static native void releaseItemLease(String epoch, String id);
+    /** Internal terminal-quiescence hook; ordinary plugin disable does not invoke it. */
+    public static native void closeItemSnapshots();
     private Native() {}
 
     public static native String serverName();
@@ -110,7 +125,7 @@ public final class Native {
     public static native boolean finishPendingSpawn(String world, String uuid, boolean publish);
     public static native String[] signLines(String world, int x, int y, int z);
     public static native String hopperCustomName(String world, int x, int y, int z);
-    public static native String hopperInventorySlot(String world, int x, int y, int z, int slot);
+    public static native foton.item.ItemTransfer hopperInventorySlot(String world, int x, int y, int z, int slot);
     /** The key of the recipe a square crafting grid `width` wide makes of
      * the encoded stacks, row by row, or null. */
     public static native String craftingRecipe(String items, int width);
@@ -131,9 +146,10 @@ public final class Native {
     public static native boolean brewingStandApply(String world, int x, int y, int z,
         String blockState, byte[] snapshot, boolean force, boolean applyPhysics);
     public static native boolean jukeboxIsPlaying(String world, int x, int y, int z);
-    public static native String jukeboxRecord(String world, int x, int y, int z);
-    public static native void jukeboxSetRecord(String world, int x, int y, int z, String item);
-    public static native void hopperSetInventorySlot(String world, int x, int y, int z, int slot, String item);
+    public static native foton.item.ItemTransfer jukeboxRecord(String world, int x, int y, int z);
+    public static native void jukeboxSetRecord(String world, int x, int y, int z, foton.item.ItemMutation item);
+    public static native void hopperSetInventorySlot(String world, int x, int y, int z, int slot, foton.item.ItemMutation item);
+    public static native void blockInventorySetContents(String world, int x, int y, int z, foton.item.ItemMutation[] items);
     public static native void hopperSetCustomName(String world, int x, int y, int z, String name);
     public static native void signSetLine(String world, int x, int y, int z, String line, int index);
     public static native void signSetColor(String world, int x, int y, int z, int color);
@@ -198,10 +214,16 @@ public final class Native {
     public static native boolean worldAutoSave(String world);
     public static native void setWorldAutoSave(String world, boolean value);
     public static native void saveWorld(String world);
-    public static native String worldDropItem(String world, double x, double y, double z, String item);
+    public static native String worldDropItem(String world, double x, double y, double z, foton.item.ItemMutation item);
+    public static native String[] scoreboardTeamNames(String world);
+    public static native String scoreboardTeamPrefix(String world, String team);
+    public static native boolean scoreboardSetTeamPrefix(String world, String team, String prefix);
+    public static native boolean scoreboardAddTeam(String world, String team);
+    public static native boolean scoreboardRemoveTeam(String world, String team);
+    public static native boolean scoreboardAddEntry(String world, String team, String entry);
+    public static native boolean scoreboardRemoveEntry(String world, String team, String entry);
     public static native String[] scoreboardTeamEntries(String world, String team);
     public static native String scoreboardEntryTeam(String world, String entry);
-    public static native String[] scoreboardTeamNames(String world);
     /** False when the name is already a team, or empty. */
     public static native boolean scoreboardRegisterTeam(String world, String team);
     public static native boolean scoreboardUnregisterTeam(String world, String team);
@@ -276,6 +298,9 @@ public final class Native {
     public static native boolean entityRemoveWhenFarAway(String uuid);
     public static native boolean entityPersistent(String uuid);
     public static native void setEntityPersistent(String uuid, boolean persistent);
+    public static native String[] entityScoreboardTags(String uuid);
+    public static native boolean entityAddScoreboardTag(String uuid, String tag);
+    public static native boolean entityRemoveScoreboardTag(String uuid, String tag);
     public static native void setEntityRemoveWhenFarAway(String uuid, boolean remove);
     public static native float entityDropChance(String uuid, int slot);
     public static native void setEntityDropChance(String uuid, int slot, float chance);
@@ -359,9 +384,9 @@ public final class Native {
     public static native boolean setPaintingArt(String uuid, String art, boolean force);
     public static native String endermanCarriedBlock(String uuid);
     public static native void setEndermanCarriedBlock(String uuid, String block);
-    public static native String entityItemStack(String uuid);
+    public static native foton.item.ItemTransfer entityItemStack(String uuid);
     public static native String entityTntSource(String uuid);
-    public static native void setEntityItemStack(String uuid, String item);
+    public static native void setEntityItemStack(String uuid, foton.item.ItemMutation item);
     public static native void setItemUnlimitedLifetime(String uuid, boolean unlimited);
     public static native int itemAge(String uuid);
     public static native void setItemAge(String uuid, int age);
@@ -401,7 +426,7 @@ public final class Native {
     public static native int villagerLevel(String uuid);
     public static native void setVillagerLevel(String uuid, int level);
     public static native void resetVillagerOffers(String uuid);
-    public static native void setVillagerOffers(String uuid, String[] offers);
+    public static native void setVillagerOffers(String uuid, foton.item.MerchantOfferMutation[] offers);
     public static native String zombieVillagerProfession(String uuid);
     public static native void setZombieVillagerProfession(String uuid, String profession);
     public static native void setZombieVillager(String uuid, boolean villager);
@@ -473,10 +498,11 @@ public final class Native {
     public static native void setEntityAgeLock(String uuid, boolean locked);
     public static native boolean pigHasSaddle(String uuid);
     public static native void pigSetSaddle(String uuid, boolean saddled);
-    public static native String horseInventorySlot(String uuid, int slot);
-    public static native String mountInventorySlot(String uuid, int slot);
-    public static native void setMountInventorySlot(String uuid, int slot, String item);
-    public static native void setHorseInventorySlot(String uuid, int slot, String item);
+    public static native foton.item.ItemTransfer horseInventorySlot(String uuid, int slot);
+    public static native foton.item.ItemTransfer mountInventorySlot(String uuid, int slot);
+    public static native void setMountInventorySlot(String uuid, int slot, foton.item.ItemMutation item);
+    public static native void setHorseInventorySlot(String uuid, int slot, foton.item.ItemMutation item);
+    public static native void setMountInventoryContents(String uuid, foton.item.ItemMutation[] items);
     public static native void setBlockDisplayBlock(String uuid, String state);
     public static native String boatType(String uuid);
     public static native void setBoatType(String uuid, String type);
@@ -491,7 +517,6 @@ public final class Native {
     public static native double[] entityPosition(String uuid);
     public static native double[] entityOrigin(String uuid);
     public static native double[] entityBoundingBox(String uuid);
-    public static native String[] entityScoreboardTags(String uuid);
     public static native boolean addEntityScoreboardTag(String uuid, String tag);
     public static native boolean removeEntityScoreboardTag(String uuid, String tag);
     public static native boolean entityHasGravity(String uuid);
@@ -538,7 +563,7 @@ public final class Native {
     public static native void setEntityCustomNameVisible(String uuid, boolean visible);
     public static native boolean ironGolemPlayerCreated(String uuid);
     public static native void setIronGolemPlayerCreated(String uuid, boolean value);
-    public static native String[] entityMerchantRecipes(String uuid);
+    public static native foton.item.MerchantOfferTransfer[] entityMerchantRecipes(String uuid);
     public static native boolean entitySetMerchantOfferUses(String uuid, int index, int uses);
     public static native boolean entitySetMerchantOfferMaxUses(String uuid, int index, int maxUses);
     public static native boolean entitySetMerchantOfferDemand(String uuid, int index, int demand);
@@ -557,10 +582,16 @@ public final class Native {
     /** A player's game mode, lower case, or null once they are gone. */
     public static native int openMenuSlotCount(String uuid);
     public static native int openMenuTopSlotCount(String uuid);
-    public static native String openMenuSlot(String uuid, int slot);
-    public static native boolean setOpenMenuSlot(String uuid, int slot, String item);
+    public static native foton.item.ItemTransfer openMenuSlot(String uuid, int slot);
+    public static native void setOpenMenuItems(String uuid, int[] slots, foton.item.ItemMutation[] items, boolean full);
     public static native String openMenuType(String uuid);
     public static native String openMenuTitle(String uuid);
+    public static native String enchantmentView(String uuid);
+    public static native boolean setEnchantmentView(String uuid, long instance, String state);
+    public static native String enchantmentItem(String uuid, long instance, int slot);
+    public static native String enchantmentTitle(String uuid, long instance);
+    public static native boolean setEnchantmentItem(String uuid, long instance, int slot, String item);
+    public static native boolean closeEnchantmentView(String uuid, long instance);
     public static native void updateInventory(String uuid);
     public static native void closeInventory(String uuid);
     public static native String gameMode(String uuid);
@@ -580,18 +611,14 @@ public final class Native {
     public static native boolean openAnvil(String uuid, String world, int x, int y, int z);
     public static native boolean openCartographyTable(String uuid, String world, int x, int y, int z);
 
-    /** One inventory slot as `minecraft:name count`, or the empty string.
-     *
-     * A string rather than an object: building a Java object from Rust means
-     * naming a constructor by signature, and a signature that drifts is a
-     * NoSuchMethodError at the worst possible moment.
-     */
-    public static native String inventorySlot(String uuid, int slot);
+    /** One owning native item snapshot, or null for an empty inventory slot. */
+    public static native foton.item.ItemTransfer inventorySlot(String uuid, int slot);
 
     /** Writes one inventory slot. An empty string empties it. */
-    public static native void setInventorySlot(String uuid, int slot, String item);
-    public static native String enderChestSlot(String uuid, int slot);
-    public static native void setEnderChestSlot(String uuid, int slot, String item);
+    public static native void setInventorySlot(String uuid, int slot, foton.item.ItemMutation item);
+    public static native foton.item.ItemTransfer enderChestSlot(String uuid, int slot);
+    public static native void setEnderChestSlot(String uuid, int slot, foton.item.ItemMutation item);
+    public static native void setPlayerInventorySlots(String uuid, boolean ender, int[] slots, foton.item.ItemMutation[] items);
 
     /** Which hotbar slot a player is holding, or -1 once they are gone. */
     public static native int heldSlot(String uuid);
@@ -649,10 +676,11 @@ public final class Native {
     public static native boolean blockIndirectlyPowered(String world, int x, int y, int z);
     public static native byte skyLight(String world, int x, int y, int z);
     public static native boolean blockPassable(String world, int x, int y, int z);
-    public static native String lecternBook(String world, int x, int y, int z);
+    public static native void spawnParticle(String world, String particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, double speed);
+    public static native foton.item.ItemTransfer lecternBook(String world, int x, int y, int z);
     public static native String[] lecternBookPages(String world, int x, int y, int z);
     public static native void lecternClearBook(String world, int x, int y, int z);
-    public static native boolean lecternSetBook(String world, int x, int y, int z, String item);
+    public static native boolean lecternSetBook(String world, int x, int y, int z, foton.item.ItemMutation item);
 
     /** Writes one block from the same text. */
     public static native void setBlock(String world, int x, int y, int z, String state);
@@ -758,7 +786,7 @@ public final class Native {
     public static native void setItemOwner(String uuid, String owner);
     public static native int itemPickupDelay(String uuid);
     public static native void setItemPickupDelay(String uuid, int delay);
-    public static native void setItemFrameItem(String uuid, String item, boolean playSound);
+    public static native void setItemFrameItem(String uuid, foton.item.ItemMutation item, boolean playSound);
     public static native String fireworkAttachedTo(String uuid);
     /** An equipment slot by Bukkit {@code EquipmentSlot} ordinal. */
     public static native String entityEquipmentItem(String uuid, int slot);
@@ -803,9 +831,9 @@ public final class Native {
     /** A new plugin merchant titled with a component's JSON; its handle. */
     public static native String createMerchant(String titleJson);
     public static native void releaseMerchant(String handle);
-    public static native String[] merchantOffers(String handle);
-    public static native boolean setMerchantOffers(String handle, String[] offers);
-    public static native boolean setMerchantOffer(String handle, int index, String offer);
+    public static native foton.item.MerchantOfferTransfer[] merchantOffers(String handle);
+    public static native boolean setMerchantOffers(String handle, foton.item.MerchantOfferMutation[] offers);
+    public static native boolean setMerchantOffer(String handle, int index, foton.item.MerchantOfferMutation offer);
     /** The trader of a plugin merchant (by handle) or of a villager or wandering trader (by UUID). */
     public static native String merchantTrader(String handle);
     public static native boolean openMerchant(String uuid, String handle, boolean force);

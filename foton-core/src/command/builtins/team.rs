@@ -2,12 +2,11 @@
 //!
 //! Vanilla parity: `net.minecraft.server.commands.TeamCommand`.
 //!
-//! Only the subcommands backed by state that something reads are here. Vanilla
-//! also carries `displayName`, `color`, `prefix`, `suffix`,
-//! `nametagVisibility`, `deathMessageVisibility` and `collisionRule`; every one
-//! of those exists to reach a client through `CSetPlayerTeam`, which Foton does
-//! not send yet. Storing them would be writing data nothing can observe, so
-//! they are left out until the packet exists rather than accepted and dropped.
+//! Only the subcommands backed by state that something reads are here. Team
+//! creation, removal, membership and the implemented options are synchronized
+//! to connected clients in the scoreboard's domain through `CSetPlayerTeam`.
+//! The remaining vanilla presentation fields stay unsupported until their
+//! state exists; accepting and dropping them would be misleading.
 //!
 //! What is here changes behavior: membership, which `@e[team=]` already reads,
 //! and the two options `Player.canHarmPlayer` and `Entity.isAlliedTo` consult.
@@ -150,7 +149,12 @@ fn add_team(context: &FotonCommandContext<CommandSource>) -> Result<i32, Command
 /// Vanilla parity: `TeamCommand.deleteTeam`.
 fn remove_team(context: &FotonCommandContext<CommandSource>) -> Result<i32, CommandSyntaxError> {
     let team = team(context)?;
-    source_scoreboard(context)?.remove_team(&team);
+    if !source_scoreboard(context)?.remove_team(&team) {
+        return Err(CommandSyntaxError::dynamic(format!(
+            "Team '{}' disappeared before removal",
+            team.name()
+        )));
+    }
     let message = translations::COMMANDS_TEAM_REMOVE_SUCCESS
         .message([team.name().to_owned()])
         .component();

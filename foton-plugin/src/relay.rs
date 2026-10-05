@@ -10,14 +10,12 @@
 
 use std::sync::Arc;
 
-use foton_core::event::Event as _;
 use foton_core::event::{
-    BlockBreakEvent, BlockDropItemEvent, EnchantOffer, EntitiesLoadEvent, EntitiesUnloadEvent,
-    EntityDamageEvent, EntityDismountEvent, EntityPlaceEvent, FurnaceBurnEvent, FurnaceSmeltEvent,
+    BlockBreakEvent, BlockDropItemEvent, EntitiesLoadEvent, EntitiesUnloadEvent, EntityDamageEvent,
+    EntityDismountEvent, EntityPlaceEvent, FurnaceBurnEvent, FurnaceSmeltEvent,
     FurnaceStartSmeltEvent, PlayerArmorChangeEvent, PlayerFailMoveEvent, PlayerHarvestBlockEvent,
     PlayerItemConsumeEvent, PlayerPurchaseEvent, PlayerTeleportEvent, PlayerToggleFlightEvent,
-    PlayerVelocityEvent, PrepareItemEnchantEvent, PrepareSmithingEvent, ServerListPingEvent,
-    TeleportPoint,
+    PlayerVelocityEvent, PrepareSmithingEvent, ServerListPingEvent, TeleportPoint,
 };
 use foton_core::server::Server;
 use foton_registry::REGISTRY;
@@ -632,74 +630,9 @@ fn describe_offer(offer: &MerchantOffer) -> String {
     .join(OFFER_FIELD)
 }
 
-/// Writes the three enchanting offers, `key level cost` each, empty where
-/// the row is.
-fn enchant_offers(offers: &[Option<EnchantOffer>; 3]) -> String {
-    offers
-        .iter()
-        .map(|offer| {
-            offer.as_ref().map_or_else(String::new, |offer| {
-                format!("{} {} {}", offer.enchantment, offer.level, offer.cost)
-            })
-        })
-        .collect::<Vec<_>>()
-        .join(ITEM)
-}
-
-/// Reads [`enchant_offers`] back; `None` when the answer is malformed.
-fn parse_enchant_offers(text: &str) -> Option<[Option<EnchantOffer>; 3]> {
-    let rows = text.split(ITEM).collect::<Vec<_>>();
-    if rows.len() != 3 {
-        return None;
-    }
-    let mut offers: [Option<EnchantOffer>; 3] = [None, None, None];
-    for (slot, row) in rows.into_iter().enumerate() {
-        if row.is_empty() {
-            continue;
-        }
-        let mut parts = row.split(' ');
-        let enchantment = parts.next()?.parse::<Identifier>().ok()?;
-        let level = parts.next()?.parse::<i32>().ok()?;
-        let cost = parts.next()?.parse::<i32>().ok()?;
-        offers[slot] = Some(EnchantOffer {
-            enchantment,
-            level,
-            cost,
-        });
-    }
-    Some(offers)
-}
-
 /// The workstation screen events.
 fn subscribe_menus(server: &Arc<Server>, vm: &Arc<JavaVM>) {
     let events = server.events();
-
-    let jvm = Arc::clone(vm);
-    events.on::<PrepareItemEnchantEvent, _>(owner(), move |event| {
-        let Some(answer) = text_call(
-            &jvm,
-            "firePrepareEnchant",
-            &[
-                &event.player().to_string(),
-                event.world(),
-                &block_position(event.table()),
-                &describe_slot(event.item()),
-                &enchant_offers(event.offers()),
-                &event.bonus().to_string(),
-                bit(event.is_cancelled()),
-            ],
-        ) else {
-            return;
-        };
-        let answer = fields(&answer);
-        let Some(cancelled) = flag(answer.first()) else {
-            return;
-        };
-        event.set_cancelled(cancelled);
-        if let Some(offers) = answer.get(1).and_then(|text| parse_enchant_offers(text)) {
-            event.set_offers(offers);
-        }
-    });
 
     let jvm = Arc::clone(vm);
     events.on::<PrepareSmithingEvent, _>(owner(), move |event| {

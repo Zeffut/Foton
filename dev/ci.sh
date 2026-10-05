@@ -61,7 +61,22 @@ run "cargo test --workspace"                       cargo test --workspace
 # is why Build Release failed on the runner while passing on every developer's
 # machine, where the file was left over from an earlier build.
 run "plugin api builds"                            bash dev/build-plugin-api.sh --check
+PAPER_API_TEMP=""
+if [ -z "${FOTON_PAPER_API_JAR:-}" ]; then
+  PAPER_API_TEMP="$(mktemp -d "${TMPDIR:-/tmp}/foton-ci-paper-api.XXXXXX")"
+  trap 'rm -rf -- "$PAPER_API_TEMP"' EXIT
+  source dev/paper-api-test-lib.sh
+  FOTON_PAPER_API_JAR="$(paper_api_prepare "" "$PAPER_API_TEMP")" || exit 1
+  export FOTON_PAPER_API_JAR
+fi
+run "Paper-compiled shapeless recipes"            bash dev/shapeless-recipe-test.sh "${FOTON_PAPER_API_JAR:-}"
+run "Paper-compiled prepare enchant"              bash dev/prepare-enchant-test.sh "${FOTON_PAPER_API_JAR:-}"
 run "plugin runtime dependency closure"            bash dev/plugin-runtime-test.sh
+# This fixture is compiled against exact official Paper bytes, not Foton's own
+# API. It checks DriverManager visibility and executes a real SQLite query.
+# FOTON_PAPER_API_JAR can point to an already downloaded copy; the test still
+# checks its pinned digest and refuses stale or substituted bytes.
+run "Paper-compiled SQLite plugin"                 bash dev/sqlite-plugin-test.sh "${FOTON_PAPER_API_JAR:-}"
 # The release path has its own packaging logic and must stay aligned with the
 # workflow without actually creating a tag or contacting GitHub during CI.
 run "manual release packaging"                    bash dev/release-test.sh
@@ -79,6 +94,7 @@ run "spawn events cross JNI"                       cargo test -p foton-plugin --
 # unregistered and the first plugin to call it takes an
 # UnsatisfiedLinkError. Neither shows up in a build.
 run "every native is registered"                   "$PY" dev/check-natives.py --quiet
+run "event JNI descriptors and arguments"          "$PY" dev/check-event-bridge.py --quiet
 run "test counts are current"                      "$PY" dev/count-tests.py --check
 # Four test files sat in dev/ that nothing ran, which is the same shape as the
 # clippy note above: the checks existed and nobody was reading them.

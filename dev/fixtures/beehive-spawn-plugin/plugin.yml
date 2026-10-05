@@ -1,0 +1,7 @@
+name: BeehiveSpawnProbe
+version: 1.0
+main: foton.fixture.beehive.BeehiveSpawnProbe
+api-version: '1.21.11'
+commands:
+  allowbeerelease:
+    description: Allows the test hive's bee to leave after its cancelled attempts.

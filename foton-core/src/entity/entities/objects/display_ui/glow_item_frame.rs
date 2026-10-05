@@ -62,6 +62,11 @@ unsafe impl DowncastType for GlowItemFrameEntity {
 }
 
 impl GlowItemFrameEntity {
+    /// Borrows the display item for bounded owning capture before allocation.
+    pub fn with_framed_item<R>(&self, read: impl FnOnce(&ItemStack) -> R) -> R {
+        read(self.entity_data.lock().item_frame().item.get())
+    }
+
     /// Creates a fresh glow item frame from the generic entity factory path.
     #[must_use]
     pub fn new(entity_type: EntityTypeRef, id: i32, position: DVec3, world: Weak<World>) -> Self {

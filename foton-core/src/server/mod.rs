@@ -86,7 +86,7 @@ use foton_crypto::{key_store::KeyStore, signature::ProfileKeyValidator};
 use foton_protocol::packet_traits::{ClientPacket, EncodedPacket};
 use foton_protocol::packets::game::{
     CCommandSuggestions, CEntityEvent, CLogin, CPlayerInfoUpdate, CRemovePlayerInfo,
-    CSetDefaultSpawnPosition, CSystemChat, CTabList, CTickingState, CTickingStep,
+    CSetDefaultSpawnPosition, CSetPlayerTeam, CSystemChat, CTabList, CTickingState, CTickingStep,
     CommonPlayerSpawnInfo, RelativeMovement,
 };
 use foton_protocol::utils::ConnectionProtocol;

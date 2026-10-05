@@ -7,6 +7,7 @@ import org.bukkit.event.Cancellable;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.inventory.InventoryEvent;
 import org.bukkit.inventory.InventoryView;
+import org.bukkit.inventory.view.EnchantmentView;
 import org.bukkit.inventory.ItemStack;
 
 /** An enchanting table has rolled its offers for the item put in it. The
@@ -21,9 +22,17 @@ public class PrepareItemEnchantEvent extends InventoryEvent implements Cancellab
     private final int bonus;
     private boolean cancelled;
 
+    public PrepareItemEnchantEvent(Player enchanter, EnchantmentView view, Block table,
+            ItemStack item, EnchantmentOffer[] offers, int bonus) {
+        this(enchanter, (InventoryView) view, table, item, offers, bonus);
+    }
+
     public PrepareItemEnchantEvent(Player enchanter, InventoryView view, Block table, ItemStack item,
             EnchantmentOffer[] offers, int bonus) {
         super(view);
+        if (view != null && !(view instanceof EnchantmentView)) {
+            throw new IllegalArgumentException("PrepareItemEnchantEvent requires an EnchantmentView");
+        }
         this.enchanter = enchanter;
         this.table = table;
         this.item = item;
@@ -31,6 +40,7 @@ public class PrepareItemEnchantEvent extends InventoryEvent implements Cancellab
         this.bonus = bonus;
     }
 
+    @Override public EnchantmentView getView() { return (EnchantmentView) super.getView(); }
     public Player getEnchanter() { return enchanter; }
     public Block getEnchantBlock() { return table; }
     public ItemStack getItem() { return item; }

@@ -103,6 +103,7 @@ fn load_offer(compound: &simdnbt::borrow::NbtCompound<'_, '_>) -> Option<Merchan
         compound.int("demand").unwrap_or(0),
     );
     offer.set_special_price_diff(compound.int("specialPrice").unwrap_or(0));
+    offer.set_reward_exp(compound.byte("rewardExp") != Some(0));
     Some(offer)
 }
 
@@ -130,4 +131,46 @@ pub fn load(list: &BorrowedNbtList<'_, '_>) -> MerchantOffers {
         .into_iter()
         .filter_map(|c| load_offer(&c))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reward_experience_false_survives_nbt_and_absence_defaults_true() {
+        crate::init_vanilla_registry();
+        let mut offer = MerchantOffer::with_uses(
+            ItemCost::new(&crate::vanilla_items::EMERALD, 1),
+            None,
+            ItemStack::new(&crate::vanilla_items::STONE),
+            2,
+            9,
+            4,
+            0.25,
+            3,
+        );
+        offer.set_reward_exp(false);
+        let compound = save_offer(&offer);
+        let encoded = simdnbt::owned::Nbt::new("".into(), compound);
+        let mut bytes = Vec::new();
+        encoded.write(&mut bytes);
+        let parsed = simdnbt::borrow::read(&mut std::io::Cursor::new(&bytes)).expect("offer NBT");
+        let loaded = load_offer(&parsed.unwrap().as_compound()).expect("saved offer");
+        assert!(!loaded.should_reward_exp());
+        assert_eq!(loaded.uses(), 2);
+        assert_eq!(loaded.xp(), 4);
+        let mut defaults = NbtCompound::new();
+        defaults.insert("buy", save_cost(offer.item_cost_a()));
+        defaults.insert("sell", offer.result().to_nbt_tag_ref());
+        let mut bytes = Vec::new();
+        simdnbt::owned::Nbt::new("".into(), defaults).write(&mut bytes);
+        let parsed =
+            simdnbt::borrow::read(&mut std::io::Cursor::new(&bytes)).expect("default offer NBT");
+        assert!(
+            load_offer(&parsed.unwrap().as_compound())
+                .expect("default offer")
+                .should_reward_exp()
+        );
+    }
 }

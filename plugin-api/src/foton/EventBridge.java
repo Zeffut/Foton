@@ -571,7 +571,7 @@ public final class EventBridge {
         } catch (RuntimeException ex) { return "!"; }
     }
     public static boolean fireCreatureSpawn(String entity, String world, double x, double y, double z, String reason) {
-        org.bukkit.entity.LivingEntity living = new FotonLivingEntity(Native.parse(entity));
+        org.bukkit.entity.LivingEntity living = (org.bukkit.entity.LivingEntity) FotonEntity.handle(Native.parse(entity));
         org.bukkit.event.entity.CreatureSpawnEvent event =
             new org.bukkit.event.entity.CreatureSpawnEvent(
                 living, new org.bukkit.Location(new FotonWorld(world), x, y, z),
@@ -1069,9 +1069,14 @@ public final class EventBridge {
      * so a close handler still finds its own holder and what the player left
      * inside; one that opens another menu keeps it. */
     public static void fireInventoryClose(String uuid) {
-        FotonCustomInventory closing = FotonCustomInventory.viewedBy(uuid);
-        dispatch(new org.bukkit.event.inventory.InventoryCloseEvent(player(uuid)));
-        if (closing != null) closing.detachViewer(uuid);
+        FotonCustomInventory.ViewerAttachment attachment =
+            FotonCustomInventory.openAttachmentForViewer(uuid);
+        FotonCustomInventory closing = attachment == null ? null : attachment.inventory();
+        try {
+            dispatch(new org.bukkit.event.inventory.InventoryCloseEvent(player(uuid)));
+        } finally {
+            if (closing != null) closing.detachViewer(attachment);
+        }
     }
 
     public static boolean firePlayerOpenSign(String uuid, String world, int x, int y, int z, boolean front, String cause) {

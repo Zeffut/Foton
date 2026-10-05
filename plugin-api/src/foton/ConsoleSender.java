@@ -13,10 +13,12 @@ public final class ConsoleSender implements ConsoleCommandSender {
         System.out.println(message);
     }
 
-    /** The console may do anything, which is what every server assumes. */
+    /** The console is an operator, while explicitly false permissions stay denied. */
     @Override
     public boolean hasPermission(String permission) {
-        return true;
+        if (permission == null) return false;
+        Boolean declared = PermissionRegistry.resolveDefault(permission, true);
+        return declared == null || declared;
     }
 
     @Override

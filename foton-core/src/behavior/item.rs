@@ -568,6 +568,16 @@ pub trait ItemBehavior: Send + Sync {
         false
     }
 
+    /// Vanilla `instanceof BannerItem` capability, independent of item naming.
+    fn is_banner(&self) -> bool {
+        false
+    }
+
+    /// Vanilla `instanceof BundleItem` capability, including colored bundles.
+    fn is_bundle(&self) -> bool {
+        false
+    }
+
     /// Called when this item is used (e.g. right click in air).
     fn use_item(&self, context: &mut UseItemContext) -> InteractionResult {
         // Vanilla parity: `Consumable.startConsuming`.

@@ -7,6 +7,7 @@ use foton_utils::serial::{ReadFrom, WriteTo};
 
 use crate::REGISTRY;
 use crate::data_component_predicate::DataComponentExactPredicate;
+use crate::data_components::ComponentPatchEntry;
 use crate::item_stack::ItemStack;
 use crate::items::ItemRef;
 use crate::registry::{RegistryEntry as _, RegistryExt as _};
@@ -26,6 +27,31 @@ pub struct ItemCost {
 }
 
 impl ItemCost {
+    /// Paper's ingredient conversion: only positive patch entries constrain payment,
+    /// while the immediate display retains the complete original stack.
+    /// Persistent/stream reconstruction still uses the derived-display constructor.
+    /// Callers admitting external recursive state must preflight before this semantic
+    /// predicate copy and its existing persistent-value validation.
+    #[must_use]
+    pub fn try_from_ingredient(stack: ItemStack) -> Option<Self> {
+        if stack.is_empty() {
+            return None;
+        }
+        let mut values = Vec::new();
+        for (key, entry) in stack.patch().iter() {
+            if let ComponentPatchEntry::Set(value) = entry {
+                values.push((REGISTRY.data_components.by_key(key)?, value.clone()));
+            }
+        }
+        let components = DataComponentExactPredicate::new(values)?;
+        Some(Self {
+            item: stack.item(),
+            count: stack.count(),
+            components,
+            item_stack: stack,
+        })
+    }
+
     /// A cost of `count` of `item` with no component requirements.
     #[must_use]
     pub fn new(item: ItemRef, count: i32) -> Self {
@@ -87,6 +113,10 @@ impl ItemCost {
         stack.is(self.item) && self.components.test(stack)
     }
 }
+
+#[cfg(test)]
+#[path = "item_cost_tests.rs"]
+mod tests;
 
 impl WriteTo for ItemCost {
     /// Vanilla parity: `ItemCost.STREAM_CODEC`.

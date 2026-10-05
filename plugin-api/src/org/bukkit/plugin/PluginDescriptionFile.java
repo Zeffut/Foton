@@ -42,6 +42,10 @@ public class PluginDescriptionFile implements io.papermc.paper.plugin.configurat
     private final List<String> loadBefore;
     private final List<String> provides;
     private final List<String> libraries;
+    private final List<String> contributors;
+    private final PluginLoadOrder load;
+    private final String paperPluginLoader;
+    private final boolean paperSkipLibraries;
     private final Map<String, Map<String, Object>> commands;
     private final String apiVersion;
     private final String bootstrapper;
@@ -51,8 +55,13 @@ public class PluginDescriptionFile implements io.papermc.paper.plugin.configurat
     private final String prefix;
     private final String website;
     private final List<org.bukkit.permissions.Permission> permissions;
+    private final org.bukkit.permissions.PermissionDefault permissionDefault;
 
     public PluginDescriptionFile(Reader reader) throws InvalidDescriptionException {
+        this(loadMapping(reader));
+    }
+
+    private static Map<String, Object> loadMapping(Reader reader) throws InvalidDescriptionException {
         Object loaded;
         try {
             loaded = foton.Yaml.load(read(reader));
@@ -66,10 +75,20 @@ public class PluginDescriptionFile implements io.papermc.paper.plugin.configurat
         for (Map.Entry<?, ?> entry : ((Map<?, ?>) loaded).entrySet()) {
             root.put(String.valueOf(entry.getKey()), entry.getValue());
         }
+        return root;
+    }
 
-        this.name = requiredText(root, "name");
-        this.main = requiredText(root, "main");
-        this.version = root.containsKey("version") ? text(root.get("version")) : "0";
+    protected PluginDescriptionFile(Map<String, Object> root) throws InvalidDescriptionException {
+        this.name = text(root.get("name"));
+        this.main = text(root.get("main"));
+        this.version = text(root.get("version"));
+        if (name == null || name.isBlank() || main == null || main.isBlank()
+                || version == null || version.isBlank()) {
+            throw new InvalidDescriptionException("plugin descriptor needs name, main and version");
+        }
+        if (!name.matches("[A-Za-z0-9 _.-]+")) {
+            throw new InvalidDescriptionException("invalid plugin name: " + name);
+        }
         this.description = text(root.get("description"));
         this.apiVersion = apiVersion(root.get("api-version"));
         this.prefix = text(root.get("prefix"));
@@ -80,7 +99,7 @@ public class PluginDescriptionFile implements io.papermc.paper.plugin.configurat
         this.loadBefore = dependencyNames(root.get("loadbefore"), "loadbefore");
         this.provides = dependencyNames(root.get("provides"), "provides");
         rejectOwnAlias();
-        this.libraries = dependencyNames(root.get("libraries"), "libraries");
+
         this.bootstrapper = optionalText(root.get("bootstrapper"), "bootstrapper");
         this.loader = optionalText(root.get("loader"), "loader");
         Map<String, Object> dependencies = mapping(root.get("dependencies"), "dependencies", true);
@@ -88,7 +107,22 @@ public class PluginDescriptionFile implements io.papermc.paper.plugin.configurat
             dependencies.get("bootstrap"), "dependencies.bootstrap");
         this.serverDependencies = dependencySection(
             dependencies.get("server"), "dependencies.server");
-        this.permissions = permissions(root.get("permissions"));
+
+        List<String> declaredLibraries = dependencyNames(root.get("libraries"), "libraries");
+        this.contributors = stringList(root, "contributors");
+        try {
+            this.load = root.containsKey("load")
+                ? PluginLoadOrder.valueOf(text(root.get("load"))) : PluginLoadOrder.POSTWORLD;
+        } catch (IllegalArgumentException error) {
+            throw new InvalidDescriptionException(error, "invalid plugin load phase");
+        }
+        this.paperPluginLoader = text(root.get("paper-plugin-loader"));
+        Object skip = root.get("paper-skip-libraries");
+        this.paperSkipLibraries = skip != null && String.valueOf(skip).equalsIgnoreCase("true");
+        this.libraries = paperSkipLibraries ? List.of() : declaredLibraries;
+        this.permissionDefault = root.containsKey("default-permission")
+            ? permissionDefault(root.get("default-permission")) : org.bukkit.permissions.PermissionDefault.OP;
+        this.permissions = permissions(root.get("permissions"), permissionDefault);
 
         Map<String, Map<String, Object>> declared = new LinkedHashMap<>();
         if (root.get("commands") instanceof Map) {
@@ -124,12 +158,17 @@ public class PluginDescriptionFile implements io.papermc.paper.plugin.configurat
         this.loadBefore = List.of();
         this.provides = List.of();
         this.libraries = List.of();
+        this.contributors = List.of();
+        this.load = PluginLoadOrder.POSTWORLD;
+        this.paperPluginLoader = null;
+        this.paperSkipLibraries = false;
         this.commands = Map.of();
         this.bootstrapper = null;
         this.loader = null;
         this.bootstrapDependencies = Map.of();
         this.serverDependencies = Map.of();
         this.permissions = List.of();
+        this.permissionDefault = org.bukkit.permissions.PermissionDefault.OP;
     }
 
     private static String read(Reader reader) {
@@ -141,7 +180,7 @@ public class PluginDescriptionFile implements io.papermc.paper.plugin.configurat
                 text.append(buffer, 0, got);
             }
         } catch (java.io.IOException error) {
-            return "";
+            throw new IllegalArgumentException("cannot read plugin descriptor", error);
         }
         return text.toString();
     }
@@ -169,9 +208,27 @@ public class PluginDescriptionFile implements io.papermc.paper.plugin.configurat
         return value;
     }
 
+    private static List<String> stringList(Map<String, Object> root, String key)
+            throws InvalidDescriptionException {
+        Object value = root.get(key);
+        if (value == null) return List.of();
+        if (!(value instanceof List<?> values)) {
+            throw new InvalidDescriptionException(key + " must be a list");
+        }
+        List<String> result = new ArrayList<>();
+        for (Object entry : values) {
+            if (!(entry instanceof String name) || name.isBlank()) {
+                throw new InvalidDescriptionException(key + " must contain nonempty strings");
+            }
+            result.add(name);
+        }
+        return List.copyOf(result);
+    }
+
     /** `author: Ada` and `authors: [Ada, Alan]` are both written. */
     private static List<String> names(Object list, Object single) {
         List<String> out = new ArrayList<>();
+        if (single != null) out.add(String.valueOf(single));
         if (list instanceof List) {
             for (Object entry : (List<?>) list) {
                 if (entry != null) {
@@ -181,14 +238,19 @@ public class PluginDescriptionFile implements io.papermc.paper.plugin.configurat
         } else if (list != null) {
             out.add(String.valueOf(list));
         }
-        if (single != null) {
-            out.add(String.valueOf(single));
-        }
         return Collections.unmodifiableList(out);
     }
 
     private static List<String> dependencyNames(Object raw, String field)
             throws InvalidDescriptionException {
+        // Retain Foton's string shorthand, without stringifying malformed YAML.
+        if (raw != null && !(raw instanceof String) && !(raw instanceof List<?>)) {
+            throw new InvalidDescriptionException("plugin.yml field " + field + " must be a string or string list");
+        }
+        if (raw instanceof List<?> entries
+                && entries.stream().anyMatch(entry -> !(entry instanceof String))) {
+            throw new InvalidDescriptionException("plugin.yml field " + field + " must contain only strings");
+        }
         List<String> values = names(raw, null);
         List<String> out = new ArrayList<>();
         Set<String> seen = new HashSet<>();
@@ -306,22 +368,49 @@ public class PluginDescriptionFile implements io.papermc.paper.plugin.configurat
             "plugin.yml field " + field + " must be true or false");
     }
 
-    private static List<org.bukkit.permissions.Permission> permissions(Object value) {
+    private static List<org.bukkit.permissions.Permission> permissions(Object value,
+            org.bukkit.permissions.PermissionDefault inheritedDefault) {
         if (!(value instanceof Map)) return List.of();
         List<org.bukkit.permissions.Permission> out = new ArrayList<>();
         for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
             String name = String.valueOf(entry.getKey());
             String description = "";
-            org.bukkit.permissions.PermissionDefault defaultValue = org.bukkit.permissions.PermissionDefault.FALSE;
+            org.bukkit.permissions.PermissionDefault defaultValue = inheritedDefault;
             if (entry.getValue() instanceof Map<?, ?> fields) {
                 Object d = fields.get("description");
                 if (d != null) description = String.valueOf(d);
                 Object def = fields.get("default");
-                if (def != null) try { defaultValue = org.bukkit.permissions.PermissionDefault.valueOf(String.valueOf(def).toUpperCase(java.util.Locale.ROOT)); } catch (IllegalArgumentException ignored) { }
+                if (def != null) defaultValue = permissionDefault(def);
+                Map<String, Boolean> children = permissionChildren(fields.get("children"));
+                out.add(new org.bukkit.permissions.Permission(
+                    name, description, defaultValue, children));
+                continue;
             }
             out.add(new org.bukkit.permissions.Permission(name, description, defaultValue));
         }
         return Collections.unmodifiableList(out);
+    }
+
+    private static org.bukkit.permissions.PermissionDefault permissionDefault(Object value) {
+        String normalized = String.valueOf(value).trim().toUpperCase(java.util.Locale.ROOT)
+            .replace('-', '_').replace(' ', '_');
+        try {
+            return org.bukkit.permissions.PermissionDefault.valueOf(normalized);
+        } catch (IllegalArgumentException ignored) {
+            return org.bukkit.permissions.PermissionDefault.FALSE;
+        }
+    }
+
+    private static Map<String, Boolean> permissionChildren(Object value) {
+        if (!(value instanceof Map<?, ?> children)) return Map.of();
+        Map<String, Boolean> result = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> child : children.entrySet()) {
+            Object raw = child.getValue();
+            boolean enabled = raw instanceof Boolean bool
+                ? bool : Boolean.parseBoolean(String.valueOf(raw));
+            result.put(String.valueOf(child.getKey()), enabled);
+        }
+        return result;
     }
 
     public String getName() { return name; }
@@ -329,6 +418,7 @@ public class PluginDescriptionFile implements io.papermc.paper.plugin.configurat
     @Override public String getVersion() { return version; }
 
     public String getMain() { return main; }
+    @Override public String getMainClass() { return main; }
 
     public String getDescription() { return description; }
 
@@ -354,7 +444,12 @@ public class PluginDescriptionFile implements io.papermc.paper.plugin.configurat
 
     public Map<String, Dependency> getServerDependencies() { return serverDependencies; }
 
+    public List<String> getContributors() { return contributors; }
+    public PluginLoadOrder getLoad() { return load; }
+    public String getPaperPluginLoader() { return paperPluginLoader; }
+    public boolean isPaperSkipLibraries() { return paperSkipLibraries; }
     public List<org.bukkit.permissions.Permission> getPermissions() { return permissions; }
+    public org.bukkit.permissions.PermissionDefault getPermissionDefault() { return permissionDefault; }
 
     public String getAPIVersion() { return apiVersion; }
 

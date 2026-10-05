@@ -1,0 +1,7 @@
+name: PluginChannelProbe
+version: 1.0
+main: foton.fixture.channels.PluginChannelProbe
+api-version: '1.21.11'
+commands:
+  channelprobe:
+    description: Send a plugin message to the invoking player

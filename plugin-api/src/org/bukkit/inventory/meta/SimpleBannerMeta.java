@@ -8,7 +8,7 @@ import org.bukkit.block.banner.Pattern;
 public final class SimpleBannerMeta extends SimpleItemMeta implements BannerMeta {
     private DyeColor baseColor = DyeColor.WHITE;
     @Override public DyeColor getBaseColor() { return baseColor; }
-    @Override public void setBaseColor(DyeColor value) { baseColor = value == null ? DyeColor.WHITE : value; }
+    @Override public void setBaseColor(DyeColor value) { baseColor = value == null ? DyeColor.WHITE : value; setBaseColorComponent(value); }
     // A banner item's layers are its banner_patterns component, which every
     // meta carries (a shield's too).
     @Override public List<Pattern> getPatterns() {

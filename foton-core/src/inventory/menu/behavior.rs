@@ -139,6 +139,12 @@ impl MenuBehavior {
         self.container_id
     }
 
+    /// Process-unique identity for plugin views; unlike the wire id this never cycles at 100.
+    #[must_use]
+    pub const fn instance_id(&self) -> u64 {
+        self.instance.0
+    }
+
     /// The menu type, or `None` for the player's own inventory.
     #[must_use]
     pub const fn menu_type(&self) -> Option<MenuTypeRef> {

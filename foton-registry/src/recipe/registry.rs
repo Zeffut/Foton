@@ -69,6 +69,28 @@ impl Default for RecipeRegistry {
 }
 
 impl RecipeRegistry {
+    /// Materializes every extracted result after component registries are published.
+    pub(crate) fn validate_vanilla_results(&self) -> std::io::Result<()> {
+        let results = self
+            .shaped_recipes
+            .iter()
+            .map(|recipe| &recipe.result)
+            .chain(self.shapeless_recipes.iter().map(|recipe| &recipe.result))
+            .chain(self.smelting_recipes.iter().map(|recipe| &recipe.result))
+            .chain(self.blasting_recipes.iter().map(|recipe| &recipe.result))
+            .chain(self.smoking_recipes.iter().map(|recipe| &recipe.result))
+            .chain(self.campfire_recipes.iter().map(|recipe| &recipe.result))
+            .chain(
+                self.stonecutting_recipes
+                    .iter()
+                    .map(|recipe| &recipe.result),
+            )
+            .chain(self.smithing_recipes.iter().map(|recipe| &recipe.result));
+        for result in results {
+            result.try_template()?;
+        }
+        Ok(())
+    }
     /// Creates a new empty recipe registry.
     #[must_use]
     pub fn new() -> Self {
@@ -703,7 +725,38 @@ impl crate::RegistryEntry for CraftingRecipe {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data_components::vanilla_components::SUSPICIOUS_STEW_EFFECTS;
     use crate::{REGISTRY, init_vanilla_registry, vanilla_items};
+    use simdnbt::FromNbtTag as _;
+    use std::io::Cursor;
+
+    #[test]
+    fn extracted_stew_result_keeps_effect_through_assembly_and_persistence() {
+        init_vanilla_registry();
+        let id = Identifier::vanilla_static("suspicious_stew_from_allium");
+        let recipe = REGISTRY
+            .recipes
+            .get_shapeless(&id)
+            .expect("extracted recipe");
+        let stack = recipe.assemble();
+        let effects = stack.get(SUSPICIOUS_STEW_EFFECTS).expect("result effect");
+        assert_eq!(effects.effects().len(), 1);
+        assert_eq!(
+            effects.effects()[0].effect().key.to_string(),
+            "minecraft:fire_resistance"
+        );
+        assert_eq!(effects.effects()[0].duration(), 60);
+
+        let mut bytes = Vec::new();
+        stack.to_nbt_tag_ref().write(&mut bytes);
+        let borrowed =
+            simdnbt::borrow::read_tag(&mut Cursor::new(bytes.as_slice())).expect("saved stack tag");
+        let restored = ItemStack::from_nbt_tag(borrowed.as_tag()).expect("restored result");
+        assert_eq!(
+            restored.get(SUSPICIOUS_STEW_EFFECTS),
+            stack.get(SUSPICIOUS_STEW_EFFECTS)
+        );
+    }
 
     #[test]
     fn every_cooking_family_is_populated() {
@@ -729,7 +782,7 @@ mod tests {
 
         assert_eq!(smelted.cooking_time, 200);
         assert_eq!(blasted.cooking_time, 100);
-        assert_eq!(smelted.result.item.key, blasted.result.item.key);
+        assert_eq!(smelted.result.item().key, blasted.result.item().key);
     }
 
     #[test]
@@ -772,7 +825,7 @@ mod tests {
         let cooked = recipes
             .find_campfire_recipe(&porkchop)
             .expect("a campfire cooks porkchop");
-        assert_eq!(cooked.result.item.key, vanilla_items::COOKED_PORKCHOP.key);
+        assert_eq!(cooked.result.item().key, vanilla_items::COOKED_PORKCHOP.key);
         assert_eq!(
             cooked.cooking_time, 600,
             "a campfire is six times slower than a furnace"

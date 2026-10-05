@@ -1,0 +1,18 @@
+{
+  "26.2": {
+    "build": 129,
+    "channel": "STABLE",
+    "java": 25,
+    "sha256": "b1d8f6bfa1b6101fa8e947b53041cb3bdf5540e7b83b6547ca19ba7edefeb083",
+    "url": "https://fill-data.papermc.io/v1/objects/b1d8f6bfa1b6101fa8e947b53041cb3bdf5540e7b83b6547ca19ba7edefeb083/paper-26.2-129.jar",
+    "metadata": "https://fill.papermc.io/v3/projects/paper/versions/26.2/builds"
+  },
+  "1.21.11": {
+    "build": 132,
+    "channel": "STABLE",
+    "java": 21,
+    "sha256": "5ffef465eeeb5f2a3c23a24419d97c51afd7dbb4923ff42df9a3f58bba1ccfba",
+    "url": "https://fill-data.papermc.io/v1/objects/5ffef465eeeb5f2a3c23a24419d97c51afd7dbb4923ff42df9a3f58bba1ccfba/paper-1.21.11-132.jar",
+    "metadata": "https://fill.papermc.io/v3/projects/paper/versions/1.21.11/builds"
+  }
+}

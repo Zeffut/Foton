@@ -464,6 +464,10 @@ if [ -d "$FIXTURE_SRC" ]; then
     "$LIBRARY_PLUGINS" "$MALFORMED_LIBRARY_PLUGINS" \
     "$DESCRIPTOR_CACHE_JAR" "$INTERRUPTED_CACHE_JAR" "$PAPER_PLUGINS" \
     "$OUT/fixture-evidence.json"
+  # MavenLibraryResolver's mirror is a process-initialized constant. The local
+  # repository fixture configures it before first use, independently of the
+  # preceding legacy-cache fixtures; keep all assertions in a fresh JVM.
+  java -cp "$CHECK_CLASSES:$API_CP" foton.PluginLibraries
   java -cp "$CHECK_CLASSES:$API_CP:$HOST_DRIVER_JAR" HostRuntimeCheck \
     jdbc "$JDBC_PLUGINS"
   java -cp "$CHECK_CLASSES:$API_CP:$HOST_DRIVER_JAR" HostRuntimeCheck \

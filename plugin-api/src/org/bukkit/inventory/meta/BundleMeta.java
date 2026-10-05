@@ -10,5 +10,5 @@ public interface BundleMeta extends ItemMeta {
 
     void setItems(List<ItemStack> items);
     default void addItem(ItemStack item) { if (item == null) return; List<ItemStack> values = getItems(); values.add(item); setItems(values); }
-    default java.util.Map<String,Object> serialize() { return java.util.Collections.emptyMap(); }
+    default java.util.Map<String,Object> serialize() { throw new UnsupportedOperationException("specialized metadata persistence"); }
 }

@@ -7,6 +7,12 @@ final class Permissions {
         Checks.expect(owner != null && owner.isEnabled(),
             "the permission check needs the enabled fixture plugin");
 
+        descriptorPermissionsAreRegistered();
+        parentRelationsMatchPaper();
+        registryChangesInvalidateLivePermissibles();
+        registryChangesInvalidateLivePlayers(owner);
+        collidingPluginDeclarationsAreRestoredAfterUnload();
+
         java.util.UUID id = java.util.UUID.fromString(
             "00000000-0000-0000-0000-000000000042");
         foton.EventBridge.fireJoin(id.toString(), "");
@@ -18,6 +24,13 @@ final class Permissions {
         fallback.setPermission("fixture.shared", false);
         org.bukkit.permissions.PermissionAttachment owned = first.addAttachment(owner);
         owned.setPermission("FiXtUrE.ShArEd", true);
+
+        org.bukkit.permissions.PermissionAttachment inherited = first.addAttachment(owner);
+        inherited.setPermission("fixture.operator", true);
+        Checks.expect(first.hasPermission("fixture.inherited")
+                && !first.hasPermission("fixture.denied"),
+            "an attachment did not expand registered permission children");
+        inherited.remove();
 
         Checks.expect(first.hasPermission("fixture.shared")
                 && second.hasPermission("FIXTURE.SHARED"),
@@ -53,6 +66,186 @@ final class Permissions {
         }
         Checks.expect(rejected,
             "a disabled plugin was allowed to recreate an attachment after teardown");
+    }
+
+    private static void descriptorPermissionsAreRegistered() {
+        org.bukkit.plugin.PluginManager manager = org.bukkit.Bukkit.getPluginManager();
+        org.bukkit.permissions.Permission root = manager.getPermission("FIXTURE.OPERATOR");
+        Checks.expect(root != null
+                && root.getDefault() == org.bukkit.permissions.PermissionDefault.OP,
+            "plugin.yml permissions were not registered in PluginManager");
+        Checks.same(root.getChildren().get("fixture.inherited"), true,
+            "plugin.yml permission children were not parsed");
+        Checks.same(foton.PermissionRegistry.resolveDefault("fixture.operator", true), true,
+            "default op did not grant operators");
+        Checks.same(foton.PermissionRegistry.resolveDefault("fixture.operator", false), false,
+            "default op granted a non-operator");
+        Checks.same(foton.PermissionRegistry.resolveDefault("fixture.visitor", false), true,
+            "default not-op did not grant a non-operator");
+        Checks.same(foton.PermissionRegistry.resolveDefault("fixture.visitor", true), false,
+            "default not-op granted an operator");
+        Checks.same(foton.PermissionRegistry.resolveDefault("fixture.always", false), true,
+            "default true was not granted");
+        Checks.same(foton.PermissionRegistry.resolveDefault("fixture.never", true), false,
+            "default false was granted");
+        Checks.expect(org.bukkit.Bukkit.getConsoleSender().hasPermission("fixture.operator")
+                && !org.bukkit.Bukkit.getConsoleSender().hasPermission("fixture.never"),
+            "the console did not respect op/false descriptor defaults");
+        Checks.same(foton.PermissionRegistry.resolveDefault("fixture.inherited", true), true,
+            "a true child was not inherited from its granted parent");
+        Checks.same(foton.PermissionRegistry.resolveDefault("fixture.denied", true), false,
+            "a false child did not deny the inherited permission");
+
+        MutableOperator operator = new MutableOperator(true);
+        org.bukkit.permissions.PermissibleBase permissible =
+            new org.bukkit.permissions.PermissibleBase(operator);
+        Checks.expect(permissible.hasPermission("fixture.inherited")
+                && !permissible.hasPermission("fixture.denied"),
+            "PermissibleBase did not apply registered child permissions");
+        permissible.setOp(false);
+        Checks.expect(permissible.hasPermission("fixture.visitor")
+                && !permissible.hasPermission("fixture.operator")
+                && !permissible.isPermissionSet("fixture.operator"),
+            "PermissibleBase.setOp(false) did not recalculate op/not-op defaults");
+        permissible.setOp(true);
+        Checks.expect(permissible.hasPermission("fixture.operator")
+                && permissible.hasPermission("fixture.inherited")
+                && permissible.isPermissionSet("fixture.operator"),
+            "PermissibleBase.setOp(true) did not recalculate op/not-op defaults");
+
+        cyclicChildrenDoNotRewriteTheirRoot();
+    }
+
+    private static void cyclicChildrenDoNotRewriteTheirRoot() {
+        org.bukkit.permissions.Permission first = new org.bukkit.permissions.Permission(
+            "fixture.cycle.first", "", org.bukkit.permissions.PermissionDefault.TRUE,
+            java.util.Map.of("fixture.cycle.second", true));
+        org.bukkit.permissions.Permission second = new org.bukkit.permissions.Permission(
+            "fixture.cycle.second", "", org.bukkit.permissions.PermissionDefault.FALSE,
+            java.util.Map.of("fixture.cycle.first", false));
+        foton.PermissionRegistry.add(first);
+        foton.PermissionRegistry.add(second);
+        try {
+            Checks.same(foton.PermissionRegistry.resolveDefault(
+                    "fixture.cycle.first", false), true,
+                "a cyclic child declaration rewrote its granted root");
+        } finally {
+            foton.PermissionRegistry.remove("fixture.cycle.first");
+            foton.PermissionRegistry.remove("fixture.cycle.second");
+        }
+    }
+
+    private static void parentRelationsMatchPaper() {
+        org.bukkit.permissions.Permission child = new org.bukkit.permissions.Permission(
+            "fixture.parent.child");
+        org.bukkit.permissions.Permission parent = child.addParent(
+            "FiXtUrE.PaReNt.Root", true);
+        try {
+            Checks.same(parent.getName(), "fixture.parent.root",
+                "Permission.addParent(String, boolean) did not return the normalized parent");
+            Checks.same(parent.getChildren().get(child.getName()), true,
+                "Permission.addParent wrote the relationship in the wrong direction");
+            Checks.expect(!child.getChildren().containsKey(parent.getName()),
+                "Permission.addParent incorrectly made the parent a child");
+        } finally {
+            foton.PermissionRegistry.remove(parent.getName());
+        }
+    }
+
+    private static void registryChangesInvalidateLivePermissibles() {
+        MutableOperator operator = new MutableOperator(false);
+        org.bukkit.permissions.PermissibleBase permissible =
+            new org.bukkit.permissions.PermissibleBase(operator);
+        permissible.addAttachment(new Owner("registry-cache"),
+            "fixture.dynamic.root", true);
+        Checks.expect(!permissible.isPermissionSet("fixture.dynamic.child"),
+            "the dynamic child unexpectedly existed before its declaration");
+
+        foton.PermissionRegistry.add(new org.bukkit.permissions.Permission(
+            "fixture.dynamic.root", "", org.bukkit.permissions.PermissionDefault.FALSE,
+            java.util.Map.of("fixture.dynamic.child", true)));
+        Checks.expect(permissible.hasPermission("fixture.dynamic.child"),
+            "adding a declaration did not invalidate a live PermissibleBase cache");
+
+        foton.PermissionRegistry.remove("fixture.dynamic.root");
+        Checks.expect(!permissible.isPermissionSet("fixture.dynamic.child"),
+            "removing a declaration left a cached inherited child behind");
+    }
+
+    private static void collidingPluginDeclarationsAreRestoredAfterUnload() {
+        Owner firstOwner = new Owner("permission-first");
+        Owner secondOwner = new Owner("permission-second");
+        org.bukkit.permissions.Permission first = new org.bukkit.permissions.Permission(
+            "fixture.collision", org.bukkit.permissions.PermissionDefault.TRUE);
+        org.bukkit.permissions.Permission second = new org.bukkit.permissions.Permission(
+            "fixture.collision", org.bukkit.permissions.PermissionDefault.FALSE);
+        registerDeclarations(firstOwner, java.util.List.of(first));
+        registerDeclarations(secondOwner, java.util.List.of(second));
+        try {
+            Checks.same(foton.PermissionRegistry.get("FIXTURE.COLLISION"), first,
+                "a later plugin replaced the first declaration for a colliding node");
+            removeDeclarations(firstOwner);
+            Checks.same(foton.PermissionRegistry.get("fixture.collision"), second,
+                "unloading the selected owner did not restore the later declaration");
+            Checks.same(foton.PermissionRegistry.resolveDefault(
+                    "FiXtUrE.CoLlIsIoN", false), false,
+                "the restored declaration did not supply its own default");
+        } finally {
+            removeDeclarations(firstOwner);
+            removeDeclarations(secondOwner);
+        }
+    }
+
+    private static void registryChangesInvalidateLivePlayers(
+            org.bukkit.plugin.Plugin owner) {
+        java.util.UUID id = java.util.UUID.fromString(
+            "00000000-0000-0000-0000-000000000046");
+        foton.EventBridge.fireJoin(id.toString(), "");
+        foton.FotonPlayer player = new foton.FotonPlayer(id);
+        player.addAttachment(owner, "fixture.player.dynamic.root", true);
+        foton.PermissionRegistry.add(new org.bukkit.permissions.Permission(
+            "fixture.player.dynamic.root", "",
+            org.bukkit.permissions.PermissionDefault.FALSE,
+            java.util.Map.of("fixture.player.dynamic.child", true)));
+        try {
+            Checks.expect(player.hasPermission("fixture.player.dynamic.child"),
+                "adding a declaration did not invalidate a live FotonPlayer cache");
+        } finally {
+            foton.PermissionRegistry.remove("fixture.player.dynamic.root");
+            foton.EventBridge.fireQuit(id.toString(), "");
+        }
+    }
+
+    private static void registerDeclarations(org.bukkit.plugin.Plugin owner,
+            java.util.List<org.bukkit.permissions.Permission> permissions) {
+        invokeRegistryOwnerMethod("register", owner, permissions);
+    }
+
+    private static void removeDeclarations(org.bukkit.plugin.Plugin owner) {
+        invokeRegistryOwnerMethod("removeOwnedBy", owner);
+    }
+
+    private static void invokeRegistryOwnerMethod(String name, Object... arguments) {
+        try {
+            Class<?>[] types = name.equals("register")
+                ? new Class<?>[] {org.bukkit.plugin.Plugin.class, java.util.List.class}
+                : new Class<?>[] {org.bukkit.plugin.Plugin.class};
+            java.lang.reflect.Method method = foton.PermissionRegistry.class
+                .getDeclaredMethod(name, types);
+            method.setAccessible(true);
+            method.invoke(null, arguments);
+        } catch (ReflectiveOperationException error) {
+            throw new AssertionError("could not invoke PermissionRegistry." + name, error);
+        }
+    }
+
+    private static final class MutableOperator
+            implements org.bukkit.permissions.ServerOperator {
+        private boolean value;
+
+        private MutableOperator(boolean value) { this.value = value; }
+        @Override public boolean isOp() { return value; }
+        @Override public void setOp(boolean value) { this.value = value; }
     }
 
     private static void concurrentDisableCannotLeakAttachments(

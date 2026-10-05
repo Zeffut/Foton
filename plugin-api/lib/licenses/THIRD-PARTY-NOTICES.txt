@@ -2,7 +2,8 @@ Foton plugin runtime third-party notices
 =========================================
 
 The runtime bundle contains the following unmodified third-party artifacts.
-The complete applicable license texts are distributed beside this notice.
+The complete applicable license texts are distributed beside this notice,
+or at the explicitly identified paths inside the unmodified JARs below.
 
 MIT license
 -----------
@@ -21,6 +22,7 @@ Apache License 2.0
 ------------------
 
 * annotations 26.1.0
+* auto-service-annotations 1.1.1
 * gson 2.14.0
 * guava 33.6.0-jre
 * failureaccess 1.0.3
@@ -34,13 +36,65 @@ Apache License 2.0
 * Netty 4.2.15.Final: netty-common, netty-buffer, netty-transport,
   netty-resolver and netty-codec-base
 * snakeyaml 2.2
-* sqlite-jdbc 3.49.1.0 (Xerial)
+* sqlite-jdbc 3.49.1.0
+* Maven Artifact Resolver 1.9.18: maven-resolver-api, maven-resolver-spi,
+  maven-resolver-util, maven-resolver-impl, maven-resolver-named-locks,
+  maven-resolver-connector-basic
+* Maven 3.9.6: maven-resolver-provider, maven-model, maven-model-builder,
+  maven-repository-metadata, maven-artifact, maven-builder-support
+* commons-lang3 3.20.0
+* javax.inject 1
+* plexus-interpolation 1.26
+* plexus-utils 3.5.1 (also includes the third-party licenses listed below)
 
-Their complete common license is APACHE-2.0.txt. None of the pinned JARs
-contains an additional NOTICE file. SQLite JDBC also contains the Zentus
-license reproduced below. Guava and failureaccess's embedded
+Their complete common license is APACHE-2.0.txt. Maven, Commons Lang and
+Plexus Utils retain their original embedded META-INF/NOTICE files.
+Guava and failureaccess's embedded
 META-INF/LICENSE files and SLF4J's embedded META-INF/LICENSE.txt were also
 checked against the durable texts in this directory.
+SQLite JDBC retains its own Apache license and the separate David Crawshaw
+BSD-style notice at META-INF/maven/org.xerial/sqlite-jdbc/LICENSE and
+META-INF/maven/org.xerial/sqlite-jdbc/LICENSE.zentus inside the unmodified JAR.
+
+Maven resolver provenance and notices
+------------------------------------
+
+Each of the 16 added artifacts is pinned by group/artifact/version and SHA-256
+in plugin-api/lib/manifest.txt. dev/fetch-plugin-api-libs.sh constructs its source URL as
+https://repo.papermc.io/repository/maven-public/<group path>/<artifact>/<version>/<artifact>-<version>.jar
+The initial unmodified bytes came from the checksum-pinned official Paper
+26.2 build 129 runtime, whose Maven Resolver and provider versions we retain.
+All listed dependencies are redistributed as separate, unmodified JARs.
+
+Maven Artifact; Maven Builder Support; Maven Model; Maven Model Builder;
+Maven Repository Metadata Model; Maven Artifact Resolver Provider:
+Copyright 2001-2023 The Apache Software Foundation
+
+Maven Artifact Resolver API; Maven Artifact Resolver Connector Basic;
+Maven Artifact Resolver Implementation; Maven Artifact Resolver Named Locks;
+Maven Artifact Resolver SPI; Maven Artifact Resolver Utilities:
+Copyright 2010-2023 The Apache Software Foundation
+
+Apache Commons Lang:
+Copyright 2001-2025 The Apache Software Foundation
+
+These products include software developed at
+The Apache Software Foundation (https://www.apache.org/).
+
+Plexus Utils includes software developed by the Indiana University
+Extreme! Lab (http://www.extreme.indiana.edu/), The Apache Software Foundation
+(http://www.apache.org/), ThoughtWorks (http://www.thoughtworks.com),
+javolution (http://javolution.org/) and Rome (https://rome.dev.java.net/).
+Its complete additional licenses, copyright notices, conditions and disclaimers
+are retained in the distributed plexus-utils-3.5.1.jar at:
+  licenses/extreme.indiana.edu.license.TXT
+  licenses/javolution.license.TXT
+  licenses/thoughtworks.TXT
+These permit binary redistribution with their notices and conditions retained.
+
+javax.inject's Apache-2.0 license is declared in its published 1 POM.
+Plexus Interpolation inherits Apache-2.0 from its published plexus 5.1 POM.
+Both are covered by the complete APACHE-2.0.txt distributed here.
 
 Upstream license sources
 ------------------------

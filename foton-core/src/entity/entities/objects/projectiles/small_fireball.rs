@@ -90,6 +90,11 @@ impl SmallFireballEntity {
         self.entity_data.lock().fireball.item_stack.get().clone()
     }
 
+    /// Borrows the display item for bounded owning capture before allocation.
+    pub fn with_item<R>(&self, read: impl FnOnce(&ItemStack) -> R) -> R {
+        read(self.entity_data.lock().fireball.item_stack.get())
+    }
+
     /// Sets the item the client draws in place of the fireball.
     ///
     /// Vanilla parity: `Fireball.setItem`.

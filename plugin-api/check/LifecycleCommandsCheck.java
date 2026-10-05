@@ -27,6 +27,7 @@ public final class LifecycleCommandsCheck {
     private static final List<String> executions = new ArrayList<>();
     private static Commands registrar;
     private static ManagedPlugin owner;
+    private static int bootstrapCalls;
     private static CountDownLatch started, release, finished;
     private static final AtomicReference<Throwable> taskFailure = new AtomicReference<>();
 
@@ -36,6 +37,17 @@ public final class LifecycleCommandsCheck {
 
     static void check() throws Exception {
         Path root = Files.createTempDirectory("foton-lifecycle-commands-");
+        var serverField = Bukkit.class.getDeclaredField("server");
+        serverField.setAccessible(true);
+        Object previous = serverField.get(null);
+        org.bukkit.Server delegate = previous == null ? new foton.FotonServer() : (org.bukkit.Server) previous;
+        serverField.set(null, java.lang.reflect.Proxy.newProxyInstance(
+            LifecycleCommandsCheck.class.getClassLoader(), new Class<?>[] {org.bukkit.Server.class},
+            (proxy, method, arguments) -> {
+                if (method.getName().equals("getMinecraftVersion")) return "26.2";
+                try { return method.invoke(delegate, arguments); }
+                catch (java.lang.reflect.InvocationTargetException error) { throw error.getCause(); }
+            }));
         try {
             for (Boundary selected : Boundary.values()) {
                 boundary = selected;
@@ -43,6 +55,7 @@ public final class LifecycleCommandsCheck {
                 executions.clear();
                 registrar = null;
                 owner = null;
+                bootstrapCalls = 0;
                 started = new CountDownLatch(1);
                 release = new CountDownLatch(1);
                 finished = new CountDownLatch(1);
@@ -54,6 +67,7 @@ public final class LifecycleCommandsCheck {
                 }
             }
         } finally {
+            serverField.set(null, previous);
             try (var paths = Files.walk(root)) {
                 for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) {
                     Files.deleteIfExists(path);
@@ -66,11 +80,13 @@ public final class LifecycleCommandsCheck {
         pluginJar(directory);
         Checks.same(PluginHost.loadAllOnLoad(directory.toString()), 1,
             "managed command fixture must load");
+        Checks.same(steps, List.of("bootstrap"), "bootstrap commands precede instance enable delivery");
+        Checks.same(bootstrapCalls, 1, "bootstrap callback runs once before construction");
         PluginClassLoader loader = managedLoader();
         int enabled = PluginHost.enableAll();
         if (boundary == Boundary.NONE) {
             Checks.same(enabled, 1, "command fixture must enable");
-            Checks.same(steps, List.of("bootstrap:1", "constructor:1", "enable:1", "late1:1"),
+            Checks.same(steps, List.of("bootstrap", "constructor:1", "enable:1", "late1:1"),
                 "early and onEnable handlers must run once in their respective phases");
             verifyCommands(1);
             Commands previous = registrar;
@@ -78,19 +94,20 @@ public final class LifecycleCommandsCheck {
             noCommands();
             Checks.same(PluginHost.byName(NAME), owner, "disable must retain loaded identity");
             Checks.same(PluginHost.enableAll(), 1, "same managed identity must re-enable");
-            Checks.same(steps, List.of("bootstrap:1", "constructor:1", "enable:1", "late1:1",
-                "bootstrap:2", "constructor:2", "late1:2", "enable:2", "late2:2"),
+            Checks.same(steps, List.of("bootstrap", "constructor:1", "enable:1", "late1:1",
+                "constructor:2", "late1:2", "enable:2", "late2:2"),
                 "each retained and new registration must run once per enable cycle");
             Checks.expect(registrar != previous, "re-enable must start a fresh command tree");
             verifyCommands(2);
+            Checks.same(bootstrapCalls, 1, "re-enable must not replay bootstrap callbacks");
             return;
         }
         Checks.same(enabled, 0, "failed or retired command fixture must not finish enabled");
         Checks.expect(!owner.isEnabled(), "retirement must disable the fixture");
         List<String> expected = switch (boundary) {
             case FAIL_LATE, DISABLE_LATE, DISCARD_LATE ->
-                List.of("bootstrap:1", "constructor:1", "enable:1", "late1:1");
-            default -> List.of("bootstrap:1", "constructor:1", "enable:1");
+                List.of("bootstrap", "constructor:1", "enable:1", "late1:1");
+            default -> List.of("bootstrap", "constructor:1", "enable:1");
         };
         Checks.same(steps, expected, "late delivery crossed an enable failure/retirement boundary");
         noCommands();
@@ -99,8 +116,8 @@ public final class LifecycleCommandsCheck {
             Checks.same(PluginHost.byName(NAME), owner, "failed enable must retain loaded identity");
             boundary = Boundary.NONE;
             Checks.same(PluginHost.enableAll(), 1, "failed enable must be retryable");
-            Checks.same(steps, List.of("bootstrap:1", "constructor:1", "enable:1",
-                "bootstrap:2", "constructor:2", "late1:2", "enable:2", "late2:2"),
+            Checks.same(steps, List.of("bootstrap", "constructor:1", "enable:1",
+                "constructor:2", "late1:2", "enable:2", "late2:2"),
                 "failed enable must not retain a consumed cursor or lose pending handlers");
             verifyCommands(2);
         }
@@ -144,25 +161,28 @@ public final class LifecycleCommandsCheck {
         }
     }
 
-    public static final class Bootstrap implements PluginBootstrap {
+    public static class Bootstrap implements PluginBootstrap {
         @Override public void bootstrap(BootstrapContext context) {
             context.getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS, event -> {
-                registrar = (Commands) event.registrar();
-                owner.cycle++;
-                steps.add("bootstrap:" + owner.cycle);
-                register(registrar, "b1early");
+                Checks.expect(owner == null, "bootstrap commands must precede plugin construction");
+                bootstrapCalls++;
+                steps.add("bootstrap");
+                register((Commands) event.registrar(), "b1early");
             });
         }
     }
 
-    public static final class ManagedPlugin extends JavaPlugin {
+    public static class ManagedPlugin extends JavaPlugin {
         int cycle;
         Command earlyCommand;
 
         public ManagedPlugin() {
             owner = this;
             getLifecycleManager().registerEventHandler(LifecycleEvents.COMMANDS, event -> {
-                Checks.expect(event.registrar() == registrar, "constructor needs bootstrap registrar");
+                cycle++;
+                registrar = (Commands) event.registrar();
+                Checks.expect(registrar.getDispatcher().getRoot().getChild("b1early") != null,
+                    "bootstrap tree must seed the effective instance registrar");
                 steps.add("constructor:" + cycle);
                 register((Commands) event.registrar(), "b1constructor");
             });
@@ -271,10 +291,25 @@ public final class LifecycleCommandsCheck {
 
     private static void pluginJar(Path directory) throws Exception {
         Files.createDirectories(directory);
+        Path source = directory.resolve("OwnedLifecycleCommands.java");
+        Files.writeString(source, "public final class OwnedLifecycleCommands extends LifecycleCommandsCheck.ManagedPlugin {}");
+        Path bootstrapSource = directory.resolve("OwnedLifecycleBootstrap.java");
+        Files.writeString(bootstrapSource, "public final class OwnedLifecycleBootstrap extends LifecycleCommandsCheck.Bootstrap {}");
+        Path classes = Files.createDirectories(directory.resolve("classes"));
+        int compiled = javax.tools.ToolProvider.getSystemJavaCompiler().run(null, null, null,
+            "--release", "21", "-classpath", System.getProperty("java.class.path"),
+            "-d", classes.toString(), source.toString(), bootstrapSource.toString());
+        Checks.same(compiled, 0, "loader-owned lifecycle fixture compilation");
         try (var jar = new java.util.jar.JarOutputStream(Files.newOutputStream(directory.resolve(NAME + ".jar")))) {
+            jar.putNextEntry(new java.util.jar.JarEntry("OwnedLifecycleCommands.class"));
+            Files.copy(classes.resolve("OwnedLifecycleCommands.class"), jar);
+            jar.closeEntry();
+            jar.putNextEntry(new java.util.jar.JarEntry("OwnedLifecycleBootstrap.class"));
+            Files.copy(classes.resolve("OwnedLifecycleBootstrap.class"), jar);
+            jar.closeEntry();
             jar.putNextEntry(new java.util.jar.JarEntry("paper-plugin.yml"));
-            jar.write(("name: " + NAME + "\nversion: 1\nmain: " + ManagedPlugin.class.getName()
-                + "\nbootstrapper: " + Bootstrap.class.getName() + "\n")
+            jar.write(("name: " + NAME + "\nversion: 1\nmain: OwnedLifecycleCommands"
+                + "\napi-version: '1.21.11'\nbootstrapper: OwnedLifecycleBootstrap\n")
                 .getBytes(java.nio.charset.StandardCharsets.UTF_8));
             jar.closeEntry();
         }

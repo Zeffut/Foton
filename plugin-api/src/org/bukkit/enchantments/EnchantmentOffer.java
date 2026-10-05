@@ -13,6 +13,7 @@ public class EnchantmentOffer {
     }
 
     public Enchantment getEnchantment() { return enchantment; }
+
     public void setEnchantment(Enchantment enchantment) {
         if (enchantment == null) throw new IllegalArgumentException("The enchantment may not be null!");
         this.enchantment = enchantment;

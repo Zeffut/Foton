@@ -218,21 +218,23 @@ grep -q '^FROM rustlang/rust:nightly-alpine3.23-2026-07-23@sha256:e4a0ce16a94f25
 ! grep -Eq '^FROM [^ @]+:[^ @]+ AS builder$' "$REPO/Dockerfile"
 
 # Durable notices are required inputs, not files synthesized at publication.
-[ "$(find "$REPO/plugin-api/lib/licenses" -maxdepth 1 -type f -name '*.txt' | wc -l)" -eq 6 ]
+dependency_jar_count="$(find "$REPO/plugin-api/lib" -maxdepth 1 -type f -name '*.jar' | wc -l)"
+license_file_count="$(find "$REPO/plugin-api/lib/licenses" -maxdepth 1 -type f -name '*.txt' | wc -l)"
+[ "$dependency_jar_count" -eq 48 ]
+[ "$license_file_count" -eq 6 ]
 for license in ADVENTURE-MIT.txt APACHE-2.0.txt BRIGADIER-MIT.txt JOML-MIT.txt \
   SLF4J-MIT.txt THIRD-PARTY-NOTICES.txt; do
   [ -f "$REPO/plugin-api/lib/licenses/$license" ]
 done
 grep -q 'END OF TERMS AND CONDITIONS' "$REPO/plugin-api/lib/licenses/APACHE-2.0.txt"
-for dependency in adventure-api adventure-key adventure-text-logger-slf4j \
-  adventure-text-minimessage adventure-text-serializer-commons \
-  adventure-text-serializer-gson adventure-text-serializer-json \
-  adventure-text-serializer-legacy adventure-text-serializer-plain option \
-  annotations brigadier gson guava \
+for dependency in adventure-api adventure-key adventure-text-minimessage adventure-text-logger-slf4j \
+  adventure-text-serializer-plain adventure-text-serializer-json \
+  adventure-text-serializer-gson adventure-text-serializer-commons option \
+  adventure-text-serializer-legacy auto-service-annotations annotations brigadier gson guava \
   failureaccess jspecify error_prone_annotations j2objc-annotations joml \
   kotlin-stdlib-jdk8 kotlin-stdlib-jdk7 kotlin-stdlib kotlin-stdlib-common \
   netty-buffer netty-codec-base netty-common netty-resolver netty-transport \
-  slf4j-api snakeyaml sqlite-jdbc; do
+  slf4j-api sqlite-jdbc snakeyaml; do
   grep -qi "$dependency" "$REPO/plugin-api/lib/licenses/THIRD-PARTY-NOTICES.txt" \
     || { echo "third-party notices omit $dependency" >&2; exit 1; }
 done
@@ -248,11 +250,13 @@ OUT="$TARGET/release-artifacts"
 tar -tzf "$OUT/foton-plugin-runtime.tar.gz" > "$SCRATCH/tar-list"
 jar tf "$OUT/foton-plugin-runtime.zip" > "$SCRATCH/zip-list"
 tar -xOzf "$OUT/foton-plugin-runtime.tar.gz" ./SHA256SUMS > "$SCRATCH/runtime-sums"
-[ "$(grep -c '^[0-9a-f]\{64\}  ' "$SCRATCH/runtime-sums")" -eq 38 ]
-[ "$(grep -c '\.jar$' "$SCRATCH/tar-list")" -eq 32 ]
-[ "$(grep -c '\.jar$' "$SCRATCH/zip-list")" -eq 32 ]
-[ "$(grep -vc '/$' "$SCRATCH/tar-list")" -eq 39 ]
-[ "$(grep -vc '/$' "$SCRATCH/zip-list")" -eq 39 ]
+runtime_jar_count=$((dependency_jar_count + 1))
+runtime_manifest_count=$((runtime_jar_count + license_file_count))
+[ "$(grep -c '^[0-9a-f]\{64\}  ' "$SCRATCH/runtime-sums")" -eq "$runtime_manifest_count" ]
+[ "$(grep -c '\.jar$' "$SCRATCH/tar-list")" -eq "$runtime_jar_count" ]
+[ "$(grep -c '\.jar$' "$SCRATCH/zip-list")" -eq "$runtime_jar_count" ]
+[ "$(grep -vc '/$' "$SCRATCH/tar-list")" -eq "$((runtime_manifest_count + 1))" ]
+[ "$(grep -vc '/$' "$SCRATCH/zip-list")" -eq "$((runtime_manifest_count + 1))" ]
 for library in adventure-text-minimessage-5.2.0.jar adventure-text-serializer-commons-5.2.0.jar \
   adventure-text-serializer-gson-5.2.0.jar adventure-text-serializer-json-5.2.0.jar \
   adventure-text-serializer-legacy-5.2.0.jar option-1.1.0.jar; do
@@ -264,9 +268,12 @@ done
 grep -qx './foton-plugin-api.jar' "$SCRATCH/tar-list"
 grep -qx './lib/snakeyaml-2.2.jar' "$SCRATCH/tar-list"
 grep -qx './lib/netty-codec-base-4.2.15.Final.jar' "$SCRATCH/tar-list"
+grep -qx './lib/sqlite-jdbc-3.49.1.0.jar' "$SCRATCH/tar-list"
 grep -qx 'foton-plugin-api.jar' "$SCRATCH/zip-list"
 grep -qx 'lib/snakeyaml-2.2.jar' "$SCRATCH/zip-list"
 grep -qx 'lib/netty-transport-4.2.15.Final.jar' "$SCRATCH/zip-list"
+grep -qx 'lib/adventure-text-minimessage-5.2.0.jar' "$SCRATCH/zip-list"
+grep -qx 'lib/sqlite-jdbc-3.49.1.0.jar' "$SCRATCH/zip-list"
 grep -qx './SHA256SUMS' "$SCRATCH/tar-list"
 grep -qx 'SHA256SUMS' "$SCRATCH/zip-list"
 grep -qx './licenses/THIRD-PARTY-NOTICES.txt' "$SCRATCH/tar-list"

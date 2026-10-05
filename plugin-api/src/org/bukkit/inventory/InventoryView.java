@@ -12,7 +12,7 @@ public interface InventoryView {
     /** The raw slot of a click outside the window. */
     int OUTSIDE = -999;
 
-    default org.bukkit.event.inventory.InventoryType getType() { return org.bukkit.event.inventory.InventoryType.CHEST; }
+    default org.bukkit.event.inventory.InventoryType getType() { return getTopInventory().getType(); }
     Inventory getTopInventory();
     Inventory getBottomInventory();
     HumanEntity getPlayer();

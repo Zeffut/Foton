@@ -7,6 +7,7 @@ mod kind;
 pub mod kinds;
 mod layout;
 
+use crate::event::EnchantmentViewState;
 use crate::inventory::container::Container as _;
 pub use behavior::MenuBehavior;
 pub use builder::{
@@ -120,6 +121,35 @@ impl Menu {
     /// Returns a mutable reference to this menu's kind.
     pub fn kind_mut(&mut self) -> &mut dyn MenuKind {
         self.kind.as_mut()
+    }
+
+    /// Applies Bukkit enchantment-view state while borrowing the menu's two parts.
+    pub fn set_enchantment_view_state(&mut self, state: EnchantmentViewState) -> bool {
+        let Some(kind) = self.kind.downcast_mut::<kinds::EnchantmentKind>() else {
+            return false;
+        };
+        kind.set_view_state(&mut self.behavior, state);
+        true
+    }
+
+    /// Applies a plugin's table-slot write and recomputes its offers through the real event path.
+    pub fn set_enchantment_item(
+        &mut self,
+        index: usize,
+        stack: ItemStack,
+        player: &Player,
+    ) -> bool {
+        if self.kind.downcast_ref::<kinds::EnchantmentKind>().is_none() || index >= 2 {
+            return false;
+        }
+        let mut guard = self.behavior.lock_all_containers();
+        let Some(slot) = self.behavior.slots().get(index) else {
+            return false;
+        };
+        slot.set_item(&mut guard, stack);
+        self.kind
+            .slots_changed(&mut self.behavior, &mut guard, player);
+        true
     }
 
     /// The container ID for this menu (0 for the player inventory).

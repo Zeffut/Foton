@@ -18,7 +18,29 @@ use foton_utils::Identifier;
 use foton_utils::codec::VarInt;
 use foton_utils::serial::WriteTo;
 
-use crate::data_components::DataComponentPatch;
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use crate::data_components::DataComponentPatch;
+    use crate::data_components::vanilla_components::{CUSTOM_NAME, DAMAGE};
+
+    #[test]
+    fn recipe_book_result_keeps_component_overrides_and_removals() {
+        crate::init_vanilla_registry();
+        let mut patch = DataComponentPatch::new();
+        patch.set(
+            CUSTOM_NAME,
+            text_components::TextComponent::plain("Recipe prize"),
+        );
+        patch.remove(DAMAGE);
+        let result = RecipeResult::try_with_patch(&vanilla_items::IRON_SWORD, 1, patch)
+            .expect("typed result");
+        let Some(SlotDisplay::ItemStack(shown)) = SlotDisplay::of_result(&result) else {
+            panic!("valid result must be displayed");
+        };
+        assert_eq!(shown.create(), result.to_item_stack());
+    }
+}
 use crate::item_stack_template::ItemStackTemplate;
 use crate::items::ItemRef;
 use crate::vanilla_recipe_book_registries::{
@@ -200,13 +222,7 @@ impl SlotDisplay {
     /// when the result is not a valid `ItemStackTemplate`, which a plugin
     /// recipe asking for more than 99 items would not be.
     fn of_result(result: &RecipeResult) -> Option<Self> {
-        ItemStackTemplate::try_with_count_and_patch(
-            result.item,
-            result.count,
-            DataComponentPatch::new(),
-        )
-        .ok()
-        .map(Self::ItemStack)
+        result.try_template().ok().cloned().map(Self::ItemStack)
     }
 
     const fn type_id(&self) -> i32 {

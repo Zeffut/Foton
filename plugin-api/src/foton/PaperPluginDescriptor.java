@@ -5,7 +5,6 @@ import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -20,23 +19,40 @@ final class PaperPluginDescriptor extends PluginDescriptionFile {
     record Dependency(String name, Phase phase, LoadOrder load, boolean required,
                       boolean joinClasspath) {}
 
-    private final String description;
-    private final String apiVersion;
     private final String bootstrapper;
     private final String loader;
+    private final boolean openClassloader;
     private final List<String> authors;
     private final List<Dependency> dependencies;
+    private final ApiVersion apiVersion;
 
-    private PaperPluginDescriptor(String name, String version, String main,
-            String description, String apiVersion, String bootstrapper, String loader,
-            List<String> authors, List<Dependency> dependencies) {
-        super(name, version, main);
-        this.description = description;
-        this.apiVersion = apiVersion;
-        this.bootstrapper = bootstrapper;
-        this.loader = loader;
-        this.authors = List.copyOf(authors);
+    private PaperPluginDescriptor(Map<String, Object> root, List<Dependency> dependencies)
+            throws InvalidDescriptionException {
+        super(commonFields(root));
+        this.apiVersion = ApiVersion.parse(requiredText(root, "api-version"));
+        if (apiVersion.compareTo(new ApiVersion(1, 19, 0)) < 0) {
+            throw new InvalidDescriptionException("Paper api-version must be at least 1.19");
+        }
+        this.bootstrapper = text(root.get("bootstrapper"));
+        this.loader = text(root.get("loader"));
+        this.openClassloader = booleanValue(root.get("has-open-classloader"), false);
+        List<String> declaredAuthors = new ArrayList<>(super.getAuthors());
+        if (root.get("author") != null && declaredAuthors.size() > 1) {
+            declaredAuthors.add(declaredAuthors.remove(0));
+        }
+        this.authors = List.copyOf(declaredAuthors);
         this.dependencies = List.copyOf(dependencies);
+    }
+
+    private static Map<String, Object> commonFields(Map<String, Object> root) {
+        Map<String, Object> fields = new LinkedHashMap<>(root);
+        // These keys belong only to the Bukkit descriptor, even in a dual-descriptor jar.
+        for (String key : List.of("depend", "softdepend", "loadbefore", "commands",
+                "libraries", "paper-plugin-loader", "paper-skip-libraries")) fields.remove(key);
+        // Paper validates grammar here and the target version before discovery;
+        // legacy descriptors keep their existing parser-time target bound.
+        fields.remove("api-version");
+        return fields;
     }
 
     static PaperPluginDescriptor read(InputStream stream) throws InvalidDescriptionException {
@@ -51,8 +67,23 @@ final class PaperPluginDescriptor extends PluginDescriptionFile {
         }
         Map<String, Object> root = stringMap(source);
         String name = requiredText(root, "name");
-        String version = requiredText(root, "version");
-        String main = requiredText(root, "main");
+        if (name.contains(" ") || java.util.Set.of("bukkit", "minecraft", "mojang", "spigot", "paper")
+                .contains(name.toLowerCase(java.util.Locale.ROOT))) {
+            throw new InvalidDescriptionException("restricted Paper plugin name: " + name);
+        }
+        requiredText(root, "version");
+        requiredText(root, "main");
+        requiredText(root, "api-version");
+        for (String key : List.of("main", "bootstrapper", "loader")) {
+            String className = text(root.get(key));
+            if (className == null) continue;
+            for (String prefix : List.of("net.minecraft.", "org.bukkit.", "io.papermc.paper.",
+                    "com.destroystokoyo.paper.")) {
+                if (className.startsWith(prefix)) {
+                    throw new InvalidDescriptionException("restricted Paper plugin namespace: " + className);
+                }
+            }
+        }
         List<Dependency> dependencies = new ArrayList<>();
         Object declaredDependencies = root.get("dependencies");
         if (declaredDependencies != null) {
@@ -62,10 +93,7 @@ final class PaperPluginDescriptor extends PluginDescriptionFile {
             parseDependencies(sections, "bootstrap", Phase.BOOTSTRAP, dependencies);
             parseDependencies(sections, "server", Phase.SERVER, dependencies);
         }
-        return new PaperPluginDescriptor(name, version, main, text(root.get("description")),
-            text(root.get("api-version")), text(root.get("bootstrapper")),
-            text(root.get("loader")), names(root.get("authors"), root.get("author")),
-            dependencies);
+        return new PaperPluginDescriptor(root, dependencies);
     }
 
     private static void parseDependencies(Map<?, ?> sections, String key, Phase phase,
@@ -144,20 +172,46 @@ final class PaperPluginDescriptor extends PluginDescriptionFile {
         return value == null ? null : String.valueOf(value);
     }
 
-    private static List<String> names(Object values, Object single) {
-        List<String> output = new ArrayList<>();
-        if (values instanceof List<?> list) {
-            for (Object value : list) if (value != null) output.add(String.valueOf(value));
-        } else if (values != null) output.add(String.valueOf(values));
-        if (single != null) output.add(String.valueOf(single));
-        return Collections.unmodifiableList(output);
-    }
-
     String bootstrapper() { return bootstrapper; }
     String loader() { return loader; }
+    boolean hasOpenClassloader() { return openClassloader; }
+    @Override public List<String> getAuthors() { return authors; }
+    @Override public String getAPIVersion() { return apiVersion.toString(); }
     List<Dependency> paperDependencies() { return dependencies; }
 
-    @Override public String getDescription() { return description; }
-    @Override public String getAPIVersion() { return apiVersion; }
-    @Override public List<String> getAuthors() { return authors; }
+    void validateTarget(String target) throws InvalidDescriptionException {
+        if (apiVersion.compareTo(ApiVersion.parse(target)) > 0) {
+            throw new InvalidDescriptionException("Unsupported API version " + apiVersion
+                + "; server target is " + target);
+        }
+    }
+
+    /** Mirrors Paper 26.2 ApiVersion parsing and normalization. */
+    private record ApiVersion(int major, int minor, int patch) implements Comparable<ApiVersion> {
+        static ApiVersion parse(String value) throws InvalidDescriptionException {
+            if (value == null || value.trim().isEmpty() || value.equalsIgnoreCase("none")) {
+                return new ApiVersion(Integer.MIN_VALUE, Integer.MIN_VALUE, Integer.MIN_VALUE);
+            }
+            String[] parts = value.split("\\.");
+            if (parts.length != 2 && parts.length != 3) {
+                throw new InvalidDescriptionException("invalid API version: " + value);
+            }
+            try {
+                return new ApiVersion(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]),
+                    parts.length == 3 ? Integer.parseInt(parts[2]) : 0);
+            } catch (NumberFormatException error) {
+                throw new InvalidDescriptionException(error, "invalid API version: " + value);
+            }
+        }
+
+        @Override public int compareTo(ApiVersion other) {
+            int order = Integer.compare(major, other.major);
+            if (order == 0) order = Integer.compare(minor, other.minor);
+            if (order == 0) order = Integer.compare(patch, other.patch);
+            return order;
+        }
+
+        @Override public String toString() { return major + "." + minor + "." + patch; }
+    }
+
 }

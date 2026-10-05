@@ -24,10 +24,10 @@ public class ShapelessRecipe extends CraftingRecipe {
         if (choices.size() + count > 9) {
             throw new IllegalArgumentException("Shapeless recipes cannot have more than 9 ingredients");
         }
-        if (count > 0 && (material == null || material.isAir())) {
-            throw new IllegalArgumentException("Cannot have empty/air material choice");
-        }
-        for (int remaining = count; remaining > 0; remaining--) {
+        for (int i = 0; i < count; i++) {
+            if (material == null) throw new IllegalArgumentException("Cannot have null choice");
+            if (material.isAir()) throw new IllegalArgumentException("Cannot have empty/air choice");
+            if (!material.isItem()) throw new IllegalArgumentException("Cannot have non-item choice " + material);
             choices.add(new RecipeChoice.MaterialChoice(material));
         }
         return this;

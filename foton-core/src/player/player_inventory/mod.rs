@@ -5,12 +5,19 @@ use std::sync::Arc;
 use foton_registry::item_stack::ItemStack;
 use text_components::TextComponent;
 
-use crate::{inventory::menu::Menu, player::Player, world::World};
+use crate::{
+    inventory::{menu::Menu, slots::MenuSlotReadSource},
+    player::Player,
+    world::World,
+};
 
 mod container;
 mod core;
+mod enchantment_view;
 mod equipment;
+mod item_batch;
 mod player_handlers;
+pub use item_batch::{MenuItemBatch, MenuItemBatchError, MenuItemBatchStatus, MenuSlotWrite};
 
 pub use container::InvalidHotbarSlot;
 pub(crate) use container::armor_equipment;
@@ -98,18 +105,22 @@ impl PlayerInventorySyncState {
     }
 }
 
-/// The pending open-menu work a tick still has to hand to the client.
-///
-/// It carried a `container_id` until the container-close handler stopped
-/// comparing ids -- vanilla's `handleContainerClose` reads none -- which left
-/// nothing reading it. The id is still on the menu itself for anyone who needs
-/// it; keeping a second, never-read copy here only invites the two to disagree.
+/// Snapshot and deferred actions while a callback owns the detached menu.
+/// The stable instance identity keeps targeted actions bound to that menu,
+/// independently of its cyclic wire container id.
 struct OpenMenuDispatch {
+    instance: u64,
     overrides_player_slots: bool,
     top_slot_count: usize,
     menu_type: Option<String>,
-    snapshot: Vec<ItemStack>,
+    reads: OpenMenuReadSource,
+    live_reads_supported: bool,
     actions: Vec<DeferredMenuAction>,
+}
+
+enum OpenMenuReadSource {
+    Snapshot(Vec<ItemStack>),
+    Live(Vec<MenuSlotReadSource>),
 }
 
 struct TerminalMenuRemoval {
@@ -120,10 +131,13 @@ struct TerminalMenuRemoval {
 }
 
 enum DeferredMenuAction {
-    Close { send_packet: bool },
+    Close {
+        send_packet: bool,
+        expected_instance: Option<u64>,
+    },
     Open(Box<PendingMenuOpen>),
     Install(Box<PreparedMenu>),
-    SetSlot { index: usize, stack: ItemStack },
+    SetItems(Box<dyn MenuItemBatch>),
 }
 
 type MenuFactory = Box<dyn for<'a> FnOnce(MenuOpenContext<'a>) -> Menu + Send + 'static>;
@@ -155,5 +169,7 @@ impl OpenMenuState {
     }
 }
 
+#[cfg(test)]
+mod item_bridge_tests;
 #[cfg(test)]
 mod tests;

@@ -16,5 +16,5 @@ public interface MapMeta extends ItemMeta {
     Color getColor();
     void setColor(Color color);
     @Override MapMeta clone();
-    default java.util.Map<String,Object> serialize() { return java.util.Collections.emptyMap(); }
+    default java.util.Map<String,Object> serialize() { throw new UnsupportedOperationException("specialized metadata persistence"); }
 }

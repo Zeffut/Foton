@@ -50,8 +50,14 @@ impl RawBlockEntity {
         state: BlockStateId,
         data: NbtCompound,
     ) -> Self {
+        let base = BlockEntityBase::new(block_entity_type, level, pos, state);
+        base.load_persistent_data(
+            data.compound("PublicBukkitValues")
+                .cloned()
+                .unwrap_or_default(),
+        );
         Self {
-            base: BlockEntityBase::new(block_entity_type, level, pos, state),
+            base,
             state: SyncMutex::new(RawBlockEntityState { data }),
         }
     }

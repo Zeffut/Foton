@@ -1,4 +1,6 @@
 import org.bukkit.Location;
+import org.bukkit.Material;
+import org.bukkit.util.BoundingBox;
 import org.bukkit.util.Vector;
 
 /** Location and Vector, on the parts that are easy to get subtly wrong. */
@@ -100,10 +102,63 @@ final class Geometry {
             "a bare key defaults to minecraft");
         Checks.same(org.bukkit.NamespacedKey.fromString(""), null,
             "an empty key is nobody's");
+
+        boundingBoxes();
+        worldTypeDelegation();
+    }
+
+    private static void boundingBoxes() {
+        BoundingBox expanded = new BoundingBox(0, 0, 0, 4, 6, 8);
+        Checks.expect(expanded.expand(1, 2, 3) == expanded,
+            "bounding box expansion mutates and returns the same box");
+        Checks.same(expanded.getMinX(), -1.0, "uniform expansion moves the negative side");
+        Checks.same(expanded.getMaxY(), 8.0, "uniform expansion moves the positive side");
+
+        BoundingBox contracted = new BoundingBox(0, 0, 0, 4, 6, 8);
+        contracted.expand(-3, -10, -1);
+        Checks.same(contracted.getMinX(), 2.0,
+            "over-contraction collapses an axis at its original center");
+        Checks.same(contracted.getMaxX(), 2.0,
+            "over-contraction never inverts an axis");
+        Checks.same(contracted.getMinY(), 3.0,
+            "each over-contracted axis uses its own center");
+        Checks.same(contracted.getMinZ(), 1.0,
+            "a bounded contraction keeps the remaining extent");
+        Checks.same(contracted.getMaxZ(), 7.0,
+            "a bounded contraction is symmetric");
+
+        BoundingBox directional = new BoundingBox(0, 0, 0, 1, 1, 1);
+        Checks.expect(directional.expandDirectional(-2, 3, 0.5) == directional,
+            "directional expansion returns the same box");
+        Checks.same(directional.getMinX(), -2.0,
+            "a negative direction expands only the negative side");
+        Checks.same(directional.getMaxX(), 1.0,
+            "directional expansion leaves the opposite side fixed");
+        Checks.same(directional.getMaxY(), 4.0,
+            "a positive direction expands only the positive side");
+
+        org.bukkit.util.VoxelShape shape = () -> java.util.List.of(
+            new BoundingBox(0, 0, 0, 1, 1, 1),
+            new BoundingBox(3, 0, 0, 4, 1, 1));
+        Checks.expect(shape.overlaps(new BoundingBox(0.5, 0, 0, 1.5, 1, 1)),
+            "a voxel shape overlaps when any constituent box overlaps");
+        Checks.expect(!shape.overlaps(new BoundingBox(1, 0, 0, 2, 1, 1)),
+            "boxes that only touch at a border do not overlap");
+    }
+
+    private static void worldTypeDelegation() {
+        NamedWorld world = new NamedWorld("blocks");
+        Checks.same(world.getType(7, 8, 9), Material.STONE,
+            "World.getType delegates to the block lookup");
+        Checks.same(java.util.List.of(world.lastBlockAt()[0], world.lastBlockAt()[1],
+            world.lastBlockAt()[2]), java.util.List.of(7, 8, 9),
+            "World.getType forwards every block coordinate");
     }
 
     /** A world that is only a name, so a location can have one without Foton. */
-    private record NamedWorld(String name) implements org.bukkit.World {
+    private record NamedWorld(String name, int[] lastBlockAt) implements org.bukkit.World {
+        private NamedWorld(String name) { this(name, new int[3]); }
+
         @Override public String getName() { return name; }
 
         @Override public java.util.UUID getUID() { return null; }
@@ -112,7 +167,15 @@ final class Geometry {
 
         @Override public Location getSpawnLocation() { return null; }
 
-        @Override public org.bukkit.block.Block getBlockAt(int x, int y, int z) { return null; }
+        @Override public org.bukkit.block.Block getBlockAt(int x, int y, int z) {
+            lastBlockAt[0] = x;
+            lastBlockAt[1] = y;
+            lastBlockAt[2] = z;
+            return (org.bukkit.block.Block) java.lang.reflect.Proxy.newProxyInstance(
+                Geometry.class.getClassLoader(),
+                new Class<?>[] {org.bukkit.block.Block.class},
+                (proxy, method, args) -> method.getName().equals("getType") ? Material.STONE : null);
+        }
 
         @Override public org.bukkit.block.Block getBlockAt(Location location) { return null; }
 

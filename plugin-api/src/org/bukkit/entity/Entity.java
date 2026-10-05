@@ -1,6 +1,7 @@
 package org.bukkit.entity;
 
 import java.util.UUID;
+import java.util.Set;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.command.CommandSender;

@@ -216,6 +216,12 @@ impl ItemEntity {
         self.entity_data.lock().item.get().clone()
     }
 
+    /// Borrows the stack synchronously under the entity-data lock, permitting
+    /// clone preflight. The reader must not call Java or reenter this entity.
+    pub fn read_item<R>(&self, read: impl FnOnce(&ItemStack) -> R) -> R {
+        read(self.entity_data.lock().item.get())
+    }
+
     /// Sets the item stack.
     pub fn set_item(&self, item: ItemStack) {
         self.entity_data.lock().item.set(item);

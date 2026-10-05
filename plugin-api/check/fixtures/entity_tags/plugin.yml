@@ -1,0 +1,4 @@
+name: EntityScoreboardTagsProbe
+version: '1.0'
+main: EntityScoreboardTagsProbe
+api-version: '1.21'

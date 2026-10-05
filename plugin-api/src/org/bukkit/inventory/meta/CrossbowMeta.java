@@ -8,5 +8,5 @@ public interface CrossbowMeta extends ItemMeta {
     List<ItemStack> getChargedProjectiles();
     void setChargedProjectiles(List<ItemStack> projectiles);
     void addChargedProjectile(ItemStack projectile);
-    default java.util.Map<String,Object> serialize() { return java.util.Collections.emptyMap(); }
+    default java.util.Map<String,Object> serialize() { throw new UnsupportedOperationException("specialized metadata persistence"); }
 }

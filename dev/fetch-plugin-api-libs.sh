@@ -8,7 +8,7 @@
 #
 # The set and the versions are not a matter of taste. Compile-time libraries
 # come from `io.papermc.paper:paper-api:26.2.build.121-stable` and its Adventure
-# BOM. Host runtime libraries, currently Xerial SQLite JDBC, match Paper's
+# BOM. Host runtime libraries, including SQLite JDBC and Maven Resolver, match Paper's
 # server runtime. The directory once held Adventure 4.26.1 beside a 5.2.0
 # logger built against Adventure 5, and it compiled -- which is the whole
 # argument for checking rather than trusting a build.

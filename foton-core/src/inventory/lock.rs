@@ -215,6 +215,27 @@ impl ContainerRef {
         self.id
     }
 
+    /// Reads storage metadata without unpacking loot or invoking owner callbacks.
+    /// Callers still recheck slot indices under the eventual item-operation guard.
+    #[must_use]
+    pub fn container_size(&self) -> usize {
+        self.source.lock().get_container_size()
+    }
+
+    /// Reads existing storage without loot unpacking or owner notifications.
+    /// The synchronous reader must not call Java/world code or reenter storage.
+    pub fn with_stored_item<R>(
+        &self,
+        index: usize,
+        read: impl FnOnce(&ItemStack) -> R,
+    ) -> Option<R> {
+        let container = self.source.lock();
+        if index >= container.get_container_size() {
+            return None;
+        }
+        Some(read(container.get_item(index)))
+    }
+
     /// Returns the block entity that owns this container, if one does.
     ///
     /// A menu needs this to tell the block that somebody is looking inside.

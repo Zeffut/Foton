@@ -135,6 +135,11 @@ def export_tracked_checkout(destination: Path) -> None:
         target = destination / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / relative, target)
+    # A merge under test can introduce API classes and pinned libraries absent
+    # from HEAD. Overlay the complete Java inputs, never a new manifest with an
+    # old partial library/class set. Keep build outputs absent for the fresh test.
+    for relative in ("plugin-api/src", "plugin-api/check", "plugin-api/fixture", "plugin-api/lib"):
+        shutil.copytree(ROOT / relative, destination / relative, dirs_exist_ok=True)
     (destination / "plugin-api/src/org/bukkit/attribute/Attribute.java").unlink(missing_ok=True)
     (destination / "plugin-api/src/org/bukkit/potion/PotionEffectType.java").unlink(missing_ok=True)
 

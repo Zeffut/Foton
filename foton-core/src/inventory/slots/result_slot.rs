@@ -51,6 +51,13 @@ impl ResultSlot {
 }
 
 impl Slot for ResultSlot {
+    fn live_read_source(&self) -> Option<super::MenuSlotReadSource> {
+        Some(super::MenuSlotReadSource::new(
+            self.result_container().clone(),
+            0,
+        ))
+    }
+
     fn storage(&self) -> &SlotStorage {
         &self.storage
     }

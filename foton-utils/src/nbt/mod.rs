@@ -272,7 +272,9 @@ fn sum_sizes(mut sizes: impl Iterator<Item = Option<u64>>) -> Option<u64> {
     sizes.try_fold(0_u64, |total, size| total.checked_add(size?))
 }
 
-fn vanilla_nbt_compound_heap_size(compound: &NbtCompound) -> Option<u64> {
+/// Returns the heap usage Vanilla charges for a compound without cloning it.
+#[must_use]
+pub fn vanilla_nbt_compound_heap_size(compound: &NbtCompound) -> Option<u64> {
     let mut size = 48_u64;
     let mut keys = FxHashSet::default();
     for (key, value) in compound.iter() {

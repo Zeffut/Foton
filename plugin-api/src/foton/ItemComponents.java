@@ -58,28 +58,12 @@ final class ItemComponents {
         if (meta.getInstrumentComponent() != null) field(out, "instrument", meta.getInstrumentComponent().getKey().toString());
         java.util.Map<String, Object> custom = meta.getCustomData();
         if (!custom.isEmpty()) field(out, "customhex", hex(Snbt.write(custom)));
-        if (meta instanceof SimpleBookMeta book) book(out, book, type);
         return out.toString();
-    }
-
-    private static void book(StringBuilder out, SimpleBookMeta book, Material type) {
-        if (type == Material.WRITTEN_BOOK) {
-            // A written book always has its cover, even an empty one: vanilla's
-            // component has no absent title or author.
-            field(out, "booktitlehex", hex(book.hasTitle() ? book.getTitle() : ""));
-            field(out, "bookauthorhex", hex(book.hasAuthor() ? book.getAuthor() : ""));
-            BookMeta.Generation generation = book.getGeneration();
-            field(out, "bookgen", String.valueOf(generation == null ? 0 : generation.ordinal()));
-            for (Component page : book.pages()) field(out, "bookpagehex", hex(ComponentJson.json(page)));
-        } else if (type == Material.WRITABLE_BOOK) {
-            for (String page : book.getPages()) field(out, "bookpagehex", hex(page));
-        }
     }
 
     static void decode(SimpleItemMeta meta, Material type, List<String> fields) {
         List<String> hidden = new ArrayList<>();
         List<Pattern> patterns = new ArrayList<>();
-        List<Component> pages = new ArrayList<>();
         List<Component> lore = new ArrayList<>();
         Float cooldown = null;
         NamespacedKey cooldownGroup = null;
@@ -112,20 +96,6 @@ final class ItemComponents {
                     }
                     case "instrument" -> meta.setInstrumentComponent(Registry.INSTRUMENT.get(NamespacedKey.fromString(value)));
                     case "customhex" -> meta.setCustomData(Snbt.parseCompound(unhex(value)));
-                    case "booktitlehex" -> {
-                        if (meta instanceof SimpleBookMeta book) book.setTitle(unhex(value));
-                    }
-                    case "bookauthorhex" -> {
-                        if (meta instanceof SimpleBookMeta book) book.setAuthor(unhex(value));
-                    }
-                    case "bookgen" -> {
-                        int generation = Integer.parseInt(value);
-                        if (meta instanceof SimpleBookMeta book && generation >= 0 && generation < BookMeta.Generation.values().length) {
-                            book.setGeneration(BookMeta.Generation.values()[generation]);
-                        }
-                    }
-                    case "bookpagehex" -> pages.add(type == Material.WRITTEN_BOOK
-                        ? ComponentJson.parse(unhex(value)) : Component.text(unhex(value)));
                     default -> { }
                 }
             } catch (RuntimeException unreadable) {
@@ -138,7 +108,6 @@ final class ItemComponents {
         if (cooldown != null && cooldown > 0) {
             meta.setUseCooldown(new org.bukkit.inventory.meta.components.SimpleUseCooldownComponent(cooldown, cooldownGroup));
         }
-        if (!pages.isEmpty() && meta instanceof SimpleBookMeta book) book.pages(pages);
     }
 
     private static void field(StringBuilder out, String name, String value) {

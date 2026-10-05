@@ -26,42 +26,62 @@ import org.bukkit.inventory.meta.SimpleItemMeta;
 public class ItemStack implements Cloneable {
     private Material type;
     private int amount;
-    private short durability;
     private ItemMeta meta;
     /** Opaque NBT retained by Foton for plugin round-tripping. */
     private String opaqueNbt;
-    private final java.util.IdentityHashMap<io.papermc.paper.datacomponent.DataComponentType<?>, Object> dataComponents = new java.util.IdentityHashMap<>();
 
     public ItemStack(Material type) {
         this(type, 1);
     }
 
-    public ItemStack(Material type, int amount, short durability) { this(type, amount); this.durability = durability; }
+    public ItemStack(Material type, int amount, short durability) { this(type, amount); initializeDurability(durability); }
 
     /** Legacy constructor retained for ViaVersion and other pre-flattening integrations. */
     @Deprecated
     public ItemStack(Material type, int amount, short durability, Byte data) {
         this(type, amount, durability);
-        if (data != null) this.durability = data;
+        if (data != null) initializeDurability(data);
     }
 
     public ItemStack(Material type, int amount) {
+        if (amount <= 0) throw new IllegalArgumentException("amount must be greater than 0");
         this.type = type == null ? Material.AIR : type;
         this.amount = amount;
     }
 
     public Material getType() {
-        return type;
+        return amount <= 0 ? Material.AIR : type;
     }
 
     /** Changing the type to air empties the stack, which is what Bukkit does
      * and what a plugin clearing a slot relies on. */
     public void setType(Material type) {
-        this.type = type == null ? Material.AIR : type;
-        if (this.type.isAir()) {
+        Material target = type == null ? Material.AIR : type;
+        if (target.isAir()) {
+            this.type = target;
             this.amount = 0;
             this.meta = null;
+            this.opaqueNbt = null;
+            return;
         }
+        if (isEmpty()) {
+            if (this.type.isAir()) amount = 1;
+            this.type = target;
+            meta = null;
+            opaqueNbt = null;
+            return;
+        }
+        if (foton.PluginHost.itemBridgeBound()) {
+            ItemStack rebased = foton.FotonInventory.decodeTransfer(foton.Native.rebaseItem(nativeMutation(),
+                "minecraft:" + target.getKeyName(), false));
+            if (rebased == null) throw new IllegalStateException("nonempty item rebase returned empty state");
+            this.type = rebased.type;
+            this.amount = rebased.amount;
+            this.meta = rebased.meta;
+            this.opaqueNbt = rebased.opaqueNbt;
+            return;
+        }
+        this.type = target;
     }
 
     public int getAmount() {
@@ -72,44 +92,73 @@ public class ItemStack implements Cloneable {
         this.amount = amount;
     }
 
-    @Deprecated public org.bukkit.material.MaterialData getData() { return new org.bukkit.material.MaterialData(type, (byte) durability); }
+    @Deprecated public org.bukkit.material.MaterialData getData() { return new org.bukkit.material.MaterialData(type, (byte) getDurability()); }
 
-    public short getDurability() { return durability; }
+    public short getDurability() {
+        if (foton.PluginHost.itemBridgeBound()) return (short) foton.Native.itemDurability(nativeMutation());
+        return (short) damageValue();
+    }
+
+    private int damageValue() { return meta instanceof Damageable damageable ? damageable.getDamage() : 0; }
 
     public String getOpaqueNbt() { return opaqueNbt; }
-    public void setOpaqueNbt(String value) { opaqueNbt = value; }
-
-    /** Stores a typed Paper data component on this stack. */
-    public <T> void setData(io.papermc.paper.datacomponent.DataComponentType.Valued<T> type, T value) {
-        if (type == null) throw new IllegalArgumentException("type");
-        if (type == io.papermc.paper.datacomponent.DataComponentTypes.DAMAGE) {
-            durability = value instanceof Number number ? (short) number.intValue() : 0;
-            return;
-        }
-        if (setMetaComponent(type, value)) return;
-        if (value == null) dataComponents.remove(type); else dataComponents.put(type, value);
-        if (type == io.papermc.paper.datacomponent.DataComponentTypes.CUSTOM_MODEL_DATA && value instanceof io.papermc.paper.datacomponent.item.CustomModelData model) {
-            ItemMeta copy = getItemMeta();
-            org.bukkit.inventory.meta.components.CustomModelDataComponent target = copy.getCustomModelDataComponent();
-            target.setFloats(model.floats()); target.setFlags(model.flags()); target.setStrings(model.strings()); java.util.ArrayList<org.bukkit.Color> colors = new java.util.ArrayList<>(); for (Integer color : model.colors()) colors.add(org.bukkit.Color.fromRGB(color)); target.setColors(colors);
-            copy.setCustomModelDataComponent(target); setItemMeta(copy);
-        }
+    public void setOpaqueNbt(String value) {
+        if (!java.util.Objects.equals(opaqueNbt, value)
+                && meta instanceof SimpleItemMeta simple && simple.nativeState().hasNativeBase())
+            throw new UnsupportedOperationException("carrier opaque NBT mutation");
+        opaqueNbt = value;
     }
+
+    private static String componentKey(io.papermc.paper.datacomponent.DataComponentType<?> type) {
+        if (type == null) throw new IllegalArgumentException("component type");
+        if (type == io.papermc.paper.datacomponent.DataComponentTypes.DAMAGE) return "damage";
+        if (type == io.papermc.paper.datacomponent.DataComponentTypes.CUSTOM_MODEL_DATA) return "custom_model_data";
+        if (type == io.papermc.paper.datacomponent.DataComponentTypes.BANNER_PATTERNS) return "banner_patterns";
+        if (type == io.papermc.paper.datacomponent.DataComponentTypes.BASE_COLOR) return "base_color";
+        if (type == io.papermc.paper.datacomponent.DataComponentTypes.TRIM) return "trim";
+        throw new UnsupportedOperationException("public component key");
+    }
+
+    private static void requireNativeComponents() {
+        if (!foton.PluginHost.itemBridgeBound())
+            throw new IllegalStateException("canonical item components require native registry binding");
+    }
+
+    public <T> void setData(io.papermc.paper.datacomponent.DataComponentType.Valued<T> type, T value) {
+        componentKey(type);
+        if (setMetaComponent(type, value)) return;
+        requireNativeComponents();
+        if (value == null) throw new IllegalArgumentException("component value");
+        if (isEmpty()) return;
+        ItemMeta copy = getItemMeta();
+        if (type == io.papermc.paper.datacomponent.DataComponentTypes.DAMAGE) {
+            if (!(value instanceof Integer damage)) throw new IllegalArgumentException("damage must be an integer");
+            ((Damageable) copy).setDamage(damage);
+        } else {
+            if (!(value instanceof io.papermc.paper.datacomponent.item.CustomModelData model))
+                throw new IllegalArgumentException("custom model data value");
+            org.bukkit.inventory.meta.components.CustomModelDataComponent target = copy.getCustomModelDataComponent();
+            target.setFloats(model.floats());
+            target.setFlags(model.flags());
+            target.setStrings(model.strings());
+            java.util.ArrayList<org.bukkit.Color> colors = new java.util.ArrayList<>();
+            for (Integer color : model.colors()) colors.add(org.bukkit.Color.fromRGB(color));
+            target.setColors(colors);
+            copy.setCustomModelDataComponent(target);
+        }
+        setItemMeta(copy);
+    }
+
     @SuppressWarnings("unchecked")
     public <T> T getData(io.papermc.paper.datacomponent.DataComponentType<T> type) {
-        if (type == io.papermc.paper.datacomponent.DataComponentTypes.DAMAGE) {
-            return (T) Integer.valueOf(durability);
+        componentKey(type);
+        if (isMetaComponent(type)) {
+            if (foton.PluginHost.itemBridgeBound() && !hasData(type)) return null;
+            return (T) metaComponent(type);
         }
-        if (isMetaComponent(type)) return (T) metaComponent(type);
-        return (T) dataComponents.get(type);
-    }
-
-    /** Whether the stack carries this component. */
-    public boolean hasData(io.papermc.paper.datacomponent.DataComponentType<?> type) {
-        if (type == null) return false;
-        if (type == io.papermc.paper.datacomponent.DataComponentTypes.DAMAGE) return durability != 0;
-        if (isMetaComponent(type)) return metaComponent(type) != null;
-        return dataComponents.containsKey(type);
+        requireNativeComponents();
+        return (T) (type == io.papermc.paper.datacomponent.DataComponentTypes.DAMAGE
+            ? foton.Native.itemDamage(nativeMutation()) : foton.Native.itemCustomModelData(nativeMutation()));
     }
 
     private static boolean isMetaComponent(io.papermc.paper.datacomponent.DataComponentType<?> type) {
@@ -152,31 +201,67 @@ public class ItemStack implements Cloneable {
         if (!(meta instanceof SimpleItemMeta simple)) return new foton.FotonPersistentDataContainer();
         return ((foton.FotonPersistentDataContainer) simple.getPersistentDataContainer()).copy();
     }
-
-    /** Reads a valued component. Same answer as the wider overload; Paper
-     * declares both, and a plugin compiled against the `Valued` one needs that
-     * exact signature to resolve. */
-    @SuppressWarnings("unchecked")
     public <T> T getData(io.papermc.paper.datacomponent.DataComponentType.Valued<T> type) {
         return getData((io.papermc.paper.datacomponent.DataComponentType<T>) type);
     }
 
-    /** Removes a component, returning the stack to its default for it. */
-    public void unsetData(io.papermc.paper.datacomponent.DataComponentType<?> type) {
-        if (type == null) return;
-        if (type == io.papermc.paper.datacomponent.DataComponentTypes.DAMAGE) {
-            durability = 0;
+    public boolean hasData(io.papermc.paper.datacomponent.DataComponentType<?> type) {
+        String key = componentKey(type);
+        if (!foton.PluginHost.itemBridgeBound() && isMetaComponent(type)) return metaComponent(type) != null;
+        requireNativeComponents();
+        int state = foton.Native.itemComponentState(nativeMutation(), key);
+        return state == 1 || state == 2;
+    }
+
+    public boolean isDataOverridden(io.papermc.paper.datacomponent.DataComponentType<?> type) {
+        String key = componentKey(type);
+        requireNativeComponents();
+        return foton.Native.itemComponentState(nativeMutation(), key) >= 2;
+    }
+
+    /** Removes the effective component, including a value supplied by the prototype. */
+    public void unsetData(io.papermc.paper.datacomponent.DataComponentType<?> type) { editComponent(type, false); }
+
+    /** Clears the patch entry so that the current item's prototype becomes visible. */
+    public void resetData(io.papermc.paper.datacomponent.DataComponentType<?> type) { editComponent(type, true); }
+
+    private void editComponent(io.papermc.paper.datacomponent.DataComponentType<?> type, boolean reset) {
+        String key = componentKey(type);
+        if (!foton.PluginHost.itemBridgeBound() && isMetaComponent(type)) {
+            setMetaComponent(type, null);
             return;
         }
-        if (setMetaComponent(type, null)) return;
-        dataComponents.remove(type);
+        requireNativeComponents();
+        if (isEmpty()) return;
+        ItemStack changed = foton.FotonInventory.decodeTransfer(foton.Native.editItemComponent(nativeMutation(), key, reset));
+        if (changed == null) throw new IllegalStateException("component edit returned empty state");
+        meta = changed.meta;
+        opaqueNbt = changed.opaqueNbt;
     }
 
     /** Legacy numeric item id; modern materials intentionally do not expose one. */
     @Deprecated
     public int getTypeId() { return type.getId(); }
 
-    public void setDurability(short durability) { this.durability = durability; }
+    public void setDurability(short durability) {
+        if (isEmpty()) return;
+        if (foton.PluginHost.itemBridgeBound()) {
+            ItemStack changed = foton.FotonInventory.decodeTransfer(foton.Native.setItemDurability(nativeMutation(), durability));
+            if (changed == null) throw new IllegalStateException("durability edit returned empty state");
+            meta = changed.meta;
+            opaqueNbt = changed.opaqueNbt;
+            return;
+        }
+        ItemMeta copy = getItemMeta();
+        ((Damageable) copy).setDamage(Math.max(0, Math.min(Short.toUnsignedInt(type.getMaxDurability()), durability)));
+        setItemMeta(copy);
+    }
+
+    private void initializeDurability(short durability) {
+        ItemMeta initial = emptyMeta();
+        ((Damageable) initial).setDamage(Math.max(0, Math.min(Short.toUnsignedInt(type.getMaxDurability()), durability)));
+        meta = initial;
+    }
 
     public void addEnchantment(org.bukkit.enchantments.Enchantment enchantment, int level) { if (enchantment == null || level <= 0 || level > enchantment.getMaxLevel()) throw new IllegalArgumentException("Invalid enchantment level"); ItemMeta copy=getItemMeta(); if(copy.addEnchant(enchantment, level, false)) setItemMeta(copy); }
 
@@ -188,7 +273,16 @@ public class ItemStack implements Cloneable {
 
     public java.util.Map<org.bukkit.enchantments.Enchantment, Integer> getEnchantments() { return getItemMeta().getEnchants(); }
 
-    public java.util.Map<String, Object> serialize() { java.util.Map<String,Object> values=new java.util.LinkedHashMap<>(); values.put("type", type.getKeyName()); values.put("amount", amount); if (durability != 0) values.put("durability", durability); if (meta != null) { java.util.Map<String,Object> m=new java.util.LinkedHashMap<>(); if(meta.hasDisplayName())m.put("display-name",meta.getDisplayName()); if(meta.hasLore())m.put("lore",meta.getLore()); if(meta.hasCustomModelData())m.put("custom-model-data",meta.getCustomModelData()); if(meta.isUnbreakable())m.put("Unbreakable",true); values.put("meta",m); } return values; }
+    public java.util.Map<String, Object> serialize() { requireLegacyPersistence(false); java.util.Map<String,Object> values=new java.util.LinkedHashMap<>(); values.put("type", type.getKeyName()); values.put("amount", amount); if (getDurability() != 0) values.put("durability", getDurability()); if (meta != null) { java.util.Map<String,Object> m=new java.util.LinkedHashMap<>(); if(meta.hasDisplayName())m.put("display-name",meta.getDisplayName()); if(meta.hasLore())m.put("lore",meta.getLore()); if(meta.hasCustomModelData())m.put("custom-model-data",meta.getCustomModelData()); if(meta.isUnbreakable())m.put("Unbreakable",true); values.put("meta",m); } return values; }
+
+    private void requireLegacyPersistence(boolean binary) {
+        if (amount < 0 || !binary && damageValue() > Short.toUnsignedInt(type.getMaxDurability()))
+            throw new UnsupportedOperationException("unrepresented legacy item fields");
+        if (opaqueNbt != null)
+            throw new UnsupportedOperationException("opaque item state persistence");
+        if (meta instanceof SimpleItemMeta simple) simple.requireLegacyPersistence(binary);
+        else if (meta != null) throw new UnsupportedOperationException("foreign metadata persistence");
+    }
 
     public static ItemStack deserialize(java.util.Map<String, Object> values) {
         if (values == null) throw new IllegalArgumentException("values");
@@ -196,7 +290,7 @@ public class ItemStack implements Cloneable {
         if (material == null) throw new IllegalArgumentException("Unknown material: " + raw);
         int count = values.get("amount") instanceof Number n ? n.intValue() : 1;
         short damage = values.get("durability") instanceof Number n ? n.shortValue() : 0;
-        ItemStack stack = new ItemStack(material, count); stack.setDurability(damage); Object rawMeta=values.get("meta"); if(rawMeta instanceof java.util.Map<?,?> m){ ItemMeta meta=stack.getItemMeta(); Object n=m.get("display-name"); if(n instanceof String v)meta.setDisplayName(v); Object l=m.get("lore"); if(l instanceof java.util.List<?> v){ java.util.ArrayList<String> lines=new java.util.ArrayList<>(); for(Object x:v)if(x instanceof String z)lines.add(z); meta.setLore(lines); } Object cmd=m.get("custom-model-data"); if(cmd instanceof Number v)meta.setCustomModelData(v.intValue()); if(Boolean.TRUE.equals(m.get("Unbreakable")))meta.setUnbreakable(true); stack.setItemMeta(meta); } return stack;
+        ItemStack stack = new ItemStack(material, Math.max(1, count)); stack.setDurability(damage); Object rawMeta=values.get("meta"); if(rawMeta instanceof java.util.Map<?,?> m){ ItemMeta meta=stack.getItemMeta(); Object n=m.get("display-name"); if(n instanceof String v)meta.setDisplayName(v); Object l=m.get("lore"); if(l instanceof java.util.List<?> v){ java.util.ArrayList<String> lines=new java.util.ArrayList<>(); for(Object x:v)if(x instanceof String z)lines.add(z); meta.setLore(lines); } Object cmd=m.get("custom-model-data"); if(cmd instanceof Number v)meta.setCustomModelData(v.intValue()); if(Boolean.TRUE.equals(m.get("Unbreakable")))meta.setUnbreakable(true); stack.setItemMeta(meta); } stack.setAmount(count); return stack;
     }
 
     /**
@@ -211,6 +305,7 @@ public class ItemStack implements Cloneable {
      * @throws IllegalStateException if the stack cannot be encoded
      */
     public byte[] serializeAsBytes() {
+        requireLegacyPersistence(true);
         try {
             ByteArrayOutputStream bytes = new ByteArrayOutputStream();
             DataOutputStream out = new DataOutputStream(bytes);
@@ -218,7 +313,7 @@ public class ItemStack implements Cloneable {
             out.writeByte(1);
             out.writeUTF(type.getKeyName());
             out.writeInt(amount);
-            out.writeShort(durability);
+            out.writeShort(getDurability());
 
             ItemMeta value = meta;
             out.writeBoolean(value != null);
@@ -272,7 +367,9 @@ public class ItemStack implements Cloneable {
             if (in.readUnsignedByte() != 1) throw new IllegalArgumentException("unsupported ItemStack binary version");
             Material material = Material.matchMaterial(in.readUTF());
             if (material == null) throw new IllegalArgumentException("unknown material in ItemStack binary data");
-            ItemStack stack = new ItemStack(material, in.readInt());
+            int count = in.readInt();
+            if (count < 0) throw new IllegalArgumentException("negative legacy item count");
+            ItemStack stack = new ItemStack(material, Math.max(1, count));
             stack.setDurability(in.readShort());
             if (in.readBoolean()) {
                 ItemMeta value = stack.getItemMeta();
@@ -311,6 +408,7 @@ public class ItemStack implements Cloneable {
                 stack.setItemMeta(value);
             }
             if (in.available() != 0) throw new IllegalArgumentException("trailing ItemStack binary data");
+            stack.setAmount(count);
             return stack;
         } catch (EOFException malformed) {
             throw new IllegalArgumentException("truncated ItemStack binary data", malformed);
@@ -346,16 +444,11 @@ public class ItemStack implements Cloneable {
     public void lore(java.util.List<net.kyori.adventure.text.Component> values) { ItemMeta copy=getItemMeta(); copy.lore(values); setItemMeta(copy); }
 
     public boolean hasItemMeta() {
+        if (isEmpty()) return false;
+        if (foton.PluginHost.itemBridgeBound()) return foton.Native.itemHasMeta(nativeMutation());
         return meta != null;
     }
 
-    /** A copy of the meta, or a fresh empty one.
-     *
-     * A copy because Bukkit's is: a plugin mutates what it gets and then calls
-     * setItemMeta, and a plugin that forgets the second call sees no change.
-     * That is a trap, it is Bukkit's trap, and behaving differently here would
-     * make plugins written against it silently wrong instead.
-     */
     /** Whether this stack holds nothing.
      *
      * <p>Air or a non-positive count. Plugins use it instead of the
@@ -386,11 +479,59 @@ public class ItemStack implements Cloneable {
         return current == null ? null : current.displayName();
     }
 
+    /** Returns detached metadata; edits take effect only after setItemMeta. */
     public ItemMeta getItemMeta() {
+        if (isEmpty()) return new SimpleItemMeta();
         return meta == null ? emptyMeta() : meta.clone();
     }
 
+    /** Internal hydration hook; native state is not public serialized metadata. */
+    public void attachNativeState(foton.item.ItemTransfer transfer) {
+        if (meta == null) meta = emptyMeta();
+        if (!(meta instanceof SimpleItemMeta simple))
+            throw new IllegalStateException("unsupported item metadata implementation");
+        simple.attachNativeState(transfer);
+    }
+
+    public foton.item.ItemMutation nativeMutation() {
+        if (isEmpty()) return foton.item.ItemMutation.empty();
+        if (meta != null && !(meta instanceof SimpleItemMeta))
+            throw new UnsupportedOperationException("foreign metadata implementation");
+        SimpleItemMeta simple = meta instanceof SimpleItemMeta value ? value : new SimpleItemMeta();
+        return simple.nativeState().mutation(foton.FotonInventory.encode(this));
+    }
+
     public boolean setItemMeta(ItemMeta value) {
+        if (value != null && !(value instanceof SimpleItemMeta))
+            throw new IllegalArgumentException("foreign metadata implementation");
+        if (foton.PluginHost.itemBridgeBound()) {
+            if (isEmpty()) return false;
+            if (value == null) {
+                meta = null;
+                return true;
+            }
+            SimpleItemMeta donor = (SimpleItemMeta) value;
+            Material source = donor.nativeMaterial() == null ? type : donor.nativeMaterial();
+            if (donor.nativeMaterial() == null && donor.nativeFamily().equals("BOOK_WRITABLE")) source = Material.WRITABLE_BOOK;
+            ItemStack candidate = new ItemStack(source, amount);
+            candidate.meta = donor.clone();
+            foton.item.ItemMutation mutation = candidate.nativeMutation();
+            if (!foton.Native.itemHasMeta(mutation)) {
+                meta = null;
+                return true;
+            }
+            String targetFamily = foton.Native.itemMetaKind("minecraft:" + type.getKeyName());
+            if (!foton.item.MetaFamily.applicable(donor.nativeFamily(), targetFamily)) return false;
+            if (donor.nativeFamily().equals("BLOCK_STATE") && source != type)
+                throw new UnsupportedOperationException("cross-material block-state metadata");
+            ItemStack converted = foton.FotonInventory.decodeTransfer(foton.Native.convertItemMeta(
+                mutation, nativeMutation(), "minecraft:" + type.getKeyName(),
+                donor.nativeFamily().equals("LEATHER_ARMOR") && targetFamily.equals("COLORABLE_ARMOR")));
+            if (converted == null) throw new IllegalStateException("nonempty donor conversion returned empty state");
+            meta = converted.meta;
+            opaqueNbt = converted.opaqueNbt;
+            return true;
+        }
         if (value instanceof org.bukkit.inventory.meta.BookMeta && !isBook()) {
             return false;
         }
@@ -398,7 +539,11 @@ public class ItemStack implements Cloneable {
         return true;
     }
 
+    /** Internal projection hydration; canonical validation is performed by the owning transfer. */
+    public void hydrateMeta(ItemMeta value) { meta = value == null ? null : value.clone(); }
+
     private ItemMeta emptyMeta() {
+        if (foton.PluginHost.itemBridgeBound()) return foton.item.MetaFamily.empty(type);
         if (type == Material.SHULKER_BOX || type == Material.WHITE_SHULKER_BOX || type == Material.ORANGE_SHULKER_BOX || type == Material.MAGENTA_SHULKER_BOX || type == Material.LIGHT_BLUE_SHULKER_BOX || type == Material.YELLOW_SHULKER_BOX || type == Material.LIME_SHULKER_BOX || type == Material.PINK_SHULKER_BOX || type == Material.GRAY_SHULKER_BOX || type == Material.LIGHT_GRAY_SHULKER_BOX || type == Material.CYAN_SHULKER_BOX || type == Material.PURPLE_SHULKER_BOX || type == Material.BLUE_SHULKER_BOX || type == Material.BROWN_SHULKER_BOX || type == Material.GREEN_SHULKER_BOX || type == Material.RED_SHULKER_BOX || type == Material.BLACK_SHULKER_BOX)
             return new org.bukkit.inventory.meta.SimpleBlockStateMeta();
         if (type == Material.POTION || type == Material.SPLASH_POTION || type == Material.LINGERING_POTION || type == Material.TIPPED_ARROW) return new org.bukkit.inventory.meta.SimplePotionMeta();
@@ -423,19 +568,19 @@ public class ItemStack implements Cloneable {
 
     /** Whether two stacks are the same item, ignoring how many. */
     public boolean isSimilar(ItemStack other) {
+        if (other == null) return false;
+        if (foton.PluginHost.itemBridgeBound()) return foton.Native.itemsSimilar(nativeMutation(), other.nativeMutation());
         return other != null
             && type == other.type
-            && durability == other.durability
             && java.util.Objects.equals(meta, other.meta);
     }
 
     @Override
     public ItemStack clone() {
-        ItemStack copy = new ItemStack(type, amount);
-        copy.durability = durability;
+        ItemStack copy = new ItemStack(type, 1);
+        copy.amount = amount;
         copy.meta = meta == null ? null : meta.clone();
         copy.opaqueNbt = opaqueNbt;
-        copy.dataComponents.putAll(dataComponents);
         return copy;
     }
 
@@ -448,7 +593,9 @@ public class ItemStack implements Cloneable {
 
     @Override
     public int hashCode() {
-        return java.util.Objects.hash(type, amount, durability, meta);
+        // Canonical comparison includes unprojected native state; a coarse hash
+        // avoids inventing a persistent component hash or hashing only projections.
+        return java.util.Objects.hash(isEmpty() ? Material.AIR : type, amount);
     }
 
     @Override

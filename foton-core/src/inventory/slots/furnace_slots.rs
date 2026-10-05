@@ -45,6 +45,10 @@ impl FurnaceResultSlot {
 }
 
 impl Slot for FurnaceResultSlot {
+    fn live_read_source(&self) -> Option<super::MenuSlotReadSource> {
+        self.inner.live_read_source()
+    }
+
     fn storage(&self) -> &SlotStorage {
         self.inner.storage()
     }

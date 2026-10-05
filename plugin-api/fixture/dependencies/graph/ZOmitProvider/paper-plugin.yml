@@ -1,3 +1,4 @@
 name: ZOmitProvider
 version: 1
+api-version: '26.2'
 main: fixture.dependencies.DependencyPlugins$ZOmitProvider

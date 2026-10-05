@@ -1,0 +1,7 @@
+name: BrewEventProbe
+version: 1.0.0
+main: foton.fixture.brew.BrewEventProbe
+api-version: '1.21.11'
+commands:
+  brewprobe:
+    description: Verify brewing cancellation and result writeback

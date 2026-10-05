@@ -15,6 +15,15 @@ import org.bukkit.plugin.Plugin;
  * is not a new hazard for a plugin to learn.
  */
 public final class FotonPlayer implements Player, org.bukkit.projectiles.ProjectileSource, net.kyori.adventure.audience.Audience {
+    @Override public Set<String> getScoreboardTags() {
+        return new FotonScoreboardTags(id.toString());
+    }
+    @Override public boolean addScoreboardTag(String tag) {
+        return Native.entityAddScoreboardTag(id.toString(), java.util.Objects.requireNonNull(tag, "tag"));
+    }
+    @Override public boolean removeScoreboardTag(String tag) {
+        return Native.entityRemoveScoreboardTag(id.toString(), java.util.Objects.requireNonNull(tag, "tag"));
+    }
     @Override public void playEffect(org.bukkit.EntityEffect effect) { if (effect != null) Native.playerEntityEffect(getUniqueId().toString(), effect.name()); }
 
     @Override public Player getKiller() {
@@ -279,7 +288,7 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
 
     @Override
     public org.bukkit.inventory.InventoryView getOpenInventory() {
-        return new FotonInventoryView(this);
+        return EnchantmentEventBridge.currentView(this);
     }
 
     @Override
@@ -705,10 +714,16 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
     @Override
     public boolean hasPermission(String permission) {
         if (permission == null) return false;
+        String normalized = permission.toLowerCase(java.util.Locale.ROOT);
         PlayerPermissions state = PERMISSIONS.get(sessionKey());
-        ResolvedPermission explicit = state == null ? null : state.resolved.get(permission.toLowerCase(java.util.Locale.ROOT));
+        ResolvedPermission explicit = state == null ? null : state.resolved.get(normalized);
         if (explicit != null) return explicit.value;
-        return Native.hasPermission(id.toString(), permission);
+        if (Native.isPermissionSet(id.toString(), normalized)) {
+            return Native.hasPermission(id.toString(), normalized);
+        }
+        Boolean declared = PermissionRegistry.resolveDefault(normalized, isOp());
+        if (declared != null) return declared;
+        return Native.hasPermission(id.toString(), normalized);
     }
 
     @Override public org.bukkit.permissions.PermissionAttachment addAttachment(Plugin plugin) {
@@ -743,14 +758,27 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
         if (state != null) state.recalculate();
     }
 
+    static void recalculateAllPermissions() {
+        for (PlayerPermissions state : PERMISSIONS.values()) state.recalculate();
+    }
+
     @Override public java.util.Set<org.bukkit.permissions.PermissionAttachmentInfo> getEffectivePermissions() {
         java.util.LinkedHashSet<org.bukkit.permissions.PermissionAttachmentInfo> result = new java.util.LinkedHashSet<>();
+        for (java.util.Map.Entry<String, Boolean> entry
+                : PermissionRegistry.effectiveDefaults(isOp()).entrySet()) {
+            result.add(new org.bukkit.permissions.PermissionAttachmentInfo(
+                this, entry.getKey(), null, entry.getValue()));
+        }
         String[] entries = Native.effectivePermissions(id.toString());
         if (entries != null) for (String entry : entries) {
             if (entry == null) continue;
             int separator = entry.lastIndexOf('|');
             if (separator <= 0) continue;
-            result.add(new org.bukkit.permissions.PermissionAttachmentInfo(this, entry.substring(0, separator), null, "1".equals(entry.substring(separator + 1))));
+            String permission = entry.substring(0, separator)
+                .toLowerCase(java.util.Locale.ROOT);
+            result.removeIf(info -> info.getPermission().equalsIgnoreCase(permission));
+            result.add(new org.bukkit.permissions.PermissionAttachmentInfo(
+                this, permission, null, "1".equals(entry.substring(separator + 1))));
         }
         PlayerPermissions state = PERMISSIONS.get(sessionKey());
         if (state != null) for (java.util.Map.Entry<String, ResolvedPermission> entry : state.resolved.entrySet()) {
@@ -764,9 +792,12 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
 
     @Override public boolean isPermissionSet(String permission) {
         if (permission == null) return false;
+        String normalized = permission.toLowerCase(java.util.Locale.ROOT);
         PlayerPermissions state = PERMISSIONS.get(sessionKey());
-        if (state != null && state.resolved.containsKey(permission.toLowerCase(java.util.Locale.ROOT))) return true;
-        return Native.isPermissionSet(id.toString(), permission);
+        if (state != null && state.resolved.containsKey(normalized)) return true;
+        if (Native.isPermissionSet(id.toString(), normalized)) return true;
+        return PermissionRegistry.effectiveDefaults(isOp())
+            .containsKey(normalized);
     }
 
     /** Releases every attachment owned by a plugin across all player handles. */
@@ -840,11 +871,24 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
             java.util.LinkedHashMap<String, ResolvedPermission> next = new java.util.LinkedHashMap<>();
             for (org.bukkit.permissions.PermissionAttachment attachment : attachments) {
                 for (java.util.Map.Entry<String, Boolean> permission : attachment.getPermissions().entrySet()) {
-                    String node = permission.getKey().toLowerCase(java.util.Locale.ROOT);
-                    next.put(node, new ResolvedPermission(attachment, permission.getValue()));
+                    apply(next, attachment, permission.getKey(), permission.getValue(),
+                        new java.util.LinkedHashSet<>());
                 }
             }
             resolved = java.util.Collections.unmodifiableMap(next);
+        }
+
+        private static void apply(java.util.Map<String, ResolvedPermission> target,
+                org.bukkit.permissions.PermissionAttachment attachment, String permission,
+                boolean value, java.util.Set<String> path) {
+            String node = permission.toLowerCase(java.util.Locale.ROOT);
+            if (!path.add(node)) return;
+            target.put(node, new ResolvedPermission(attachment, value));
+            for (java.util.Map.Entry<String, Boolean> child
+                    : PermissionRegistry.children(node).entrySet()) {
+                apply(target, attachment, child.getKey(), value == child.getValue(), path);
+            }
+            path.remove(node);
         }
     }
 
@@ -861,6 +905,14 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
     @Override
     public Set<String> getListeningPluginChannels() {
         return FotonMessenger.listening(id);
+    }
+
+    public boolean addChannel(String channel) {
+        return FotonMessenger.addChannel(this, channel);
+    }
+
+    public boolean removeChannel(String channel) {
+        return FotonMessenger.removeChannel(this, channel);
     }
 
     @Override

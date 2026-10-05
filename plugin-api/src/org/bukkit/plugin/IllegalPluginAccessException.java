@@ -11,4 +11,8 @@ public class IllegalPluginAccessException extends IllegalStateException {
     public IllegalPluginAccessException(String msg) {
         super(msg);
     }
+
+    @Override public String getMessage() {
+        return super.getMessage();
+    }
 }

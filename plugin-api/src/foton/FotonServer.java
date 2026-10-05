@@ -172,11 +172,11 @@ public final class FotonServer implements Server {
         return Native.serverBrand();
     }
 
-    /** The API version a plugin checks against, not Foton's own.
+    /** The targeted Paper API version a plugin checks against, not Foton's own.
      *
      * A plugin reading this is asking "which Bukkit am I talking to", and
      * answering with Foton's version number would tell it something true about
-     * the wrong question.
+     * the wrong question. Foton's version remains available from getVersion().
      */
     @Override
     public String getBukkitVersion() {
@@ -470,7 +470,6 @@ public final class FotonServer implements Server {
     }
 
     private static final class Plugins implements PluginManager {
-        private final java.util.Map<String, org.bukkit.permissions.Permission> permissions = new java.util.concurrent.ConcurrentHashMap<>();
         @Override public void registerEvents(Listener listener, Plugin plugin) {
             requireEnabled(plugin, listener);
             EventBridge.register(listener, plugin);
@@ -491,13 +490,13 @@ public final class FotonServer implements Server {
             return PluginHost.all();
         }
         @Override public org.bukkit.permissions.Permission getPermission(String name) {
-            return name == null ? null : permissions.get(name.toLowerCase(java.util.Locale.ROOT));
+            return PermissionRegistry.get(name);
         }
         @Override public void addPermission(org.bukkit.permissions.Permission permission) {
-            if (permission != null) permissions.putIfAbsent(permission.getName().toLowerCase(java.util.Locale.ROOT), permission);
+            PermissionRegistry.add(permission);
         }
         @Override public void removePermission(String name) {
-            if (name != null) permissions.remove(name.toLowerCase(java.util.Locale.ROOT));
+            PermissionRegistry.remove(name);
         }
 
         @Override public void callEvent(org.bukkit.event.Event event) {

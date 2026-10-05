@@ -91,6 +91,18 @@ impl BrewEvent {
         self.fuel_level
     }
 
+    /// Remaining uses after the cycle's fuel was spent (incoming API name).
+    #[must_use]
+    pub const fn fuel(&self) -> i32 {
+        self.fuel_level
+    }
+
+    /// Takes the accepted bottle results, or none when completion was cancelled.
+    #[must_use]
+    pub fn into_results(self) -> Option<Vec<ItemStack>> {
+        (!self.cancelled).then_some(self.results)
+    }
+
     /// Whether a listener cancelled this completion.
     #[must_use]
     pub const fn is_cancelled(&self) -> bool {

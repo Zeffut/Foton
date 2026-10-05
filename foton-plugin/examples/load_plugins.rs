@@ -31,9 +31,16 @@ fn main() -> ExitCode {
         .unwrap_or_default();
     let config = PluginHostConfig {
         java_home,
-        api_jar: repo.join("plugin-api/build/foton-plugin-api.jar"),
-        library_directories: vec![repo.join("plugin-api/lib")],
+        api_jar: var_os("FOTON_PLUGIN_API_JAR").map_or_else(
+            || repo.join("plugin-api/build/foton-plugin-api.jar"),
+            PathBuf::from,
+        ),
+        library_directories: vec![
+            var_os("FOTON_PLUGIN_LIBRARY_DIRECTORY")
+                .map_or_else(|| repo.join("plugin-api/lib"), PathBuf::from),
+        ],
         plugin_directory: plugins.clone(),
+        item_snapshot_limit: PluginHostConfig::DEFAULT_ITEM_SNAPSHOT_LIMIT,
     };
 
     // No server: the natives answer as they would for one that has

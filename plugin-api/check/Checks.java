@@ -9,8 +9,24 @@ public final class Checks {
 
     public static void main(String[] args) throws Exception {
         Services.check();
+        var serverField = org.bukkit.Bukkit.class.getDeclaredField("server");
+        serverField.setAccessible(true);
+        Object previous = serverField.get(null);
+        org.bukkit.Server delegate = previous == null ? new foton.FotonServer() : (org.bukkit.Server) previous;
+        serverField.set(null, java.lang.reflect.Proxy.newProxyInstance(Checks.class.getClassLoader(),
+            new Class<?>[] {org.bukkit.Server.class}, (proxy, method, arguments) -> {
+                if (method.getName().equals("getMinecraftVersion")) return "26.2";
+                try { return method.invoke(delegate, arguments); }
+                catch (java.lang.reflect.InvocationTargetException error) { throw error.getCause(); }
+            }));
+        try { runChecks(args); }
+        finally { serverField.set(null, previous); }
+    }
+
+    private static void runChecks(String[] args) throws Exception {
         Events.check(args[0]);
         LoadingTasksCheck.check();
+        PermissionRollbackCheck.check();
         LifecycleCommandsCheck.check();
         PluginLifecycle.check();
         NetworkHooks.check();
@@ -30,8 +46,13 @@ public final class Checks {
         Items.check();
         RegistryValues.check();
         ItemComponentsCheck.check();
+        foton.CustomInventoryCheck.check();
+        ItemPersistenceCheck.check();
+        MerchantItemsCheck.check();
+        ShapelessRecipeParity.check();
         Colors.check();
         Commands.check();
+        Scoreboards.check();
         Permissions.check();
         PluginLifecycle.concurrentDisableAllKeepsLoaderAlive();
         Checks.expect(foton.CommandMap.get("fixture") == null,
@@ -45,10 +66,18 @@ public final class Checks {
         paper(args[11]);
         FIXTURE_EVIDENCE.write(args[12]);
         YamlCheck.check();
+        foton.PaperLoading.check();
+        foton.PaperBootstrap.check();
+        foton.PaperBootstrapGraph.check();
+        LifecyclePriorityCheck.check();
+        PrepareEnchantBridgeCheck.run();
+        foton.BootstrapCommandSeedCheck.check();
+        MetadataJournalCheck.check();
         assertHostIsEmpty();
+        PluginLifecycle.checkTerminalShutdown();
         System.out.println(
             "plugin API checked: services, events, scheduler, lifecycle, network hooks, YAML,\n"
-                + "    configuration, geometry, items, colors, commands and permissions");
+                + "    configuration, geometry, items, colors, commands, scoreboards and permissions");
     }
 
     static void expect(boolean condition, String what) {
@@ -256,12 +285,12 @@ public final class Checks {
         }
         String graphLog = graphBytes.toString(java.nio.charset.StandardCharsets.UTF_8);
         try {
-            same(enabled, 16, "dependency graph enabled count; load="
+            same(enabled, 18, "dependency graph enabled count; load="
                 + csvProperty("foton.fixture.dependencies.load") + "; log=" + graphLog);
             same(csvProperty("foton.fixture.dependencies.load"), java.util.List.of(
                 "AfterConsumer", "AfterProvider", "AOmitConsumer", "BootstrapProvider",
                 "NoJoinProvider", "NoJoinConsumer", "OptionalA", "OptionalB",
-                "PaperConsumer", "Provider", "Consumer", "ServerAfter", "Unrelated",
+                "PaperConsumer", "Provider", "Consumer", "RequiredCycleB", "RequiredCycleA", "ServerAfter", "Unrelated",
                 "ZOmitProvider", "ZuluBefore", "AlphaTarget"),
                 "deterministic dependency load order");
             same(csvProperty("foton.fixture.dependencies.enable"), csvProperty(
@@ -269,8 +298,8 @@ public final class Checks {
                 "dependency enable order should match load order");
             same(System.getProperty("foton.fixture.dependencies.alias"), "Provider",
                 "consumer dependency alias lookup");
-            same(System.getProperty("foton.fixture.dependencies.joined"), "true",
-                "join-classpath dependency visibility");
+            same(System.getProperty("foton.fixture.dependencies.joined"), "false",
+                "bootstrap-only dependency must not leak into SERVER classpath");
             same(System.getProperty("foton.fixture.dependencies.isolated"), "true",
                 "join-classpath false dependency isolation");
             same(System.getProperty("foton.fixture.dependencies.afterJoined"), "true",
@@ -283,10 +312,10 @@ public final class Checks {
             expect(graphLog.contains("optional dependency cycle")
                     && graphLog.contains("OptionalA") && graphLog.contains("OptionalB"),
                 "optional cycle was not broken with a named diagnostic: " + graphLog);
-            expect(graphLog.contains("required dependency cycle")
-                    && graphLog.contains("RequiredCycleA")
-                    && graphLog.contains("RequiredCycleB"),
-                "required cycle diagnostic did not name every member: " + graphLog);
+            expect(graphLog.contains("recovered plugin ordering cycle")
+                    && graphLog.contains("requiredcyclea")
+                    && graphLog.contains("requiredcycleb"),
+                "required order-cycle recovery did not name every member: " + graphLog);
             expect(!csvProperty("foton.fixture.dependencies.load").contains("BrokenRequired")
                     && !csvProperty("foton.fixture.dependencies.load")
                         .contains("BrokenDependent"),
@@ -312,21 +341,19 @@ public final class Checks {
         }
         String duplicateLog = duplicateBytes.toString(java.nio.charset.StandardCharsets.UTF_8);
         try {
-            same(enabled, 1, "duplicate descriptor isolation");
+            same(enabled, 3, "actual duplicate descriptor isolation, distinct alias providers load");
             same(csvProperty("foton.fixture.dependencies.load"),
-                java.util.List.of("HealthyDuplicate"),
-                "duplicate names or aliases should reject every conflicting provider");
-            expect(duplicateLog.contains("duplicate alias")
-                    && duplicateLog.contains("AliasOne")
-                    && duplicateLog.contains("AliasTwo"),
-                "duplicate alias diagnostic did not name its providers: " + duplicateLog);
+                java.util.List.of("AliasOne", "AliasTwo", "HealthyDuplicate"),
+                "actual duplicate names must be rejected without suppressing distinct alias providers");
+            same(foton.PluginHost.byName("SharedAlias"), foton.PluginHost.byName("AliasOne"),
+                "fresh-batch alias selection must use the lexical provider");
             expect(duplicateLog.contains("duplicate plugin name")
                     && duplicateLog.contains("SameName")
                     && duplicateLog.contains("samename"),
                 "duplicate real-name diagnostic did not name its plugins: " + duplicateLog);
             FIXTURE_EVIDENCE.record("dependency", duplicateDirectory,
-                java.util.Set.of("HealthyDuplicate"),
-                java.util.Set.of("HealthyDuplicate"), duplicateLog);
+                java.util.Set.of("AliasOne", "AliasTwo", "HealthyDuplicate"),
+                java.util.Set.of("AliasOne", "AliasTwo", "HealthyDuplicate"), duplicateLog);
         } finally {
             foton.PluginHost.disableAll();
             clearDependencyProperties();
@@ -353,7 +380,7 @@ public final class Checks {
                     && foton.PluginHost.byName("EXISTINGALIAS") == existing,
                 "cross-call collision split real-name and alias lookup");
             same(csvProperty("foton.fixture.dependencies.load"), java.util.List.of(
-                "ExistingProvider", "CollisionDependent", "CollisionHealthy"),
+                "ExistingProvider", "CollisionHealthy", "CollisionDependent"),
                 "cross-call collisions loaded a conflicting plugin");
             same(System.getProperty("foton.fixture.dependencies.crossCallProvider"),
                 "ExistingProvider", "cross-call dependency resolved the wrong provider");
@@ -524,8 +551,8 @@ public final class Checks {
             expect(paper != null, "Paper bootstrap fixture did not enable");
             Object steps = paper.getClass().getField("steps").get(null);
             same(steps, java.util.List.of(
-                "bootstrap", "createPlugin", "constructor:sentinel", "onLoad",
-                "commands", "constructorCommands", "onEnable"),
+                "bootstrap", "commands", "createPlugin", "constructor:sentinel", "onLoad",
+                "constructorCommands", "onEnable"),
                 "Paper bootstrap and constructor lifecycle order");
             expect(org.bukkit.Bukkit.getServer().getPluginCommand("paperfixture") != null,
                 "bootstrap lifecycle command was not registered");

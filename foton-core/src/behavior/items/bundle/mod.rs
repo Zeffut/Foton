@@ -81,6 +81,10 @@ impl BundleItem {
 }
 
 impl ItemBehavior for BundleItem {
+    fn is_bundle(&self) -> bool {
+        true
+    }
+
     /// Vanilla parity: `BundleItem.overrideStackedOnOther` -- a carried bundle
     /// clicked onto another slot.
     fn override_stacked_on_other(

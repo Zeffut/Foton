@@ -6,6 +6,7 @@ import java.io.InputStream;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.net.URL;
+import java.net.URLClassLoader;
 import java.net.URLConnection;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
@@ -38,6 +39,7 @@ import org.bukkit.plugin.java.JavaPlugin;
  */
 public final class PluginHost {
     private static final List<Plugin> loaded = new ArrayList<>();
+    private static final Map<String, String> selectedProviders = new HashMap<>();
     private static final Map<Plugin, org.bukkit.plugin.java.PluginClassLoader> loadersByPlugin =
         new java.util.IdentityHashMap<>();
     private static final Map<Plugin, InvocationState> invocations =
@@ -47,6 +49,9 @@ public final class PluginHost {
     private static final ThreadLocal<Integer> lifecycleCallbackDepth =
         ThreadLocal.withInitial(() -> 0);
     private static final Object lifecycle = new Object();
+    private static boolean itemBridgeBound;
+    private static boolean terminalRequested;
+    private static boolean itemBridgeClosed;
     /** Serializes lifecycle callbacks without holding the state monitor.
      *
      * <p>The lock is reentrant because Bukkit permits a plugin callback to
@@ -74,6 +79,7 @@ public final class PluginHost {
     private static final class PluginState {
         final PluginDescriptionFile descriptor;
         org.bukkit.plugin.java.PluginClassLoader loader;
+        PaperBootstrapRunner bootstrap;
         JavaPlugin plugin;
         Status status = Status.DISCOVERED;
         boolean enableAttempted;
@@ -99,24 +105,33 @@ public final class PluginHost {
         }
     }
 
-    private static final class DependencyEdge {
-        final DiscoveredPlugin from;
-        final DiscoveredPlugin to;
-        boolean required;
-        boolean removed;
-
-        DependencyEdge(DiscoveredPlugin from, DiscoveredPlugin to, boolean required) {
-            this.from = from;
-            this.to = to;
-            this.required = required;
-        }
-    }
-
     private PluginHost() {}
 
     /** Marks a real host shutdown; ordinary plugin disable/re-enable does not call this. */
     public static void markStopping() {
         org.bukkit.Bukkit.markStopping();
+        synchronized (lifecycle) { terminalRequested = true; }
+        closeItemBridgeIfDrained();
+    }
+
+    /** Called only after the embedded host registers its real native methods. */
+    public static void bindItemBridge() {
+        synchronized (lifecycle) { itemBridgeBound = true; }
+        closeItemBridgeIfDrained();
+    }
+
+    /** Internal availability signal; registry readiness is checked by native calls. */
+    public static boolean itemBridgeBound() {
+        synchronized (lifecycle) { return itemBridgeBound; }
+    }
+
+    private static void closeItemBridgeIfDrained() {
+        boolean close;
+        synchronized (lifecycle) {
+            close = itemBridgeBound && terminalRequested && !itemBridgeClosed && invocations.isEmpty();
+            if (close) itemBridgeClosed = true;
+        }
+        if (close) Native.closeItemSnapshots();
     }
 
     /** bukkit.yml's default `settings.update-folder`. */
@@ -205,17 +220,27 @@ public final class PluginHost {
         ensureServer();
         pluginsDirectory = new File(directory).getAbsoluteFile();
         applyUpdates(pluginsDirectory);
-        List<DiscoveredPlugin> ordered = orderedPlugins(pluginsDirectory);
+        PluginDiscovery discovery = discoverJars(pluginsDirectory);
+        Map<File, PreparedBootstrap> bootstraps = prepareBootstraps(discovery.bootstrapCandidates());
+        List<DiscoveredPlugin> ordered = new ArrayList<>();
+        for (File jar : discovery.serverOrder()) {
+            try { ordered.add(new DiscoveredPlugin(jar, readDescriptor(jar))); }
+            catch (Exception error) { System.out.println("[host] " + jar + " descriptor failed: " + error); }
+        }
         Map<DiscoveredPlugin, PluginState> prepared = new java.util.IdentityHashMap<>();
         for (DiscoveredPlugin plugin : ordered) {
             try {
-                PluginState state = prepare(plugin);
+                PreparedBootstrap bootstrap = bootstraps.remove(plugin.jar);
+                if (plugin.descriptor instanceof PaperPluginDescriptor paper
+                        && paper.bootstrapper() != null && bootstrap == null) continue;
+                PluginState state = prepare(plugin, bootstrap);
                 if (state != null) prepared.put(plugin, state);
             } catch (Throwable error) {
                 System.out.println("[host] " + plugin.jar.getName() + " failed: " + error);
                 error.printStackTrace(System.out);
             }
         }
+        for (PreparedBootstrap unused : bootstraps.values()) closeUnpublished(unused.loader());
         for (DiscoveredPlugin plugin : ordered) {
             PluginState state = prepared.get(plugin);
             if (state == null) continue;
@@ -275,6 +300,121 @@ public final class PluginHost {
         return loadedNow;
     }
 
+    private record PreparedBootstrap(org.bukkit.plugin.java.PluginClassLoader loader,
+                                     PaperBootstrapRunner runner, DependencyClassLoader dependencies) {}
+
+    private record BootstrapCandidate(org.bukkit.plugin.java.PluginClassLoader loader,
+                                      DependencyClassLoader dependencies,
+                                      File jar, PaperPluginDescriptor descriptor) {}
+
+    private static Map<File, PreparedBootstrap> prepareBootstraps(List<File> ordered) {
+        Map<File, PreparedBootstrap> prepared = new java.util.LinkedHashMap<>();
+        Map<String, File> candidates = new HashMap<>();
+        List<PluginDescriptionFile> descriptors = new ArrayList<>();
+        for (File jar : ordered) {
+            try {
+                PluginDescriptionFile descriptor = readDescriptor(jar);
+                candidates.put(pluginKey(descriptor.getName()), jar);
+                descriptors.add(descriptor);
+            } catch (Exception error) {
+                System.out.println("[host] " + jar.getName() + " bootstrap descriptor failed: " + error);
+            }
+        }
+        List<String> bootstrapOrder = new PluginDependencyGraph(descriptors)
+            .order(PaperPluginDescriptor.Phase.BOOTSTRAP);
+        Map<String, org.bukkit.plugin.java.PluginClassLoader> bootstrapLoaders =
+            new java.util.concurrent.ConcurrentHashMap<>();
+        Map<String, BootstrapCandidate> ready = new java.util.LinkedHashMap<>();
+        for (String key : bootstrapOrder) {
+            File jar = candidates.get(key);
+            org.bukkit.plugin.java.PluginClassLoader loader = null;
+            try {
+                PluginDescriptionFile descriptor = readDescriptor(jar);
+                if (!(descriptor instanceof PaperPluginDescriptor paper) || paper.bootstrapper() == null) continue;
+                if (byName(descriptor.getName()) != null) continue;
+                DependencyClassLoader dependencies = new DependencyClassLoader(
+                    bootstrapDependencies(paper), bootstrapLoaders);
+                loader = new org.bukkit.plugin.java.PluginClassLoader(pluginUrls(jar, descriptor), dependencies);
+                loader.describe(org.bukkit.Bukkit.getServer(), descriptor,
+                    new File(jar.getParentFile(), descriptor.getName()));
+                bootstrapLoaders.put(key, loader);
+                ready.put(key, new BootstrapCandidate(loader, dependencies, jar, paper));
+            } catch (Throwable error) {
+                System.out.println("[host] " + jar.getName() + " bootstrap classloader failed: " + error);
+                if (loader != null) closeUnpublished(loader);
+            }
+        }
+        List<org.bukkit.plugin.java.PluginClassLoader> failed = new ArrayList<>();
+        for (String key : bootstrapOrder) {
+            BootstrapCandidate candidate = ready.get(key);
+            if (candidate == null) continue;
+            try {
+                PaperBootstrapRunner runner = new PaperBootstrapRunner(candidate.jar(),
+                    candidate.descriptor(), candidate.loader());
+                runner.bootstrap();
+                prepared.put(candidate.jar(), new PreparedBootstrap(candidate.loader(), runner,
+                    candidate.dependencies()));
+            } catch (Throwable error) {
+                System.out.println("[host] " + candidate.jar().getName() + " bootstrap failed: " + error);
+                failed.add(candidate.loader());
+            }
+        }
+        var entries = prepared.entrySet().iterator();
+        while (entries.hasNext()) {
+            var entry = entries.next();
+            try {
+                entry.getValue().runner().commands();
+            } catch (Throwable error) {
+                System.out.println("[host] " + entry.getKey().getName() + " bootstrap commands failed: " + error);
+                failed.add(entry.getValue().loader());
+                entries.remove();
+            }
+        }
+        // A failed provider remains available to later bootstrap callbacks on
+        // Paper. Keep its loader through the command phase, then release it.
+        for (var loader : failed) closeUnpublished(loader);
+        // Bootstrap visibility ends here. A surviving plugin loader must not
+        // retain every sibling (including failed, closed loaders) for its lifetime.
+        bootstrapLoaders.clear();
+        return prepared;
+    }
+
+    private static List<String> bootstrapDependencies(PaperPluginDescriptor descriptor) {
+        // Pinned Paper 26.2 build 129 exposes a declared bootstrap provider's
+        // classes even when that edge declares join-classpath: false. The same
+        // flag remains honored independently for the SERVER phase.
+        return descriptor.paperDependencies().stream()
+            .filter(dependency -> dependency.phase() == PaperPluginDescriptor.Phase.BOOTSTRAP)
+            .map(PaperPluginDescriptor.Dependency::name).toList();
+    }
+
+    private static void closeUnpublished(org.bukkit.plugin.java.PluginClassLoader loader) {
+        if (loader.getPlugin() != null) {
+            JavaPlugin plugin = loader.getPlugin();
+            plugin.setEnabled(false);
+            cleanupPublished(plugin);
+            release(plugin, "permissions", () -> PermissionRegistry.removeOwnedBy(plugin));
+        }
+        try { loader.close(); }
+        catch (IOException error) { System.out.println("[host] bootstrap classloader failed to close: " + error); }
+    }
+
+    private static List<String> requiredDependencies(Plugin plugin) {
+        return requiredDependencies(plugin.getDescription());
+    }
+
+    /** Dependencies without which the plugin must not load: Bukkit's
+     * {@code depend}, or the {@code required} entries of paper-plugin.yml. */
+    private static List<String> requiredDependencies(PluginDescriptionFile descriptor) {
+        return PluginDependencyGraph.required(descriptor, PaperPluginDescriptor.Phase.SERVER);
+    }
+
+    private static String unavailableLoadedDependency(Plugin plugin) {
+        for (String name : requiredDependencies(plugin)) {
+            if (byName(name) == null) return name;
+        }
+        return null;
+    }
     /** Enables every plugin successfully loaded by loadAllOnLoad. */
     public static int enableAll() {
         lifecycleOperation.lock();
@@ -372,7 +512,9 @@ public final class PluginHost {
         }
     }
 
-    private static List<DiscoveredPlugin> orderedPlugins(File dir) {
+    private record PluginDiscovery(List<File> serverOrder, List<File> bootstrapCandidates) {}
+
+    private static PluginDiscovery discoverJars(File dir) {
         File[] found = dir.listFiles((d, name) -> name.endsWith(".jar"));
         List<File> bundled = bundledJars();
         List<File> jars = new ArrayList<>(bundled);
@@ -384,10 +526,10 @@ public final class PluginHost {
         for (File jar : jars) {
             try {
                 PluginDescriptionFile descriptor = readDescriptor(jar);
+                requireSupportedLoading(descriptor);
                 String identity = key(descriptor.getName());
                 if (!bundled.contains(jar) && bundledNames.contains(identity)) {
-                    System.out.println("[host] " + descriptor.getName()
-                        + " is provided by Foton; skipping " + jar.getName());
+                    System.out.println("[host] " + descriptor.getName() + " is provided by Foton; skipping " + jar.getName());
                     continue;
                 }
                 if (bundled.contains(jar)) bundledNames.add(identity);
@@ -397,24 +539,31 @@ public final class PluginHost {
                 error.printStackTrace(System.out);
             }
         }
-        discovered.sort(PLUGIN_ORDER);
-        return order(discovered);
-    }
-
-    private static List<DiscoveredPlugin> order(List<DiscoveredPlugin> discovered) {
         Set<DiscoveredPlugin> rejected = new HashSet<>();
         rejectDuplicateNames(discovered, rejected);
-        rejectDuplicateAliases(discovered, rejected);
         rejectLoadedIdentityConflicts(discovered, rejected);
-        Map<String, DiscoveredPlugin> identities = identities(discovered, rejected);
-        rejectMissingRequired(discovered, identities, rejected);
-        propagateRequiredRejections(discovered, identities, rejected);
-
-        List<DependencyEdge> edges = dependencyEdges(discovered, identities, rejected);
-        rejectRequiredCycles(discovered, edges, rejected);
-        propagateRequiredRejections(discovered, identities, rejected);
-        breakOptionalCycles(discovered, edges, rejected);
-        return topologicalOrder(discovered, edges, rejected);
+        Map<String, File> jarsByName = new HashMap<>();
+        List<PluginDescriptionFile> descriptors = new ArrayList<>();
+        for (Plugin live : all()) descriptors.add(live.getDescription());
+        List<File> bootstrapCandidates = new ArrayList<>();
+        for (DiscoveredPlugin plugin : discovered) {
+            if (rejected.contains(plugin)) continue;
+            descriptors.add(plugin.descriptor);
+            jarsByName.put(plugin.key, plugin.jar);
+            bootstrapCandidates.add(plugin.jar);
+        }
+        PluginDependencyGraph graph = new PluginDependencyGraph(descriptors);
+        synchronized (lifecycle) {
+            if (loaded.isEmpty()) selectedProviders.clear();
+            // Live selections are stable across incremental discovery.
+            graph.providers().forEach(selectedProviders::putIfAbsent);
+        }
+        List<File> ordered = new ArrayList<>();
+        for (String identity : graph.order(PaperPluginDescriptor.Phase.SERVER)) {
+            File jar = jarsByName.get(identity);
+            if (jar != null) ordered.add(jar);
+        }
+        return new PluginDiscovery(ordered, bootstrapCandidates);
     }
 
     private static void rejectDuplicateNames(
@@ -431,278 +580,16 @@ public final class PluginHost {
         }
     }
 
-    private static void rejectDuplicateAliases(
-            List<DiscoveredPlugin> discovered, Set<DiscoveredPlugin> rejected) {
-        Map<String, List<DiscoveredPlugin>> identities = new TreeMap<>();
-        for (DiscoveredPlugin plugin : discovered) {
-            if (rejected.contains(plugin)) continue;
-            identities.computeIfAbsent(plugin.key, ignored -> new ArrayList<>()).add(plugin);
-            for (String alias : plugin.descriptor.getProvides()) {
-                identities.computeIfAbsent(key(alias), ignored -> new ArrayList<>()).add(plugin);
-            }
-        }
-        for (Map.Entry<String, List<DiscoveredPlugin>> entry : identities.entrySet()) {
-            List<DiscoveredPlugin> owners = entry.getValue();
-            if (owners.size() < 2) continue;
-            owners.sort(PLUGIN_ORDER);
-            System.out.println("[host] duplicate alias " + entry.getKey() + ": "
-                + describe(owners));
-            rejected.addAll(owners);
-        }
-    }
-
     private static void rejectLoadedIdentityConflicts(
             List<DiscoveredPlugin> discovered, Set<DiscoveredPlugin> rejected) {
         for (DiscoveredPlugin plugin : discovered) {
             if (rejected.contains(plugin)) continue;
             IdentityConflict conflict = loadedIdentityConflict(plugin.descriptor);
             if (conflict == null) continue;
-            System.out.println("[host] " + plugin.descriptor.getName() + ": identity "
+            System.out.println("[host] " + plugin.descriptor.getName() + " (" + plugin.jar.getName() + "): identity "
                 + conflict.identity + " is already provided by " + conflict.owner.getName());
             rejected.add(plugin);
         }
-    }
-
-    private static Map<String, DiscoveredPlugin> identities(
-            List<DiscoveredPlugin> discovered, Set<DiscoveredPlugin> rejected) {
-        Map<String, DiscoveredPlugin> identities = new HashMap<>();
-        for (DiscoveredPlugin plugin : discovered) {
-            if (rejected.contains(plugin)) continue;
-            identities.put(plugin.key, plugin);
-            for (String alias : plugin.descriptor.getProvides()) {
-                identities.put(key(alias), plugin);
-            }
-        }
-        return identities;
-    }
-
-    private static void rejectMissingRequired(
-            List<DiscoveredPlugin> discovered,
-            Map<String, DiscoveredPlugin> identities,
-            Set<DiscoveredPlugin> rejected) {
-        for (DiscoveredPlugin plugin : discovered) {
-            if (rejected.contains(plugin)) continue;
-            for (String dependency : requiredDependencies(plugin.descriptor)) {
-                if (identities.containsKey(key(dependency)) || byName(dependency) != null) {
-                    continue;
-                }
-                System.out.println("[host] " + plugin.descriptor.getName()
-                    + ": missing required dependency " + dependency);
-                rejected.add(plugin);
-                break;
-            }
-        }
-    }
-
-    private static void propagateRequiredRejections(
-            List<DiscoveredPlugin> discovered,
-            Map<String, DiscoveredPlugin> identities,
-            Set<DiscoveredPlugin> rejected) {
-        boolean changed;
-        do {
-            changed = false;
-            for (DiscoveredPlugin plugin : discovered) {
-                if (rejected.contains(plugin)) continue;
-                for (String dependency : requiredDependencies(plugin.descriptor)) {
-                    DiscoveredPlugin provider = identities.get(key(dependency));
-                    if (provider == null || !rejected.contains(provider)) continue;
-                    System.out.println("[host] " + plugin.descriptor.getName()
-                        + ": required dependency " + dependency + " was rejected");
-                    rejected.add(plugin);
-                    changed = true;
-                    break;
-                }
-            }
-        } while (changed);
-    }
-
-    private static List<String> requiredDependencies(PluginDescriptionFile descriptor) {
-        Map<String, String> dependencies = new LinkedHashMap<>();
-        for (String dependency : descriptor.getDepend()) {
-            dependencies.put(key(dependency), dependency);
-        }
-        addRequired(dependencies, descriptor.getBootstrapDependencies());
-        addRequired(dependencies, descriptor.getServerDependencies());
-        return List.copyOf(dependencies.values());
-    }
-
-    private static void addRequired(
-            Map<String, String> out, Map<String, PluginDescriptionFile.Dependency> dependencies) {
-        for (Map.Entry<String, PluginDescriptionFile.Dependency> entry : dependencies.entrySet()) {
-            if (entry.getValue().required()) out.putIfAbsent(key(entry.getKey()), entry.getKey());
-        }
-    }
-
-    private static List<DependencyEdge> dependencyEdges(
-            List<DiscoveredPlugin> discovered,
-            Map<String, DiscoveredPlugin> identities,
-            Set<DiscoveredPlugin> rejected) {
-        Map<String, DependencyEdge> edges = new LinkedHashMap<>();
-        for (DiscoveredPlugin plugin : discovered) {
-            if (rejected.contains(plugin)) continue;
-            for (String dependency : plugin.descriptor.getDepend()) {
-                addEdge(edges, identities.get(key(dependency)), plugin, true);
-            }
-            for (String dependency : plugin.descriptor.getSoftDepend()) {
-                addEdge(edges, identities.get(key(dependency)), plugin, false);
-            }
-            for (String dependency : plugin.descriptor.getLoadBefore()) {
-                addEdge(edges, plugin, identities.get(key(dependency)), false);
-            }
-            addPaperEdges(edges, plugin, plugin.descriptor.getBootstrapDependencies(), identities);
-            addPaperEdges(edges, plugin, plugin.descriptor.getServerDependencies(), identities);
-        }
-        return new ArrayList<>(edges.values());
-    }
-
-    private static void addPaperEdges(
-            Map<String, DependencyEdge> edges,
-            DiscoveredPlugin plugin,
-            Map<String, PluginDescriptionFile.Dependency> dependencies,
-            Map<String, DiscoveredPlugin> identities) {
-        for (Map.Entry<String, PluginDescriptionFile.Dependency> entry : dependencies.entrySet()) {
-            DiscoveredPlugin dependency = identities.get(key(entry.getKey()));
-            if (entry.getValue().load() == PluginDescriptionFile.Load.BEFORE) {
-                addEdge(edges, dependency, plugin, entry.getValue().required());
-            } else if (entry.getValue().load() == PluginDescriptionFile.Load.AFTER) {
-                addEdge(edges, plugin, dependency, entry.getValue().required());
-            }
-        }
-    }
-
-    private static void addEdge(
-            Map<String, DependencyEdge> edges,
-            DiscoveredPlugin from, DiscoveredPlugin to, boolean required) {
-        if (from == null || to == null) return;
-        String edgeKey = from.key + "\0" + to.key;
-        DependencyEdge existing = edges.get(edgeKey);
-        if (existing == null) {
-            edges.put(edgeKey, new DependencyEdge(from, to, required));
-        } else if (required) {
-            existing.required = true;
-        }
-    }
-
-    private static void rejectRequiredCycles(
-            List<DiscoveredPlugin> discovered,
-            List<DependencyEdge> edges,
-            Set<DiscoveredPlugin> rejected) {
-        for (List<DiscoveredPlugin> component : components(discovered, edges, rejected)) {
-            if (!isCycle(component, edges)) continue;
-            boolean required = false;
-            for (DependencyEdge edge : edges) {
-                if (component.contains(edge.from) && component.contains(edge.to)
-                        && edge.required) {
-                    required = true;
-                    break;
-                }
-            }
-            if (!required) continue;
-            component.sort(PLUGIN_ORDER);
-            System.out.println("[host] required dependency cycle: " + describe(component));
-            rejected.addAll(component);
-        }
-    }
-
-    private static void breakOptionalCycles(
-            List<DiscoveredPlugin> discovered,
-            List<DependencyEdge> edges,
-            Set<DiscoveredPlugin> rejected) {
-        for (List<DiscoveredPlugin> component : components(discovered, edges, rejected)) {
-            if (!isCycle(component, edges)) continue;
-            for (DependencyEdge edge : edges) {
-                if (!component.contains(edge.from) || !component.contains(edge.to)) continue;
-                if (PLUGIN_ORDER.compare(edge.from, edge.to) < 0) continue;
-                edge.removed = true;
-                System.out.println("[host] optional dependency cycle: dropping edge "
-                    + edge.from.descriptor.getName() + " -> " + edge.to.descriptor.getName());
-            }
-        }
-    }
-
-    private static List<List<DiscoveredPlugin>> components(
-            List<DiscoveredPlugin> discovered,
-            List<DependencyEdge> edges,
-            Set<DiscoveredPlugin> rejected) {
-        List<List<DiscoveredPlugin>> components = new ArrayList<>();
-        Set<DiscoveredPlugin> assigned = new HashSet<>();
-        for (DiscoveredPlugin seed : discovered) {
-            if (rejected.contains(seed) || assigned.contains(seed)) continue;
-            Set<DiscoveredPlugin> forward = reachable(seed, edges, rejected, false);
-            List<DiscoveredPlugin> component = new ArrayList<>();
-            for (DiscoveredPlugin candidate : discovered) {
-                if (rejected.contains(candidate) || !forward.contains(candidate)) continue;
-                if (reachable(candidate, edges, rejected, false).contains(seed)) {
-                    component.add(candidate);
-                }
-            }
-            assigned.addAll(component);
-            components.add(component);
-        }
-        return components;
-    }
-
-    private static Set<DiscoveredPlugin> reachable(
-            DiscoveredPlugin start,
-            List<DependencyEdge> edges,
-            Set<DiscoveredPlugin> rejected,
-            boolean honorRemoved) {
-        Set<DiscoveredPlugin> found = new HashSet<>();
-        List<DiscoveredPlugin> pending = new ArrayList<>();
-        pending.add(start);
-        while (!pending.isEmpty()) {
-            DiscoveredPlugin current = pending.remove(pending.size() - 1);
-            if (!found.add(current)) continue;
-            for (DependencyEdge edge : edges) {
-                if (edge.from != current || rejected.contains(edge.to)) continue;
-                if (honorRemoved && edge.removed) continue;
-                pending.add(edge.to);
-            }
-        }
-        return found;
-    }
-
-    private static boolean isCycle(
-            List<DiscoveredPlugin> component, List<DependencyEdge> edges) {
-        if (component.size() > 1) return true;
-        if (component.isEmpty()) return false;
-        DiscoveredPlugin only = component.get(0);
-        for (DependencyEdge edge : edges) {
-            if (edge.from == only && edge.to == only) return true;
-        }
-        return false;
-    }
-
-    private static List<DiscoveredPlugin> topologicalOrder(
-            List<DiscoveredPlugin> discovered,
-            List<DependencyEdge> edges,
-            Set<DiscoveredPlugin> rejected) {
-        Map<DiscoveredPlugin, Integer> indegrees = new HashMap<>();
-        for (DiscoveredPlugin plugin : discovered) {
-            if (!rejected.contains(plugin)) indegrees.put(plugin, 0);
-        }
-        for (DependencyEdge edge : edges) {
-            if (edge.removed || rejected.contains(edge.from) || rejected.contains(edge.to)) {
-                continue;
-            }
-            indegrees.put(edge.to, indegrees.get(edge.to) + 1);
-        }
-        PriorityQueue<DiscoveredPlugin> ready = new PriorityQueue<>(PLUGIN_ORDER);
-        for (Map.Entry<DiscoveredPlugin, Integer> entry : indegrees.entrySet()) {
-            if (entry.getValue() == 0) ready.add(entry.getKey());
-        }
-        List<DiscoveredPlugin> ordered = new ArrayList<>();
-        while (!ready.isEmpty()) {
-            DiscoveredPlugin current = ready.remove();
-            ordered.add(current);
-            for (DependencyEdge edge : edges) {
-                if (edge.removed || edge.from != current || rejected.contains(edge.to)) continue;
-                int remaining = indegrees.compute(edge.to,
-                    (ignored, degree) -> degree == null ? 0 : degree - 1);
-                if (remaining == 0) ready.add(edge.to);
-            }
-        }
-        return ordered;
     }
 
     /** Jars Foton ships beside its API, from {@code -Dfoton.bundled-plugins}. */
@@ -725,13 +612,12 @@ public final class PluginHost {
         }
         return String.join(", ", names);
     }
-
     private static PluginDescriptionFile readDescriptor(File jar) throws Exception {
         try (JarFile archive = new JarFile(jar)) {
             var paper = archive.getEntry("paper-plugin.yml");
             if (paper != null) {
                 try (InputStream stream = archive.getInputStream(paper)) {
-                    return new PluginDescriptionFile(stream);
+                    return PaperPluginDescriptor.read(stream);
                 }
             }
             var legacy = archive.getEntry("plugin.yml");
@@ -744,27 +630,39 @@ public final class PluginHost {
         }
     }
 
-    private static PluginState prepare(DiscoveredPlugin discovered) throws Throwable {
+    private static void requireSupportedLoading(PluginDescriptionFile descriptor)
+            throws InvalidDescriptionException {
+        if (descriptor instanceof PaperPluginDescriptor paper) {
+            paper.validateTarget(org.bukkit.Bukkit.getMinecraftVersion());
+            if (paper.hasOpenClassloader()) {
+                throw new UnsupportedOperationException(descriptor.getName()
+                    + ": open Paper classloader visibility is not implemented");
+            }
+        }
+    }
+
+    private static PluginState prepare(DiscoveredPlugin discovered, PreparedBootstrap prepared) throws Throwable {
         File jar = discovered.jar;
         PluginDescriptionFile descriptor = discovered.descriptor;
-        if (descriptor.getLoader() != null) {
-            throw new UnsupportedOperationException("custom plugin loader "
-                + descriptor.getLoader() + " is not supported");
-        }
+        requireSupportedLoading(descriptor);
         IdentityConflict conflict = loadedIdentityConflict(descriptor);
         if (conflict != null) {
             System.out.println("[host] " + descriptor.getName() + ": identity "
                 + conflict.identity + " is already provided by " + conflict.owner.getName()
                 + "; skipping " + jar.getName());
+            if (prepared != null) closeUnpublished(prepared.loader());
             return null;
         }
         PluginState state = new PluginState(descriptor);
+        state.bootstrap = prepared == null ? null : prepared.runner();
         registerState(state);
         try {
             org.bukkit.plugin.java.PluginClassLoader loader =
-                new HostedPluginClassLoader(
-                    pluginUrls(jar, descriptor), dependencyParent(descriptor));
+                prepared == null ? new org.bukkit.plugin.java.PluginClassLoader(
+                    pluginUrls(jar, descriptor), dependencyParent(descriptor)) : prepared.loader();
             state.loader = loader;
+            if (prepared != null) prepared.dependencies().useServerDependencies(
+                PluginDependencyGraph.visible(descriptor, PaperPluginDescriptor.Phase.SERVER));
             File dataFolder = new File(bundledNames.contains(key(descriptor.getName()))
                 ? pluginsDirectory : jar.getParentFile(), descriptor.getName());
             // Before the constructor, not after: a plugin may call getName()
@@ -786,45 +684,20 @@ public final class PluginHost {
         try {
             File dataFolder = new File(bundledNames.contains(key(descriptor.getName()))
                 ? pluginsDirectory : jar.getParentFile(), descriptor.getName());
-            FotonBootstrapContext bootstrapContext = null;
-            boolean createdByBootstrap = false;
-            JavaPlugin candidate;
-            if (descriptor.getBootstrapper() == null) {
-                candidate = constructMain(descriptor, loader);
-            } else {
-                Class<?> type = Class.forName(descriptor.getBootstrapper(), false, loader);
-                if (!io.papermc.paper.plugin.bootstrap.PluginBootstrap.class
-                        .isAssignableFrom(type)) {
-                    throw new IllegalArgumentException("bootstrapper "
-                        + descriptor.getBootstrapper() + " does not implement PluginBootstrap");
-                }
-                Class<? extends io.papermc.paper.plugin.bootstrap.PluginBootstrap>
-                    bootstrapType = type.asSubclass(
-                        io.papermc.paper.plugin.bootstrap.PluginBootstrap.class);
-                var bootstrapper = bootstrapType.getDeclaredConstructor().newInstance();
-                bootstrapContext = new FotonBootstrapContext(
-                    descriptor, dataFolder.toPath(), jar.toPath());
-                bootstrapper.bootstrap(bootstrapContext);
-                candidate = bootstrapper.createPlugin(bootstrapContext);
-                if (candidate == null) {
-                    candidate = constructMain(descriptor, loader);
-                } else {
-                    createdByBootstrap = true;
-                }
-            }
-            if (createdByBootstrap && candidate.getClass().getClassLoader() != loader) {
-                throw new IllegalArgumentException("plugin instance for "
-                    + descriptor.getName() + " was not created by its plugin classloader");
+            JavaPlugin candidate = state.bootstrap == null
+                ? constructMain(descriptor, loader) : state.bootstrap.createPlugin();
+            if (state.bootstrap != null
+                    && (candidate.getClass().getClassLoader() != loader || loader.getPlugin() != candidate)) {
+                throw new IllegalStateException("createPlugin must return the JavaPlugin constructed by its own loader");
             }
             state.plugin = candidate;
             synchronized (lifecycle) { statesByPlugin.put(candidate, state); }
 
             loader.setPlugin(candidate);
             candidate.init(org.bukkit.Bukkit.getServer(), descriptor, dataFolder);
-            if (bootstrapContext != null) {
-                FotonLifecycle.transfer(bootstrapContext, candidate);
-            }
+
             synchronized (lifecycle) {
+                if (terminalRequested) throw new IllegalStateException("host is stopping");
                 loaded.add(candidate);
                 InvocationState invocation = new InvocationState();
                 invocation.loading = true;
@@ -833,6 +706,7 @@ public final class PluginHost {
                 state.status = Status.LOADING;
                 FotonScheduler.activatePlugin(candidate);
             }
+            PermissionRegistry.register(candidate, descriptor.getPermissions());
         } catch (Throwable error) {
             if (state.plugin == null && loader != null) {
                 state.plugin = loader.getPlugin();
@@ -860,6 +734,7 @@ public final class PluginHost {
             boolean published;
             synchronized (lifecycle) { published = invocations.containsKey(plugin); }
             if (published) {
+                synchronized (lifecycle) { invocations.get(plugin).loading = false; }
                 cleanup(plugin);
                 return;
             }
@@ -867,6 +742,7 @@ public final class PluginHost {
             // commands/lifecycle handlers through the classloader's early identity.
             plugin.setEnabled(false);
             cleanupPublished(plugin);
+            release(plugin, "permissions", () -> PermissionRegistry.removeOwnedBy(plugin));
             synchronized (lifecycle) { statesByPlugin.remove(plugin); }
             state.plugin = null;
         }
@@ -881,29 +757,12 @@ public final class PluginHost {
 
     private static String unavailablePriorDependency(
             PluginDescriptionFile descriptor, boolean enabling) {
-        for (String dependency : descriptor.getDepend()) {
-            if (!dependencyAvailable(dependency, enabling)) return dependency;
-        }
-        String unavailable = unavailablePriorPaperDependency(
-            descriptor.getBootstrapDependencies(), enabling);
-        if (unavailable != null) return unavailable;
-        unavailable = unavailablePriorPaperDependency(
-            descriptor.getServerDependencies(), enabling);
-        if (unavailable != null) return unavailable;
-        return null;
-    }
-
-    private static String unavailablePriorPaperDependency(
-            Map<String, PluginDescriptionFile.Dependency> dependencies,
-            boolean enabling) {
-        for (Map.Entry<String, PluginDescriptionFile.Dependency> entry
-                : dependencies.entrySet()) {
-            PluginDescriptionFile.Dependency dependency = entry.getValue();
-            if (dependency.required()
-                    && dependency.load() == PluginDescriptionFile.Load.BEFORE
-                    && !dependencyAvailable(entry.getKey(), enabling)) {
-                return entry.getKey();
-            }
+        for (String dependency : requiredDependencies(descriptor)) {
+            Plugin provider = byName(dependency);
+            PluginState state = provider == null ? null : stateOf(provider);
+            if (state == null || state.status == Status.FAILED
+                    || enabling && state.enableAttempted && !provider.isEnabled())
+                return dependency;
         }
         return null;
     }
@@ -944,7 +803,7 @@ public final class PluginHost {
     }
 
     private static void registerState(PluginState state) {
-        List<String> identities = identityKeys(state.descriptor);
+        List<String> identities = selectedIdentityKeys(state.descriptor);
         for (String identity : identities) {
             PluginState existing = states.get(identity);
             if (existing != null && existing.plugin != null && loaded.contains(existing.plugin)) {
@@ -957,13 +816,24 @@ public final class PluginHost {
     private static void registerLoader(
             PluginDescriptionFile descriptor,
             org.bukkit.plugin.java.PluginClassLoader loader) {
-        List<String> identities = identityKeys(descriptor);
+        List<String> identities = selectedIdentityKeys(descriptor);
         for (String identity : identities) {
             if (pluginLoaders.containsKey(identity)) {
                 throw new IllegalStateException("plugin identity is already registered: " + identity);
             }
         }
         for (String identity : identities) pluginLoaders.put(identity, loader);
+    }
+
+    private static List<String> selectedIdentityKeys(PluginDescriptionFile descriptor) {
+        String owner = key(descriptor.getName());
+        return identityKeys(descriptor).stream().filter(identity ->
+            owner.equals(selectedProviders.getOrDefault(identity, owner))).toList();
+    }
+
+    private static void addDependencyIdentity(List<String> out, String name) {
+        String identity = key(name);
+        if (!out.contains(identity)) out.add(identity);
     }
 
     private static List<String> identityKeys(PluginDescriptionFile descriptor) {
@@ -991,34 +861,79 @@ public final class PluginHost {
         }
     }
 
-    private static URL[] pluginUrls(File jar, PluginDescriptionFile descriptor)
-            throws Exception {
+    private static URL[] pluginUrls(File jar, PluginDescriptionFile descriptor) throws Exception {
         List<URL> urls = new ArrayList<>();
         urls.add(jar.toURI().toURL());
-        Path cache = jar.toPath().getParent().resolve(".foton-libraries");
-        List<String> declarations = new ArrayList<>(descriptor.getLibraries());
-        try (JarFile archive = new JarFile(jar)) {
-            declarations.addAll(paperLibraries(archive));
-        }
-
-        List<MavenCoordinate> coordinates = new ArrayList<>();
-        for (String declaration : declarations) {
-            MavenCoordinate coordinate = MavenCoordinate.parse(declaration).runtimeVariant();
-            if (!coordinates.contains(coordinate)) coordinates.add(coordinate);
-            if (coordinate.group.equals("org.jetbrains.kotlinx")
-                    && coordinate.artifact.equals("kotlinx-serialization-json-jvm")) {
-                MavenCoordinate core = new MavenCoordinate(
-                    coordinate.group, "kotlinx-serialization-core-jvm", coordinate.version);
-                if (!coordinates.contains(core)) coordinates.add(core);
+        Path cache = jar.toPath().toAbsolutePath().getParent().resolve(".foton-libraries");
+        List<io.papermc.paper.plugin.loader.library.ClassPathLibrary> libraries = new ArrayList<>();
+        io.papermc.paper.plugin.loader.library.ClassPathLibrary legacyLibraries = null;
+        if (!(descriptor instanceof PaperPluginDescriptor) && !descriptor.isPaperSkipLibraries()
+                && !descriptor.getLibraries().isEmpty()) {
+            var resolver = new io.papermc.paper.plugin.loader.library.impl.MavenLibraryResolver();
+            resolver.addRepository(new org.eclipse.aether.repository.RemoteRepository.Builder("central", "default",
+                io.papermc.paper.plugin.loader.library.impl.MavenLibraryResolver.MAVEN_CENTRAL_DEFAULT_MIRROR).build());
+            for (String coordinate : descriptor.getLibraries()) {
+                // Preserve the pre-existing validated flat-cache contract. New
+                // uncached declarations use the incoming transitive resolver.
+                String[] parts = coordinate.split(":", -1);
+                if (parts.length == 3 && java.util.Arrays.stream(parts)
+                        .allMatch(part -> !part.isEmpty() && !part.equals(".") && !part.equals("..")
+                            && MAVEN_SEGMENT.matcher(part).matches())) {
+                    MavenCoordinate cached = MavenCoordinate.parse(coordinate).runtimeVariant();
+                    Path existing = cached.cachePath(cache);
+                    if (validJar(existing)) {
+                        urls.add(existing.toUri().toURL());
+                        continue;
+                    }
+                }
+                resolver.addDependency(new org.eclipse.aether.graph.Dependency(new org.eclipse.aether.artifact.DefaultArtifact(coordinate), null));
             }
+            legacyLibraries = resolver;
         }
-        for (MavenCoordinate coordinate : coordinates) {
-            try {
+        String loaderName = descriptor instanceof PaperPluginDescriptor paper ? paper.loader() : descriptor.getPaperPluginLoader();
+        if (loaderName == null) {
+            // Foton compatibility adapter predating Paper's custom loader contract.
+            // Custom loaders own their JSON exclusively; never inspect it in that path.
+            List<String> declarations;
+            try (JarFile archive = new JarFile(jar)) { declarations = paperLibraries(archive); }
+            for (String declaration : declarations) {
+                MavenCoordinate coordinate = MavenCoordinate.parse(declaration).runtimeVariant();
                 urls.add(resolveLibrary(cache, coordinate).toUri().toURL());
-            } catch (IOException error) {
-                throw new IOException(
-                    "cannot resolve plugin library " + coordinate.declaration(), error);
+                if (coordinate.group.equals("org.jetbrains.kotlinx")
+                        && coordinate.artifact.equals("kotlinx-serialization-json-jvm")) {
+                    urls.add(resolveLibrary(cache, new MavenCoordinate(coordinate.group,
+                        "kotlinx-serialization-core-jvm", coordinate.version)).toUri().toURL());
+                }
             }
+        }
+        if (loaderName != null) {
+            var context = new io.papermc.paper.plugin.bootstrap.PluginProviderContext() {
+                @Override public io.papermc.paper.plugin.configuration.PluginMeta getConfiguration() { return descriptor; }
+                @Override public Path getDataDirectory() { return jar.toPath().toAbsolutePath().getParent().resolve(descriptor.getName()); }
+                @Override public net.kyori.adventure.text.logger.slf4j.ComponentLogger getLogger() {
+                    return net.kyori.adventure.text.logger.slf4j.ComponentLogger.logger(descriptor.getName());
+                }
+                @Override public Path getPluginSource() { return jar.toPath(); }
+            };
+            try (URLClassLoader loader = new URLClassLoader(new URL[] {jar.toURI().toURL()}, PluginHost.class.getClassLoader())) {
+                Object instance = Class.forName(loaderName, true, loader).getDeclaredConstructor().newInstance();
+                if (!(instance instanceof io.papermc.paper.plugin.loader.PluginLoader pluginLoader)) {
+                    throw new IOException("Plugin loader does not implement PluginLoader: " + loaderName);
+                }
+                pluginLoader.classloader(new io.papermc.paper.plugin.loader.PluginClasspathBuilder() {
+                    @Override public io.papermc.paper.plugin.loader.PluginClasspathBuilder addLibrary(io.papermc.paper.plugin.loader.library.ClassPathLibrary library) {
+                        libraries.add(java.util.Objects.requireNonNull(library));
+                        return this;
+                    }
+                    @Override public io.papermc.paper.plugin.bootstrap.PluginProviderContext getContext() { return context; }
+                });
+                if (legacyLibraries != null) libraries.add(legacyLibraries);
+                // A custom ClassPathLibrary can reference classes from the loader's JAR.
+                urls.addAll(PluginLibraryResolver.registerLibraries(cache, libraries));
+            }
+        } else {
+            if (legacyLibraries != null) libraries.add(legacyLibraries);
+            urls.addAll(PluginLibraryResolver.registerLibraries(cache, libraries));
         }
         return urls.toArray(new URL[0]);
     }
@@ -1178,72 +1093,38 @@ public final class PluginHost {
     }
 
     private static ClassLoader dependencyParent(PluginDescriptionFile descriptor) {
-        List<String> dependencies = new ArrayList<>();
-        for (String name : descriptor.getDepend()) {
-            addDependencyIdentity(dependencies, name);
-        }
-        for (String name : descriptor.getSoftDepend()) {
-            addDependencyIdentity(dependencies, name);
-        }
-        addClasspathDependencies(dependencies, descriptor.getBootstrapDependencies());
-        addClasspathDependencies(dependencies, descriptor.getServerDependencies());
-        return dependencies.isEmpty() ? PluginHost.class.getClassLoader() : new DependencyClassLoader(dependencies);
-    }
-
-    private static void addClasspathDependencies(
-            List<String> out,
-            Map<String, PluginDescriptionFile.Dependency> dependencies) {
-        for (Map.Entry<String, PluginDescriptionFile.Dependency> entry
-                : dependencies.entrySet()) {
-            if (!entry.getValue().joinClasspath()) continue;
-            addDependencyIdentity(out, entry.getKey());
-        }
-    }
-
-    private static void addDependencyIdentity(List<String> out, String name) {
-        String identity = key(name);
-        if (!out.contains(identity)) out.add(identity);
-    }
-
-    private static final class HostedPluginClassLoader
-            extends org.bukkit.plugin.java.PluginClassLoader {
-        private HostedPluginClassLoader(URL[] urls, ClassLoader parent) {
-            super(urls, parent);
-        }
-
-        @Override
-        protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
-            synchronized (getClassLoadingLock(name)) {
-                Class<?> type = findLoadedClass(name);
-                if (type == null) {
-                    try {
-                        type = PluginHost.class.getClassLoader().loadClass(name);
-                    } catch (ClassNotFoundException ignored) {
-                        // Plugin-owned or dependency-owned class; try those below.
-                    }
-                }
-                if (type == null) {
-                    try {
-                        type = findClass(name);
-                    } catch (ClassNotFoundException ignored) {
-                        // Declared dependency class; delegate below.
-                    }
-                }
-                if (type == null) type = getParent().loadClass(name);
-                if (resolve) resolveClass(type);
-                return type;
-            }
-        }
+        List<String> visible = PluginDependencyGraph.visible(descriptor, PaperPluginDescriptor.Phase.SERVER);
+        return visible.isEmpty() ? PluginHost.class.getClassLoader() : new DependencyClassLoader(visible);
     }
 
     private static final class DependencyClassLoader extends ClassLoader {
-        private static final ThreadLocal<Set<ClassLoader>> resolving =
+        private static final ThreadLocal<Set<DependencyClassLoader>> searching =
             ThreadLocal.withInitial(HashSet::new);
-        private final List<String> dependencies;
+        private volatile List<String> dependencies;
+        private final Map<String, org.bukkit.plugin.java.PluginClassLoader> bootstrapLoaders;
+        private volatile boolean bootstrapPhase;
 
         private DependencyClassLoader(List<String> dependencies) {
+            this(dependencies, Map.of(), false);
+        }
+
+        private DependencyClassLoader(List<String> dependencies,
+                Map<String, org.bukkit.plugin.java.PluginClassLoader> bootstrapLoaders) {
+            this(dependencies, bootstrapLoaders, true);
+        }
+
+        private DependencyClassLoader(List<String> dependencies,
+                Map<String, org.bukkit.plugin.java.PluginClassLoader> bootstrapLoaders,
+                boolean bootstrapPhase) {
             super(PluginHost.class.getClassLoader());
             this.dependencies = List.copyOf(dependencies);
+            this.bootstrapLoaders = bootstrapLoaders;
+            this.bootstrapPhase = bootstrapPhase;
+        }
+
+        private void useServerDependencies(List<String> serverDependencies) {
+            this.dependencies = List.copyOf(serverDependencies);
+            this.bootstrapPhase = false;
         }
 
         @Override
@@ -1251,17 +1132,37 @@ public final class PluginHost {
             try {
                 return super.loadClass(name, resolve);
             } catch (ClassNotFoundException missingFromServer) {
-                for (String identity : dependencies) {
-                    ClassLoader dependency = pluginLoaders.get(identity);
-                    if (dependency == null || !resolving.get().add(dependency)) continue;
-                    try {
-                        return Class.forName(name, false, dependency);
-                    } catch (ClassNotFoundException ignored) {
-                        // Try the next declared dependency.
-                    } finally {
-                        resolving.get().remove(dependency);
-                        if (resolving.get().isEmpty()) resolving.remove();
+                Set<DependencyClassLoader> active = searching.get();
+                if (!active.add(this)) throw missingFromServer;
+                try {
+                    List<ClassLoader> available = new ArrayList<>();
+                    synchronized (lifecycle) {
+                        for (String dependency : dependencies) {
+                            ClassLoader loader;
+                            if (bootstrapPhase) {
+                                String alias = selectedProviders.getOrDefault(pluginKey(dependency),
+                                    pluginKey(dependency));
+                                loader = bootstrapLoaders.get(alias);
+                            } else {
+                                Plugin plugin = findByNameLocked(dependency);
+                                loader = loadersByPlugin.get(plugin);
+                                if (loader == null) loader = pluginLoaders.get(pluginKey(dependency));
+                            }
+                            if (loader != null) available.add(loader);
+                        }
                     }
+                    // AFTER and OMIT providers may be published after this
+                    // loader was constructed. Visibility is not a load-order edge.
+                    for (ClassLoader dependency : available) {
+                        try {
+                            return Class.forName(name, false, dependency);
+                        } catch (ClassNotFoundException ignored) {
+                            // Try the next declared dependency.
+                        }
+                    }
+                } finally {
+                    active.remove(this);
+                    if (active.isEmpty()) searching.remove();
                 }
                 throw missingFromServer;
             }
@@ -1473,6 +1374,7 @@ public final class PluginHost {
 
     private static void finishDiscard(Plugin plugin, InvocationState state,
             org.bukkit.plugin.java.PluginClassLoader loader) {
+        release(plugin, "permissions", () -> PermissionRegistry.removeOwnedBy(plugin));
         synchronized (lifecycle) {
             invocations.remove(plugin, state);
             PluginState metadata = statesByPlugin.remove(plugin);
@@ -1480,6 +1382,7 @@ public final class PluginHost {
                 metadata.cleaned.set(true);
                 metadata.plugin = null;
                 metadata.loader = null;
+                metadata.bootstrap = null;
             }
             if (loader != null) loadersByPlugin.remove(plugin, loader);
             lifecycle.notifyAll();
@@ -1492,6 +1395,7 @@ public final class PluginHost {
                     + " classloader failed to close: " + error);
             }
         }
+        closeItemBridgeIfDrained();
     }
 
     private static void awaitInvocations(InvocationState state, Runnable onDrained) {
@@ -1659,13 +1563,26 @@ public final class PluginHost {
     }
 
     private static Plugin findByNameLocked(String name) {
+        String selected = selectedProviders.get(pluginKey(name));
+        return findExactNameLocked(selected == null ? name : selected);
+    }
+
+    private static Plugin findExactNameLocked(String name) {
         for (Plugin plugin : loaded) {
-            if (plugin.getName().equalsIgnoreCase(name)
-                    || containsIgnoreCase(plugin.getDescription().getProvides(), name)) {
+            if (plugin.getName().equalsIgnoreCase(name)) return plugin;
+        }
+        for (Plugin plugin : loaded) {
+            if (containsIgnoreCase(plugin.getDescription().getProvides(), name)) {
                 return plugin;
             }
         }
         return null;
+    }
+
+    /** Bootstrap callbacks ran once before construction; seed each instance enable cycle. */
+    static void seedBootstrapCommands(JavaPlugin plugin, FotonCommands commands) {
+        PluginState state = stateOf(plugin);
+        if (state != null && state.bootstrap != null) state.bootstrap.seedCommands(commands);
     }
 
     private static boolean isPublishedLocked(Plugin candidate) {
@@ -1716,8 +1633,12 @@ public final class PluginHost {
             for (int index = snapshot.size() - 1; index >= 0; index--) {
                 discardSerialized(snapshot.get(index));
             }
+            synchronized (lifecycle) {
+                if (loaded.isEmpty()) selectedProviders.clear();
+            }
         } finally {
             lifecycleOperation.unlock();
         }
+        closeItemBridgeIfDrained();
     }
 }

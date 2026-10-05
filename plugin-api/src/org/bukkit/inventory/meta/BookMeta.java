@@ -90,6 +90,8 @@ public interface BookMeta extends ItemMeta {
 
     Generation getGeneration();
 
+    boolean hasGeneration();
+
     void setGeneration(Generation generation);
 
     @Override

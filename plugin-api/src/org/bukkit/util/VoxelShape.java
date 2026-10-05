@@ -6,6 +6,11 @@ import java.util.Collection;
 public interface VoxelShape {
     Collection<BoundingBox> getBoundingBoxes();
 
-    /** Whether any box of the shape overlaps {@code other}. */
-    boolean overlaps(BoundingBox other);
+    default boolean overlaps(BoundingBox other) {
+        if (other == null) return false;
+        for (BoundingBox box : getBoundingBoxes()) {
+            if (box != null && box.overlaps(other)) return true;
+        }
+        return false;
+    }
 }

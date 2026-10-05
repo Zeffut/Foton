@@ -23,7 +23,7 @@ use foton_utils::{DowncastType, DowncastTypeKey};
 
 use crate::entity::{Entity, SharedEntity, WeakEntity};
 use crate::inventory::prelude::*;
-use crate::inventory::slots::{ArmorSlot, SlotStorage};
+use crate::inventory::slots::{ArmorSlot, MenuSlotReadSource, SlotStorage};
 use crate::player::player_inventory::PlayerInventory;
 
 /// Reads the inventory a mount owns right now.
@@ -193,6 +193,10 @@ unsafe impl DowncastType for MountEquipmentSlot {
 }
 
 impl Slot for MountEquipmentSlot {
+    fn live_read_source(&self) -> Option<MenuSlotReadSource> {
+        self.base.live_read_source()
+    }
+
     fn storage(&self) -> &SlotStorage {
         self.base.storage()
     }

@@ -109,7 +109,7 @@ public final class FotonScheduler implements BukkitScheduler {
         PluginGeneration generation = generationTable().find(plugin);
         if (generation == null || !generation.accepting()) {
             throw new org.bukkit.plugin.IllegalPluginAccessException(
-                "Plugin attempted to register task while disabled");
+                "Plugin attempted to register a task while disabled: " + plugin.getName());
         }
     }
 

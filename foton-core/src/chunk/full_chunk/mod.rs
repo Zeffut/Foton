@@ -51,6 +51,16 @@ use crate::world::tick_scheduler::{
 use crate::world::{World, game_event::GameEventListenerCount};
 use foton_worldgen::structure::{StructureReferenceMap, StructureStartMap};
 
+pub(crate) fn client_block_entity_info(entity: &dyn BlockEntity) -> BlockEntityInfo {
+    let pos = entity.get_block_pos();
+    BlockEntityInfo {
+        packed_xz: PackedChunkLocalXZ::from_block_pos(pos),
+        y: pos.0.y as i16,
+        type_id: entity.get_type().id() as i32,
+        data: entity.get_client_update_tag().into(),
+    }
+}
+
 /// Borrowed capability for Full-only live world access.
 ///
 /// Similar to Java's `LevelChunk`, this holds a weak reference to the world
@@ -2074,18 +2084,7 @@ impl FullChunkRef<'_> {
             .block_entity_storage()
             .get_all()
             .iter()
-            .map(|entity| {
-                let pos = entity.get_block_pos();
-                let type_id = entity.get_type().id() as i32;
-                let update_tag = entity.get_update_tag();
-
-                BlockEntityInfo {
-                    packed_xz: PackedChunkLocalXZ::from_block_pos(pos),
-                    y: pos.0.y as i16,
-                    type_id,
-                    data: update_tag.into(),
-                }
-            })
+            .map(|entity| client_block_entity_info(entity.as_ref()))
             .collect();
 
         ChunkPacketData {

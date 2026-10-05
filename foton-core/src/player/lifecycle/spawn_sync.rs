@@ -184,6 +184,8 @@ impl Player {
         self.reset_flying_ticks();
 
         self.send_spawn_state_packets(&world);
+        // Admission/domain-switch completion sends the canonical team snapshot
+        // with the recipe book, once. Reset/spawn must not duplicate it.
 
         // Force health/xp resync on next tick
         self.reset_sent_info();
