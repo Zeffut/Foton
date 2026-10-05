@@ -759,7 +759,16 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
     }
 
     static void recalculateAllPermissions() {
-        for (PlayerPermissions state : PERMISSIONS.values()) state.recalculate();
+        Throwable failure = null;
+        for (PlayerPermissions state : PERMISSIONS.values()) {
+            try { state.recalculate(); }
+            catch (RuntimeException | Error error) {
+                if (failure == null) failure = error;
+                else if (failure != error) failure.addSuppressed(error);
+            }
+        }
+        if (failure instanceof RuntimeException error) throw error;
+        if (failure instanceof Error error) throw error;
     }
 
     @Override public java.util.Set<org.bukkit.permissions.PermissionAttachmentInfo> getEffectivePermissions() {

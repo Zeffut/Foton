@@ -63,8 +63,10 @@ public final class PaperLoading {
             Path competing = root.resolve("competing");
             fixture(competing, "AliasAlpha", false, "provides: [Competing]\n", null);
             fixture(competing, "AliasZulu", false, "load: STARTUP\nprovides: [Competing]\n", null);
-            equal(PluginHost.loadAll(competing.toString()), 2, "competing aliases both load");
+            fixture(competing, "AliasConsumer", false, "softdepend: [Competing]\n", null);
+            equal(PluginHost.loadAll(competing.toString()), 3, "competing aliases and optional consumer load");
             equal(PluginHost.byName("Competing").getName(), "AliasAlpha", "graph alias selection survives startup ordering");
+            competingRetirement(root);
             PluginHost.disableAll();
             descriptorsAndPhases();
             System.setProperty("foton.paper.order", "");
@@ -220,6 +222,65 @@ public final class PaperLoading {
         return java.util.Arrays.stream(PluginHost.all()).map(org.bukkit.plugin.Plugin::getName).toList();
     }
 
+    private static void competingRetirement(Path root) throws Exception {
+        var original = PluginHost.byName("AliasAlpha");
+        var consumer = PluginHost.byName("AliasConsumer");
+        ClassLoader oldLoader = consumer.getClass().getClassLoader();
+        equal(Class.forName("fixture.AliasAlpha", false, oldLoader), original.getClass(),
+            "initial consumer binds selected provider");
+        var required = root.resolve("competing-required");
+        fixture(required, "OldRequiredConsumer", false, "depend: [Competing]\n", null);
+        equal(PluginHost.loadAll(required.toString()), 1, "required consumer binds original generation");
+        var oldRequired = PluginHost.byName("OldRequiredConsumer");
+        PluginHost.cleanup(original);
+        equal(PluginHost.byName("Competing"), null, "retired alias cannot promote live competitor");
+        hidden(oldLoader, "fixture.AliasZulu");
+        Path incremental = root.resolve("competing-incremental");
+        fixture(incremental, "Unrelated", false, "", null);
+        fixture(incremental, "MissingAliasConsumer", false, "depend: [Competing]\n", null);
+        equal(PluginHost.loadAll(incremental.toString()), 1,
+            "unselected competitor cannot satisfy incremental required dependency");
+        equal(PluginHost.byName("MissingAliasConsumer"), null, "missing alias consumer rejected");
+        equal(PluginHost.byName("OldRequiredConsumer"), null, "old required consumer fails rather than rebinding");
+        equal(oldRequired.isEnabled(), false, "required consumer retired after provider loss");
+        equal(PluginHost.byName("Competing"), null, "discovery must not promote live competitor");
+        equal(PluginHost.byName("AliasConsumer"), consumer, "optional old consumer remains live");
+        hidden(oldLoader, "fixture.AliasZulu");
+
+        Path replacement = root.resolve("competing-new-generation");
+        fixture(replacement, "AliasAlpha", false, "provides: [Competing]\n", null);
+        fixture(replacement, "FreshConsumer", false, "depend: [Competing]\n", null);
+        equal(PluginHost.loadAll(replacement.toString()), 2, "explicit replacement and fresh consumer load");
+        var current = PluginHost.byName("AliasAlpha");
+        if (current == original) throw new AssertionError("replacement must be a new instance");
+        equal(PluginHost.byName("Competing"), current, "lookup uses explicit new generation");
+        ClassLoader freshLoader = PluginHost.byName("FreshConsumer").getClass().getClassLoader();
+        equal(Class.forName("fixture.AliasAlpha", false, freshLoader), current.getClass(),
+            "fresh dependency admission and class visibility agree");
+        equal(Class.forName("fixture.AliasAlpha$Unresolved", false, freshLoader).getClassLoader(),
+            current.getClass().getClassLoader(), "fresh classes come from new provider generation");
+        hidden(oldLoader, "fixture.AliasAlpha$Unresolved");
+        hidden(oldLoader, "fixture.AliasZulu");
+        equal(PluginHost.byName("AliasConsumer"), consumer, "old optional consumer not silently rebound");
+        var previousRequired = PluginHost.byName("FreshConsumer");
+        PluginHost.cleanup(current);
+        Path next = root.resolve("competing-immediate-replacement");
+        fixture(next, "AliasAlpha", false, "provides: [Competing]\n", null);
+        fixture(next, "NextConsumer", false, "depend: [Competing]\n", null);
+        equal(PluginHost.loadAll(next.toString()), 2, "new provider present before required failure propagation");
+        equal(PluginHost.byName("FreshConsumer"), null, "new same-name generation cannot satisfy old required binding");
+        equal(previousRequired.isEnabled(), false, "old required consumer retired despite alias being available");
+        equal(PluginHost.byName("Competing"), PluginHost.byName("AliasAlpha"), "next generation owns alias");
+        hidden(oldLoader, "fixture.AliasAlpha$Unresolved");
+    }
+
+    private static void hidden(ClassLoader loader, String name) throws Exception {
+        try {
+            Class.forName(name, false, loader);
+            throw new AssertionError("unexpected dependency class visibility: " + name);
+        } catch (ClassNotFoundException expected) { }
+    }
+
     private static void equal(Object actual, Object expected, String message) {
         if (!java.util.Objects.equals(actual, expected)) {
             throw new AssertionError(message + ": expected " + expected + ", got " + actual);
@@ -239,6 +300,7 @@ public final class PaperLoading {
         Files.writeString(source, "package fixture; public final class " + name
             + " extends org.bukkit.plugin.java.JavaPlugin { public " + name
             + "() { record(\"construct:\"); } public void onEnable() { record(\"enable:\"); }"
+            + "public static final class Unresolved {}"
             + "private void record(String phase) { String key = \"foton.paper.order\";"
             + "System.setProperty(key, System.getProperty(key, \"\") + phase + getName() + \";\"); }}", StandardCharsets.UTF_8);
         int result = javax.tools.ToolProvider.getSystemJavaCompiler().run(null, null, null,
@@ -246,6 +308,7 @@ public final class PaperLoading {
         equal(result, 0, "fixture compilation");
         try (JarOutputStream jar = new JarOutputStream(Files.newOutputStream(directory.resolve(name + ".jar")))) {
             entry(jar, "fixture/" + name + ".class", Files.readAllBytes(classes.resolve("fixture/" + name + ".class")));
+            entry(jar, "fixture/" + name + "$Unresolved.class", Files.readAllBytes(classes.resolve("fixture/" + name + "$Unresolved.class")));
             entry(jar, paper ? "paper-plugin.yml" : "plugin.yml", ("name: " + name
                 + "\nversion: 1\nmain: fixture." + name + "\napi-version: '" + apiVersion + "'\n" + fields).getBytes(StandardCharsets.UTF_8));
             if (legacy != null) entry(jar, "plugin.yml", legacy.getBytes(StandardCharsets.UTF_8));

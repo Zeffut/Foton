@@ -9,21 +9,24 @@ public final class PermissionRollbackCheck {
     public static void main(String[] args) throws Exception { check(); }
 
     static void check() throws Exception {
-        checkFailure(false);
-        checkFailure(true);
+        checkFailure(false, false);
+        checkFailure(true, false);
+        checkFailure(false, true);
+        checkFailure(true, true);
     }
 
-    private static void checkFailure(boolean late) throws Exception {
+    private static void checkFailure(boolean late, boolean playerFailure) throws Exception {
         Path root = Files.createTempDirectory("foton-permission-rollback-");
         var permissible = new ThrowingPermissible();
         var healthy = new org.bukkit.permissions.PermissibleBase(null);
-        var players = new PlayerCaches(healthy);
+        var players = new PlayerCaches(healthy, playerFailure);
         var onLoadRan = new java.util.concurrent.atomic.AtomicBoolean();
         System.getProperties().put("foton.permission.rollback.arm", (Runnable) () -> {
             onLoadRan.set(true);
             Checks.expect(healthy.hasPermission("fixture.rollback"), "healthy default grant populated before onLoad failure");
             players.assertChild(true);
-            permissible.armed = true;
+            if (playerFailure) players.arm();
+            else permissible.armed = true;
         });
         try {
             Path source = root.resolve("PermissionFailure.java");
@@ -55,15 +58,25 @@ public final class PermissionRollbackCheck {
                     .getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 jar.closeEntry();
             }
-            permissible.armed = !late;
+            permissible.armed = !late && !playerFailure;
+            if (!late && playerFailure) players.arm();
             Checks.same(foton.PluginHost.loadAllOnLoad(root.toString()), 0,
                 "throwing permissible must roll back load");
             JavaPlugin instance = (JavaPlugin) System.getProperties().get("foton.permission.rollback.instance");
             Checks.expect(instance != null, "fixture must construct before permission failure");
             Checks.same(onLoadRan.get(), late, "publication failure must prevent onLoad; late failure must reach it");
-            Checks.expect(permissible.failures >= (late ? 1 : 2), "rollback must survive cleanup callback failures");
+            Checks.expect((playerFailure ? players.failures() : permissible.failures) >= (late ? 1 : 2),
+                "rollback must survive cleanup callback failures");
             Checks.expect(!healthy.hasPermission("fixture.rollback"), "healthy default grant revoked despite first thrower");
             players.assertChild(false);
+            if (playerFailure) {
+                try {
+                    foton.PermissionRegistry.changed();
+                    throw new AssertionError("player callback failures must propagate after traversal");
+                } catch (IllegalStateException expected) {
+                    Checks.same(expected.getSuppressed().length, 1, "both player failures must be aggregated");
+                }
+            }
             Checks.expect(!instance.isEnabled(), "failed publication left enabled instance");
             Checks.expect(foton.PluginHost.byName("PermissionFailure") == null
                 && foton.PluginHost.byName("PermissionAlias") == null,
@@ -97,7 +110,10 @@ public final class PermissionRollbackCheck {
         private final java.util.List<Object> keys = new java.util.ArrayList<>();
         private final java.util.List<Object> states = new java.util.ArrayList<>();
         private final java.lang.reflect.Field resolved;
-        PlayerCaches(org.bukkit.permissions.Permissible permissible) throws Exception {
+        private final ThrowingPermission foreign;
+        PlayerCaches(org.bukkit.permissions.Permissible permissible, boolean playerFailure) throws Exception {
+            foreign = playerFailure ? new ThrowingPermission() : null;
+            if (foreign != null) foton.PermissionRegistry.add(foreign);
             var field = foton.FotonPlayer.class.getDeclaredField("PERMISSIONS");
             field.setAccessible(true);
             map = (java.util.Map<?, ?>) field.get(null);
@@ -111,7 +127,7 @@ public final class PermissionRollbackCheck {
             var session = Class.forName("foton.FotonPlayer$SessionKey").getDeclaredConstructor(java.util.UUID.class, long.class);
             session.setAccessible(true);
             var owner = new JavaPlugin() {};
-            for (int index = 0; index < 2; index++) {
+            for (int index = 0; index < (playerFailure ? 3 : 2); index++) {
                 Object state = constructor.newInstance();
                 var attachment = new org.bukkit.permissions.PermissionAttachment(owner, permissible);
                 attachment.setPermission("fixture.rollback", true);
@@ -121,7 +137,21 @@ public final class PermissionRollbackCheck {
                 keys.add(key);
                 states.add(state);
             }
+            if (foreign != null) {
+                // Choose by the real map traversal, not UUID/hash assumptions.
+                var ordered = map.values().stream().filter(states::contains).toList();
+                for (Object failing : java.util.List.of(ordered.get(0), ordered.get(2))) {
+                    var attachment = new org.bukkit.permissions.PermissionAttachment(owner, permissible);
+                    attachment.setPermission(foreign.getName(), true);
+                    add.invoke(failing, attachment);
+                    states.remove(failing);
+                }
+                Checks.expect(states.getFirst() == ordered.get(1),
+                    "healthy cache must follow the first failing player in real map traversal");
+            }
         }
+        void arm() { foreign.armed = true; }
+        int failures() { return foreign.failures; }
         void assertChild(boolean present) {
             try {
                 for (Object state : states) Checks.expect(
@@ -129,7 +159,24 @@ public final class PermissionRollbackCheck {
                     "every player cache must invalidate despite foreign permissible failure");
             } catch (IllegalAccessException error) { throw new AssertionError(error); }
         }
-        public void close() { for (Object key : keys) map.remove(key); }
+        public void close() {
+            if (foreign != null) foreign.armed = false;
+            for (Object key : keys) map.remove(key);
+            if (foreign != null) foton.PermissionRegistry.remove(foreign.getName());
+        }
+    }
+
+    private static final class ThrowingPermission extends org.bukkit.permissions.Permission {
+        boolean armed;
+        int failures;
+        ThrowingPermission() { super("fixture.foreign", org.bukkit.permissions.PermissionDefault.FALSE); }
+        @Override public java.util.Map<String, Boolean> getChildren() {
+            if (armed) {
+                failures++;
+                throw new IllegalStateException("intentional player descriptor failure");
+            }
+            return super.getChildren();
+        }
     }
 
     private static final class ThrowingPermissible extends org.bukkit.permissions.PermissibleBase {

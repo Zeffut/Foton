@@ -30,6 +30,21 @@ These are explicit integration choices, not a universal Paper certification.
   resolver. Automatic `paper-libraries.json` remains a Foton-only adapter when
   no custom loader is declared; a custom loader owns that resolution exclusively.
 
+## Incremental alias retirement and dependency generations
+
+Only registered identities participate in live lookup. Retiring the selected
+alias provider does not promote a previously unselected live competitor, even
+on subsequent discovery. A new discovery batch can explicitly load a replacement
+generation and its new consumers; fresh-batch deterministic selection is unchanged.
+
+Required dependency admission and future dependency class resolution use the
+provider generation prepared for each consumer, including same-batch AFTER/OMIT
+providers. Existing consumers do not acquire replacement generations (or newly
+appearing optional providers) by name. Required consumers fail the existing
+lifecycle validation when their bound provider is retired; optional consumers
+can remain but cannot resolve new classes through that retired binding. Classes
+already resolved by the JVM are not retroactively unloaded.
+
 ## Player saves: format 13, no automatic migration
 
 Both integration parents labeled incompatible positional player layouts as

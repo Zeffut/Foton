@@ -80,6 +80,8 @@ public final class PluginHost {
         final PluginDescriptionFile descriptor;
         org.bukkit.plugin.java.PluginClassLoader loader;
         PaperBootstrapRunner bootstrap;
+        DependencyClassLoader dependencies;
+        Map<String, java.lang.ref.WeakReference<PluginState>> providers = Map.of();
         JavaPlugin plugin;
         Status status = Status.DISCOVERED;
         boolean enableAttempted;
@@ -241,6 +243,9 @@ public final class PluginHost {
             }
         }
         for (PreparedBootstrap unused : bootstraps.values()) closeUnpublished(unused.loader());
+        // Every same-batch state exists now, including AFTER/OMIT providers.
+        // Bind generations before any constructor can resolve dependency classes.
+        for (PluginState state : prepared.values()) bindProviders(state);
         for (DiscoveredPlugin plugin : ordered) {
             PluginState state = prepared.get(plugin);
             if (state == null) continue;
@@ -255,7 +260,7 @@ public final class PluginHost {
             PluginState state = prepared.get(discovered);
             if (state == null || state.plugin == null) continue;
             JavaPlugin plugin = state.plugin;
-            String unavailable = unavailablePriorDependency(discovered.descriptor, false);
+            String unavailable = unavailablePriorDependency(state, false);
             if (unavailable != null) {
                 System.out.println("[host] " + plugin.getName()
                     + ": required dependency " + unavailable + " did not load");
@@ -464,7 +469,7 @@ public final class PluginHost {
                 InvocationState invocation = invocations.get(plugin);
                 if (invocation == null || invocation.loading || invocation.enabling || invocation.disabling) continue;
             }
-            String unavailable = unavailablePriorDependency(plugin.getDescription(), true);
+            String unavailable = unavailablePriorDependency(state, true);
             if (unavailable != null) {
                 System.out.println("[host] " + plugin.getName()
                     + ": required dependency " + unavailable + " did not enable");
@@ -574,7 +579,11 @@ public final class PluginHost {
         rejectLoadedIdentityConflicts(discovered, rejected);
         Map<String, File> jarsByName = new HashMap<>();
         List<PluginDescriptionFile> descriptors = new ArrayList<>();
-        for (Plugin live : all()) descriptors.add(live.getDescription());
+        Set<String> liveNames = new HashSet<>();
+        for (Plugin live : all()) {
+            descriptors.add(live.getDescription());
+            liveNames.add(key(live.getName()));
+        }
         List<File> bootstrapCandidates = new ArrayList<>();
         for (DiscoveredPlugin plugin : discovered) {
             if (rejected.contains(plugin)) continue;
@@ -582,9 +591,10 @@ public final class PluginHost {
             jarsByName.put(plugin.key, plugin.jar);
             bootstrapCandidates.add(plugin.jar);
         }
-        PluginDependencyGraph graph = new PluginDependencyGraph(descriptors);
+        PluginDependencyGraph graph;
         synchronized (lifecycle) {
             if (loaded.isEmpty()) selectedProviders.clear();
+            graph = new PluginDependencyGraph(descriptors, selectedProviders, liveNames);
             // Live selections are stable across incremental discovery.
             graph.providers().forEach(selectedProviders::putIfAbsent);
         }
@@ -687,12 +697,12 @@ public final class PluginHost {
         state.bootstrap = prepared == null ? null : prepared.runner();
         registerState(state);
         try {
+            state.dependencies = prepared == null ? new DependencyClassLoader(
+                PluginDependencyGraph.visible(descriptor, PaperPluginDescriptor.Phase.SERVER)) : prepared.dependencies();
             org.bukkit.plugin.java.PluginClassLoader loader =
                 prepared == null ? new org.bukkit.plugin.java.PluginClassLoader(
-                    pluginUrls(jar, descriptor), dependencyParent(descriptor)) : prepared.loader();
+                    pluginUrls(jar, descriptor), state.dependencies) : prepared.loader();
             state.loader = loader;
-            if (prepared != null) prepared.dependencies().useServerDependencies(
-                PluginDependencyGraph.visible(descriptor, PaperPluginDescriptor.Phase.SERVER));
             File dataFolder = new File(bundledNames.contains(key(descriptor.getName()))
                 ? pluginsDirectory : jar.getParentFile(), descriptor.getName());
             // Before the constructor, not after: a plugin may call getName()
@@ -788,12 +798,11 @@ public final class PluginHost {
     }
 
     private static String unavailablePriorDependency(
-            PluginDescriptionFile descriptor, boolean enabling) {
-        for (String dependency : requiredDependencies(descriptor)) {
-            Plugin provider = byName(dependency);
-            PluginState state = provider == null ? null : stateOf(provider);
-            if (state == null || state.status == Status.FAILED
-                    || enabling && state.enableAttempted && !provider.isEnabled())
+            PluginState consumer, boolean enabling) {
+        for (String dependency : requiredDependencies(consumer.descriptor)) {
+            PluginState state = boundProvider(consumer.providers, dependency);
+            if (state == null || state.plugin == null || state.status == Status.FAILED
+                    || enabling && state.enableAttempted && !state.plugin.isEnabled())
                 return dependency;
         }
         return null;
@@ -807,7 +816,7 @@ public final class PluginHost {
                 PluginState state = stateOf(plugin);
                 if (state == null || (enabling && !plugin.isEnabled())) continue;
                 String unavailable = unavailableRequiredDependency(
-                    plugin.getDescription(), enabling);
+                    state, enabling);
                 if (unavailable == null) continue;
                 System.out.println("[host] " + plugin.getName()
                     + ": required dependency " + unavailable
@@ -820,15 +829,15 @@ public final class PluginHost {
     }
 
     private static String unavailableRequiredDependency(
-            PluginDescriptionFile descriptor, boolean enabling) {
-        for (String dependency : requiredDependencies(descriptor)) {
-            if (!dependencyAvailable(dependency, enabling)) return dependency;
+            PluginState consumer, boolean enabling) {
+        for (String dependency : requiredDependencies(consumer.descriptor)) {
+            if (!dependencyAvailable(consumer, dependency, enabling)) return dependency;
         }
         return null;
     }
 
-    private static boolean dependencyAvailable(String name, boolean enabling) {
-        PluginState state = states.get(key(name));
+    private static boolean dependencyAvailable(PluginState consumer, String name, boolean enabling) {
+        PluginState state = boundProvider(consumer.providers, name);
         return state != null && (enabling
             ? state.status == Status.ENABLED
             : state.status == Status.LOADED || state.status == Status.ENABLED);
@@ -1131,9 +1140,27 @@ public final class PluginHost {
         }
     }
 
-    private static ClassLoader dependencyParent(PluginDescriptionFile descriptor) {
-        List<String> visible = PluginDependencyGraph.visible(descriptor, PaperPluginDescriptor.Phase.SERVER);
-        return visible.isEmpty() ? PluginHost.class.getClassLoader() : new DependencyClassLoader(visible);
+    private static void bindProviders(PluginState consumer) {
+        List<String> visible = PluginDependencyGraph.visible(consumer.descriptor, PaperPluginDescriptor.Phase.SERVER);
+        Map<String, java.lang.ref.WeakReference<PluginState>> bindings = new HashMap<>();
+        List<String> names = new ArrayList<>(visible);
+        names.addAll(requiredDependencies(consumer.descriptor));
+        synchronized (lifecycle) {
+            for (String name : names) {
+                PluginState provider = states.get(key(name));
+                if (provider != null) bindings.put(key(name), new java.lang.ref.WeakReference<>(provider));
+            }
+            consumer.providers = Map.copyOf(bindings);
+            consumer.dependencies.useServerDependencies(visible, consumer.providers);
+        }
+    }
+
+    private static PluginState boundProvider(
+            Map<String, java.lang.ref.WeakReference<PluginState>> bindings, String name) {
+        var reference = bindings.get(key(name));
+        PluginState provider = reference == null ? null : reference.get();
+        // Retirement invalidates the binding immediately, including during draining.
+        return provider != null && states.get(key(name)) == provider ? provider : null;
     }
 
     private static final class DependencyClassLoader extends ClassLoader {
@@ -1142,6 +1169,7 @@ public final class PluginHost {
         private volatile List<String> dependencies;
         private final Map<String, org.bukkit.plugin.java.PluginClassLoader> bootstrapLoaders;
         private volatile boolean bootstrapPhase;
+        private Map<String, java.lang.ref.WeakReference<PluginState>> serverProviders = Map.of();
 
         private DependencyClassLoader(List<String> dependencies) {
             this(dependencies, Map.of(), false);
@@ -1161,8 +1189,10 @@ public final class PluginHost {
             this.bootstrapPhase = bootstrapPhase;
         }
 
-        private void useServerDependencies(List<String> serverDependencies) {
+        private void useServerDependencies(List<String> serverDependencies,
+                Map<String, java.lang.ref.WeakReference<PluginState>> providers) {
             this.dependencies = List.copyOf(serverDependencies);
+            this.serverProviders = providers;
             this.bootstrapPhase = false;
         }
 
@@ -1183,9 +1213,8 @@ public final class PluginHost {
                                     pluginKey(dependency));
                                 loader = bootstrapLoaders.get(alias);
                             } else {
-                                Plugin plugin = findByNameLocked(dependency);
-                                loader = loadersByPlugin.get(plugin);
-                                if (loader == null) loader = pluginLoaders.get(pluginKey(dependency));
+                                PluginState provider = boundProvider(serverProviders, dependency);
+                                loader = provider == null ? null : provider.loader;
                             }
                             if (loader != null) available.add(loader);
                         }
@@ -1602,20 +1631,9 @@ public final class PluginHost {
     }
 
     private static Plugin findByNameLocked(String name) {
-        String selected = selectedProviders.get(pluginKey(name));
-        return findExactNameLocked(selected == null ? name : selected);
-    }
-
-    private static Plugin findExactNameLocked(String name) {
-        for (Plugin plugin : loaded) {
-            if (plugin.getName().equalsIgnoreCase(name)) return plugin;
-        }
-        for (Plugin plugin : loaded) {
-            if (containsIgnoreCase(plugin.getDescription().getProvides(), name)) {
-                return plugin;
-            }
-        }
-        return null;
+        PluginState state = states.get(pluginKey(name));
+        return state != null && state.plugin != null && isPublishedLocked(state.plugin)
+            ? state.plugin : null;
     }
 
     /** Bootstrap callbacks ran once before construction; seed each instance enable cycle. */

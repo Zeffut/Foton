@@ -19,6 +19,11 @@ final class PluginDependencyGraph {
     private final Map<String, String> providers = new HashMap<>();
 
     PluginDependencyGraph(Iterable<PluginDescriptionFile> descriptors) {
+        this(descriptors, Map.of(), Set.of());
+    }
+
+    PluginDependencyGraph(Iterable<PluginDescriptionFile> descriptors,
+            Map<String, String> liveProviders, Set<String> liveNames) {
         for (PluginDescriptionFile descriptor : descriptors) {
             String key = key(descriptor.getName());
             if (plugins.putIfAbsent(key, descriptor) != null) {
@@ -29,9 +34,13 @@ final class PluginDependencyGraph {
         // A real plugin name has priority over a provided alias.
         for (var entry : plugins.entrySet()) {
             for (String alias : entry.getValue().getProvides()) {
+                // A live loser cannot acquire an alias on a later discovery pass.
+                if (liveNames.contains(entry.getKey())
+                        && !entry.getKey().equals(liveProviders.get(key(alias)))) continue;
                 providers.putIfAbsent(key(alias), entry.getKey());
             }
         }
+        providers.putAll(liveProviders);
     }
 
     List<String> order(PaperPluginDescriptor.Phase phase) {
