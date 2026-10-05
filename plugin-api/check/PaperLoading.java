@@ -27,6 +27,10 @@ public final class PaperLoading {
                 catch (java.lang.reflect.InvocationTargetException error) { throw error.getCause(); }
             }));
         try {
+            lateOptionalProviders(root.resolve("late-bukkit"), false, false);
+            lateOptionalProviders(root.resolve("late-paper"), true, false);
+            lateOptionalProviders(root.resolve("failed-then-late-bukkit"), false, true);
+            lateOptionalProviders(root.resolve("failed-then-late-paper"), true, true);
             Path original = root.resolve("original-alias");
             fixture(original, "Retained", false, "provides: [Obsolete]\n", null);
             equal(PluginHost.loadAll(original.toString()), 1, "original alias provider loads");
@@ -220,6 +224,58 @@ public final class PaperLoading {
 
     private static List<String> order() {
         return java.util.Arrays.stream(PluginHost.all()).map(org.bukkit.plugin.Plugin::getName).toList();
+    }
+
+    private static void lateOptionalProviders(Path root, boolean paper, boolean failedPreparation) throws Exception {
+        Path consumers = root.resolve("consumers");
+        String optional = paper
+            ? "dependencies:\n  server:\n    LateService:\n      required: false\n      join-classpath: true\n"
+            : "softdepend: [LateService]\n";
+        fixture(consumers, "LateConsumer", paper, optional, null);
+        fixture(consumers, "QuietConsumer", paper, optional, null);
+        if (failedPreparation) fixture(consumers, "LateProvider", false,
+            "provides: [LateService]\nlibraries: [invalid-coordinate]\n", null);
+        if (paper) fixture(consumers, "NoJoinConsumer", true,
+            "dependencies:\n  server:\n    LateService:\n      required: false\n      join-classpath: false\n", null);
+        equal(PluginHost.loadAll(consumers.toString()), paper ? 3 : 2, "optional consumers load without provider");
+        var consumer = PluginHost.byName("LateConsumer");
+        var quiet = PluginHost.byName("QuietConsumer");
+        ClassLoader consumerLoader = consumer.getClass().getClassLoader();
+        hidden(consumerLoader, "fixture.LateProvider$Unresolved");
+        Path first = root.resolve("first-provider");
+        fixture(first, "LateProvider", false, "provides: [LateService]\n", null);
+        equal(PluginHost.loadAll(first.toString()), 1, "first optional provider loads from another directory");
+        var provider = PluginHost.byName("LateProvider");
+        equal(PluginHost.byName("LateService"), provider, "late registered alias lookup");
+        equal(Class.forName("fixture.LateProvider$Unresolved", false, consumerLoader).getClassLoader(),
+            provider.getClass().getClassLoader(), "never-bound optional acquires first provider generation");
+        if (paper) hidden(PluginHost.byName("NoJoinConsumer").getClass().getClassLoader(),
+            "fixture.LateProvider$Unresolved");
+        PluginHost.cleanup(provider);
+        equal(PluginHost.byName("LateService"), null, "first provider alias retired");
+        // Deterministically simulate collection of the retired weak referent.
+        var statesField = PluginHost.class.getDeclaredField("statesByPlugin");
+        statesField.setAccessible(true);
+        Object quietState = ((java.util.Map<?, ?>) statesField.get(null)).get(quiet);
+        var providersField = quietState.getClass().getDeclaredField("providers");
+        providersField.setAccessible(true);
+        var binding = (java.lang.ref.Reference<?>) ((java.util.Map<?, ?>) providersField.get(quietState)).get("lateservice");
+        if (binding == null) throw new AssertionError("first provider must bind even without class lookup");
+        binding.clear();
+        Path replacement = root.resolve("replacement");
+        fixture(replacement, "ReplacementProvider", false, "provides: [LateService]\n", null);
+        fixture(replacement, "FreshOptionalConsumer", paper, optional, null);
+        equal(PluginHost.loadAll(replacement.toString()), 2, "replacement and fresh optional consumer load");
+        var next = PluginHost.byName("ReplacementProvider");
+        equal(PluginHost.byName("LateService"), next, "public lookup uses replacement");
+        equal(Class.forName("fixture.ReplacementProvider$Unresolved", false,
+                PluginHost.byName("FreshOptionalConsumer").getClass().getClassLoader()).getClassLoader(),
+            next.getClass().getClassLoader(), "fresh consumer resolves replacement-only class");
+        hidden(consumerLoader, "fixture.ReplacementProvider$Unresolved");
+        hidden(quiet.getClass().getClassLoader(), "fixture.ReplacementProvider$Unresolved");
+        equal(PluginHost.byName("LateConsumer"), consumer, "old optional consumer remains live");
+        equal(PluginHost.byName("QuietConsumer"), quiet, "unused optional binding stays retired");
+        PluginHost.disableAll();
     }
 
     private static void competingRetirement(Path root) throws Exception {

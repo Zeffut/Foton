@@ -39,11 +39,18 @@ generation and its new consumers; fresh-batch deterministic selection is unchang
 
 Required dependency admission and future dependency class resolution use the
 provider generation prepared for each consumer, including same-batch AFTER/OMIT
-providers. Existing consumers do not acquire replacement generations (or newly
-appearing optional providers) by name. Required consumers fail the existing
-lifecycle validation when their bound provider is retired; optional consumers
-can remain but cannot resolve new classes through that retired binding. Classes
-already resolved by the JVM are not retroactively unloaded.
+providers. An initially absent Bukkit soft dependency or optional Paper SERVER
+joined-classpath dependency can acquire its first registered provider later.
+The binding occurs when that provider's selected identity and loader are
+registered, before construction/publication, not at the consumer's first class
+lookup. A preparation that fails before loader registration is not availability.
+Once bound, an expired weak reference remains a retired binding: neither a
+replacement generation nor a surviving unselected alias competitor can take over.
+
+Required consumers fail the existing lifecycle validation when their bound
+provider is retired; optional consumers can remain but cannot resolve new classes
+through that retired binding. Classes already resolved by the JVM are not
+retroactively unloaded.
 
 ## Player saves: format 13, no automatic migration
 

@@ -708,7 +708,7 @@ public final class PluginHost {
             // Before the constructor, not after: a plugin may call getName()
             // or getLogger() from it, and several do.
             loader.describe(org.bukkit.Bukkit.getServer(), descriptor, dataFolder);
-            registerLoader(descriptor, loader);
+            registerLoader(state);
             return state;
         } catch (Throwable error) {
             rollback(state);
@@ -854,16 +854,28 @@ public final class PluginHost {
         for (String identity : identities) states.put(identity, state);
     }
 
-    private static void registerLoader(
-            PluginDescriptionFile descriptor,
-            org.bukkit.plugin.java.PluginClassLoader loader) {
-        List<String> identities = selectedIdentityKeys(descriptor);
-        for (String identity : identities) {
-            if (pluginLoaders.containsKey(identity)) {
-                throw new IllegalStateException("plugin identity is already registered: " + identity);
+    private static void registerLoader(PluginState provider) {
+        synchronized (lifecycle) {
+            List<String> identities = selectedIdentityKeys(provider.descriptor);
+            for (String identity : identities) {
+                if (pluginLoaders.containsKey(identity)) {
+                    throw new IllegalStateException("plugin identity is already registered: " + identity);
+                }
+            }
+            for (String identity : identities) pluginLoaders.put(identity, provider.loader);
+            // Pin first availability, not first class lookup. A weak reference whose
+            // referent has expired is still a binding, and must never be replaced.
+            for (Plugin plugin : loaded) {
+                PluginState consumer = statesByPlugin.get(plugin);
+                for (String name : PluginDependencyGraph.visible(
+                        consumer.descriptor, PaperPluginDescriptor.Phase.SERVER)) {
+                    String identity = key(name);
+                    if (!identities.contains(identity)
+                            || containsIgnoreCase(requiredDependencies(consumer.descriptor), name)) continue;
+                    consumer.providers.putIfAbsent(identity, new java.lang.ref.WeakReference<>(provider));
+                }
             }
         }
-        for (String identity : identities) pluginLoaders.put(identity, loader);
     }
 
     private static List<String> selectedIdentityKeys(PluginDescriptionFile descriptor) {
@@ -1148,19 +1160,27 @@ public final class PluginHost {
         synchronized (lifecycle) {
             for (String name : names) {
                 PluginState provider = states.get(key(name));
-                if (provider != null) bindings.put(key(name), new java.lang.ref.WeakReference<>(provider));
+                boolean required = containsIgnoreCase(requiredDependencies(consumer.descriptor), name);
+                if (provider != null && (required || provider.loader != null
+                        && pluginLoaders.get(key(name)) == provider.loader)) {
+                    bindings.put(key(name), new java.lang.ref.WeakReference<>(provider));
+                }
             }
-            consumer.providers = Map.copyOf(bindings);
+            // Missing entries are never-bound optionals; retained weak entries
+            // distinguish retired generations. Access is guarded by lifecycle.
+            consumer.providers = bindings;
             consumer.dependencies.useServerDependencies(visible, consumer.providers);
         }
     }
 
     private static PluginState boundProvider(
             Map<String, java.lang.ref.WeakReference<PluginState>> bindings, String name) {
-        var reference = bindings.get(key(name));
-        PluginState provider = reference == null ? null : reference.get();
-        // Retirement invalidates the binding immediately, including during draining.
-        return provider != null && states.get(key(name)) == provider ? provider : null;
+        synchronized (lifecycle) {
+            var reference = bindings.get(key(name));
+            PluginState provider = reference == null ? null : reference.get();
+            // Retirement invalidates the binding immediately, including during draining.
+            return provider != null && states.get(key(name)) == provider ? provider : null;
+        }
     }
 
     private static final class DependencyClassLoader extends ClassLoader {
