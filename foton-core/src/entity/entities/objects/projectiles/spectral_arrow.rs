@@ -29,6 +29,7 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, MobEffectInstance, Projectile,
     ProjectileBase, ProjectileDeflection, RemovalReason, SharedEntity, next_entity_id,
 };
+use crate::event::Combuster;
 use crate::inventory::container::Container as _;
 use crate::inventory::slot_ranges::CONTENTS_SLOT;
 use crate::physics::MoverType;
@@ -65,7 +66,7 @@ const FLAG_CRIT: i8 = 1;
 /// Seconds a burning arrow sets its target alight for.
 ///
 /// Vanilla parity: the `igniteForSeconds(5.0F)` of `AbstractArrow.onHitEntity`.
-const IGNITE_TICKS: i32 = 100;
+const IGNITE_SECONDS: f32 = 5.0;
 
 /// How far back along its own travel an arrow is pulled when it lands.
 ///
@@ -462,7 +463,7 @@ impl Projectile for SpectralArrowEntity {
         let is_enderman = target.entity_type() == &vanilla_entities::ENDERMAN;
         let fire_ticks_before = target.remaining_fire_ticks();
         if self.is_on_fire() && !is_enderman {
-            target.ignite_for_ticks(IGNITE_TICKS);
+            target.ignite_for_seconds(IGNITE_SECONDS, Combuster::Entity(self.uuid()));
         }
 
         #[expect(

@@ -240,6 +240,24 @@ public final class EventRelay {
             Integer.parseInt(at[2]));
     }
 
+    /** Answers `cancelled, seconds`. `combuster` is written as {@link #fireEntityDamage}'s damager. */
+    public static String fireEntityCombust(String entity, String combuster, String seconds) {
+        org.bukkit.entity.Entity victim = FotonEntity.handle(Native.parse(entity));
+        float duration = Float.parseFloat(seconds);
+        org.bukkit.event.entity.EntityCombustEvent event;
+        if (combuster.startsWith("entity:")) {
+            event = new org.bukkit.event.entity.EntityCombustByEntityEvent(
+                FotonEntity.handle(Native.parse(combuster.substring("entity:".length()))), victim, duration);
+        } else if (combuster.startsWith("block:")) {
+            event = new org.bukkit.event.entity.EntityCombustByBlockEvent(
+                block(victim, combuster.substring("block:".length())), victim, duration);
+        } else {
+            event = new org.bukkit.event.entity.EntityCombustEvent(victim, duration);
+        }
+        EventBridge.dispatch(event);
+        return answer(event.isCancelled(), event.getDuration());
+    }
+
     /** Separates the stacks of a list. */
     static final String ITEM = "\u001e";
 

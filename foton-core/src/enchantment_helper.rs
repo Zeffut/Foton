@@ -15,6 +15,7 @@ use foton_utils::Identifier;
 use crate::entity::attribute::AttributeModifier;
 use crate::entity::damage::DamageSource;
 use crate::entity::{Entity, LivingEntity, MobEffectInstance};
+use crate::event::Combuster;
 use crate::inventory::equipment::EquipmentSlot;
 use crate::world::World;
 use crate::world::explosion::{ExplosionBlockInteraction, ExplosionSpec};
@@ -887,8 +888,10 @@ fn apply_supported_entity_effect(
             false
         }
         EnchantmentEntityEffect::Ignite { duration } => {
-            let ticks = (duration.calculate(level) * 20.0).floor() as i32;
-            entity.ignite_for_ticks(ticks);
+            // Paper parity: `Ignite.apply` names the wielder as the combuster.
+            let combuster = enchanted_entity
+                .map_or(Combuster::Nothing, |owner| Combuster::Entity(owner.uuid()));
+            entity.ignite_for_seconds(duration.calculate(level), combuster);
             false
         }
         EnchantmentEntityEffect::Explode { .. } => {

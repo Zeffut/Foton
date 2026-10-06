@@ -29,6 +29,7 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, HurtingProjectile, HurtingProjectileBase,
     Projectile, ProjectileBase, ProjectileHit, RemovalReason, SharedEntity,
 };
+use crate::event::Combuster;
 use crate::inventory::slot_ranges::CONTENTS_SLOT;
 use crate::world::{ClipHitResult, World};
 
@@ -37,10 +38,10 @@ use crate::world::{ClipHitResult, World};
 /// Vanilla parity: the `5.0F` of `SmallFireball.onHitEntity`.
 const DIRECT_HIT_DAMAGE: f32 = 5.0;
 
-/// How long the target burns for, in ticks.
+/// How long the target burns for, in seconds.
 ///
 /// Vanilla parity: the `igniteForSeconds(5.0F)` of `SmallFireball.onHitEntity`.
-const TARGET_BURN_TICKS: i32 = 100;
+const TARGET_BURN_SECONDS: f32 = 5.0;
 
 /// A blaze's fireball.
 #[entity_behavior(class = "SmallFireball")]
@@ -183,7 +184,7 @@ impl Projectile for SmallFireballEntity {
         };
 
         let fire_ticks_before = entity.remaining_fire_ticks();
-        entity.ignite_for_ticks(TARGET_BURN_TICKS);
+        entity.ignite_for_seconds(TARGET_BURN_SECONDS, Combuster::Entity(self.uuid()));
 
         let source = match self.get_owner() {
             Some(owner) => DamageSource::environment(&vanilla_damage_types::FIREBALL)

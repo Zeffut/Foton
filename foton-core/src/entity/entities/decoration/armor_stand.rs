@@ -36,7 +36,7 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, LivingEntity, LivingEntityBase,
     RemovalReason,
 };
-use crate::event::EntityDamageEvent;
+use crate::event::{Combuster, EntityDamageEvent};
 use crate::player::Player;
 use crate::world::World;
 
@@ -69,7 +69,7 @@ const BURN_DAMAGE: f32 = 4.0;
 /// How long a stand burns once lit.
 ///
 /// Vanilla parity: the `igniteForSeconds(5.0F)` of `hurtServer`.
-const FIRE_TICKS: i32 = 100;
+const FIRE_SECONDS: f32 = 5.0;
 
 /// An armor stand.
 #[entity_behavior(class = "ArmorStand")]
@@ -522,7 +522,7 @@ impl LivingEntity for ArmorStandEntity {
             if self.is_on_fire() {
                 self.wear_down(FIRE_TICK_DAMAGE);
             } else {
-                self.ignite_for_ticks(FIRE_TICKS);
+                self.ignite_for_seconds(FIRE_SECONDS, Combuster::Nothing);
             }
             return false;
         }

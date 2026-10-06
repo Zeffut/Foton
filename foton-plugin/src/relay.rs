@@ -11,12 +11,12 @@
 use std::sync::Arc;
 
 use foton_core::event::{
-    BlockBreakEvent, BlockDropItemEvent, DamageModifier, Damager, EntitiesLoadEvent,
-    EntitiesUnloadEvent, EntityDamageEvent, EntityDismountEvent, EntityPlaceEvent,
-    FurnaceBurnEvent, FurnaceSmeltEvent, FurnaceStartSmeltEvent, PlayerArmorChangeEvent,
-    PlayerFailMoveEvent, PlayerHarvestBlockEvent, PlayerItemConsumeEvent, PlayerPurchaseEvent,
-    PlayerTeleportEvent, PlayerToggleFlightEvent, PlayerVelocityEvent, PrepareSmithingEvent,
-    ServerListPingEvent, TeleportPoint,
+    BlockBreakEvent, BlockDropItemEvent, Combuster, DamageModifier, Damager, EntitiesLoadEvent,
+    EntitiesUnloadEvent, EntityCombustEvent, EntityDamageEvent, EntityDismountEvent,
+    EntityPlaceEvent, FurnaceBurnEvent, FurnaceSmeltEvent, FurnaceStartSmeltEvent,
+    PlayerArmorChangeEvent, PlayerFailMoveEvent, PlayerHarvestBlockEvent, PlayerItemConsumeEvent,
+    PlayerPurchaseEvent, PlayerTeleportEvent, PlayerToggleFlightEvent, PlayerVelocityEvent,
+    PrepareSmithingEvent, ServerListPingEvent, TeleportPoint,
 };
 use foton_core::server::Server;
 use foton_registry::REGISTRY;
@@ -407,7 +407,7 @@ fn subscribe_entities(server: &Arc<Server>, vm: &Arc<JavaVM>) {
     });
 }
 
-/// Damage about to be dealt.
+/// Damage about to be dealt, and entities about to catch fire.
 fn subscribe_combat(server: &Arc<Server>, vm: &Arc<JavaVM>) {
     let events = server.events();
 
@@ -445,6 +445,40 @@ fn subscribe_combat(server: &Arc<Server>, vm: &Arc<JavaVM>) {
             .filter(|damage| damage.is_finite())
         {
             event.set_damage(damage);
+        }
+    });
+
+    let jvm = Arc::clone(vm);
+    events.on::<EntityCombustEvent, _>(owner(), move |event| {
+        let combuster = match event.combuster() {
+            Combuster::Nothing => String::new(),
+            Combuster::Entity(id) => format!("entity:{id}"),
+            Combuster::Block(pos) => {
+                format!("block:{}", pos.map_or_else(String::new, block_position))
+            }
+        };
+        let Some(answer) = text_call(
+            &jvm,
+            "fireEntityCombust",
+            &[
+                &event.entity().to_string(),
+                &combuster,
+                &event.seconds().to_string(),
+            ],
+        ) else {
+            return;
+        };
+        let answer = fields(&answer);
+        if flag(answer.first()) == Some(true) {
+            event.set_cancelled(true);
+            return;
+        }
+        if let Some(seconds) = answer
+            .get(1)
+            .and_then(|text| text.parse::<f32>().ok())
+            .filter(|seconds| seconds.is_finite())
+        {
+            event.set_seconds(seconds);
         }
     });
 }

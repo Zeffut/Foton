@@ -1,6 +1,7 @@
 use super::*;
 use crate::advancement::triggers;
 use crate::entity::neutral_mob::NeutralMob;
+use crate::event::{Combuster, EntityCombustEvent};
 
 /// Final state accepted from a client-authored movement packet.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -51,6 +52,12 @@ const MAX_PLAYER_JUMP_CHARGE: i32 = 90;
 ///
 /// Vanilla parity: the `cloudBottom + 4.0F` of `Entity.isInClouds`.
 const CLOUD_LAYER_THICKNESS: f64 = 4.0;
+
+/// Vanilla parity: the `igniteForSeconds(15.0F)` of `Entity.lavaIgnite`.
+const LAVA_IGNITE_SECONDS: f32 = 15.0;
+
+/// Vanilla parity: the `igniteForSeconds(8.0F)` of `BaseFireBlock.fireIgnite`.
+const FIRE_IGNITE_SECONDS: f32 = 8.0;
 
 /// A trait for entities.
 ///
@@ -1086,20 +1093,57 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
 
     /// Applies an inside-block effect queued by vanilla's step-based collector.
     fn apply_inside_block_effect(&self, effect_type: InsideBlockEffectType) {
-        let fire_ignite_extra_ticks = if matches!(effect_type, InsideBlockEffectType::FireIgnite) {
-            self.fire_ignite_extra_ticks()
-        } else {
-            0
-        };
+        match effect_type {
+            InsideBlockEffectType::LavaIgnite if self.lava_ignites_by_event() => {
+                self.ignite_for_seconds(LAVA_IGNITE_SECONDS, Combuster::Block(None));
+                return;
+            }
+            InsideBlockEffectType::FireIgnite if !self.fire_immune() => {
+                self.fire_ignite();
+                return;
+            }
+            _ => {}
+        }
         self.base().apply_inside_block_effect(
             effect_type,
             self.can_freeze(),
             self.fire_immune(),
-            fire_ignite_extra_ticks,
+            0,
             self.ticks_required_to_freeze(),
             self.remaining_fire_ticks_cap(),
         );
         self.sync_base_fire_freeze_entity_data();
+    }
+
+    /// Whether lava setting this entity alight asks plugins first.
+    ///
+    /// Paper parity: `Entity.lavaIgnite` fires `EntityCombustByBlockEvent`
+    /// only for a living entity that is not already burning; anything else
+    /// is relit every tick it spends in lava without a word.
+    fn lava_ignites_by_event(&self) -> bool {
+        !self.fire_immune() && self.as_living_entity().is_some() && self.remaining_fire_ticks() <= 0
+    }
+
+    /// Lights this entity from a fire block it stands in.
+    ///
+    /// Vanilla parity: `BaseFireBlock.fireIgnite`, with the
+    /// `EntityCombustByBlockEvent` Paper fires each tick the fire would take.
+    /// A refused ignition leaves the entity a tick short of catching.
+    fn fire_ignite(&self) {
+        let remaining = self.remaining_fire_ticks();
+        if remaining < 0 {
+            self.set_remaining_fire_ticks(remaining + 1);
+        } else {
+            let extra = self.fire_ignite_extra_ticks();
+            if extra > 0 {
+                self.set_remaining_fire_ticks(remaining + extra);
+            }
+        }
+        if self.remaining_fire_ticks() >= 0
+            && !self.ignite_for_seconds(FIRE_IGNITE_SECONDS, Combuster::Block(None))
+        {
+            self.set_remaining_fire_ticks(self.remaining_fire_ticks() - 1);
+        }
     }
 
     /// Gets the world this entity is in.
@@ -2551,6 +2595,23 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
     fn clear_fire(&self) {
         self.base().clear_fire();
         self.sync_base_fire_freeze_entity_data();
+    }
+
+    /// Sets this entity on fire for `seconds` unless a plugin objects, and
+    /// answers whether it caught.
+    ///
+    /// Paper parity: `Entity.igniteForSeconds` behind the `EntityCombustEvent`
+    /// Paper fires first, naming what set the fire.
+    fn ignite_for_seconds(&self, seconds: f32, combuster: Combuster) -> bool {
+        let mut event = EntityCombustEvent::new(self.uuid(), combuster, seconds);
+        if let Some(world) = self.level() {
+            world.fire_event(&mut event);
+        }
+        if Event::is_cancelled(&event) {
+            return false;
+        }
+        self.ignite_for_ticks((event.seconds() * 20.0).floor() as i32);
+        true
     }
 
     /// Ignites this entity for a vanilla tick duration.

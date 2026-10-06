@@ -68,7 +68,9 @@ use crate::entity::{
     SpawnGroupData, WeakEntity,
 };
 use crate::event::Event as _;
-use crate::event::{EntityPickupItemEvent, EntityPushedByEntityAttackEvent, EntityTargetEvent};
+use crate::event::{
+    Combuster, EntityPickupItemEvent, EntityPushedByEntityAttackEvent, EntityTargetEvent,
+};
 use crate::inventory::equipment::EquipmentSlot;
 use crate::player::Player;
 use crate::world::game_event::GameEventContext;
@@ -444,10 +446,10 @@ impl Default for MobBase {
     }
 }
 
-/// Ticks an undead mob burns for when caught in sunlight.
+/// Seconds an undead mob burns for when caught in sunlight.
 ///
 /// Vanilla parity: the `igniteForSeconds(8.0F)` of `Mob.burnUndead`.
-const DAYLIGHT_BURN_TICKS: i32 = 160;
+const DAYLIGHT_BURN_SECONDS: f32 = 8.0;
 
 /// Object-safe access to a mob trait object from default `Mob` methods.
 ///
@@ -758,7 +760,7 @@ pub trait Mob: LivingEntity + MobSource {
             self.on_equipped_item_broken(slot);
         }
         if !wearing_a_hat {
-            self.ignite_for_ticks(DAYLIGHT_BURN_TICKS);
+            self.ignite_for_seconds(DAYLIGHT_BURN_SECONDS, Combuster::Nothing);
         }
     }
 

@@ -29,6 +29,8 @@ use rustc_hash::FxHashMap;
 
 pub mod block;
 mod brew;
+/// An entity catching fire.
+pub mod combust;
 pub mod command;
 /// A command a player typed, before the server has read it.
 pub mod command_preprocess;
@@ -63,6 +65,7 @@ pub use block::{
     BlockPreDispenseEvent, BlockSpreadEvent, LeavesDecayEvent, PistonEvent, SignChangeEvent,
 };
 pub use brew::BrewEvent;
+pub use combust::{Combuster, EntityCombustEvent};
 pub use command::{AsyncTabCompleteEvent, CommandEvent};
 pub use command_preprocess::PlayerCommandPreprocessEvent;
 pub use cooking::{FurnaceBurnEvent, FurnaceSmeltEvent, FurnaceStartSmeltEvent};
