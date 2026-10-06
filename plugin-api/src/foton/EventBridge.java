@@ -771,10 +771,11 @@ public final class EventBridge {
         io.papermc.paper.chat.ChatRenderer renderer = paper.renderer();
         if (renderer == io.papermc.paper.chat.ChatRenderer.defaultRenderer()) return answer.toString();
         net.kyori.adventure.text.Component name = source.displayName();
-        for (Player recipient : recipients) {
+        for (net.kyori.adventure.audience.Audience viewer : paper.viewers()) {
+            if (!(viewer instanceof Player recipient)) continue;
             net.kyori.adventure.text.Component line;
             try {
-                line = renderer.render(source, name, body, recipient);
+                line = renderer.render(source, name, body, viewer);
             } catch (Throwable error) {
                 System.out.println("[events] a chat renderer threw: " + rootOf(error));
                 continue;
