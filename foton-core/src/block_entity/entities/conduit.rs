@@ -199,7 +199,7 @@ impl ConduitBlockEntity {
             );
             living.hurt_server(
                 world,
-                &DamageSource::environment(&vanilla_damage_types::MAGIC),
+                &DamageSource::environment(&vanilla_damage_types::MAGIC).with_block_damager(pos),
                 ATTACK_DAMAGE,
             );
         }

@@ -4,6 +4,7 @@ use foton_registry::{
     REGISTRY, TaggedRegistryExt, damage_type::DamageScaling, damage_type::DamageType,
     vanilla_damage_type_tags,
 };
+use foton_utils::BlockPos;
 use glam::DVec3;
 
 use text_components::TextComponent;
@@ -23,6 +24,29 @@ pub struct DamageSource {
     pub direct_entity_id: Option<i32>,
     /// Source position (for explosions, etc.).
     pub source_position: Option<DVec3>,
+    /// Whether the blow was a critical hit, as the attacker judged it.
+    ///
+    /// Paper's `DamageSource.critical()`: vanilla works the bonus into the
+    /// amount and keeps no record of it, but plugins read it back from the
+    /// damage event.
+    pub critical: bool,
+    /// The Bukkit `DamageCause` this damage is already known to have.
+    ///
+    /// Paper's `DamageSource.knownCause`, for the few blows whose damage type
+    /// alone names the wrong cause: a sweep is a player attack, and melting
+    /// snow is fire.
+    pub known_cause: Option<&'static str>,
+    /// The block that dealt the damage, for damage a block deals by touch.
+    ///
+    /// Paper's `DamageSource.eventBlockDamager`. Vanilla does not keep it, but
+    /// it is what turns a plugin's damage event into a by-block one.
+    pub block_damager: Option<BlockPos>,
+    /// The entity a plugin is told dealt the damage, where vanilla names none.
+    ///
+    /// Paper's `DamageSource.eventEntityDamager`: a lightning strike carries
+    /// no entity in vanilla, so its death message stays the plain one, yet
+    /// plugins see the bolt as the damager.
+    pub event_entity_damager: Option<i32>,
 }
 
 impl DamageSource {
@@ -34,6 +58,10 @@ impl DamageSource {
             causing_entity_id: None,
             direct_entity_id: None,
             source_position: None,
+            critical: false,
+            known_cause: None,
+            block_damager: None,
+            event_entity_damager: None,
         }
     }
 
@@ -100,6 +128,34 @@ impl DamageSource {
     #[must_use]
     pub const fn with_source_position(mut self, source_position: DVec3) -> Self {
         self.source_position = Some(source_position);
+        self
+    }
+
+    /// Marks the blow as a critical hit.
+    #[must_use]
+    pub const fn critical(mut self) -> Self {
+        self.critical = true;
+        self
+    }
+
+    /// Names the Bukkit `DamageCause` this damage already has.
+    #[must_use]
+    pub const fn with_known_cause(mut self, cause: &'static str) -> Self {
+        self.known_cause = Some(cause);
+        self
+    }
+
+    /// Names the block that dealt the damage.
+    #[must_use]
+    pub const fn with_block_damager(mut self, pos: BlockPos) -> Self {
+        self.block_damager = Some(pos);
+        self
+    }
+
+    /// Names the entity plugins are told dealt the damage.
+    #[must_use]
+    pub const fn with_event_entity_damager(mut self, entity_id: i32) -> Self {
+        self.event_entity_damager = Some(entity_id);
         self
     }
 

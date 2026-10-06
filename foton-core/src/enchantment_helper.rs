@@ -15,6 +15,7 @@ use foton_utils::Identifier;
 use crate::entity::attribute::AttributeModifier;
 use crate::entity::damage::DamageSource;
 use crate::entity::{Entity, LivingEntity, MobEffectInstance};
+use crate::event::Combuster;
 use crate::inventory::equipment::EquipmentSlot;
 use crate::world::World;
 use crate::world::explosion::{ExplosionBlockInteraction, ExplosionSpec};
@@ -461,15 +462,25 @@ pub(crate) fn do_post_attack_effects_with_item_source(
 ) {
     if let Some(living_victim) = victim.as_living_entity() {
         for slot in EquipmentSlot::ALL {
-            let mut item_broke = false;
-            living_victim.with_equipment_slot_mut(slot, &mut |item| {
-                item_broke = apply_post_attack_effects(
-                    world,
-                    item,
-                    Some(slot),
-                    EnchantmentTarget::Victim,
-                    context,
-                );
+            // The effects run on a copy: thorns hurts the attacker, and the
+            // attacker's armor maths read this victim's equipment back, which
+            // deadlocks while the slot is held.
+            let mut item = living_victim.get_item_by_slot(slot);
+            if item.is_empty() {
+                continue;
+            }
+            let item_broke = apply_post_attack_effects(
+                world,
+                &mut item,
+                Some(slot),
+                EnchantmentTarget::Victim,
+                context,
+            );
+            let mut spent = Some(item);
+            living_victim.with_equipment_slot_mut(slot, &mut |held| {
+                if let Some(item) = spent.take() {
+                    *held = item;
+                }
             });
             if item_broke {
                 living_victim.on_equipped_item_broken(slot);
@@ -877,8 +888,10 @@ fn apply_supported_entity_effect(
             false
         }
         EnchantmentEntityEffect::Ignite { duration } => {
-            let ticks = (duration.calculate(level) * 20.0).floor() as i32;
-            entity.ignite_for_ticks(ticks);
+            // Paper parity: `Ignite.apply` names the wielder as the combuster.
+            let combuster = enchanted_entity
+                .map_or(Combuster::Nothing, |owner| Combuster::Entity(owner.uuid()));
+            entity.ignite_for_seconds(duration.calculate(level), combuster);
             false
         }
         EnchantmentEntityEffect::Explode { .. } => {

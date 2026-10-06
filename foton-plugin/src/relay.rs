@@ -11,12 +11,12 @@
 use std::sync::Arc;
 
 use foton_core::event::{
-    BlockBreakEvent, BlockDropItemEvent, EntitiesLoadEvent, EntitiesUnloadEvent, EntityDamageEvent,
-    EntityDismountEvent, EntityPlaceEvent, FurnaceBurnEvent, FurnaceSmeltEvent,
-    FurnaceStartSmeltEvent, PlayerArmorChangeEvent, PlayerFailMoveEvent, PlayerHarvestBlockEvent,
-    PlayerInteractEvent, PlayerItemConsumeEvent, PlayerPurchaseEvent, PlayerTeleportEvent,
-    PlayerToggleFlightEvent, PlayerVelocityEvent, PrepareSmithingEvent, ServerListPingEvent,
-    TeleportPoint, UseResult,
+    BlockBreakEvent, BlockDropItemEvent, Combuster, DamageModifier, Damager, EntitiesLoadEvent,
+    EntitiesUnloadEvent, EntityCombustEvent, EntityDamageEvent, EntityDismountEvent,
+    EntityPlaceEvent, FurnaceBurnEvent, FurnaceSmeltEvent, FurnaceStartSmeltEvent,
+    PlayerArmorChangeEvent, PlayerFailMoveEvent, PlayerHarvestBlockEvent, PlayerInteractEvent,
+    PlayerItemConsumeEvent, PlayerPurchaseEvent, PlayerTeleportEvent, PlayerToggleFlightEvent,
+    PlayerVelocityEvent, PrepareSmithingEvent, ServerListPingEvent, TeleportPoint, UseResult,
 };
 use foton_core::server::Server;
 use foton_registry::REGISTRY;
@@ -144,6 +144,7 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: &Arc<JavaVM>) {
     subscribe_player_items(server, vm);
     subscribe_interactions(server, vm);
     subscribe_entities(server, vm);
+    subscribe_combat(server, vm);
     subscribe_blocks(server, vm);
     subscribe_cooking(server, vm);
     subscribe_server(server, vm);
@@ -436,16 +437,31 @@ fn subscribe_entities(server: &Arc<Server>, vm: &Arc<JavaVM>) {
             ],
         );
     });
+}
+
+/// Damage about to be dealt, and entities about to catch fire.
+fn subscribe_combat(server: &Arc<Server>, vm: &Arc<JavaVM>) {
+    let events = server.events();
 
     let jvm = Arc::clone(vm);
     events.on::<EntityDamageEvent, _>(owner(), move |event| {
+        let damager = match event.damager() {
+            Damager::Nothing => String::new(),
+            Damager::Entity(id) => format!("entity:{id}"),
+            Damager::Block(pos) => {
+                format!("block:{}", pos.map_or_else(String::new, block_position))
+            }
+        };
         let Some(answer) = text_call(
             &jvm,
-            "fireEnvironmentDamage",
+            "fireEntityDamage",
             &[
                 &event.entity().to_string(),
+                &damager,
                 event.cause(),
                 &event.damage().to_string(),
+                &modifier_list(event.modifiers()),
+                bit(event.critical()),
             ],
         ) else {
             return;
@@ -461,6 +477,40 @@ fn subscribe_entities(server: &Arc<Server>, vm: &Arc<JavaVM>) {
             .filter(|damage| damage.is_finite())
         {
             event.set_damage(damage);
+        }
+    });
+
+    let jvm = Arc::clone(vm);
+    events.on::<EntityCombustEvent, _>(owner(), move |event| {
+        let combuster = match event.combuster() {
+            Combuster::Nothing => String::new(),
+            Combuster::Entity(id) => format!("entity:{id}"),
+            Combuster::Block(pos) => {
+                format!("block:{}", pos.map_or_else(String::new, block_position))
+            }
+        };
+        let Some(answer) = text_call(
+            &jvm,
+            "fireEntityCombust",
+            &[
+                &event.entity().to_string(),
+                &combuster,
+                &event.seconds().to_string(),
+            ],
+        ) else {
+            return;
+        };
+        let answer = fields(&answer);
+        if flag(answer.first()) == Some(true) {
+            event.set_cancelled(true);
+            return;
+        }
+        if let Some(seconds) = answer
+            .get(1)
+            .and_then(|text| text.parse::<f32>().ok())
+            .filter(|seconds| seconds.is_finite())
+        {
+            event.set_seconds(seconds);
         }
     });
 }
@@ -798,6 +848,15 @@ fn block_position(pos: BlockPos) -> String {
 /// Writes a chunk position as `x z`.
 fn chunk_position(pos: ChunkPos) -> String {
     format!("{} {}", pos.0.x, pos.0.y)
+}
+
+/// Writes damage modifiers as `NAME=amount`, comma-separated.
+fn modifier_list(modifiers: &[(DamageModifier, f64)]) -> String {
+    modifiers
+        .iter()
+        .map(|(modifier, amount)| format!("{}={amount}", modifier.bukkit_name()))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// Writes entity ids comma-separated.

@@ -413,8 +413,8 @@ impl Entity for CreeperEntity {
 
     /// Vanilla parity: `Creeper.thunderHit`, which takes the damage and the
     /// singeing like anything else and then stays charged for good.
-    fn thunder_hit(&self, world: &World, _bolt: &dyn Entity) {
-        self.entity_thunder_hit(world);
+    fn thunder_hit(&self, world: &World, bolt: &dyn Entity) {
+        self.entity_thunder_hit(world, bolt);
         self.entity_data.lock().is_powered.set(true);
     }
 }

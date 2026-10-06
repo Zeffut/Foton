@@ -41,7 +41,7 @@ use crate::behavior::waxables::get_normal_from_waxed_variant;
 use crate::behavior::weathering::{get_weather_state, previous_copper_stage};
 use crate::entity::damage::DamageSource;
 use crate::entity::{Entity, EntityBase, EntityBaseLoad, RemovalReason};
-use crate::event::LightningStrikeEvent;
+use crate::event::{Combuster, LightningStrikeEvent};
 use crate::world::{LevelReader as _, World};
 
 /// Ticks a fresh bolt has left.
@@ -70,7 +70,7 @@ const STRIKE_DAMAGE: f32 = 5.0;
 /// How long a struck entity would burn.
 ///
 /// Vanilla parity: the `igniteForSeconds(8.0F)` of `Entity.thunderHit`.
-const STRIKE_FIRE_TICKS: i32 = 160;
+const STRIKE_FIRE_SECONDS: f32 = 8.0;
 
 /// Fires the first flash tries to light beyond the one under the bolt.
 ///
@@ -340,14 +340,17 @@ impl Entity for LightningBoltEntity {
 /// then checks it against zero, so the eight-second ignition only ever fires
 /// for an entity whose counter was at -1. For everything else a strike leaves
 /// one tick of fire, which is the flicker seen in game.
-pub fn default_thunder_hit(entity: &dyn Entity, world: &World) {
+pub fn default_thunder_hit(entity: &dyn Entity, world: &World, bolt: &dyn Entity) {
     entity.set_remaining_fire_ticks(entity.remaining_fire_ticks() + 1);
     if entity.remaining_fire_ticks() == 0 {
-        entity.ignite_for_ticks(STRIKE_FIRE_TICKS);
+        entity.ignite_for_seconds(STRIKE_FIRE_SECONDS, Combuster::Entity(bolt.uuid()));
     }
+    // Paper parity: plugins see the bolt as the damager, where vanilla's
+    // source carries no entity and keeps the plain death message.
     entity.hurt(
         world,
-        &DamageSource::environment(&vanilla_damage_types::LIGHTNING_BOLT),
+        &DamageSource::environment(&vanilla_damage_types::LIGHTNING_BOLT)
+            .with_event_entity_damager(bolt.id()),
         STRIKE_DAMAGE,
     );
 }

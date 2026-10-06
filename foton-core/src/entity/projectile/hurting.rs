@@ -13,6 +13,7 @@ use simdnbt::owned::NbtCompound;
 
 use crate::entity::projectile::{Projectile, rotate_towards_movement};
 use crate::entity::{RemovalReason, SharedEntity};
+use crate::event::Combuster;
 
 /// Thrust a hurting projectile adds along its heading each tick.
 ///
@@ -37,11 +38,11 @@ const AIR_INERTIA: f64 = 0.95;
 /// stops dead rather than crossing it.
 const LIQUID_INERTIA: f64 = 0.8;
 
-/// How long a burning projectile keeps itself alight, in ticks.
+/// How long a burning projectile keeps itself alight, in seconds.
 ///
 /// Vanilla parity: the `igniteForSeconds(1.0F)` of `AbstractHurtingProjectile.tick`,
 /// reapplied every tick so the flame never lapses in flight.
-const BURN_TICKS: i32 = 20;
+const BURN_SECONDS: f32 = 1.0;
 
 /// How far toward its heading a hurting projectile turns each tick.
 ///
@@ -185,7 +186,7 @@ pub trait HurtingProjectile: Projectile {
         self.projectile_base_tick();
 
         if self.should_burn() {
-            self.ignite_for_ticks(BURN_TICKS);
+            self.ignite_for_seconds(BURN_SECONDS, Combuster::Nothing);
         }
 
         if let Some(result) = hit

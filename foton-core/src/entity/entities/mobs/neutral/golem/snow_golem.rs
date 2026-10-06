@@ -246,7 +246,8 @@ impl SnowGolemEntity {
         }
         self.hurt(
             world,
-            &DamageSource::environment(&vanilla_damage_types::ON_FIRE),
+            // Paper parity: plugins are told the golem melts, not burns.
+            &DamageSource::environment(&vanilla_damage_types::ON_FIRE).with_known_cause("MELTING"),
             MELT_DAMAGE,
         );
     }

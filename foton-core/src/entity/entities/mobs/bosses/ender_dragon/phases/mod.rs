@@ -32,6 +32,7 @@ use crate::entity::damage::DamageSource;
 use crate::entity::entities::{
     ArrowEntity, EndCrystalEntity, SpectralArrowEntity, ThrownTridentEntity, WindChargeEntity,
 };
+use crate::event::Combuster;
 use crate::player::Player;
 use crate::world::World;
 
@@ -269,7 +270,7 @@ pub trait DragonPhaseInstance: Send + Sync {
 /// sibling rather than a `WindCharge`.
 pub(super) fn sitting_on_hurt(dragon: &EnderDragon, source: &DamageSource, damage: f32) -> f32 {
     /// Vanilla `igniteForSeconds(1.0F)`.
-    const IGNITE_TICKS: i32 = 20;
+    const IGNITE_SECONDS: f32 = 1.0;
 
     let Some(world) = dragon.level() else {
         return damage;
@@ -289,7 +290,7 @@ pub(super) fn sitting_on_hurt(dragon: &EnderDragon, source: &DamageSource, damag
         return damage;
     }
 
-    direct.ignite_for_ticks(IGNITE_TICKS);
+    direct.ignite_for_seconds(IGNITE_SECONDS, Combuster::Nothing);
     0.0
 }
 

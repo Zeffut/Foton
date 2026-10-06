@@ -276,8 +276,8 @@ impl Entity for GlowItemFrameEntity {
     /// Lightning passes straight through anything hung on a block.
     fn thunder_hit(&self, _world: &World, _bolt: &dyn Entity) {}
 
-    fn hurt(&self, world: &World, source: &DamageSource, _amount: f32) -> bool {
-        self.hurt_item_frame(world, source)
+    fn hurt(&self, world: &World, source: &DamageSource, amount: f32) -> bool {
+        self.hurt_item_frame(world, source, amount)
     }
 
     fn tick(&self) {

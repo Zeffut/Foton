@@ -485,11 +485,6 @@ public final class EventBridge {
         dispatch(event); return !event.isCancelled();
     }
 
-    private static org.bukkit.event.entity.EntityDamageEvent.DamageCause damageCause(String name) {
-        try { return org.bukkit.event.entity.EntityDamageEvent.DamageCause.valueOf(name); }
-        catch (IllegalArgumentException | NullPointerException error) { return org.bukkit.event.entity.EntityDamageEvent.DamageCause.CUSTOM; }
-    }
-
     private static org.bukkit.event.inventory.ClickType clickType(String name) {
         try { return org.bukkit.event.inventory.ClickType.valueOf(name); }
         catch (IllegalArgumentException | NullPointerException error) { return org.bukkit.event.inventory.ClickType.UNKNOWN; }
@@ -513,7 +508,7 @@ public final class EventBridge {
     }
 
     public static boolean fireEntityPickup(String entity, String item) {
-        org.bukkit.entity.LivingEntity living = new FotonLivingEntity(Native.parse(entity));
+        org.bukkit.entity.LivingEntity living = living(entity);
         org.bukkit.entity.Item itemHandle = new FotonItem(Native.parse(item));
         org.bukkit.entity.Player player = null;
         try { player = Bukkit.getServer().getPlayer(UUID.fromString(entity)); } catch (IllegalArgumentException ignored) { }
@@ -573,7 +568,7 @@ public final class EventBridge {
 
     public static boolean fireEntityRegainHealth(String entity, float amount) {
         org.bukkit.event.entity.EntityRegainHealthEvent event =
-            new org.bukkit.event.entity.EntityRegainHealthEvent(new FotonLivingEntity(Native.parse(entity)), amount);
+            new org.bukkit.event.entity.EntityRegainHealthEvent(living(entity), amount);
         dispatch(event);
         return !event.isCancelled();
     }
@@ -591,19 +586,6 @@ public final class EventBridge {
             return null;
         }
         return record.event();
-    }
-
-    public static boolean fireEntityDamage(String damager, String entity, String cause, boolean critical) {
-        org.bukkit.entity.Entity target = FotonEntity.handle(Native.parse(entity));
-        org.bukkit.event.entity.EntityDamageByEntityEvent event =
-            new org.bukkit.event.entity.EntityDamageByEntityEvent(
-                FotonEntity.handle(Native.parse(damager)), target,
-                damageCause(cause), critical);
-        dispatch(event);
-        if (target instanceof org.bukkit.entity.LivingEntity) {
-            LAST_DAMAGE.put(target.getUniqueId(), new DamageRecord(event, Bukkit.getCurrentTick()));
-        }
-        return !event.isCancelled();
     }
 
     public static boolean fireEntityPushedByEntityAttack(String entity, String pushedBy) {
@@ -907,8 +889,14 @@ public final class EventBridge {
         return !event.isCancelled();
     }
     public static void fireEntityDeath(String uuid) {
-        dispatch(new org.bukkit.event.entity.EntityDeathEvent(
-            new FotonLivingEntity(java.util.UUID.fromString(uuid))));
+        dispatch(new org.bukkit.event.entity.EntityDeathEvent(living(uuid)));
+    }
+
+    /** The typed handle of a living entity, so `instanceof` answers as on Paper. */
+    static org.bukkit.entity.LivingEntity living(String uuid) {
+        UUID id = Native.parse(uuid);
+        return FotonEntity.handle(id) instanceof org.bukkit.entity.LivingEntity typed
+            ? typed : new FotonLivingEntity(id);
     }
     public static boolean firePlayerTakeLecternBook(String uuid, String world, int x, int y, int z) {
         org.bukkit.event.player.PlayerTakeLecternBookEvent event =
@@ -1024,7 +1012,7 @@ public final class EventBridge {
     public static float fireExplosionPrime(String uuid, float radius, boolean fire) {
         org.bukkit.event.entity.ExplosionPrimeEvent event =
                 new org.bukkit.event.entity.ExplosionPrimeEvent(
-                        new FotonEntity(java.util.UUID.fromString(uuid)), radius, fire);
+                        FotonEntity.handle(Native.parse(uuid)), radius, fire);
         dispatch(event);
         return event.isCancelled() ? -1.0f : event.getRadius();
     }

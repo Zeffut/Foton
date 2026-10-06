@@ -79,6 +79,7 @@ public final class PacketProbe extends JavaPlugin implements Listener {
             }
         });
         getServer().getPluginManager().registerEvents(this, this);
+        getServer().getPluginManager().registerEvents(new CombatProbe(this, facts), this);
     }
 
     @EventHandler

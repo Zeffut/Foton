@@ -16,7 +16,9 @@ use crate::behavior::ITEM_BEHAVIORS;
 use crate::behavior::item::apply_one_consume_effect;
 use crate::entity::kill_score;
 use crate::event::EntityDeathEvent;
-use crate::event::{EntityDamageEvent, EntityResurrectEvent, Event, PlayerArmorChangeEvent};
+use crate::event::{
+    DamageModifier, EntityDamageEvent, EntityResurrectEvent, Event, PlayerArmorChangeEvent,
+};
 use crate::inventory::lock::{ContainerId, ContainerLockGuard, ContainerRef};
 use crate::physics::collision;
 use crate::player::player_inventory::PlayerInventory;
@@ -884,36 +886,110 @@ pub trait LivingEntity: Entity {
         self.living_hurt_server(world, source, amount)
     }
 
-    /// Spends the invulnerability frames on `damage`, answering whether the
-    /// hit counts as a full one and the amount that lands, or `None` when
-    /// nothing does.
+    /// Offers the hit to plugins before anything spends it, and answers the
+    /// raw amount they settled on, or `None` when they called it off.
     ///
-    /// Paper parity: damage no entity is behind is first offered to plugins
-    /// as `EntityDamageEvent`, on the amount that would land, before the
-    /// frames are spent; entity damage has its own by-entity event.
-    fn land_damage(
+    /// Paper parity: `LivingEntity.handleEntityDamage`, fired on the raw amount
+    /// once the invulnerability frames have let the hit through, before the
+    /// shield, the armor or anything else touches it. A hit the frames
+    /// swallow whole is never offered.
+    fn offer_damage(&self, world: &World, source: &DamageSource, damage: f32) -> Option<f32> {
+        let Some(modifiers) = self.damage_modifiers(source, damage) else {
+            return Some(damage);
+        };
+        let mut event =
+            EntityDamageEvent::new(world, self.uuid(), source, f64::from(damage), modifiers);
+        world.fire_event(&mut event);
+        if Event::is_cancelled(&event) {
+            return None;
+        }
+        Some((event.damage() as f32).max(0.0))
+    }
+
+    /// What each reduction would take from `damage`, in the order vanilla
+    /// applies them, or `None` when the invulnerability frames would swallow
+    /// the hit whole.
+    ///
+    /// Spends nothing: the shield is not worn, the armor not dented. What an
+    /// override of [`Self::actually_hurt`] cuts on top is not seen, which Paper
+    /// does not see either.
+    fn damage_modifiers(
         &self,
-        world: &World,
         source: &DamageSource,
         damage: f32,
-    ) -> Option<(bool, f32)> {
-        let bypass = source.bypasses_cooldown();
-        let mut plugin_damage = None;
-        if let Some(cause) = EntityDamageEvent::environmental_cause(source) {
-            let landing = self.living_base().preview_damage_cooldown(damage, bypass)?;
-            let mut event = EntityDamageEvent::new(self.uuid(), cause, f64::from(landing));
-            world.fire_event(&mut event);
-            if Event::is_cancelled(&event) {
-                return None;
-            }
-            plugin_damage = Some(event.damage() as f32);
+    ) -> Option<Vec<(DamageModifier, f64)>> {
+        let mut modifiers = Vec::new();
+        let mut damage = damage;
+        let mut step = |modifier: DamageModifier, before: f32, after: f32| {
+            modifiers.push((modifier, f64::from(after) - f64::from(before)));
+            after
+        };
+        let blocked = self
+            .item_blocking(source, damage)
+            .map_or(0.0, |(blocked, _)| blocked);
+        if blocked > 0.0 || self.as_player().is_some() {
+            damage = step(DamageModifier::Blocking, damage, damage - blocked);
         }
-        let (took_full_damage, landed) =
-            self.living_base().apply_damage_cooldown(damage, bypass)?;
-        Some((
-            took_full_damage,
-            plugin_damage.map_or(landed, |changed| changed.max(0.0)),
-        ))
+        if source.is(&vanilla_damage_type_tags::DamageTypeTag::IS_FREEZING) {
+            let extra = REGISTRY
+                .entity_types
+                .is_in_tag(self.entity_type(), &EntityTypeTag::FREEZE_HURTS_EXTRA_TYPES);
+            damage = step(
+                DamageModifier::Freezing,
+                damage,
+                if extra { damage * 5.0 } else { damage },
+            );
+        }
+        if source.is(&vanilla_damage_type_tags::DamageTypeTag::DAMAGES_HELMET) {
+            let worn = self.has_item_in_slot(EquipmentSlot::Head);
+            damage = step(
+                DamageModifier::HardHat,
+                damage,
+                if worn { damage * 0.75 } else { damage },
+            );
+        }
+        if !damage.is_finite() {
+            damage = f32::MAX;
+        }
+        let landing = self
+            .living_base()
+            .preview_damage_cooldown(damage, source.bypasses_cooldown())?;
+        damage = step(DamageModifier::InvulnerabilityReduction, damage, landing);
+        let armored = if source.is(&vanilla_damage_type_tags::DamageTypeTag::BYPASSES_ARMOR) {
+            damage
+        } else {
+            let armor_toughness =
+                self.attributes()
+                    .lock()
+                    .required_value(vanilla_attributes::ARMOR_TOUGHNESS) as f32;
+            combat_rules::get_damage_after_absorb(
+                self,
+                damage,
+                source,
+                self.get_armor_value() as f32,
+                armor_toughness,
+            )
+        };
+        damage = step(DamageModifier::Armor, damage, armored);
+        // Resistance is the first half of vanilla's magic absorption; Paper
+        // reports it apart from the enchantments that make up the rest.
+        let resisted = match self.mob_effect(vanilla_mob_effects::RESISTANCE) {
+            Some(resistance)
+                if !source.is(&vanilla_damage_type_tags::DamageTypeTag::BYPASSES_EFFECTS)
+                    && !source
+                        .is(&vanilla_damage_type_tags::DamageTypeTag::BYPASSES_RESISTANCE) =>
+            {
+                let absorb = 25 - (resistance.amplifier() + 1) * 5;
+                (damage * absorb as f32 / 25.0).max(0.0)
+            }
+            _ => damage,
+        };
+        let magic = self.get_damage_after_magic_absorb(source, damage);
+        damage = step(DamageModifier::Resistance, damage, resisted);
+        damage = step(DamageModifier::Magic, damage, magic);
+        let absorbed = (damage - self.get_absorption_amount()).max(0.0);
+        step(DamageModifier::Absorption, damage, absorbed);
+        Some(modifiers)
     }
 
     /// Runs the shared body of [`Self::hurt_server`].
@@ -950,6 +1026,9 @@ pub trait LivingEntity: Entity {
         // what the blow was worth, where `damage` is what survived being
         // blocked.
         let original_damage = damage;
+        let Some(mut damage) = self.offer_damage(world, source, damage) else {
+            return false;
+        };
 
         // Vanilla parity: the item-blocking pass runs first, so what a raised
         // shield eats never reaches the freeze multiplier or the armor.
@@ -983,7 +1062,9 @@ pub trait LivingEntity: Entity {
             damage = f32::MAX;
         }
 
-        let Some((took_full_damage, effective_amount)) = self.land_damage(world, source, damage)
+        let Some((took_full_damage, effective_amount)) = self
+            .living_base()
+            .apply_damage_cooldown(damage, source.bypasses_cooldown())
         else {
             return false;
         };
@@ -2561,28 +2642,9 @@ pub trait LivingEntity: Entity {
     /// Vanilla parity: `LivingEntity.applyItemBlocking`. It runs before every
     /// other reduction, so what a shield stops never reaches armor at all.
     fn apply_item_blocking(&self, world: &World, source: &DamageSource, damage: f32) -> f32 {
-        if damage <= 0.0 {
-            return 0.0;
-        }
-        let Some(blocking_with) = self.item_blocking_with() else {
+        let Some((damage_blocked, item_damage)) = self.item_blocking(source, damage) else {
             return 0.0;
         };
-        let Some(blocks_attacks) = blocking_with.get(BLOCKS_ATTACKS) else {
-            return 0.0;
-        };
-        if blocks_attacks
-            .bypassed_by()
-            .is_some_and(|bypassed_by| bypassed_by.contains(source.damage_type))
-        {
-            return 0.0;
-        }
-        // Not ported: vanilla lets a piercing arrow through here. Foton's arrows
-        // carry no pierce level, so there is nothing to read.
-
-        let angle = self.blocking_angle_to(source);
-        let damage_blocked =
-            blocks_attacks.resolve_blocked_damage(source.damage_type, damage, angle);
-        let item_damage = blocks_attacks.item_damage();
         let Some(hand) = self.active_item_use_hand() else {
             return damage_blocked;
         };
@@ -2600,6 +2662,37 @@ pub trait LivingEntity: Entity {
         }
 
         damage_blocked
+    }
+
+    /// Returns how much of `damage` a raised item would eat, and what eating
+    /// it costs the item, without spending either.
+    ///
+    /// The pure half of vanilla `LivingEntity.applyItemBlocking`, which Paper
+    /// also runs without its effects to show plugins the hit's final amount.
+    fn item_blocking(
+        &self,
+        source: &DamageSource,
+        damage: f32,
+    ) -> Option<(f32, ItemDamageFunction)> {
+        if damage <= 0.0 {
+            return None;
+        }
+        let blocking_with = self.item_blocking_with()?;
+        let blocks_attacks = blocking_with.get(BLOCKS_ATTACKS)?;
+        if blocks_attacks
+            .bypassed_by()
+            .is_some_and(|bypassed_by| bypassed_by.contains(source.damage_type))
+        {
+            return None;
+        }
+        // Not ported: vanilla lets a piercing arrow through here. Foton's arrows
+        // carry no pierce level, so there is nothing to read.
+
+        let angle = self.blocking_angle_to(source);
+        Some((
+            blocks_attacks.resolve_blocked_damage(source.damage_type, damage, angle),
+            blocks_attacks.item_damage(),
+        ))
     }
 
     /// Returns the radian angle between where this entity looks and the hit.

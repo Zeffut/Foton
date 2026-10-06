@@ -18,8 +18,8 @@ use foton_registry::{sound_events, vanilla_mob_effects, vanilla_particle_types};
 use foton_utils::entity_events::EntityStatus;
 
 use crate::advancement::triggers;
+use crate::event::EntityPushedByEntityAttackEvent;
 use crate::event::PlayerInteractEntityEvent;
-use crate::event::{EntityDamageByEntityEvent, EntityPushedByEntityAttackEvent};
 
 /// Returns a height `progress` of the way up an entity's hitbox.
 ///
@@ -479,23 +479,13 @@ impl Player {
         let damage = base_damage + magic_boost;
         let old_movement = entity.velocity();
         let mut affected = deals_knockback;
-        let mut damage_allowed = true;
-        if deals_damage {
-            let mut event = EntityDamageByEntityEvent::new(
-                self.uuid(),
-                entity.uuid(),
-                "ENTITY_ATTACK".to_owned(),
-            );
-            self.fire_event(&mut event);
-            damage_allowed = !event.is_cancelled();
-        }
         let damage_dealt = deals_damage
-            && damage_allowed
             && entity
                 .level()
                 .is_some_and(|world| entity.hurt(&world, &damage_source, damage));
         affected |= damage_dealt;
-        if deals_knockback && (!deals_damage || damage_allowed) {
+        // Paper parity: the push lands even when a plugin cancelled the damage.
+        if deals_knockback {
             self.cause_extra_knockback(
                 entity,
                 0.4 + Self::get_knockback(0.0, &attacking_item, &enchantment_context),
@@ -575,7 +565,14 @@ impl Player {
         let attack_strength_delay = Self::attack_strength_delay_from_speed(attack_speed);
         let attack_strength_scale =
             self.attack_strength_scale_for_delay(0.5, attack_strength_delay);
+        let full_strength_attack = attack_strength_scale > 0.9;
+        let critical_attack = full_strength_attack && self.can_critical_attack(entity);
         let damage_source = self.attack_damage_source(&attacking_item);
+        let damage_source = if critical_attack {
+            damage_source.critical()
+        } else {
+            damage_source
+        };
         let enchantment_context = EnchantmentDamageContext::new(
             entity.entity_type(),
             Some(self.entity_type()),
@@ -597,13 +594,11 @@ impl Player {
             return false;
         }
 
-        let full_strength_attack = attack_strength_scale > 0.9;
         let knockback_attack = self.is_sprinting() && full_strength_attack;
         if knockback_attack {
             self.play_server_side_sound(&sound_events::ENTITY_PLAYER_ATTACK_KNOCKBACK, 1.0, 1.0);
         }
 
-        let critical_attack = full_strength_attack && self.can_critical_attack(entity);
         if critical_attack {
             base_damage *= 1.5;
         }
@@ -619,12 +614,7 @@ impl Player {
             enchantment_helper::do_post_piercing_attack_effects(&world, self);
             return false;
         };
-        let mut event =
-            EntityDamageByEntityEvent::new(self.uuid(), entity.uuid(), "ENTITY_ATTACK".to_owned())
-                .with_critical(critical_attack);
-        self.fire_event(&mut event);
-        let damage_allowed = !event.is_cancelled();
-        let was_hurt = damage_allowed && entity.hurt(&target_world, &damage_source, total_damage);
+        let was_hurt = entity.hurt(&target_world, &damage_source, total_damage);
         if was_hurt {
             let sprint_knockback = if knockback_attack { 0.5 } else { 0.0 };
             self.cause_extra_knockback(
@@ -772,6 +762,11 @@ impl Player {
         let yaw_cos = f64::from(yaw_radians.cos());
         let position = self.position();
 
+        // Paper parity: a sweep is reported as its own cause, not as the hit
+        // that set it off.
+        let sweep_source = damage_source
+            .clone()
+            .with_known_cause("ENTITY_SWEEP_ATTACK");
         let area = entity.bounding_box().inflate_xyz(1.0, 0.25, 1.0);
         for shared in world.get_entities_in_aabb(&area) {
             let nearby = shared.as_ref();
@@ -796,7 +791,7 @@ impl Player {
             let enchanted_damage =
                 enchantment_helper::modify_damage(attacking_item, &context, sweep_damage)
                     * attack_strength_scale;
-            if !living.hurt(&world, damage_source, enchanted_damage) {
+            if !living.hurt(&world, &sweep_source, enchanted_damage) {
                 continue;
             }
             living.knockback(0.4, yaw_sin, -yaw_cos);

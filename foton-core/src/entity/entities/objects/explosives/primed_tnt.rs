@@ -222,10 +222,14 @@ impl Entity for PrimedTntEntity {
             return;
         }
 
-        self.set_removed(RemovalReason::Discarded);
+        // Vanilla discards first and still names the TNT as the blast's source;
+        // Foton forgets a removed entity at once, so the blast goes off first
+        // for its victims to know what hit them. The blast never hits its own
+        // source, so nothing else changes.
         if let Some(world) = self.level() {
             self.explode(&world);
         }
+        self.set_removed(RemovalReason::Discarded);
     }
 
     fn get_default_gravity(&self) -> f64 {

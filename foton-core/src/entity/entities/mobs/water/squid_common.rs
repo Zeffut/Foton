@@ -281,7 +281,8 @@ pub(super) fn handle_air_supply<M: Mob + ?Sized>(squid: &M, world: &World, air_b
             squid.set_air_supply(0);
             squid.hurt_server(
                 world,
-                &DamageSource::environment(&vanilla_damage_types::DROWN),
+                // Paper parity: drowning in air is reported as drying out.
+                &DamageSource::environment(&vanilla_damage_types::DROWN).with_known_cause("DRYOUT"),
                 SUFFOCATION_DAMAGE,
             );
         }

@@ -360,7 +360,8 @@ impl MobEffectInstance {
         if self.effect == vanilla_mob_effects::POISON && entity.get_health() > 1.0 {
             entity.hurt(
                 world,
-                &DamageSource::environment(&vanilla_damage_types::MAGIC),
+                // Paper parity: plugins tell poison from other magic by cause.
+                &DamageSource::environment(&vanilla_damage_types::MAGIC).with_known_cause("POISON"),
                 1.0,
             );
         }

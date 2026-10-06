@@ -30,7 +30,7 @@ use crate::physics::MoverType;
 use crate::player::Player;
 use crate::world::World;
 
-use crate::event::EntityPickupItemEvent;
+use crate::event::{EntityDamageEvent, EntityPickupItemEvent};
 use crate::inventory::slot_ranges::CONTENTS_SLOT;
 use foton_protocol::packets::game::CTakeItemEntity;
 use foton_registry::blocks::block_state_ext::BlockStateExt;
@@ -722,9 +722,11 @@ impl Entity for ItemEntity {
         self.try_pickup(player);
     }
 
-    fn hurt(&self, _world: &World, source: &DamageSource, amount: f32) -> bool {
+    fn hurt(&self, world: &World, source: &DamageSource, amount: f32) -> bool {
         // TODO: Check isInvulnerableToBase once the shared non-living entity hook is ported.
-        if !self.get_item().can_be_hurt_by(source.damage_type) {
+        if !self.get_item().can_be_hurt_by(source.damage_type)
+            || !EntityDamageEvent::allows_non_living_hurt(self, world, source, amount, true)
+        {
             return false;
         }
         let new_health = {

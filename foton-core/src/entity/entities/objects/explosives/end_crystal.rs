@@ -25,6 +25,7 @@ use crate::behavior::blocks::FireBlock;
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::EnderDragon;
 use crate::entity::{Entity, EntityBase, EntityBaseLoad, EntitySyncedData, RemovalReason};
+use crate::event::EntityDamageEvent;
 use crate::world::explosion::ExplosionSpec;
 use crate::world::{LevelAccessor as _, LevelReader as _, World};
 
@@ -173,7 +174,7 @@ impl Entity for EndCrystalEntity {
     /// crystal to a dragon: the fight aborts a respawn ritual, recounts the
     /// crystals, and hands the news to
     /// [`EnderDragon::on_crystal_destroyed`](crate::entity::entities::EnderDragon::on_crystal_destroyed).
-    fn hurt(&self, world: &World, source: &DamageSource, _amount: f32) -> bool {
+    fn hurt(&self, world: &World, source: &DamageSource, amount: f32) -> bool {
         if self.is_invulnerable_to_base(source) {
             return false;
         }
@@ -190,6 +191,9 @@ impl Entity for EndCrystalEntity {
 
         if self.is_removed() {
             return true;
+        }
+        if !EntityDamageEvent::allows_non_living_hurt(self, world, source, amount, false) {
+            return false;
         }
 
         self.set_removed(RemovalReason::Killed);

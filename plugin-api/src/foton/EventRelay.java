@@ -169,15 +169,93 @@ public final class EventRelay {
         return "";
     }
 
-    /** Answers `cancelled, damage`. */
-    public static String fireEnvironmentDamage(String entity, String cause, String damage) {
-        org.bukkit.event.entity.EntityDamageEvent event = new org.bukkit.event.entity.EntityDamageEvent(
-            FotonEntity.handle(Native.parse(entity)),
-            org.bukkit.event.entity.EntityDamageEvent.DamageCause.valueOf(cause),
-            Double.parseDouble(damage));
+    /** Answers `cancelled, damage`.
+     *
+     * `damager` is empty, `entity:<uuid>` or `block:[x y z]`, which picks the
+     * Bukkit class as Paper does. `modifiers` lists `NAME=amount` for each
+     * reduction Foton foresees; each scales with the raw amount when a plugin
+     * changes it, which is exact for every one but armor. */
+    public static String fireEntityDamage(String entity, String damager, String cause, String damage,
+            String modifiers, String critical) {
+        org.bukkit.entity.Entity victim = FotonEntity.handle(Native.parse(entity));
+        org.bukkit.event.entity.EntityDamageEvent.DamageCause reason =
+            org.bukkit.event.entity.EntityDamageEvent.DamageCause.valueOf(cause);
+        java.util.Map<org.bukkit.event.entity.EntityDamageEvent.DamageModifier, Double> values =
+            new java.util.EnumMap<>(org.bukkit.event.entity.EntityDamageEvent.DamageModifier.class);
+        java.util.Map<org.bukkit.event.entity.EntityDamageEvent.DamageModifier,
+            com.google.common.base.Function<? super Double, Double>> functions =
+            new java.util.EnumMap<>(org.bukkit.event.entity.EntityDamageEvent.DamageModifier.class);
+        modifiers(Double.parseDouble(damage), modifiers, values, functions);
+        org.bukkit.event.entity.EntityDamageEvent event;
+        if (damager.startsWith("entity:")) {
+            event = new org.bukkit.event.entity.EntityDamageByEntityEvent(
+                FotonEntity.handle(Native.parse(damager.substring("entity:".length()))), victim, reason,
+                null, values, functions, flag(critical));
+        } else if (damager.startsWith("block:")) {
+            event = new org.bukkit.event.entity.EntityDamageByBlockEvent(
+                block(victim, damager.substring("block:".length())), victim, reason, values, functions);
+        } else {
+            event = new org.bukkit.event.entity.EntityDamageEvent(victim, reason, values, functions);
+        }
         EventBridge.dispatch(event);
-        if (event.getEntity() != null) EventBridge.setLastDamageCause(event.getEntity().getUniqueId(), event);
+        // Paper parity: only a hit that went through becomes the last damage.
+        if (!event.isCancelled() && victim != null) EventBridge.setLastDamageCause(victim.getUniqueId(), event);
         return answer(event.isCancelled(), event.getDamage());
+    }
+
+    /** Fills Paper's modifier maps from `NAME=amount` pairs, in Paper's order.
+     *
+     * Each function is the modifier's share of what is left when it applies,
+     * so a changed raw amount scales every reduction with it. */
+    private static void modifiers(double damage, String encoded,
+            java.util.Map<org.bukkit.event.entity.EntityDamageEvent.DamageModifier, Double> values,
+            java.util.Map<org.bukkit.event.entity.EntityDamageEvent.DamageModifier,
+                com.google.common.base.Function<? super Double, Double>> functions) {
+        values.put(org.bukkit.event.entity.EntityDamageEvent.DamageModifier.BASE, damage);
+        functions.put(org.bukkit.event.entity.EntityDamageEvent.DamageModifier.BASE, ignored -> -0.0);
+        if (!encoded.isEmpty()) {
+            for (String pair : encoded.split(",")) {
+                String[] parts = pair.split("=", 2);
+                values.put(org.bukkit.event.entity.EntityDamageEvent.DamageModifier.valueOf(parts[0]),
+                    Double.parseDouble(parts[1]));
+            }
+        }
+        double remaining = damage;
+        for (org.bukkit.event.entity.EntityDamageEvent.DamageModifier modifier
+                : org.bukkit.event.entity.EntityDamageEvent.DamageModifier.values()) {
+            if (modifier == org.bukkit.event.entity.EntityDamageEvent.DamageModifier.BASE
+                    || !values.containsKey(modifier)) continue;
+            double amount = values.get(modifier);
+            double share = remaining == 0 ? 0 : amount / remaining;
+            functions.put(modifier, left -> share * left);
+            remaining += amount;
+        }
+    }
+
+    /** The block at `x y z` in the entity's world, or null when none was named. */
+    private static org.bukkit.block.Block block(org.bukkit.entity.Entity entity, String encoded) {
+        if (encoded.isEmpty() || entity == null || entity.getWorld() == null) return null;
+        String[] at = encoded.split(" ");
+        return entity.getWorld().getBlockAt(Integer.parseInt(at[0]), Integer.parseInt(at[1]),
+            Integer.parseInt(at[2]));
+    }
+
+    /** Answers `cancelled, seconds`. `combuster` is written as {@link #fireEntityDamage}'s damager. */
+    public static String fireEntityCombust(String entity, String combuster, String seconds) {
+        org.bukkit.entity.Entity victim = FotonEntity.handle(Native.parse(entity));
+        float duration = Float.parseFloat(seconds);
+        org.bukkit.event.entity.EntityCombustEvent event;
+        if (combuster.startsWith("entity:")) {
+            event = new org.bukkit.event.entity.EntityCombustByEntityEvent(
+                FotonEntity.handle(Native.parse(combuster.substring("entity:".length()))), victim, duration);
+        } else if (combuster.startsWith("block:")) {
+            event = new org.bukkit.event.entity.EntityCombustByBlockEvent(
+                block(victim, combuster.substring("block:".length())), victim, duration);
+        } else {
+            event = new org.bukkit.event.entity.EntityCombustEvent(victim, duration);
+        }
+        EventBridge.dispatch(event);
+        return answer(event.isCancelled(), event.getDuration());
     }
 
     /** Separates the stacks of a list. */
