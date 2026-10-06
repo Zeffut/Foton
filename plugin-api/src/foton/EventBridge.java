@@ -420,7 +420,7 @@ public final class EventBridge {
     }
 
     public static boolean fireInventoryClick(String uuid, String item, String click) {
-        return fireInventoryClick(uuid, item, "", click, -1, "", "");
+        return fireInventoryClick(uuid, item, "", click, -1, -1, "", "");
     }
 
     public static boolean fireInventoryOpen(String uuid) {
@@ -469,9 +469,10 @@ public final class EventBridge {
 
     /** `recipe` and `matrix` are empty unless the click takes a crafting result. */
     public static boolean fireInventoryClick(String uuid, String item, String cursor, String click, int rawSlot,
-            String recipe, String matrix) {
+            int hotbarButton, String recipe, String matrix) {
         org.bukkit.event.inventory.InventoryClickEvent event = EventRelay.clickEvent(player(uuid),
-            FotonInventory.decode(item), FotonInventory.decode(cursor), clickType(click), rawSlot, recipe, matrix);
+            FotonInventory.decode(item), FotonInventory.decode(cursor), clickType(click), rawSlot, hotbarButton,
+            recipe, matrix);
         dispatch(event);
         return !event.isCancelled();
     }

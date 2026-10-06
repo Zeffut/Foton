@@ -36,6 +36,7 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, LivingEntity, LivingEntityBase,
     RemovalReason,
 };
+use crate::event::{Event as _, PlayerArmorStandManipulateEvent};
 use crate::player::Player;
 use crate::world::World;
 
@@ -233,6 +234,21 @@ impl ArmorStandEntity {
         }
         if worn.is_empty() && locked & (1 << filter_bit(slot, 16)) != 0 {
             return false;
+        }
+
+        // Paper parity: the `PlayerArmorStandManipulateEvent` of `swapItem`; a
+        // cancelled swap still counts as handled, so nothing else runs.
+        let mut event = PlayerArmorStandManipulateEvent::new(
+            player.gameprofile.id,
+            self.uuid(),
+            slot,
+            hand,
+            held.clone(),
+            worn.clone(),
+        );
+        player.fire_event(&mut event);
+        if event.is_cancelled() {
+            return true;
         }
 
         if player.has_infinite_materials() && worn.is_empty() && !held.is_empty() {

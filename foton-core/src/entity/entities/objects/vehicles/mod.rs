@@ -11,6 +11,7 @@ mod minecart;
 mod minecart_common;
 mod spawner_minecart;
 mod tnt_minecart;
+mod vehicle_move;
 
 pub use boat::{BoatEntity, RaftEntity};
 pub use chest_boat::{ChestBoatEntity, ChestRaftEntity};

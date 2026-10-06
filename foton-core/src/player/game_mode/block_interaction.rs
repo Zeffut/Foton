@@ -190,11 +190,7 @@ impl Player {
                     return;
                 }
 
-                let changed = self.inventory.lock().swap_hands();
-                self.stop_using_item();
-                if changed {
-                    self.broadcast_inventory_changes();
-                }
+                self.swap_hand_items();
             }
             PlayerAction::Stab => {
                 if self.game_mode() == GameType::Spectator {

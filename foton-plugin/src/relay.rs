@@ -13,10 +13,11 @@ use std::sync::Arc;
 use foton_core::event::{
     BlockBreakEvent, BlockDropItemEvent, EntitiesLoadEvent, EntitiesUnloadEvent, EntityDamageEvent,
     EntityDismountEvent, EntityPlaceEvent, FurnaceBurnEvent, FurnaceSmeltEvent,
-    FurnaceStartSmeltEvent, PlayerArmorChangeEvent, PlayerFailMoveEvent, PlayerHarvestBlockEvent,
-    PlayerInteractEvent, PlayerItemConsumeEvent, PlayerPurchaseEvent, PlayerTeleportEvent,
-    PlayerToggleFlightEvent, PlayerVelocityEvent, PrepareSmithingEvent, ServerListPingEvent,
-    TeleportPoint, UseResult,
+    FurnaceStartSmeltEvent, PlayerArmorChangeEvent, PlayerArmorStandManipulateEvent,
+    PlayerFailMoveEvent, PlayerHarvestBlockEvent, PlayerInteractEvent, PlayerItemConsumeEvent,
+    PlayerPurchaseEvent, PlayerSwapHandItemsEvent, PlayerTeleportEvent, PlayerToggleFlightEvent,
+    PlayerVelocityEvent, PrepareSmithingEvent, ServerListPingEvent, TeleportPoint, UseResult,
+    VehicleMoveEvent,
 };
 use foton_core::server::Server;
 use foton_registry::REGISTRY;
@@ -141,6 +142,8 @@ pub(crate) fn component(text: &str) -> TextComponent {
 /// Subscribes the relay to the events it carries.
 pub(crate) fn subscribe(server: &Arc<Server>, vm: &Arc<JavaVM>) {
     subscribe_movement(server, vm);
+    subscribe_vehicles(server, vm);
+    subscribe_hands(server, vm);
     subscribe_player_items(server, vm);
     subscribe_interactions(server, vm);
     subscribe_entities(server, vm);
@@ -246,6 +249,84 @@ fn subscribe_movement(server: &Arc<Server>, vm: &Arc<JavaVM>) {
                 position,
                 rotation,
             });
+        }
+    });
+}
+
+/// Boats and minecarts moving.
+fn subscribe_vehicles(server: &Arc<Server>, vm: &Arc<JavaVM>) {
+    let events = server.events();
+
+    let jvm = Arc::clone(vm);
+    events.on::<VehicleMoveEvent, _>(owner(), move |event| {
+        let (from, from_rotation) = event.from();
+        let (to, to_rotation) = event.to();
+        let _ = text_call(
+            &jvm,
+            "fireVehicleMove",
+            &[
+                &event.vehicle().to_string(),
+                event.world(),
+                &location(from, from_rotation),
+                &location(to, to_rotation),
+            ],
+        );
+    });
+}
+
+/// Items a player swaps with their offhand or with an armor stand.
+fn subscribe_hands(server: &Arc<Server>, vm: &Arc<JavaVM>) {
+    let events = server.events();
+
+    let jvm = Arc::clone(vm);
+    events.on::<PlayerSwapHandItemsEvent, _>(owner(), move |event| {
+        let Some(answer) = text_call(
+            &jvm,
+            "fireSwapHands",
+            &[
+                &event.player().to_string(),
+                &describe_slot(event.main_hand_item()),
+                &describe_slot(event.off_hand_item()),
+            ],
+        ) else {
+            return;
+        };
+        let answer = fields(&answer);
+        if flag(answer.first()) == Some(true) {
+            event.set_cancelled(true);
+            return;
+        }
+        // A field is read only when the listener changed that hand.
+        if flag(answer.get(1)) == Some(true)
+            && let Some(item) = answer.get(2).and_then(|text| parse_slot(text))
+        {
+            event.set_main_hand_item(item);
+        }
+        if flag(answer.get(3)) == Some(true)
+            && let Some(item) = answer.get(4).and_then(|text| parse_slot(text))
+        {
+            event.set_off_hand_item(item);
+        }
+    });
+
+    let jvm = Arc::clone(vm);
+    events.on::<PlayerArmorStandManipulateEvent, _>(owner(), move |event| {
+        let Some(answer) = text_call(
+            &jvm,
+            "fireArmorStandManipulate",
+            &[
+                &event.player().to_string(),
+                &event.armor_stand().to_string(),
+                equipment_slot_name(event.slot()),
+                hand_name(event.hand()),
+                &describe_slot(event.player_item()),
+                &describe_slot(event.armor_stand_item()),
+            ],
+        ) else {
+            return;
+        };
+        if flag(fields(&answer).first()) == Some(true) {
+            event.set_cancelled(true);
         }
     });
 }
@@ -767,6 +848,20 @@ const fn armor_slot_name(slot: EquipmentSlot) -> Option<&'static str> {
         EquipmentSlot::Legs => Some("LEGS"),
         EquipmentSlot::Feet => Some("FEET"),
         _ => None,
+    }
+}
+
+/// The Bukkit `EquipmentSlot` name of any equipment slot.
+const fn equipment_slot_name(slot: EquipmentSlot) -> &'static str {
+    match slot {
+        EquipmentSlot::MainHand => "HAND",
+        EquipmentSlot::OffHand => "OFF_HAND",
+        EquipmentSlot::Feet => "FEET",
+        EquipmentSlot::Legs => "LEGS",
+        EquipmentSlot::Chest => "CHEST",
+        EquipmentSlot::Head => "HEAD",
+        EquipmentSlot::Body => "BODY",
+        EquipmentSlot::Saddle => "SADDLE",
     }
 }
 

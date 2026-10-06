@@ -27,7 +27,9 @@ use super::boat_common::{
 };
 use crate::behavior::InteractionResult;
 use crate::block_entity::ContainerLoot;
-use crate::entity::{Entity, EntityBase, EntityBaseLoad, EntityMovementEmission, EntitySyncedData};
+use crate::entity::{
+    Entity, EntityBase, EntityBaseLoad, EntityMovementEmission, EntitySyncedData, SharedEntity,
+};
 use crate::inventory::container::{Container as _, SimpleContainer};
 use crate::inventory::lock::{ContainerRef, SharedContainer};
 use crate::inventory::menu::MenuSource;
@@ -148,6 +150,10 @@ macro_rules! chest_boat_body {
 
             fn tick(&self) {
                 boat_common::tick_boat(self);
+            }
+
+            fn controlling_passenger(&self) -> Option<SharedEntity> {
+                boat_common::controlling_passenger(self)
             }
 
             fn get_default_gravity(&self) -> f64 {

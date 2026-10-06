@@ -21,6 +21,11 @@ public class CraftItemEvent extends InventoryClickEvent {
         super(view, whoClicked, currentItem, cursor, click, rawSlot, -1);
         this.recipe = recipe;
     }
+    public CraftItemEvent(Recipe recipe, org.bukkit.inventory.InventoryView view, HumanEntity whoClicked,
+            ItemStack currentItem, ItemStack cursor, ClickType click, int rawSlot, int hotbarButton) {
+        super(view, whoClicked, currentItem, cursor, click, rawSlot, hotbarButton);
+        this.recipe = recipe;
+    }
     public Recipe getRecipe() { return recipe; }
     @Override public InventoryType.SlotType getSlotType() { return InventoryType.SlotType.RESULT; }
     @Override public CraftingInventory getInventory() { return (CraftingInventory) super.getInventory(); }

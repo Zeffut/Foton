@@ -179,6 +179,7 @@ pub struct InventoryClickEvent {
     cursor_item: Option<ItemStack>,
     click: String,
     slot: Option<usize>,
+    hotbar_button: i32,
     craft: Option<CraftingClick>,
     cancelled: bool,
 }
@@ -222,9 +223,16 @@ impl InventoryClickEvent {
             cursor_item,
             click,
             slot,
+            hotbar_button: -1,
             craft: None,
             cancelled: false,
         }
+    }
+    /// Names the hotbar key of a swap click: `0..=8`, or `40` for the offhand.
+    #[must_use]
+    pub const fn with_hotbar_button(mut self, button: i32) -> Self {
+        self.hotbar_button = button;
+        self
     }
     /// Marks the click as one that crafts.
     #[must_use]
@@ -261,6 +269,11 @@ impl InventoryClickEvent {
     #[must_use]
     pub const fn slot(&self) -> Option<usize> {
         self.slot
+    }
+    /// The hotbar key a swap click used, or `-1` for any other click.
+    #[must_use]
+    pub const fn hotbar_button(&self) -> i32 {
+        self.hotbar_button
     }
     /// Returns whether a listener cancelled this click.
     #[must_use]

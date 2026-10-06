@@ -12,6 +12,7 @@ pub mod experience;
 pub mod food_data;
 /// Game mode specific logic for player interactions.
 pub mod game_mode;
+mod hand_swap;
 mod health_sync;
 mod item_consume;
 mod item_cooldowns;
