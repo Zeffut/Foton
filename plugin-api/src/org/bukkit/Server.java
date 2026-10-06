@@ -22,16 +22,11 @@ public interface Server {
      * would fail them at load rather than leave them with nothing to show. */
     org.bukkit.help.HelpMap getHelpMap();
 
-    /** Sends a component to every online player and the console.
-     *
-     * <p>Serialized to plain text on the way out, because the broadcast path
-     * underneath takes a string. A plugin that formats its announcement keeps
-     * the words and loses the colors, which is the lesser of the two wrongs
-     * available until the broadcast native carries components. */
+    /** Sends a component to every online player, formatting kept, and to the console. */
     default void sendMessage(net.kyori.adventure.text.Component message) {
         if (message == null) return;
-        broadcastMessage(net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
-                .plainText().serialize(message));
+        Bukkit.broadcast(message);
+        getConsoleSender().sendMessage(message);
     }
 
     /** Returns the datapacks discovered by the active resource reload. */

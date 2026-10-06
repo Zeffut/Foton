@@ -14,7 +14,7 @@ import org.bukkit.plugin.Plugin;
  * what they answer stops meaning anything -- so a handle that stops resolving
  * is not a new hazard for a plugin to learn.
  */
-public final class FotonPlayer implements Player, org.bukkit.projectiles.ProjectileSource, net.kyori.adventure.audience.Audience {
+public final class FotonPlayer extends foton.entity.CraftPlayer implements org.bukkit.projectiles.ProjectileSource {
     @Override public Set<String> getScoreboardTags() {
         return new FotonScoreboardTags(id.toString());
     }
@@ -58,21 +58,30 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
     @Override public boolean isSprinting() { return Native.entitySprinting(id.toString()); }
     @Override public boolean isSwimming() { return Native.entitySwimming(id.toString()); }
     @Override public void hideEntity(Plugin plugin, org.bukkit.entity.Entity entity) {
-        if (entity != null) Native.playerHideEntity(id.toString(), entity.getUniqueId().toString(), true);
+        changeVisibility(entity, true);
     }
     @Override public void showEntity(Plugin plugin, org.bukkit.entity.Entity entity) {
-        if (entity != null) Native.playerHideEntity(id.toString(), entity.getUniqueId().toString(), false);
+        changeVisibility(entity, false);
+    }
+    /** Hides or shows `entity`, and tells listeners when that changed
+     * anything, as Paper's PlayerHide/ShowEntityEvent do. */
+    private void changeVisibility(org.bukkit.entity.Entity entity, boolean hide) {
+        if (entity == null) return;
+        String other = entity.getUniqueId().toString();
+        boolean visible = Native.playerCanSeeEntity(id.toString(), other);
+        Native.playerHideEntity(id.toString(), other, hide);
+        if (visible == hide) {
+            EventBridge.dispatch(hide
+                ? new org.bukkit.event.player.PlayerHideEntityEvent(this, entity)
+                : new org.bukkit.event.player.PlayerShowEntityEvent(this, entity));
+        }
     }
     @Override public boolean canSee(Player other) {
         return other != null && other.isOnline()
             && Native.playerCanSeeEntity(id.toString(), other.getUniqueId().toString());
     }
-    @Override public void hidePlayer(Player other) {
-        if (other != null) Native.playerHideEntity(id.toString(), other.getUniqueId().toString(), true);
-    }
-    @Override public void showPlayer(Player other) {
-        if (other != null) Native.playerHideEntity(id.toString(), other.getUniqueId().toString(), false);
-    }
+    @Override public void hidePlayer(Player other) { changeVisibility(other, true); }
+    @Override public void showPlayer(Player other) { changeVisibility(other, false); }
     @Override public java.util.Set<org.bukkit.entity.Entity> getTrackedBy() {
         String[] ids = Native.entityTrackedBy(id.toString());
         java.util.LinkedHashSet<org.bukkit.entity.Entity> result = new java.util.LinkedHashSet<>();
@@ -427,13 +436,19 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
         return Native.experienceLevel(id.toString());
     }
 
+    /** The reason reaches the client as the component it is. A listener of
+     * {@code PlayerKickEvent}, whose reason Foton carries as a string, can
+     * still cancel the kick or replace the reason. */
     @Override
     public void kick(net.kyori.adventure.text.Component message) {
-        String text = message == null
-            ? ""
-            : net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText()
-                .serialize(message);
-        kickPlayer(text);
+        net.kyori.adventure.text.Component reason =
+            message == null ? net.kyori.adventure.text.Component.empty() : message;
+        String plain = net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+            .plainText().serialize(reason);
+        String answer = EventBridge.kickReason(id.toString(), plain);
+        if (answer == null) return;
+        if (answer.equals(plain)) Native.kickPlayerComponent(id.toString(), FotonComponents.toJson(reason));
+        else Native.kickPlayer(id.toString(), answer);
     }
 
     private static final java.util.Map<UUID, org.bukkit.scoreboard.Scoreboard> SCOREBOARDS =
@@ -654,39 +669,17 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
             footer == null ? "" : footer);
     }
 
-    @Override
-    public void sendSignChange(org.bukkit.Location location, String[] lines, org.bukkit.DyeColor color) {
-        Player.super.sendSignChange(location, lines, color);
-    }
-
-    @Override
-    public void sendActionBar(net.kyori.adventure.text.Component message) {
-        Player.super.sendActionBar(message);
-    }
-
-    @Override public void clearTitle() { Player.super.clearTitle(); }
-
-    @Override
-    public void sendPlayerListHeaderAndFooter(net.kyori.adventure.text.Component header, net.kyori.adventure.text.Component footer) {
-        Player.super.sendPlayerListHeaderAndFooter(header, footer);
-    }
-
-    @Override
-    public void sendPlayerListHeader(net.kyori.adventure.text.Component header) {
-        Player.super.sendPlayerListHeader(header);
-    }
 
     @Override
     public void showTitle(net.kyori.adventure.title.Title title) {
         if (title == null) return;
-        String main = net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(title.title());
-        String sub = net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(title.subtitle());
         int fadeIn = 10, stay = 70, fadeOut = 20;
         net.kyori.adventure.title.Title.Times t = title.times();
         if (t != null) {
             fadeIn = ticks(t.fadeIn()); stay = ticks(t.stay()); fadeOut = ticks(t.fadeOut());
         }
-        sendTitle(main, sub, fadeIn, stay, fadeOut);
+        Native.sendTitleComponents(id.toString(), FotonComponents.toJson(title.title()),
+            FotonComponents.toJson(title.subtitle()), fadeIn, stay, fadeOut);
     }
 
     private static int ticks(java.time.Duration duration) {
@@ -704,11 +697,7 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
     }
     @Override
     public void sendMessage(net.kyori.adventure.text.Component message) {
-        if (message != null) {
-            Native.sendMessage(id.toString(),
-                net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
-                    .plainText().serialize(message));
-        }
+        if (message != null) Native.sendMessageComponent(id.toString(), FotonComponents.toJson(message));
     }
 
     @Override
@@ -916,10 +905,12 @@ public final class FotonPlayer implements Player, org.bukkit.projectiles.Project
         return FotonMessenger.listening(id);
     }
 
+    @Override
     public boolean addChannel(String channel) {
         return FotonMessenger.addChannel(this, channel);
     }
 
+    @Override
     public boolean removeChannel(String channel) {
         return FotonMessenger.removeChannel(this, channel);
     }

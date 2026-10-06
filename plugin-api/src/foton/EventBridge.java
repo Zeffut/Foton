@@ -929,6 +929,14 @@ public final class EventBridge {
         return !event.isCancelled();
     }
 
+    /** The reason a kick ends with, or null when a listener cancelled it. */
+    static String kickReason(String playerUuid, String reason) {
+        org.bukkit.event.player.PlayerKickEvent event =
+            new org.bukkit.event.player.PlayerKickEvent(player(playerUuid), reason);
+        dispatch(event);
+        return event.isCancelled() ? null : event.getReason();
+    }
+
     public static boolean firePlayerKick(String playerUuid, String reason) {
         org.bukkit.event.player.PlayerKickEvent event =
             new org.bukkit.event.player.PlayerKickEvent(player(playerUuid), reason);

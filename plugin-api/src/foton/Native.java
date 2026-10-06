@@ -824,6 +824,11 @@ public final class Native {
     public static native void setPlayerCursor(String uuid, String item);
     public static native void givePlayerExperience(String uuid, int amount, boolean mending);
     public static native void sendActionBarComponent(String uuid, String json);
+    /** A chat message, its JSON text kept whole: colours, hovers and clicks. */
+    public static native void sendMessageComponent(String uuid, String json);
+    public static native void sendTitleComponents(String uuid, String titleJson, String subtitleJson,
+        int fadeIn, int stay, int fadeOut);
+    public static native void kickPlayerComponent(String uuid, String json);
     public static native void setPlayerListNameComponent(String uuid, String json);
     public static native void setPlayerListHeaderFooterComponents(String uuid, String header, String footer);
     public static native void setEntityGliding(String uuid, boolean gliding);

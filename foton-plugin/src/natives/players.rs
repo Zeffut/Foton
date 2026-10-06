@@ -5,7 +5,9 @@
 use std::ffi::c_void;
 
 use foton_core::entity::Entity as _;
-use foton_protocol::packets::game::{CClearTitles, CSystemChat, CTabList};
+use foton_protocol::packets::game::{
+    CClearTitles, CSetSubtitleText, CSetTitleText, CSetTitlesAnimation, CSystemChat, CTabList,
+};
 use jni::JNIEnv;
 use jni::objects::{JClass, JString};
 use jni::sys::{jboolean, jint, jstring};
@@ -205,6 +207,67 @@ extern "system" fn send_action_bar_component(
     }
 }
 
+/// A chat message from a component's JSON, formatting kept.
+///
+/// Paper parity: `Player.sendMessage(Component)`. Flattening to plain text
+/// dropped every colour, hover and click a plugin put in its messages.
+extern "system" fn send_message_component(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    json: JString<'_>,
+) {
+    let Some(message) = component(&mut env, &json) else {
+        return;
+    };
+    if let Some(player) = player(&mut env, &uuid) {
+        player.send_message(&message);
+    }
+}
+
+/// A title and subtitle from components' JSON, with their fade times.
+extern "system" fn send_title_components(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    title: JString<'_>,
+    subtitle: JString<'_>,
+    fade_in: jint,
+    stay: jint,
+    fade_out: jint,
+) {
+    let (Some(title), Some(subtitle)) =
+        (component(&mut env, &title), component(&mut env, &subtitle))
+    else {
+        return;
+    };
+    let Some(player) = player(&mut env, &uuid) else {
+        return;
+    };
+    player.send_packet(CSetTitlesAnimation {
+        fade_in,
+        stay,
+        fade_out,
+    });
+    player.send_packet(CSetTitleText::new(&title, player.as_ref()));
+    player.send_packet(CSetSubtitleText::new(&subtitle, player.as_ref()));
+}
+
+/// Disconnects the player with a component's JSON as the reason.
+extern "system" fn kick_player_component(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    json: JString<'_>,
+) {
+    let Some(reason) = component(&mut env, &json) else {
+        return;
+    };
+    if let Some(player) = player(&mut env, &uuid) {
+        player.disconnect(reason);
+    }
+}
+
 /// The player's name in the tab list; null restores the plain name.
 extern "system" fn set_player_list_name_component(
     mut env: JNIEnv<'_>,
@@ -317,6 +380,21 @@ pub(super) fn bindings() -> Vec<jni::NativeMethod> {
             "givePlayerExperience",
             "(Ljava/lang/String;IZ)V",
             give_player_experience as *mut c_void,
+        ),
+        method(
+            "sendMessageComponent",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            send_message_component as *mut c_void,
+        ),
+        method(
+            "sendTitleComponents",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;III)V",
+            send_title_components as *mut c_void,
+        ),
+        method(
+            "kickPlayerComponent",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            kick_player_component as *mut c_void,
         ),
         method(
             "sendActionBarComponent",

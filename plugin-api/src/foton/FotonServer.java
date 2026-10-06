@@ -167,6 +167,14 @@ public final class FotonServer implements Server {
     }
     @Override public String getMotd() { return Native.serverMotd(); }
 
+    /** CraftBukkit's {@code CraftServer.getServer()}, which answers the
+     * Minecraft server underneath. Plugins that reach past the API call it to
+     * learn whether they may (Simple Voice Chat refuses to start without it);
+     * Foton has no Java server object, so the answer is this one. */
+    public FotonServer getServer() {
+        return this;
+    }
+
     @Override
     public String getVersion() {
         return Native.serverBrand();
