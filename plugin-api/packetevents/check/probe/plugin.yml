@@ -10,3 +10,15 @@ commands:
     description: Writes down the top of the open view.
   probegui:
     description: Opens a menu of the probe's own.
+  probepdc:
+    description: Reads the probe's tag off the tile state at x y z.
+  probefurnace:
+    description: Loads sand and coal into the furnace at x y z.
+  probespawn:
+    description: Spawns a cow, then two pigs, through the plugin API.
+  probegolems:
+    description: probegolems refuse makes the probe veto iron golem builds.
+  probeents:
+    description: Counts the entities of the player's world by type.
+  probebreed:
+    description: Spawns two cows in love mode beside the player.
