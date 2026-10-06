@@ -13,6 +13,7 @@
 # PLUGIN_SEED_DIR   copied into plugins/ before the first start (configs)
 # WAIT_FOR_LOG      a server.log pattern to wait for before the client joins
 # JOIN_AS_OP=1      the client joins in the op group, for vanilla commands
+# EXTRA_CLIENT      a dev/ script run after the join, given the port
 #
 # Needs dev/build-plugin-api.sh and dev/build-packetevents.sh to have run, and
 # a JDK 21+ at $FOTON_JAVA_HOME (default: the one `javac` belongs to).
@@ -95,6 +96,13 @@ JOIN_WATCH_SECONDS=${JOIN_WATCH_SECONDS:-5} \
 JOIN_COMMANDS=${JOIN_COMMANDS:-"!walk 0.5 -60 0.5 0.2 0 10"} \
   python3 "$ROOT/dev/join.py" "$PORT"
 RC=$?
+# A second client with its own script, for a plugin whose part is a protocol
+# of its own (dev/voicechat-handshake.py); it is handed the port.
+if [ $RC -eq 0 ] && [ -n "${EXTRA_CLIENT:-}" ]; then
+  echo "=== $EXTRA_CLIENT ==="
+  python3 "$ROOT/$EXTRA_CLIENT" "$PORT"
+  RC=$?
+fi
 
 echo "=== Stopping ==="
 kill -TERM "$PID" 2>/dev/null
