@@ -193,6 +193,12 @@ public final class FotonPlayer extends foton.entity.CraftPlayer implements org.b
     }
 
     @Override
+    public org.bukkit.entity.Entity getVehicle() {
+        String vehicle = Native.entityVehicle(id.toString());
+        return vehicle == null ? null : FotonEntity.handle(Native.parse(vehicle));
+    }
+
+    @Override
     public java.util.List<org.bukkit.entity.Entity> getPassengers() {
         String encoded = Native.entityPassengers(id.toString());
         if (encoded == null || encoded.isEmpty()) return java.util.List.of();
