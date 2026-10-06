@@ -317,9 +317,18 @@ public interface Player extends HumanEntity, org.bukkit.OfflinePlayer {
         public int getPing() { return player.getPing(); }
         public String getLocale() { return player.getLocale(); }
         public void sendMessage(String message) {}
+        /** Spigot's positioned message: the action bar for {@code ACTION_BAR},
+         * the chat otherwise. Simple Voice Chat sends its status this way. */
         public void sendMessage(net.md_5.bungee.api.ChatMessageType position,
                 net.md_5.bungee.api.chat.BaseComponent... components) {
-            super.sendMessage(components);
+            if (components == null) return;
+            net.kyori.adventure.text.Component message = foton.FotonBungee.component(components);
+            if (position == net.md_5.bungee.api.ChatMessageType.ACTION_BAR) player.sendActionBar(message);
+            else player.sendMessage(message);
+        }
+        public void sendMessage(net.md_5.bungee.api.ChatMessageType position,
+                net.md_5.bungee.api.chat.BaseComponent component) {
+            sendMessage(position, new net.md_5.bungee.api.chat.BaseComponent[] {component});
         }
     }
 }

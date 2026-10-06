@@ -21,7 +21,7 @@ public interface CommandSender extends org.bukkit.permissions.Permissible {
         }
     }
     default void sendMessage(net.md_5.bungee.api.chat.BaseComponent component) {
-        if (component != null) sendMessage(component.toLegacyText());
+        if (component != null) sendMessage(foton.FotonBungee.component(component));
     }
     default void sendMessage(net.md_5.bungee.api.chat.BaseComponent... components) {
         if (components != null) spigot().sendMessage(components);
@@ -40,14 +40,10 @@ public interface CommandSender extends org.bukkit.permissions.Permissible {
         public Spigot() { this.sender = null; }
         public Spigot(CommandSender sender) { this.sender = sender; }
         public void sendMessage(net.md_5.bungee.api.chat.BaseComponent component) {
-            if (component != null) sender.sendMessage(component.toLegacyText());
+            if (component != null) sender.sendMessage(foton.FotonBungee.component(component));
         }
         public void sendMessage(net.md_5.bungee.api.chat.BaseComponent... components) {
-            if (components == null) return;
-            StringBuilder text = new StringBuilder();
-            for (net.md_5.bungee.api.chat.BaseComponent component : components)
-                if (component != null) text.append(component.toLegacyText());
-            sender.sendMessage(text.toString());
+            if (components != null) sender.sendMessage(foton.FotonBungee.component(components));
         }
     }
 }

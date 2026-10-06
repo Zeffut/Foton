@@ -178,6 +178,7 @@ fn the_class_path_is_ordered() {
             "plexus-interpolation-1.26.jar",
             "javax.inject-1.jar",
             "commons-lang3-3.20.0.jar",
+            "bungeecord-chat-1.21-R0.2-deprecated+build.21.jar",
         ],
         "the API jar leads, then the manifest order is stable"
     );

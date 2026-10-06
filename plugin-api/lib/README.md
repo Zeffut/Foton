@@ -41,6 +41,14 @@ that rather than shading it. Observer and Zelda Civ both call
 same reason: Paper provides it, and a hand-written stand-in that ignored `§`
 codes and serialized a component as its `toString()` was worse than none.
 
+`bungeecord-chat` is the version paper-api 26.2 declares, the deprecated build
+Paper still puts on every plugin's class path. Plugins written for Spigot send
+`BaseComponent`s through `Player.spigot()`; Simple Voice Chat refuses its
+Spigot mode -- translated messages and action-bar status -- without the real
+`TranslatableComponent` and `ComponentSerializer`, which a hand-written
+stand-in never had. Its jar carries no license file and its POM no
+`<licenses>` block; the row below cites the project's repository.
+
 `adventure-text-serializer-gson` is here for Foton's own use, and paper-api
 declares it too. A component a plugin hands over -- a join or quit message, a
 kick reason, a server-list MOTD -- crosses to the Rust side as Minecraft's JSON
@@ -117,6 +125,7 @@ POM, not from memory and not carried over from the previous version.
 | adventure-text-minimessage | 5.2.0 | MIT | PaperMC Maven POM |
 | adventure-text-serializer-plain | 5.2.0 | MIT | Maven Central POM |
 | adventure-text-serializer-legacy | 5.2.0 | MIT | Maven Central POM |
+| bungeecord-chat | 1.21-R0.2-deprecated+build.21 | BSD-3-Clause | `LICENSE` in SpigotMC/BungeeCord |
 | adventure-text-serializer-gson | 5.2.0 | MIT | PaperMC Maven POM |
 | adventure-text-serializer-json | 5.2.0 | MIT | PaperMC Maven POM |
 | adventure-text-serializer-commons | 5.2.0 | MIT | PaperMC Maven POM |
