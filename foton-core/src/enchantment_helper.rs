@@ -461,15 +461,25 @@ pub(crate) fn do_post_attack_effects_with_item_source(
 ) {
     if let Some(living_victim) = victim.as_living_entity() {
         for slot in EquipmentSlot::ALL {
-            let mut item_broke = false;
-            living_victim.with_equipment_slot_mut(slot, &mut |item| {
-                item_broke = apply_post_attack_effects(
-                    world,
-                    item,
-                    Some(slot),
-                    EnchantmentTarget::Victim,
-                    context,
-                );
+            // The effects run on a copy: thorns hurts the attacker, and the
+            // attacker's armor maths read this victim's equipment back, which
+            // deadlocks while the slot is held.
+            let mut item = living_victim.get_item_by_slot(slot);
+            if item.is_empty() {
+                continue;
+            }
+            let item_broke = apply_post_attack_effects(
+                world,
+                &mut item,
+                Some(slot),
+                EnchantmentTarget::Victim,
+                context,
+            );
+            let mut spent = Some(item);
+            living_victim.with_equipment_slot_mut(slot, &mut |held| {
+                if let Some(item) = spent.take() {
+                    *held = item;
+                }
             });
             if item_broke {
                 living_victim.on_equipped_item_broken(slot);
