@@ -233,6 +233,7 @@ impl CreakingHeartBlockEntity {
             SPAWN_RANGE_Y,
             SpawnStrategy::OnTopOfColliderNoLeaves,
             true,
+            None,
         )?;
         as_creaking(&spawned)?;
 

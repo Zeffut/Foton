@@ -11108,6 +11108,12 @@ extern "system" fn spawn_entity(
     let Some(entity) = entity else {
         return null_mut();
     };
+    // Paper parity: `World#spawnEntity` asks `CreatureSpawnEvent` with `CUSTOM`.
+    // A veto answers null, where Paper hands back an entity that never joined.
+    if !world.allow_creature_spawn(&entity, PluginSpawnReason::Custom) {
+        discard_unpublished_entity(&entity);
+        return null_mut();
+    }
     match prepare_then_publish(&world, entity, |entity| {
         env.new_string(entity.uuid().to_string())
     }) {
@@ -11196,6 +11202,12 @@ extern "system" fn finish_pending_spawn(
         return 0;
     };
     if publish == 0 {
+        discard_unpublished_entity(&entity);
+        return 1;
+    }
+    // Paper parity: `World#spawn` asks `CreatureSpawnEvent` with `CUSTOM`, and
+    // a veto hands back the entity that never joined, so it counts as handled.
+    if !world.allow_creature_spawn(&entity, PluginSpawnReason::Custom) {
         discard_unpublished_entity(&entity);
         return 1;
     }

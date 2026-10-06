@@ -24,7 +24,7 @@ use crate::behavior::context::BlockPlaceContext;
 use crate::behavior::waxables::get_normal_from_waxed_variant;
 use crate::behavior::weathering::get_weather_state;
 use crate::entity::entities::{CopperGolemEntity, IronGolemEntity};
-use crate::entity::{ENTITIES, SharedEntity, next_entity_id};
+use crate::entity::{ENTITIES, PluginSpawnReason, SharedEntity, next_entity_id};
 use crate::world::block_pattern::{
     BlockPattern, BlockPatternBuilder, BlockPatternMatch, has_state,
 };
@@ -143,7 +143,7 @@ impl CarvedPumpkinBlock {
         if let Some(found) = SNOW_GOLEM_FULL.find(world.as_ref(), top_pos) {
             let spawn_pos = found.block(0, 2, 0).pos();
             if let Some(golem) = create_golem(world, &vanilla_entities::SNOW_GOLEM, spawn_pos) {
-                spawn_golem_in_world(world, &found, &golem);
+                spawn_golem_in_world(world, &found, &golem, PluginSpawnReason::BuildSnowman);
             }
             return;
         }
@@ -154,7 +154,7 @@ impl CarvedPumpkinBlock {
                 if let Some(iron_golem) = golem.downcast_ref::<IronGolemEntity>() {
                     iron_golem.set_player_created(true);
                 }
-                spawn_golem_in_world(world, &found, &golem);
+                spawn_golem_in_world(world, &found, &golem, PluginSpawnReason::BuildIronGolem);
             }
             return;
         }
@@ -170,7 +170,9 @@ impl CarvedPumpkinBlock {
             let copper_block = found.block(0, 1, 0).state().get_block();
             let facing = found.block(0, 0, 0).state().get_value(HORIZONTAL_FACING);
 
-            spawn_golem_in_world(world, &found, &golem);
+            if !spawn_golem_in_world(world, &found, &golem, PluginSpawnReason::BuildCopperGolem) {
+                return;
+            }
             replace_copper_block_with_chest(world, chest_pos, copper_block, facing);
             if let Some(copper_golem) = golem.downcast_ref::<CopperGolemEntity>() {
                 copper_golem.spawn(weather_state);
@@ -238,17 +240,28 @@ fn create_golem(
     )
 }
 
-/// Swaps the frame for the golem.
+/// Swaps the frame for the golem, or leaves the frame alone and answers
+/// `false` when a plugin vetoed the spawn.
 ///
 /// Vanilla parity: `CarvedPumpkinBlock.spawnGolemInWorld`. The advancement
-/// trigger vanilla fires here has no equivalent in Foton yet.
-fn spawn_golem_in_world(world: &Arc<World>, found: &BlockPatternMatch<'_>, golem: &SharedEntity) {
-    CarvedPumpkinBlock::clear_pattern_blocks(world, found);
+/// trigger vanilla fires here has no equivalent in Foton yet. Paper parity: the
+/// `CreatureSpawnEvent` is asked before the frame is cleared.
+fn spawn_golem_in_world(
+    world: &Arc<World>,
+    found: &BlockPatternMatch<'_>,
+    golem: &SharedEntity,
+    reason: PluginSpawnReason,
+) -> bool {
     golem.set_rotation((0.0, 0.0));
+    if !world.allow_creature_spawn(golem, reason) {
+        return false;
+    }
+    CarvedPumpkinBlock::clear_pattern_blocks(world, found);
     if let Err(error) = world.try_add_entity(Arc::clone(golem)) {
         log::debug!("golem could not be built: {error}");
     }
     CarvedPumpkinBlock::update_pattern_blocks(world, found);
+    true
 }
 
 /// Returns how oxidized the copper the golem was built from is.

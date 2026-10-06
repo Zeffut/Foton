@@ -7,8 +7,10 @@ use super::{
     SectionPos, SharedEntity, SharedGameEventListener, SyncMutex, World, WorldAabb,
     WorldChangeRequest, block_entity_ticker, mem, next_entity_id, vanilla_entities,
 };
+use crate::entity::PluginSpawnReason;
 use crate::event::{
-    ChunkUnloadEvent, EntitiesUnloadEvent, EntityRemoveFromWorldEvent, ItemSpawnEvent,
+    ChunkUnloadEvent, CreatureSpawnEvent, EntitiesUnloadEvent, EntityRemoveFromWorldEvent,
+    ItemSpawnEvent,
 };
 use uuid::Uuid;
 
@@ -640,6 +642,39 @@ impl World {
         self.entity_manager
             .get_by_uuid(uuid)
             .or_else(|| self.pending_spawn_entities.lock().get(uuid).cloned())
+    }
+
+    /// Asks the plugins whether a living entity may enter the world.
+    ///
+    /// Paper parity: the `CreatureSpawnEvent` of `ServerLevel.addFreshEntity`.
+    /// `reason` is what Bukkit calls the spawn, and is what the entity answers
+    /// to afterwards. The entity is addressable while listeners run and is not
+    /// yet in the world; `false` means a listener cancelled, and the caller
+    /// drops it. Anything that is not a living entity is let through, as
+    /// Bukkit has no event for it.
+    #[must_use]
+    pub fn allow_creature_spawn(
+        self: &Arc<Self>,
+        entity: &SharedEntity,
+        reason: PluginSpawnReason,
+    ) -> bool {
+        if entity.as_living_entity().is_none() {
+            return true;
+        }
+        entity.base().set_plugin_spawn_reason(reason);
+        let position = entity.position();
+        let mut event = CreatureSpawnEvent::new(
+            entity.uuid(),
+            self.key.to_string(),
+            position.x,
+            position.y,
+            position.z,
+            reason,
+        );
+        self.begin_pending_spawn(Arc::clone(entity));
+        self.fire_event(&mut event);
+        self.end_pending_spawn(&entity.uuid());
+        !event.is_cancelled()
     }
 
     /// Makes an unpublished entity addressable to callbacks by UUID.

@@ -58,7 +58,7 @@ use crate::entity::spawn_util::{SpawnStrategy, try_spawn_mob};
 use crate::entity::{
     AgeableMob, AgeableMobBase, Entity, EntityBase, EntityBaseLoad, EntityPose, EntitySpawnReason,
     EntitySyncedData, LivingEntity, LivingEntityBase, Mob, MobBase, MobEffectInstance,
-    PathfinderMob, SharedEntity, SpawnGroupData,
+    PathfinderMob, PluginSpawnReason, SharedEntity, SpawnGroupData,
 };
 use crate::inventory::container::{Container as _, SimpleContainer};
 use crate::inventory::menu::MenuSource;
@@ -605,6 +605,7 @@ impl VillagerEntity {
             GOLEM_SPAWN_RANGE_Y,
             SpawnStrategy::LegacyIronGolem,
             false,
+            Some(PluginSpawnReason::VillageDefense),
         );
         if spawned.is_none() {
             return;
