@@ -210,6 +210,7 @@ mod entities;
 mod lifecycle;
 mod merchants;
 mod particles;
+mod persistent_data;
 mod players;
 mod support;
 use crate::item_components;
@@ -16499,6 +16500,7 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
     bindings.extend(displays::bindings());
     bindings.extend(lifecycle::bindings());
     bindings.extend(merchants::bindings());
+    bindings.extend(persistent_data::bindings());
     bindings.extend(players::bindings());
     // Beside the table rather than in it: the packet tap is its own module.
     bindings.extend(packet_tap::bindings());

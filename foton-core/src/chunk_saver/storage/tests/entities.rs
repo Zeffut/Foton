@@ -26,6 +26,7 @@ fn test_persistent_end_crystal(pos: DVec3) -> PersistentEntity {
         glowing: false,
         tags: Vec::new(),
         custom_data_nbt: Vec::new(),
+        bukkit_values_nbt: Vec::new(),
         nbt_data: Vec::new(),
         passengers: Vec::new(),
     }
@@ -280,6 +281,60 @@ fn proto_entities_roundtrip_and_promote_to_full_chunk() {
             .string("marker")
             .map(ToString::to_string),
         Some("roundtrip".to_owned())
+    );
+}
+
+#[test]
+fn bukkit_values_survive_a_chunk_save_for_the_chunk_and_its_entities() {
+    init_globals_once();
+
+    let pos = ChunkPos::new(0, 0);
+    let chunk = Chunk::new(single_empty_section(), pos, 0, 16, Weak::new());
+    let crystal = Arc::new(EndCrystalEntity::new(
+        &vanilla_entities::END_CRYSTAL,
+        next_entity_id(),
+        DVec3::new(5.5, 6.0, 7.5),
+        Weak::new(),
+    ));
+    let mut entity_values = NbtCompound::new();
+    entity_values.insert("zeldaciv:marker", "entity");
+    crystal.base().set_bukkit_values(entity_values);
+    let mut chunk_values = NbtCompound::new();
+    chunk_values.insert("zeldaciv:blocks", "chunk");
+    chunk.set_bukkit_values(chunk_values);
+    chunk.add_entity(crystal);
+
+    let Some(prepared) =
+        ChunkStorage::prepare_chunk_save(&chunk, ChunkStatus::Features, &[], false)
+    else {
+        panic!("dirty proto chunk should prepare for saving");
+    };
+    let loaded = ChunkStorage::persistent_to_chunk(
+        &prepared.persistent,
+        pos,
+        ChunkStatus::Features,
+        0,
+        16,
+        Weak::new(),
+    );
+
+    assert_eq!(
+        loaded
+            .chunk
+            .bukkit_values()
+            .string("zeldaciv:blocks")
+            .map(ToString::to_string),
+        Some("chunk".to_owned())
+    );
+    let entities = loaded.chunk.get_entities();
+    assert_eq!(entities.len(), 1);
+    assert_eq!(
+        entities[0]
+            .base()
+            .bukkit_values()
+            .string("zeldaciv:marker")
+            .map(ToString::to_string),
+        Some("entity".to_owned())
     );
 }
 

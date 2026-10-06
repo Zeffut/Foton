@@ -762,6 +762,7 @@ impl ChunkStorage {
             structure_starts,
             structure_references,
             pois,
+            &chunk.bukkit_values(),
             pos,
         );
 
@@ -829,6 +830,7 @@ impl ChunkStorage {
         structure_starts: Vec<PersistentStructureStart>,
         structure_references: Vec<PersistentStructureReference>,
         pois: Vec<PersistentPoi>,
+        bukkit_values: &NbtCompound,
         chunk_pos: ChunkPos,
     ) -> PersistentChunk<'static> {
         let mut builder = ChunkBuilder::new(&REGISTRY);
@@ -894,6 +896,7 @@ impl ChunkStorage {
             structure_starts,
             structure_references,
             pois,
+            bukkit_values_nbt: Self::compound_to_persistent(bukkit_values),
         }
     }
 }

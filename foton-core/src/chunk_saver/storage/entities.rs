@@ -1,6 +1,7 @@
 use super::*;
 use crate::chunk_saver::nesting::MAX_NESTING_DEPTH;
 use crate::entity::PluginSpawnReason;
+use std::fmt::Debug;
 
 impl ChunkStorage {
     pub(super) fn entities_to_persistent(entities: &[SharedEntity]) -> Vec<PersistentEntity> {
@@ -76,7 +77,7 @@ impl ChunkStorage {
         custom_name
     }
 
-    pub(super) fn compound_to_persistent(compound: &NbtCompound) -> Vec<u8> {
+    pub(crate) fn compound_to_persistent(compound: &NbtCompound) -> Vec<u8> {
         if compound.is_empty() {
             return Vec::new();
         }
@@ -86,15 +87,15 @@ impl ChunkStorage {
         bytes
     }
 
-    pub(super) fn compound_from_persistent(bytes: &[u8], uuid: uuid::Uuid) -> NbtCompound {
+    pub(crate) fn compound_from_persistent(bytes: &[u8], owner: impl Debug) -> NbtCompound {
         if bytes.is_empty() {
             return NbtCompound::new();
         }
 
         let Ok(compound) = read_borrowed_compound(&mut Cursor::new(bytes)) else {
             tracing::warn!(
-                ?uuid,
-                "Failed to parse entity custom data NBT, defaulting to empty custom data"
+                ?owner,
+                "Failed to parse persisted compound NBT, defaulting to an empty compound"
             );
             return NbtCompound::new();
         };
@@ -121,6 +122,7 @@ impl ChunkStorage {
                 .cloned()
                 .collect(),
             custom_data: Self::compound_from_persistent(&persistent.custom_data_nbt, uuid),
+            bukkit_values: Self::compound_from_persistent(&persistent.bukkit_values_nbt, uuid),
             persistent: true,
         }
     }
@@ -244,6 +246,7 @@ impl ChunkStorage {
             glowing: save_data.glowing,
             tags: save_data.tags.iter().cloned().collect(),
             custom_data_nbt: Self::compound_to_persistent(&save_data.custom_data),
+            bukkit_values_nbt: Self::compound_to_persistent(&save_data.bukkit_values),
             nbt_data: nbt_bytes,
             passengers,
         })

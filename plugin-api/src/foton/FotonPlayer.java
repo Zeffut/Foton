@@ -89,8 +89,6 @@ public final class FotonPlayer extends foton.entity.CraftPlayer implements org.b
         catch (IllegalArgumentException ignored) { }
         return java.util.Collections.unmodifiableSet(result);
     }
-    private static final java.util.concurrent.ConcurrentHashMap<UUID, FotonPersistentDataContainer> DATA =
-        new java.util.concurrent.ConcurrentHashMap<>();
     private static final java.util.concurrent.ConcurrentHashMap<SessionKey, PlayerPermissions> PERMISSIONS =
         new java.util.concurrent.ConcurrentHashMap<>();
     private static final Object SESSION_LIFECYCLE = new Object();
@@ -212,7 +210,7 @@ public final class FotonPlayer extends foton.entity.CraftPlayer implements org.b
 
     @Override
     public org.bukkit.persistence.PersistentDataContainer getPersistentDataContainer() {
-        return DATA.computeIfAbsent(id, ignored -> new FotonPersistentDataContainer());
+        return FotonLivePersistentDataContainer.ofEntity(id);
     }
 
     @Override

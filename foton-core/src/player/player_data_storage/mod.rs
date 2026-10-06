@@ -47,7 +47,7 @@ use foton_utils::{BlockPos, Identifier};
 const PLAYER_MAGIC: [u8; 4] = *b"STLP";
 const GLOBAL_MAGIC: [u8; 4] = *b"STLG";
 // Both integration parents used 12 for incompatible positional schemas. Never guess.
-const PLAYER_STORAGE_VERSION: u16 = 13;
+const PLAYER_STORAGE_VERSION: u16 = 14;
 const GLOBAL_STORAGE_VERSION: u16 = 3;
 const GLOBAL_PLAYER_DATA_VERSION: i32 = 2;
 /// Largest compressed player data file accepted from disk.
@@ -157,6 +157,8 @@ struct PlayerDataFile {
     recipe_book: RecipeBookFile,
     /// Written `LivingEntity.addAdditionalSaveData` compound.
     living_nbt: Vec<u8>,
+    /// Written Bukkit persistent data compound (`BukkitValues`).
+    bukkit_values_nbt: Vec<u8>,
 }
 
 #[derive(SchemaWrite, SchemaRead)]
@@ -1120,6 +1122,7 @@ impl PlayerDataFile {
                 .collect(),
             recipe_book: RecipeBookFile::from(&data.recipe_book),
             living_nbt: data.living_nbt.clone(),
+            bukkit_values_nbt: data.bukkit_values_nbt.clone(),
         };
         file.validate_finite_values()?;
         Ok(file)
@@ -1216,6 +1219,7 @@ impl PlayerDataFile {
             statistics,
             recipe_book: self.recipe_book.into(),
             living_nbt: self.living_nbt,
+            bukkit_values_nbt: self.bukkit_values_nbt,
         })
     }
 
@@ -1847,6 +1851,7 @@ mod tests {
                 settings: [false; 8],
             },
             living_nbt: Vec::new(),
+            bukkit_values_nbt: Vec::new(),
         }
     }
 
@@ -1889,6 +1894,7 @@ mod tests {
             glowing: false,
             tags: Vec::new(),
             custom_data_nbt: Vec::new(),
+            bukkit_values_nbt: Vec::new(),
             nbt_data: Vec::new(),
             passengers: Vec::new(),
         }

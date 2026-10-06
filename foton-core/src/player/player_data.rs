@@ -28,7 +28,7 @@ use super::{
 
 /// Current data version for player saves.
 /// Increment when making breaking changes to the format.
-pub const PLAYER_DATA_VERSION: i32 = 13;
+pub const PLAYER_DATA_VERSION: i32 = 14;
 
 /// Persistent player data saved by Foton's storage backend.
 ///
@@ -173,6 +173,9 @@ pub struct PersistentPlayerData {
     /// applied first and then overwritten by that field, which is the order
     /// vanilla's `super`-first read runs in.
     pub living_nbt: Vec<u8>,
+
+    /// Bukkit persistent data compound, as Paper's `BukkitValues` in the player NBT.
+    pub bukkit_values_nbt: Vec<u8>,
 }
 
 impl PersistentPlayerData {
@@ -383,6 +386,7 @@ impl PersistentPlayerData {
             statistics,
             recipe_book: player.saved_recipe_book(),
             living_nbt,
+            bukkit_values_nbt: ChunkStorage::compound_to_persistent(&player.base().bukkit_values()),
         }
     }
 
@@ -668,6 +672,12 @@ impl PersistentPlayerData {
 
         self.apply_living_nbt(player);
         player.base().set_tags(self.tags.iter().cloned());
+        player
+            .base()
+            .set_bukkit_values(ChunkStorage::compound_from_persistent(
+                &self.bukkit_values_nbt,
+                player.uuid(),
+            ));
 
         if restore_location {
             // Position

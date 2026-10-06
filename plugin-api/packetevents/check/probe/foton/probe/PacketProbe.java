@@ -346,6 +346,10 @@ public final class PacketProbe extends JavaPlugin implements Listener {
                 : vehicle.getType() + " at " + pos(vehicle.getLocation()) + " rider " + pos(player.getLocation()));
             return true;
         }
+        if (command.getName().equals("probepdc")) {
+            PdcProbe.run(this, player, args.length > 0 ? args[0] : "read", facts);
+            return true;
+        }
         if (command.getName().equals("probecraft")) {
             Inventory top = player.getOpenInventory().getTopInventory();
             ItemStack[] contents = new ItemStack[top.getSize()];

@@ -32,8 +32,6 @@ public class FotonEntity implements Entity, org.bukkit.projectiles.ProjectileSou
     @Override public void setGlowing(boolean glowing) { Native.setEntityGlowing(id.toString(), glowing); }
     @Override public float getFallDistance() { return Native.entityFallDistance(id.toString()); }
     @Override public void setFallDistance(float distance) { Native.setEntityFallDistance(id.toString(), distance); }
-    private static final java.util.concurrent.ConcurrentHashMap<UUID, FotonPersistentDataContainer> DATA =
-        new java.util.concurrent.ConcurrentHashMap<>();
     private final UUID id;
     public FotonEntity(UUID id) { this.id = id; }
     /** The Bukkit handle for any entity, players included. */
@@ -61,7 +59,7 @@ public class FotonEntity implements Entity, org.bukkit.projectiles.ProjectileSou
     }
 
     @Override public org.bukkit.persistence.PersistentDataContainer getPersistentDataContainer() {
-        return DATA.computeIfAbsent(id, ignored -> new FotonPersistentDataContainer());
+        return FotonLivePersistentDataContainer.ofEntity(id);
     }
     @Override public boolean equals(Object other) {
         return other instanceof org.bukkit.entity.Entity entity && id.equals(entity.getUniqueId());

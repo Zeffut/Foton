@@ -237,6 +237,10 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         if !custom_data.is_empty() {
             nbt.insert("data", NbtTag::Compound(custom_data));
         }
+        let bukkit_values = self.base().bukkit_values();
+        if !bukkit_values.is_empty() {
+            nbt.insert("BukkitValues", NbtTag::Compound(bukkit_values));
+        }
 
         if let Some(living) = self.as_living_entity() {
             living.save_living(&mut nbt);

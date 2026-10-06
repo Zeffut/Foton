@@ -18,3 +18,5 @@ commands:
     description: Writes down the nearest armor stand's helmet.
   probevehicle:
     description: Writes down the vehicle the player rides.
+  probepdc:
+    description: Writes or reads persistent data on the player, entities and chunk.

@@ -1846,6 +1846,7 @@ mod tests {
             structure_starts: Vec::new(),
             structure_references: Vec::new(),
             pois: Vec::new(),
+            bukkit_values_nbt: Vec::new(),
         };
         let encoded = wincode::serialize(&persistent).expect("test chunk should encode");
         let payload = zstd::encode_all(encoded.as_slice(), 1).expect("test chunk should compress");
