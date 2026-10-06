@@ -32,19 +32,21 @@ pub fn furnace(
     let container = container.into();
     let mut builder = MenuBuilder::new(menu_type, container_id);
 
-    let input = builder.section(&container, 1);
+    let mut furnace_slots = builder.split(&container);
+
+    let input = builder.section(&mut furnace_slots, 1);
     // Vanilla also refuses a second empty bucket while one already sits here; the
     // rule cannot see the slot's current contents from this predicate, so that
     // corner case is left to Container::can_place_item.
     let fuel = builder.section_with(
-        &container,
+        &mut furnace_slots,
         1,
         SectionKind::restricted(|_slot, stack| {
             fuel::is_fuel(stack) || stack.is(&vanilla_items::BUCKET)
         }),
     );
     let result = builder.section_with(
-        &container,
+        &mut furnace_slots,
         1,
         SectionKind::custom(move |container, index| {
             Box::new(FurnaceResultSlot::new(
