@@ -28,15 +28,14 @@ use foton_core::event::{
     BlockDispenseEvent, BlockExpEvent, BlockExplodeEvent, BlockFadeEvent, BlockFertilizeEvent,
     BlockFromToEvent, BlockGrowEvent, BlockIgniteEvent, BlockPlaceEvent, BlockPreDispenseEvent,
     BlockSpreadEvent, BrewEvent, ChunkLoadEvent, ChunkPopulateEvent, ChunkUnloadEvent,
-    CommandEvent, CrafterCraftEvent, CreatureSpawnEvent, EntityChangeBlockEvent,
-    EntityDamageByEntityEvent, EntityDeathEvent, EntityExplodeEvent, EntityMountEvent,
-    EntityPickupItemEvent, EntityPortalEvent, EntityPushedByEntityAttackEvent,
-    EntityRegainHealthEvent, EntityRemoveFromWorldEvent, EntityResurrectEvent,
-    EntityTransformEvent, ExpBottleEvent, FoodLevelChangeEvent, HangingBreakEvent,
-    HangingPlaceEvent, InventoryClickEvent, InventoryCloseEvent, InventoryDragEvent,
-    InventoryOpenEvent, ItemSpawnEvent, LeavesDecayEvent, LightningStrikeEvent, PistonEvent,
-    PlayerAdvancementCriterionGrantEvent, PlayerAdvancementDoneEvent, PlayerBucketEmptyEvent,
-    PlayerBucketFillEvent, PlayerChatEvent, PlayerClientLoadedWorldEvent,
+    CommandEvent, CrafterCraftEvent, CreatureSpawnEvent, EntityChangeBlockEvent, EntityDeathEvent,
+    EntityExplodeEvent, EntityMountEvent, EntityPickupItemEvent, EntityPortalEvent,
+    EntityPushedByEntityAttackEvent, EntityRegainHealthEvent, EntityRemoveFromWorldEvent,
+    EntityResurrectEvent, EntityTransformEvent, ExpBottleEvent, FoodLevelChangeEvent,
+    HangingBreakEvent, HangingPlaceEvent, InventoryClickEvent, InventoryCloseEvent,
+    InventoryDragEvent, InventoryOpenEvent, ItemSpawnEvent, LeavesDecayEvent, LightningStrikeEvent,
+    PistonEvent, PlayerAdvancementCriterionGrantEvent, PlayerAdvancementDoneEvent,
+    PlayerBucketEmptyEvent, PlayerBucketFillEvent, PlayerChatEvent, PlayerClientLoadedWorldEvent,
     PlayerCommandPreprocessEvent, PlayerCustomPayloadEvent, PlayerDeathEvent, PlayerDropItemEvent,
     PlayerFishEvent, PlayerInteractEntityEvent, PlayerInteractEvent, PlayerItemBreakEvent,
     PlayerJoinEvent, PlayerLocaleChangeEvent, PlayerLoginAbortEvent, PlayerLoginEvent,
@@ -748,19 +747,6 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     let jvm = Arc::clone(&vm);
     events.on::<EntityRegainHealthEvent, _>(owner(), move |event| {
         if !regain_health_call(&jvm, &event.entity().to_string(), event.amount()) {
-            event.set_cancelled(true);
-        }
-    });
-
-    let jvm = Arc::clone(&vm);
-    events.on::<EntityDamageByEntityEvent, _>(owner(), move |event| {
-        if !damage_call(
-            &jvm,
-            &event.damager().to_string(),
-            &event.entity().to_string(),
-            event.cause(),
-            event.critical(),
-        ) {
             event.set_cancelled(true);
         }
     });
@@ -2076,34 +2062,6 @@ fn regain_health_call(vm: &JavaVM, entity: &str, amount: f32) -> bool {
         "fireEntityRegainHealth",
         "(Ljava/lang/String;F)Z",
         &[JValue::Object(&entity), JValue::Float(amount)],
-    )
-    .and_then(JValueGen::z)
-    .unwrap_or(true)
-}
-
-fn damage_call(vm: &JavaVM, damager: &str, entity: &str, cause: &str, critical: bool) -> bool {
-    let Some(mut env) = BridgeEnv::attach(vm) else {
-        return true;
-    };
-    let Ok(damager) = env.new_string(damager) else {
-        return true;
-    };
-    let Ok(entity) = env.new_string(entity) else {
-        return true;
-    };
-    let Ok(cause) = env.new_string(cause) else {
-        return true;
-    };
-    env.call_static_method(
-        BRIDGE,
-        "fireEntityDamage",
-        "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z)Z",
-        &[
-            JValue::Object(&damager),
-            JValue::Object(&entity),
-            JValue::Object(&cause),
-            JValue::Bool(u8::from(critical)),
-        ],
     )
     .and_then(JValueGen::z)
     .unwrap_or(true)

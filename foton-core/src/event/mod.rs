@@ -34,7 +34,7 @@ pub mod command;
 pub mod command_preprocess;
 /// Blocks that cook and brew on their own.
 pub mod cooking;
-/// Damage no entity is behind.
+/// Damage about to be dealt to an entity.
 pub mod damage;
 /// What a block gives when a player breaks or picks from it.
 pub mod drops;
@@ -66,15 +66,15 @@ pub use brew::BrewEvent;
 pub use command::{AsyncTabCompleteEvent, CommandEvent};
 pub use command_preprocess::PlayerCommandPreprocessEvent;
 pub use cooking::{FurnaceBurnEvent, FurnaceSmeltEvent, FurnaceStartSmeltEvent};
-pub use damage::EntityDamageEvent;
+pub use damage::{DamageModifier, Damager, EntityDamageEvent};
 pub use drops::{BlockDropItemEvent, PlayerHarvestBlockEvent};
 pub use enchantment::{EnchantmentOffer, EnchantmentViewState, PrepareItemEnchantEvent};
 pub use entity::{
-    BlockExplodeEvent, CreatureSpawnEvent, EntityChangeBlockEvent, EntityDamageByEntityEvent,
-    EntityDeathEvent, EntityExplodeEvent, EntityMountEvent, EntityPickupItemEvent,
-    EntityPortalEvent, EntityPushedByEntityAttackEvent, EntityRegainHealthEvent,
-    EntityRemoveFromWorldEvent, EntityResurrectEvent, EntityTargetEvent, EntityTransformEvent,
-    ExpBottleEvent, ExplosionPrimeEvent, HangingBreakEvent, HangingPlaceEvent, ItemSpawnEvent,
+    BlockExplodeEvent, CreatureSpawnEvent, EntityChangeBlockEvent, EntityDeathEvent,
+    EntityExplodeEvent, EntityMountEvent, EntityPickupItemEvent, EntityPortalEvent,
+    EntityPushedByEntityAttackEvent, EntityRegainHealthEvent, EntityRemoveFromWorldEvent,
+    EntityResurrectEvent, EntityTargetEvent, EntityTransformEvent, ExpBottleEvent,
+    ExplosionPrimeEvent, HangingBreakEvent, HangingPlaceEvent, ItemSpawnEvent,
     LightningStrikeEvent, PreCreatureSpawnEvent, ProjectileLaunchEvent,
 };
 pub use entity_lifecycle::{

@@ -196,14 +196,14 @@ impl BlockBehavior for CactusBlock {
         &self,
         _state: BlockStateId,
         world: &Arc<World>,
-        _pos: BlockPos,
+        pos: BlockPos,
         entity: &dyn Entity,
         _effect_collector: &mut InsideBlockEffectCollector,
         _is_precise: bool,
     ) {
         entity.hurt(
             world,
-            &DamageSource::environment(&vanilla_damage_types::CACTUS),
+            &DamageSource::environment(&vanilla_damage_types::CACTUS).with_block_damager(pos),
             1.0,
         );
     }

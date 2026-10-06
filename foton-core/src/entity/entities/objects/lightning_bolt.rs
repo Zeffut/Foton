@@ -340,14 +340,17 @@ impl Entity for LightningBoltEntity {
 /// then checks it against zero, so the eight-second ignition only ever fires
 /// for an entity whose counter was at -1. For everything else a strike leaves
 /// one tick of fire, which is the flicker seen in game.
-pub fn default_thunder_hit(entity: &dyn Entity, world: &World) {
+pub fn default_thunder_hit(entity: &dyn Entity, world: &World, bolt: &dyn Entity) {
     entity.set_remaining_fire_ticks(entity.remaining_fire_ticks() + 1);
     if entity.remaining_fire_ticks() == 0 {
         entity.ignite_for_ticks(STRIKE_FIRE_TICKS);
     }
+    // Paper parity: plugins see the bolt as the damager, where vanilla's
+    // source carries no entity and keeps the plain death message.
     entity.hurt(
         world,
-        &DamageSource::environment(&vanilla_damage_types::LIGHTNING_BOLT),
+        &DamageSource::environment(&vanilla_damage_types::LIGHTNING_BOLT)
+            .with_event_entity_damager(bolt.id()),
         STRIKE_DAMAGE,
     );
 }

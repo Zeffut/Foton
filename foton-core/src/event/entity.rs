@@ -544,15 +544,6 @@ impl EntityExplodeEvent {
     }
 }
 
-/// An entity attack before damage is applied.
-pub struct EntityDamageByEntityEvent {
-    damager: Uuid,
-    entity: Uuid,
-    cause: String,
-    critical: bool,
-    cancelled: bool,
-}
-
 /// Fired immediately before an entity receives attack knockback.
 pub struct EntityPushedByEntityAttackEvent {
     entity: Uuid,
@@ -721,64 +712,6 @@ impl HangingPlaceEvent {
     #[must_use]
     pub fn face(&self) -> &str {
         &self.face
-    }
-    /// Whether a listener has stopped this from happening.
-    #[must_use]
-    pub const fn is_cancelled(&self) -> bool {
-        self.cancelled
-    }
-    /// Stops this from happening, or lets it happen again.
-    pub const fn set_cancelled(&mut self, cancelled: bool) {
-        self.cancelled = cancelled;
-    }
-}
-
-// SAFETY: This Foton-owned key uniquely identifies the concrete Rust type.
-unsafe impl DowncastType for EntityDamageByEntityEvent {
-    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/entity_damage_by_entity");
-}
-impl Event for EntityDamageByEntityEvent {
-    fn is_cancelled(&self) -> bool {
-        self.cancelled
-    }
-}
-impl EntityDamageByEntityEvent {
-    /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
-    #[must_use]
-    pub const fn new(damager: Uuid, entity: Uuid, cause: String) -> Self {
-        Self {
-            damager,
-            entity,
-            cause,
-            critical: false,
-            cancelled: false,
-        }
-    }
-    /// Marks the hit as a critical one, as vanilla decided it.
-    #[must_use]
-    pub const fn with_critical(mut self, critical: bool) -> Self {
-        self.critical = critical;
-        self
-    }
-    /// Whether this is a critical hit.
-    #[must_use]
-    pub const fn critical(&self) -> bool {
-        self.critical
-    }
-    /// Who dealt the damage.
-    #[must_use]
-    pub const fn damager(&self) -> Uuid {
-        self.damager
-    }
-    /// Which entity this is about.
-    #[must_use]
-    pub const fn entity(&self) -> Uuid {
-        self.entity
-    }
-    /// What brought this about.
-    #[must_use]
-    pub fn cause(&self) -> &str {
-        &self.cause
     }
     /// Whether a listener has stopped this from happening.
     #[must_use]

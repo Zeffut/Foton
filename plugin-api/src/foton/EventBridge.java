@@ -494,11 +494,6 @@ public final class EventBridge {
         dispatch(event); return !event.isCancelled();
     }
 
-    private static org.bukkit.event.entity.EntityDamageEvent.DamageCause damageCause(String name) {
-        try { return org.bukkit.event.entity.EntityDamageEvent.DamageCause.valueOf(name); }
-        catch (IllegalArgumentException | NullPointerException error) { return org.bukkit.event.entity.EntityDamageEvent.DamageCause.CUSTOM; }
-    }
-
     private static org.bukkit.event.inventory.ClickType clickType(String name) {
         try { return org.bukkit.event.inventory.ClickType.valueOf(name); }
         catch (IllegalArgumentException | NullPointerException error) { return org.bukkit.event.inventory.ClickType.UNKNOWN; }
@@ -600,19 +595,6 @@ public final class EventBridge {
             return null;
         }
         return record.event();
-    }
-
-    public static boolean fireEntityDamage(String damager, String entity, String cause, boolean critical) {
-        org.bukkit.entity.Entity target = FotonEntity.handle(Native.parse(entity));
-        org.bukkit.event.entity.EntityDamageByEntityEvent event =
-            new org.bukkit.event.entity.EntityDamageByEntityEvent(
-                FotonEntity.handle(Native.parse(damager)), target,
-                damageCause(cause), critical);
-        dispatch(event);
-        if (target instanceof org.bukkit.entity.LivingEntity) {
-            LAST_DAMAGE.put(target.getUniqueId(), new DamageRecord(event, Bukkit.getCurrentTick()));
-        }
-        return !event.isCancelled();
     }
 
     public static boolean fireEntityPushedByEntityAttack(String entity, String pushedBy) {

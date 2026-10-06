@@ -113,6 +113,11 @@ impl BlockBehavior for PointedDripstoneBlock {
         context: EntityFallOnContext<'_>,
     ) -> Option<EntityFallDamage> {
         Self::fall_damage_for_state(state, context.fall_distance)
+            .map(|mut damage| {
+                // Paper parity: plugins see the stalagmite as the damager.
+                damage.source = damage.source.with_block_damager(pos);
+                damage
+            })
             .or_else(|| self.default_fall_on(state, world, pos, context))
     }
 

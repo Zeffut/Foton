@@ -29,7 +29,7 @@ use crate::entity::{
     BlockAttached, Entity, EntityBase, EntityBaseLoad, EntityBaseState, EntitySyncedData,
     ItemFrame, SharedEntity,
 };
-use crate::event::HangingBreakEvent;
+use crate::event::{EntityDamageEvent, HangingBreakEvent};
 use crate::inventory::slot_ranges::CONTENTS_SLOT;
 use crate::physics::{WorldCollisionProvider, has_block_collision};
 use crate::player::Player;
@@ -181,7 +181,7 @@ pub(super) trait FrameLike: BlockAttached {
     /// A punch on a frame holding something empties it and leaves the frame on
     /// the wall; a punch on an empty one takes the frame down. An explosion
     /// skips the emptying and always breaks it.
-    fn hurt_item_frame(&self, world: &World, source: &DamageSource) -> bool {
+    fn hurt_item_frame(&self, world: &World, source: &DamageSource, amount: f32) -> bool {
         if self.is_fixed() {
             return can_hurt_when_fixed(world, source) && self.hurt_block_attached(world, source);
         }
@@ -190,6 +190,18 @@ pub(super) trait FrameLike: BlockAttached {
         }
         if source.is(&DamageTypeTag::IS_EXPLOSION) || self.framed_item().is_empty() {
             return self.hurt_block_attached(world, source);
+        }
+        // Paper parity: plugins may keep the item in its frame; the hit
+        // still counts as landed.
+        if !EntityDamageEvent::allows_non_living_hurt(
+            self.as_entity_event_source(),
+            world,
+            source,
+            amount,
+            false,
+        ) || self.is_removed()
+        {
+            return true;
         }
 
         let caused_by = caused_by_entity(world, source);
@@ -512,8 +524,8 @@ impl Entity for ItemFrameEntity {
     /// Lightning passes straight through anything hung on a block.
     fn thunder_hit(&self, _world: &World, _bolt: &dyn Entity) {}
 
-    fn hurt(&self, world: &World, source: &DamageSource, _amount: f32) -> bool {
-        self.hurt_item_frame(world, source)
+    fn hurt(&self, world: &World, source: &DamageSource, amount: f32) -> bool {
+        self.hurt_item_frame(world, source, amount)
     }
 
     fn tick(&self) {

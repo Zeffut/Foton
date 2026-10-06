@@ -48,7 +48,8 @@ impl BlockBehavior for MagmaBlock {
         {
             entity.hurt(
                 world,
-                &DamageSource::environment(&vanilla_damage_types::HOT_FLOOR),
+                &DamageSource::environment(&vanilla_damage_types::HOT_FLOOR)
+                    .with_block_damager(pos),
                 damage,
             );
         }

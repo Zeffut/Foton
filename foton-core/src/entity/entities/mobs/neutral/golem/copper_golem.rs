@@ -586,7 +586,7 @@ impl Entity for CopperGolemEntity {
 
     /// Vanilla parity: `CopperGolem.thunderHit`, which scrapes a stage off.
     fn thunder_hit(&self, world: &World, bolt: &dyn Entity) {
-        self.entity_thunder_hit(world);
+        self.entity_thunder_hit(world, bolt);
 
         let bolt_uuid = bolt.uuid();
         if self.state.lock().last_lightning_bolt_uuid == Some(bolt_uuid) {

@@ -452,6 +452,7 @@ impl Projectile for SpectralArrowEntity {
         // Vanilla parity: a critical arrow rolls a bonus in `[0, damage/2 + 2)`.
         if self.is_crit_arrow() {
             damage = damage.saturating_add(rand::random_range(0..damage / 2 + 2));
+            source = source.critical();
         }
 
         if let Some(owner_living) = owner.as_ref().and_then(|owner| owner.as_living_entity()) {

@@ -285,9 +285,9 @@ impl Entity for PigEntity {
     /// Vanilla parity: `Pig.thunderHit`, which zombifies the pig instead of
     /// hurting it. On Peaceful, and whenever the conversion cannot happen, the
     /// strike falls through to the ordinary damage and singeing.
-    fn thunder_hit(&self, world: &World, _bolt: &dyn Entity) {
+    fn thunder_hit(&self, world: &World, bolt: &dyn Entity) {
         if world.difficulty() == Difficulty::Peaceful {
-            self.entity_thunder_hit(world);
+            self.entity_thunder_hit(world, bolt);
             return;
         }
 
@@ -306,7 +306,7 @@ impl Entity for PigEntity {
         );
 
         if converted.is_none() {
-            self.entity_thunder_hit(world);
+            self.entity_thunder_hit(world, bolt);
         }
     }
 

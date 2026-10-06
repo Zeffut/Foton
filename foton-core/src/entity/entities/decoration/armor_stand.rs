@@ -36,6 +36,7 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, LivingEntity, LivingEntityBase,
     RemovalReason,
 };
+use crate::event::EntityDamageEvent;
 use crate::player::Player;
 use crate::world::World;
 
@@ -487,19 +488,28 @@ impl LivingEntity for ArmorStandEntity {
     /// off, and the one thing a player can do to it needs two hits inside five
     /// ticks -- which is what stops a stray click from destroying somebody's
     /// display.
-    fn hurt_server(&self, world: &World, source: &DamageSource, _amount: f32) -> bool {
+    fn hurt_server(&self, world: &World, source: &DamageSource, amount: f32) -> bool {
         if self.is_removed() {
             return false;
         }
+        // Paper parity: a stand is not a living entity to plugins, so each
+        // branch that would act on the hit asks them first.
+        let allowed =
+            || EntityDamageEvent::allows_non_living_hurt(self, world, source, amount, true);
         // Not implemented: vanilla also refuses damage from a mob while
         // `mobGriefing` is off. Deciding whether a damage source came from a
         // mob needs a lookup from an entity id back to the entity, which
         // `DamageSource` does not offer here.
         if source.is(&DamageTypeTag::BYPASSES_INVULNERABILITY) {
-            self.set_removed(RemovalReason::Killed);
+            if allowed() {
+                self.set_removed(RemovalReason::Killed);
+            }
             return false;
         }
         if self.invisible.load(Ordering::Relaxed) || self.is_marker() {
+            return false;
+        }
+        if !allowed() {
             return false;
         }
 

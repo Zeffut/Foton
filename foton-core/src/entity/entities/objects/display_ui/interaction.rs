@@ -11,6 +11,7 @@ use std::sync::Weak;
 use foton_macros::entity_behavior;
 use foton_registry::entity_data::EntityPose;
 use foton_registry::entity_type::{EntityDimensions, EntityTypeRef};
+use foton_registry::vanilla_damage_types;
 use foton_registry::vanilla_entity_data::InteractionEntityData;
 use foton_utils::locks::SyncMutex;
 use foton_utils::types::InteractionHand;
@@ -21,7 +22,9 @@ use simdnbt::owned::{NbtCompound, NbtTag};
 use uuid::Uuid;
 
 use crate::behavior::InteractionResult;
+use crate::entity::damage::DamageSource;
 use crate::entity::{Entity, EntityBase, EntityBaseLoad, EntitySyncedData, SharedEntity};
+use crate::event::{EntityDamageEvent, Event};
 use crate::player::Player;
 use crate::world::World;
 
@@ -312,6 +315,17 @@ impl Entity for InteractionEntity {
         let Some(player) = source.as_player() else {
             return false;
         };
+        // Paper parity: plugins hear the click as one point of damage dealt
+        // by the player, and may refuse it.
+        if let Some(world) = self.level() {
+            let source = DamageSource::environment(&vanilla_damage_types::GENERIC)
+                .with_event_entity_damager(player.id());
+            let mut event = EntityDamageEvent::new(&world, self.uuid(), &source, 1.0, Vec::new());
+            world.fire_event(&mut event);
+            if Event::is_cancelled(&event) {
+                return true;
+            }
+        }
         let action = PlayerAction {
             player: player.uuid(),
             timestamp: self.action_timestamp(),

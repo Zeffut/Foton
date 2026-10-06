@@ -123,7 +123,8 @@ pub(super) fn handle_air_supply<M: LivingEntity + ?Sized>(
             fish.set_air_supply(0);
             fish.hurt_server(
                 world,
-                &DamageSource::environment(&vanilla_damage_types::DROWN),
+                // Paper parity: drowning in air is reported as drying out.
+                &DamageSource::environment(&vanilla_damage_types::DROWN).with_known_cause("DRYOUT"),
                 SUFFOCATION_DAMAGE,
             );
         }

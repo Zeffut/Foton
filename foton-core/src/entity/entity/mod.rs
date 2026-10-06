@@ -1629,13 +1629,13 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
     /// or break, and call [`Self::entity_thunder_hit`] from the override for
     /// the shared damage and ignition; Rust has no `super`, so the base body
     /// lives in its own method.
-    fn thunder_hit(&self, world: &World, _bolt: &dyn Entity) {
-        self.entity_thunder_hit(world);
+    fn thunder_hit(&self, world: &World, bolt: &dyn Entity) {
+        self.entity_thunder_hit(world, bolt);
     }
 
     /// Runs the shared body of [`Self::thunder_hit`].
-    fn entity_thunder_hit(&self, world: &World) {
-        entities::objects::default_thunder_hit(self.as_entity_event_source(), world);
+    fn entity_thunder_hit(&self, world: &World, bolt: &dyn Entity) {
+        entities::objects::default_thunder_hit(self.as_entity_event_source(), world, bolt);
     }
 
     /// Returns this entity as a neutral mob when it holds a grudge.
