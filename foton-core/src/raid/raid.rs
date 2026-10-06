@@ -46,7 +46,8 @@ use crate::entity::raider::{
     MAX_NO_ACTION_TIME, OMINOUS_BANNER_DROP_CHANCE, RaidStatus, Raider, ominous_banner,
 };
 use crate::entity::{
-    ENTITIES, Entity, EntitySpawnReason, LivingEntity, MobEffectInstance, next_entity_id,
+    ENTITIES, Entity, EntitySpawnReason, LivingEntity, MobEffectInstance, PluginSpawnReason,
+    next_entity_id,
 };
 use crate::inventory::equipment::EquipmentSlot;
 use crate::player::Player;
@@ -1153,7 +1154,9 @@ impl Raid {
                 }
 
                 self.join_raid(world, group_number, raider, Some(pos), false);
-                if world.try_add_entity(Arc::clone(&entity)).is_err() {
+                if !world.allow_creature_spawn(&entity, PluginSpawnReason::Raid)
+                    || world.try_add_entity(Arc::clone(&entity)).is_err()
+                {
                     self.remove_from_raid(world, entity.id(), true);
                     continue;
                 }
@@ -1189,7 +1192,9 @@ impl Raid {
                     continue;
                 };
                 self.join_raid(world, group_number, passenger, Some(pos), false);
-                if world.try_add_entity(Arc::clone(&rider_entity)).is_err() {
+                if !world.allow_creature_spawn(&rider_entity, PluginSpawnReason::Raid)
+                    || world.try_add_entity(Arc::clone(&rider_entity)).is_err()
+                {
                     self.remove_from_raid(world, rider_entity.id(), true);
                     continue;
                 }

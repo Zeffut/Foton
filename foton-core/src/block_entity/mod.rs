@@ -271,9 +271,16 @@ impl BlockEntityBase {
     }
 
     /// Replaces plugin-owned tile data and marks the containing chunk dirty.
+    ///
+    /// Only the chunk is told: plugin data cannot change a comparator's
+    /// reading, so the neighbour updates of [`Self::set_changed`] would be work
+    /// that touches the world for nothing, and this is called from plugin
+    /// threads that may not touch it.
     pub fn replace_persistent_data(&self, data: NbtCompound) {
         *self.persistent_data.lock() = data;
-        self.set_changed();
+        if let Some(world) = self.level() {
+            world.block_entity_changed(self.pos);
+        }
     }
 
     pub(crate) fn load_persistent_data(&self, data: NbtCompound) {

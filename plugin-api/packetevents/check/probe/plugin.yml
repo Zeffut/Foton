@@ -22,3 +22,15 @@ commands:
     description: Writes or reads persistent data on the player, entities and chunk.
   probeitems:
     description: Gives an elytra with attribute modifiers and player heads with profiles, and reads them back.
+  probetile:
+    description: Reads the probe's tag off the tile state at x y z.
+  probefurnace:
+    description: Loads sand and coal into the furnace at x y z.
+  probeapispawn:
+    description: Spawns a cow, then two pigs, through the plugin API.
+  probegolems:
+    description: probegolems refuse makes the probe veto iron golem builds.
+  probeents:
+    description: Counts the entities of the player's world by type.
+  probebreed:
+    description: Spawns two cows in love mode beside the player.

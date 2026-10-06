@@ -30,7 +30,7 @@ use simdnbt::owned::NbtCompound;
 use crate::chunk::light::LightLayer;
 use crate::entity::PluginSpawnReason;
 use crate::entity::{ENTITIES, Entity, EntitySpawnReason, SharedEntity, next_entity_id};
-use crate::event::{CreatureSpawnEvent, PreCreatureSpawnEvent};
+use crate::event::PreCreatureSpawnEvent;
 use crate::physics::{WorldCollisionProvider, has_collision};
 use crate::world::World;
 use crate::world::game_event::GameEventContext;
@@ -283,10 +283,6 @@ impl BaseSpawner {
     }
 
     /// One iteration of vanilla's `for (int c = 0; c < this.spawnCount; c++)`.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "transposes BaseSpawner.serverTick's single attempt, guard for guard"
-    )]
     fn try_spawn_one(
         &self,
         world: &Arc<World>,
@@ -386,18 +382,7 @@ impl BaseSpawner {
             }
         }
 
-        let mut spawn_event = CreatureSpawnEvent::new(
-            entity.uuid(),
-            world.key.to_string(),
-            entity.position().x,
-            entity.position().y,
-            entity.position().z,
-            PluginSpawnReason::Spawner,
-        );
-        world.begin_pending_spawn(Arc::clone(&entity));
-        world.fire_event(&mut spawn_event);
-        world.end_pending_spawn(&entity.uuid());
-        if spawn_event.is_cancelled() {
+        if !world.allow_creature_spawn(&entity, PluginSpawnReason::Spawner) {
             return SpawnAttempt::Skipped;
         }
         if world.try_add_entity(Arc::clone(&entity)).is_err() {

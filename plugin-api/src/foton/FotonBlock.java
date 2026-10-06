@@ -173,7 +173,9 @@ public final class FotonBlock implements Block {
         if (getType() == Material.SPAWNER) {
             return new FotonCreatureSpawner(this, getBlockData());
         }
-        return new FotonBlockState(this, getBlockData());
+        BlockData data = getBlockData();
+        byte[] tileData = world == null ? null : Native.blockEntityPersistentData(world.getName(), x, y, z);
+        return tileData == null ? new FotonBlockState(this, data) : new FotonTileState(this, data, tileData);
     }
 
     @Override

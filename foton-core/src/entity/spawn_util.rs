@@ -23,7 +23,9 @@ use foton_utils::{BlockPos, BlockStateId, WorldAabb};
 use glam::DVec3;
 
 use crate::entity::entities::ArrowEntity;
-use crate::entity::{AddEntityError, ENTITIES, EntitySpawnReason, SharedEntity, next_entity_id};
+use crate::entity::{
+    AddEntityError, ENTITIES, EntitySpawnReason, PluginSpawnReason, SharedEntity, next_entity_id,
+};
 use crate::physics::WorldCollisionProvider;
 use crate::physics::collision::CollisionWorld as _;
 use crate::world::World;
@@ -388,6 +390,9 @@ mod initialized_spawn_tests {
 /// Vanilla parity: `SpawnUtil.trySpawnMob`. Returns the spawned mob, or `None`
 /// when every attempt found nowhere to stand.
 ///
+/// `plugin_reason` is what Bukkit calls this spawn. A caller whose Paper
+/// reason is not settled passes `None`, and no `CreatureSpawnEvent` is asked.
+///
 /// Two approximations worth naming. Vanilla's `level.noCollision(aabb)` also
 /// tests entity collisions and the world border's own shape; Foton's
 /// [`CollisionWorld::has_block_collision`] is blocks only, so a creaking may be
@@ -409,6 +414,7 @@ pub fn try_spawn_mob(
     spawn_range_y: i32,
     strategy: SpawnStrategy,
     check_collisions: bool,
+    plugin_reason: Option<PluginSpawnReason>,
 ) -> Option<SharedEntity> {
     for _ in 0..spawn_attempts {
         let dx = rand::random_range(-spawn_range_xz..=spawn_range_xz);
@@ -452,6 +458,11 @@ pub fn try_spawn_mob(
             continue;
         }
 
+        if let Some(reason) = plugin_reason
+            && !world.allow_creature_spawn(&entity, reason)
+        {
+            continue;
+        }
         if let Err(error) = world.try_add_entity(Arc::clone(&entity)) {
             log::debug!("spawn util rejected a {}: {error}", entity_type.key);
             continue;
@@ -545,6 +556,7 @@ mod tests {
             8,
             SpawnStrategy::OnTopOfColliderNoLeaves,
             true,
+            None,
         )
         .expect("a flat stone floor should take a creaking somewhere");
 
@@ -576,6 +588,7 @@ mod tests {
             8,
             SpawnStrategy::OnTopOfColliderNoLeaves,
             true,
+            None,
         );
 
         assert!(

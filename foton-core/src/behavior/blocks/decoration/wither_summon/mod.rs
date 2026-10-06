@@ -22,7 +22,7 @@ use glam::DVec3;
 
 use crate::behavior::blocks::CarvedPumpkinBlock;
 use crate::entity::entities::WitherBoss;
-use crate::entity::{ENTITIES, next_entity_id};
+use crate::entity::{ENTITIES, PluginSpawnReason, next_entity_id};
 use crate::world::World;
 use crate::world::block_pattern::{
     BlockPattern, BlockPatternBuilder, BlockPatternMatch, has_state,
@@ -99,6 +99,11 @@ pub fn check_wither_spawn(world: &Arc<World>, pos: BlockPos) {
     ) else {
         return;
     };
+
+    // Paper parity: a vetoed wither leaves the frame standing.
+    if !world.allow_creature_spawn(&wither, PluginSpawnReason::BuildWither) {
+        return;
+    }
 
     clear_and_update(world, &found, || {
         wither.set_rotation((y_rot, 0.0));

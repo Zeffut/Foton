@@ -23,7 +23,7 @@ use crate::behavior::BlockCollisionContext;
 use crate::entity::ENTITIES;
 use crate::entity::PluginSpawnReason;
 use crate::entity::{Entity, EntitySpawnReason, SpawnGroupData, next_entity_id};
-use crate::event::{CreatureSpawnEvent, PreCreatureSpawnEvent};
+use crate::event::PreCreatureSpawnEvent;
 use crate::physics::{CollisionWorld as _, WorldCollisionProvider};
 use crate::world::World;
 use crate::world::spawn_placement::spawn_placement_for;
@@ -344,18 +344,7 @@ impl World {
 
                 group_data = mob.finalize_spawn(self, EntitySpawnReason::Natural, group_data);
 
-                let mut spawn_event = CreatureSpawnEvent::new(
-                    entity.uuid(),
-                    self.key.to_string(),
-                    entity.position().x,
-                    entity.position().y,
-                    entity.position().z,
-                    PluginSpawnReason::Natural,
-                );
-                self.begin_pending_spawn(Arc::clone(&entity));
-                self.fire_event(&mut spawn_event);
-                self.end_pending_spawn(&entity.uuid());
-                if spawn_event.is_cancelled() {
+                if !self.allow_creature_spawn(&entity, PluginSpawnReason::Natural) {
                     continue;
                 }
                 if let Err(error) = self.try_add_entity(Arc::clone(&entity)) {

@@ -18,7 +18,9 @@ use foton_utils::BlockPos;
 use foton_utils::types::Difficulty;
 
 use crate::behavior::{InteractionResult, ItemBehavior, UseOnContext};
-use crate::entity::{ENTITIES, EntitySpawnReason, Mob, SharedEntity, next_entity_id};
+use crate::entity::{
+    ENTITIES, EntitySpawnReason, Mob, PluginSpawnReason, SharedEntity, next_entity_id,
+};
 use crate::player::Player;
 use crate::world::game_event::GameEventContext;
 use crate::world::{LevelReader as _, World};
@@ -42,7 +44,7 @@ impl SpawnEggItem {
     /// `SpawnEggItemBehavior` go through, so a dispenser and a right click make
     /// the same mob under the same rules.
     pub fn spawn_at(world: &Arc<World>, entity_type: EntityTypeRef, pos: BlockPos) -> Option<()> {
-        spawn_mob(world, entity_type, pos)
+        spawn_mob(world, entity_type, pos, PluginSpawnReason::DispenseEgg)
     }
 
     /// Breeds a baby out of `parent` when `stack` is that mob's own spawn egg.
@@ -98,6 +100,9 @@ impl SpawnEggItem {
             }
         }
 
+        if !world.allow_creature_spawn(&offspring, PluginSpawnReason::SpawnerEgg) {
+            return None;
+        }
         world.try_add_entity(Arc::clone(&offspring)).ok()?;
 
         // Vanilla parity: `ItemStack.consume`, which spares a creative player.
@@ -155,7 +160,14 @@ impl ItemBehavior for SpawnEggItem {
             clicked.relative(context.hit_result.direction)
         };
 
-        if spawn_mob(context.world, entity_type, spawn_pos).is_none() {
+        if spawn_mob(
+            context.world,
+            entity_type,
+            spawn_pos,
+            PluginSpawnReason::SpawnerEgg,
+        )
+        .is_none()
+        {
             return InteractionResult::Fail;
         }
 
@@ -176,7 +188,12 @@ impl ItemBehavior for SpawnEggItem {
 /// Puts one mob of `entity_type` in the world.
 ///
 /// Vanilla parity: the `EntityType.spawn` of `SpawnEggItem.spawnMob`.
-fn spawn_mob(world: &Arc<World>, entity_type: EntityTypeRef, pos: BlockPos) -> Option<()> {
+fn spawn_mob(
+    world: &Arc<World>,
+    entity_type: EntityTypeRef,
+    pos: BlockPos,
+    reason: PluginSpawnReason,
+) -> Option<()> {
     if !World::is_in_spawnable_bounds(pos) {
         return None;
     }
@@ -196,6 +213,9 @@ fn spawn_mob(world: &Arc<World>, entity_type: EntityTypeRef, pos: BlockPos) -> O
         let _ = mob.finalize_spawn(world, EntitySpawnReason::SpawnItemUse, None);
     }
 
+    if !world.allow_creature_spawn(&entity, reason) {
+        return None;
+    }
     world.try_add_entity(entity).ok()
 }
 

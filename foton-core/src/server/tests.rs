@@ -101,6 +101,7 @@ use foton_utils::types::GameType;
 use tokio::sync::oneshot::channel;
 
 mod beehive_spawn;
+mod creature_spawn_gates;
 
 struct TestConnection {
     sent_packets: Arc<SyncMutex<Vec<EncodedPacket>>>,

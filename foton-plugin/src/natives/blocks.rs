@@ -3,14 +3,17 @@
 //! `Block#isLiquid` and `BlockData#isOccluding`, and `World#rayTraceBlocks`.
 
 use std::ffi::c_void;
+use std::io::Cursor;
+use std::ptr::null_mut;
 
 use foton_core::world::{ClipBlockShape, ClipFluid, LevelReader as _};
 use foton_registry::blocks::block_state_ext::BlockStateExt as _;
 use foton_utils::{BlockPos, Direction};
 use glam::DVec3;
 use jni::JNIEnv;
-use jni::objects::{JClass, JString};
-use jni::sys::{jboolean, jdouble, jdoubleArray, jint};
+use jni::objects::{JByteArray, JClass, JString};
+use jni::sys::{jboolean, jbyteArray, jdouble, jdoubleArray, jint};
+use simdnbt::owned::{BaseNbt, Nbt, read as read_nbt};
 
 use super::parse_state;
 use super::support::{doubles, method, text, world};
@@ -146,8 +149,77 @@ extern "system" fn ray_trace_blocks(
     doubles(&mut env, Some(&values))
 }
 
+/// Largest persistent data compound a plugin may write onto one block entity.
+const MAX_BLOCK_ENTITY_DATA_BYTES: usize = 1 << 20;
+
+/// The block entity's `PublicBukkitValues` as a binary NBT compound, or null
+/// where no block entity stands. An entity that holds none answers an empty
+/// compound, which is what a fresh tile state starts from.
+extern "system" fn block_entity_persistent_data(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jint,
+    y: jint,
+    z: jint,
+) -> jbyteArray {
+    let Some(data) = world(&mut env, &name)
+        .and_then(|world| world.get_block_entity(BlockPos::new(x, y, z)))
+        .map(|entity| entity.base().persistent_data())
+    else {
+        return null_mut();
+    };
+    let mut bytes = Vec::new();
+    BaseNbt::new("", data).write(&mut bytes);
+    env.byte_array_from_slice(&bytes)
+        .map_or(null_mut(), JByteArray::into_raw)
+}
+
+/// Replaces the block entity's `PublicBukkitValues` with a binary NBT
+/// compound, as `TileState#update` writes it. False when no block entity
+/// stands or the bytes are not a compound. The write is the entity's own and
+/// only marks the chunk dirty, so unlike `setBlock` it need not wait for the
+/// tick thread: an event handler runs on the packet thread and expects to read
+/// its write back at once.
+extern "system" fn set_block_entity_persistent_data(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jint,
+    y: jint,
+    z: jint,
+    data: JByteArray<'_>,
+) -> jboolean {
+    let Ok(bytes) = env.convert_byte_array(&data) else {
+        return 0;
+    };
+    if bytes.len() > MAX_BLOCK_ENTITY_DATA_BYTES {
+        return 0;
+    }
+    let Ok(Nbt::Some(root)) = read_nbt(&mut Cursor::new(&bytes)) else {
+        return 0;
+    };
+    let Some(entity) =
+        world(&mut env, &name).and_then(|world| world.get_block_entity(BlockPos::new(x, y, z)))
+    else {
+        return 0;
+    };
+    entity.base().replace_persistent_data(root.as_compound());
+    1
+}
+
 pub(super) fn bindings() -> Vec<jni::NativeMethod> {
     vec![
+        method(
+            "blockEntityPersistentData",
+            "(Ljava/lang/String;III)[B",
+            block_entity_persistent_data as *mut c_void,
+        ),
+        method(
+            "setBlockEntityPersistentData",
+            "(Ljava/lang/String;III[B)Z",
+            set_block_entity_persistent_data as *mut c_void,
+        ),
         method(
             "blockShapeBoxes",
             "(Ljava/lang/String;IIII)[D",

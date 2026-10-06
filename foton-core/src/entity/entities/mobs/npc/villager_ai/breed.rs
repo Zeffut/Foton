@@ -16,7 +16,8 @@ use crate::entity::ai::brain::behavior::{
 use crate::entity::ai::brain::memory::memory_module_types;
 use crate::entity::entities::mobs::npc::VillagerEntity;
 use crate::entity::{
-    AgeableMob, Entity as _, Mob, PathfinderMob as _, SharedEntity, next_entity_id,
+    AgeableMob, Entity as _, Mob, PathfinderMob as _, PluginSpawnReason, SharedEntity,
+    next_entity_id,
 };
 use crate::poi::poi_storage::OccupationStatus;
 use crate::world::World;
@@ -289,6 +290,13 @@ fn breed(
     }
     child.set_rotation((0.0, 0.0));
     child.set_old_position_to_current();
+    // Paper parity: a vetoed birth is an empty `Optional`, like a failed add.
+    if !world.allow_creature_spawn(
+        &(Arc::clone(&child) as SharedEntity),
+        PluginSpawnReason::Breeding,
+    ) {
+        return None;
+    }
     if let Err(error) = world.try_add_entity(Arc::clone(&child) as SharedEntity) {
         log::warn!("could not add a newborn villager to the world: {error}");
         return None;

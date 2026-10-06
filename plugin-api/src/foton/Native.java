@@ -142,6 +142,9 @@ public final class Native {
      * stack, as {@link EventRelay#cookingRecipe} reads it, or null. */
     public static native String cookingRecipe(String block, String item);
     /** `{burn, cook, cookTotal}` of a furnace, smoker or blast furnace, or null. */
+    /** The block entity's PublicBukkitValues as binary NBT, or null with no block entity there. */
+    public static native byte[] blockEntityPersistentData(String world, int x, int y, int z);
+    public static native boolean setBlockEntityPersistentData(String world, int x, int y, int z, byte[] data);
     public static native int[] furnaceTimes(String world, int x, int y, int z);
     public static native void setFurnaceTimes(String world, int x, int y, int z, int[] times);
     public static native String brewingStandState(String world, int x, int y, int z);

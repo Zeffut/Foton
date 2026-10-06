@@ -21,8 +21,8 @@ use super::super::{
 };
 use crate::{
     entity::{
-        AddEntityError, ENTITIES, EntityBase, EntityLoadRequest, EntitySpawnReason, SharedEntity,
-        nbt_load::read_entity_nbt,
+        AddEntityError, ENTITIES, EntityBase, EntityLoadRequest, EntitySpawnReason,
+        PluginSpawnReason, SharedEntity, nbt_load::read_entity_nbt,
     },
     world::World,
 };
@@ -134,6 +134,15 @@ pub(super) fn create_entity(
 
     if finalize && let Some(mob) = entity.as_mob() {
         let _ = mob.finalize_spawn(world, EntitySpawnReason::Command, None);
+    }
+
+    // Paper parity: every living entity of the tree is put to the listeners,
+    // and a veto on any of them fails the command before anything is added.
+    if !tree
+        .iter()
+        .all(|member| world.allow_creature_spawn(member, PluginSpawnReason::Command))
+    {
+        return Err(command_failed(&translations::COMMANDS_SUMMON_FAILED));
     }
 
     match world.try_add_entity_with_passengers(&tree) {

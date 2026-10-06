@@ -788,12 +788,17 @@ public final class EventBridge {
         return EventRelay.fireBlockBreak(uuid, world, x + " " + y + " " + z, "0").startsWith("0");
     }
 
-    /** A player is placing a block. Returns false when a plugin stopped it. */
-    public static boolean fireBlockPlace(String uuid, int x, int y, int z, String world, String item) {
-        BlockPlaceEvent event =
-            new BlockPlaceEvent(new FotonBlock(new FotonWorld(world), x, y, z), player(uuid), FotonInventory.decode(item));
+    /** A player placed a block. Returns false when a plugin stopped it. */
+    public static boolean fireBlockPlace(String uuid, int x, int y, int z, String world, String item,
+            String replaced, int againstX, int againstY, int againstZ) {
+        FotonWorld where = new FotonWorld(world);
+        FotonBlock block = new FotonBlock(where, x, y, z);
+        BlockPlaceEvent event = new BlockPlaceEvent(block,
+            new FotonBlockState(block, FotonBlock.dataOf(replaced)),
+            new FotonBlock(where, againstX, againstY, againstZ),
+            FotonInventory.decode(item), player(uuid), true);
         dispatch(event);
-        return !event.isCancelled();
+        return !event.isCancelled() && event.canBuild();
     }
 
     public static boolean fireBlockFromTo(String world, int x, int y, int z, int toX, int toY, int toZ) {

@@ -299,6 +299,93 @@ public final class PacketProbe extends JavaPlugin implements Listener {
         }
     }
 
+    private static final org.bukkit.NamespacedKey TAG = new org.bukkit.NamespacedKey("probe", "tag");
+    private final AtomicInteger places = new AtomicInteger();
+
+    /** A gold block is refused by a protection-style listener, before the probe looks. */
+    @EventHandler(priority = EventPriority.HIGH)
+    public void onPlaceGuard(org.bukkit.event.block.BlockPlaceEvent event) {
+        if (event.getBlockPlaced().getType() == org.bukkit.Material.GOLD_BLOCK) event.setCancelled(true);
+    }
+
+    /** What a placement looks like once every listener has had its say: the
+     * block that stands there, the one it replaced, and what it was placed
+     * against. A furnace is tagged through its tile state, the way Zelda Civ
+     * marks a Gerudo's furnace. */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onPlace(org.bukkit.event.block.BlockPlaceEvent event) {
+        org.bukkit.block.Block placed = event.getBlockPlaced();
+        org.bukkit.block.Block against = event.getBlockAgainst();
+        String where = placed.getX() + "," + placed.getY() + "," + placed.getZ();
+        facts.put("place " + places.incrementAndGet(), "placed " + placed.getType() + "@" + where
+            + " replaced " + event.getBlockReplacedState().getType()
+            + " against " + (against == null ? "none" : against.getType() + "@" + against.getX() + "," + against.getY() + "," + against.getZ())
+            + " item " + item(event.getItemInHand()) + " hand " + event.getHand()
+            + " cancelled " + event.isCancelled());
+        if (event.isCancelled()) {
+            getServer().getScheduler().runTaskLater(this,
+                () -> facts.put("place reverted " + where, String.valueOf(placed.getType())), 3L);
+        }
+        if (placed.getType() == org.bukkit.Material.FURNACE
+                && placed.getState() instanceof org.bukkit.block.TileState tile) {
+            tile.getPersistentDataContainer().set(TAG, org.bukkit.persistence.PersistentDataType.STRING, "gerudo");
+            facts.put("place tile state", tile.getClass().getSimpleName() + " primary thread "
+                + org.bukkit.Bukkit.isPrimaryThread());
+            facts.put("place tile data", tile.getBlockData().getAsString() + " vs live " + placed.getBlockData().getAsString());
+            facts.put("place tag update", String.valueOf(tile.update()));
+            facts.put("place tag forced update", String.valueOf(tile.update(true)));
+            org.bukkit.block.BlockState again = placed.getState();
+            facts.put("place tag read back", again instanceof org.bukkit.block.TileState t
+                ? String.valueOf(t.getPersistentDataContainer().get(TAG, org.bukkit.persistence.PersistentDataType.STRING))
+                : "not a tile state: " + again.getClass().getSimpleName());
+        }
+    }
+
+    private final Map<String, AtomicInteger> spawnCounts = new ConcurrentHashMap<>();
+
+    /** Every living spawn with its reason. A pig summoned by command and a
+     * sheep from an egg are refused, the way a plugin that suppresses a
+     * species by reason would. */
+    @EventHandler(priority = EventPriority.HIGH)
+    public void onSpawn(org.bukkit.event.entity.CreatureSpawnEvent event) {
+        String reason = event.getSpawnReason().name();
+        org.bukkit.entity.EntityType type = event.getEntityType();
+        boolean refuse = (event.getSpawnReason() == org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.COMMAND
+                || event.getSpawnReason() == org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.CUSTOM)
+                && type == org.bukkit.entity.EntityType.PIG
+            || event.getSpawnReason() == org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.SPAWNER_EGG
+                && type == org.bukkit.entity.EntityType.SHEEP
+            || event.getSpawnReason() == org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.BREEDING
+                && type == org.bukkit.entity.EntityType.VILLAGER
+            || event.getSpawnReason() == org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.BUILD_IRONGOLEM
+                && refuseGolems;
+        spawnCounts.computeIfAbsent(reason + " " + type + (refuse ? " refused" : ""), k -> new AtomicInteger()).incrementAndGet();
+        org.bukkit.Location at = event.getLocation();
+        facts.put("spawn " + reason + " last", type + " baby=" + (event.getEntity() instanceof org.bukkit.entity.Ageable a && !a.isAdult())
+            + " at " + at.getBlockX() + "," + at.getBlockY() + "," + at.getBlockZ()
+            + " reason-on-entity " + event.getEntity().getEntitySpawnReason());
+        if (refuse) event.setCancelled(true);
+    }
+
+    private volatile boolean refuseGolems;
+
+    @EventHandler
+    public void onBurn(org.bukkit.event.inventory.FurnaceBurnEvent event) {
+        org.bukkit.block.BlockState state = event.getBlock().getState();
+        facts.put("furnace burn tag", state instanceof org.bukkit.block.TileState tile
+            ? String.valueOf(tile.getPersistentDataContainer().get(TAG, org.bukkit.persistence.PersistentDataType.STRING))
+            : "not a tile state");
+    }
+
+    @EventHandler
+    public void onSmelt(org.bukkit.event.inventory.FurnaceSmeltEvent event) {
+        org.bukkit.block.BlockState state = event.getBlock().getState();
+        facts.put("furnace smelt tag", state instanceof org.bukkit.block.TileState tile
+            ? String.valueOf(tile.getPersistentDataContainer().get(TAG, org.bukkit.persistence.PersistentDataType.STRING))
+            : "not a tile state");
+        facts.put("furnace smelt", event.getSource().getType() + " -> " + event.getResult().getType());
+    }
+
     private static String item(ItemStack stack) {
         return stack == null || stack.getType().isAir() ? "-" : stack.getType() + "x" + stack.getAmount();
     }
@@ -314,6 +401,60 @@ public final class PacketProbe extends JavaPlugin implements Listener {
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (!(sender instanceof Player player)) return true;
+        if (command.getName().equals("probetile") && args.length == 3) {
+            org.bukkit.block.Block block = player.getWorld().getBlockAt(
+                Integer.parseInt(args[0]), Integer.parseInt(args[1]), Integer.parseInt(args[2]));
+            facts.put("pdc " + String.join(",", args), block.getType() + " "
+                + (block.getState() instanceof org.bukkit.block.TileState tile
+                    ? String.valueOf(tile.getPersistentDataContainer().get(TAG, org.bukkit.persistence.PersistentDataType.STRING))
+                    : "not a tile state"));
+            return true;
+        }
+        if (command.getName().equals("probefurnace") && args.length == 3) {
+            org.bukkit.block.Block block = player.getWorld().getBlockAt(
+                Integer.parseInt(args[0]), Integer.parseInt(args[1]), Integer.parseInt(args[2]));
+            if (block.getState() instanceof org.bukkit.block.Furnace furnace) {
+                furnace.getInventory().setSmelting(new ItemStack(org.bukkit.Material.SAND, 1));
+                furnace.getInventory().setFuel(new ItemStack(org.bukkit.Material.COAL, 1));
+                facts.put("furnace loaded", furnace.getInventory().getSmelting() + " " + furnace.getInventory().getFuel());
+            } else facts.put("furnace loaded", "not a furnace: " + block.getType());
+            return true;
+        }
+        if (command.getName().equals("probeapispawn")) {
+            // A plugin's own spawns: spawnEntity and spawn(Class), a pig the
+            // listener refuses and a cow it lets through.
+            Location here = player.getLocation().add(2, 0, 0);
+            org.bukkit.entity.Entity cow = player.getWorld().spawnEntity(here, org.bukkit.entity.EntityType.COW);
+            facts.put("plugin spawnEntity cow", cow == null ? "null" : "valid=" + cow.isValid());
+            org.bukkit.entity.Pig pig = player.getWorld().spawn(here, org.bukkit.entity.Pig.class);
+            facts.put("plugin spawn pig", pig == null ? "null" : "valid=" + pig.isValid());
+            org.bukkit.entity.Entity pig2 = player.getWorld().spawnEntity(here, org.bukkit.entity.EntityType.PIG);
+            facts.put("plugin spawnEntity pig", pig2 == null ? "null" : "valid=" + pig2.isValid());
+            return true;
+        }
+        if (command.getName().equals("probebreed")) {
+            // Two cows in love beside each other, born through the plugin API.
+            Location here = player.getLocation().add(1, 0, 1);
+            for (int i = 0; i < 2; i++) {
+                org.bukkit.entity.Cow cow = player.getWorld().spawn(here, org.bukkit.entity.Cow.class);
+                cow.setLoveModeTicks(600);
+                facts.put("breed cow " + i, "love " + cow.isLoveMode() + " adult " + cow.isAdult());
+            }
+            return true;
+        }
+        if (command.getName().equals("probegolems")) {
+            refuseGolems = args.length > 0 && args[0].equals("refuse");
+            return true;
+        }
+        if (command.getName().equals("probeents")) {
+            Map<String, Integer> counts = new TreeMap<>();
+            for (org.bukkit.entity.Entity entity : player.getWorld().getEntities()) {
+                if (entity instanceof Player) continue;
+                counts.merge(entity.getType().name(), 1, Integer::sum);
+            }
+            facts.put("entities " + (args.length > 0 ? args[0] : "?"), counts.toString());
+            return true;
+        }
         if (command.getName().equals("probegui")) {
             Inventory gui = getServer().createInventory(menuHolder, 27, net.kyori.adventure.text.Component.text("Probe"));
             gui.setItem(10, new ItemStack(org.bukkit.Material.DIAMOND, 3));
@@ -388,6 +529,7 @@ public final class PacketProbe extends JavaPlugin implements Listener {
         report.append("fact rider moves = ").append(riderMoves.get()).append(" cancelled ").append(riderCancels.get()).append('\n');
         report.append("fact vehicle moves = ").append(vehicleMoves.get()).append(" repelled ").append(vehicleRepels.get()).append('\n');
         new TreeMap<>(facts).forEach((k, v) -> report.append("fact ").append(k).append(" = ").append(v).append('\n'));
+        new TreeMap<>(spawnCounts).forEach((k, v) -> report.append("spawn ").append(k).append(" = ").append(v.get()).append('\n'));
         new TreeMap<>(seen).forEach((k, v) -> report.append("count ").append(k).append(" = ").append(v.get()).append('\n'));
         try {
             getDataFolder().mkdirs();

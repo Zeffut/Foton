@@ -719,11 +719,13 @@ impl BlockBreakEvent {
     }
 }
 
-/// A player is about to place a block.
+/// A player has placed a block.
 ///
-/// Fires after every vanilla check has passed -- reach, survivability,
-/// obstruction -- and before the block is written, so a listener is only asked
-/// about placements that would otherwise have happened.
+/// Fires once the block is in the world, after every vanilla check has passed
+/// and before the item is spent: a listener reads the block that landed
+/// through [`Self::state`], and what it replaced through
+/// [`Self::replaced_state`]. Cancelling puts the replaced blocks back and the
+/// item stays in the player's hand.
 ///
 /// Only a player's placement reaches this. A dispenser firing a block is not a
 /// `BlockPlaceEvent` in Bukkit either.
@@ -731,6 +733,8 @@ pub struct BlockPlaceEvent {
     player: Arc<Player>,
     position: BlockPos,
     state: BlockStateId,
+    replaced_state: BlockStateId,
+    against: BlockPos,
     item: ItemStack,
     cancelled: bool,
 }
@@ -795,18 +799,22 @@ impl Event for BlockPlaceEvent {
 }
 
 impl BlockPlaceEvent {
-    /// Creates the event for a placement that has not happened yet.
+    /// Creates the event for a block that has just been placed.
     #[must_use]
     pub const fn new(
         player: Arc<Player>,
         position: BlockPos,
         state: BlockStateId,
+        replaced_state: BlockStateId,
+        against: BlockPos,
         item: ItemStack,
     ) -> Self {
         Self {
             player,
             position,
             state,
+            replaced_state,
+            against,
             item,
             cancelled: false,
         }
@@ -818,16 +826,28 @@ impl BlockPlaceEvent {
         &self.player
     }
 
-    /// Where the block would go.
+    /// Where the block went.
     #[must_use]
     pub const fn position(&self) -> BlockPos {
         self.position
     }
 
-    /// The state that would be placed.
+    /// The state now standing at [`Self::position`].
     #[must_use]
     pub const fn state(&self) -> BlockStateId {
         self.state
+    }
+
+    /// The state it replaced.
+    #[must_use]
+    pub const fn replaced_state(&self) -> BlockStateId {
+        self.replaced_state
+    }
+
+    /// The block that was clicked to place this one.
+    #[must_use]
+    pub const fn against(&self) -> BlockPos {
+        self.against
     }
 
     /// The item involved.
@@ -836,7 +856,7 @@ impl BlockPlaceEvent {
         &self.item
     }
 
-    /// Stops the placement. Nothing is written.
+    /// Undoes the placement and keeps the item.
     pub const fn set_cancelled(&mut self, cancelled: bool) {
         self.cancelled = cancelled;
     }

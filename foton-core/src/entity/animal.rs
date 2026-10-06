@@ -22,8 +22,8 @@ use crate::entity::EntityEventSource;
 use crate::entity::ai::path::PathType;
 use crate::entity::entities::ExperienceOrbEntity;
 use crate::entity::{
-    AgeableMob, AgeableMobBase, ENTITIES, EntitySpawnReason, Mob, MobBase, SharedEntity,
-    next_entity_id,
+    AgeableMob, AgeableMobBase, ENTITIES, EntitySpawnReason, Mob, MobBase, PluginSpawnReason,
+    SharedEntity, next_entity_id,
 };
 use crate::player::Player;
 use crate::world::{LevelReader, World};
@@ -332,6 +332,17 @@ pub trait Animal: AgeableMob {
             }
             offspring_animal.set_rotation((0.0, 0.0));
             offspring_animal.set_old_position_to_current();
+
+            // Paper parity: a vetoed birth still ends the courtship, with the
+            // parents' cooldown, but there is no calf, no experience and no
+            // advancement.
+            if !world.allow_creature_spawn(&offspring, PluginSpawnReason::Breeding) {
+                self.set_age(PARENT_AGE_AFTER_BREEDING);
+                partner.set_age(PARENT_AGE_AFTER_BREEDING);
+                self.reset_love();
+                partner.reset_love();
+                return;
+            }
 
             self.finalize_spawn_child_from_breeding(world, partner, Some(offspring_animal));
         }
