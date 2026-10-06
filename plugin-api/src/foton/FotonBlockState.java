@@ -17,7 +17,7 @@ public class FotonBlockState implements BlockState {
     private final Block block;
     private String originalState;
     private BlockData data;
-    private final FotonPersistentDataContainer persistentData = new FotonPersistentDataContainer();
+    protected final FotonPersistentDataContainer persistentData = new FotonPersistentDataContainer();
 
     /** A state that belongs to no world yet.
      *
