@@ -40,11 +40,13 @@ public class FotonEntity implements Entity, org.bukkit.projectiles.ProjectileSou
     public static Entity of(UUID id) {
         return id == null ? null : FotonWorld.wrapEntity(id, Native.entityType(id.toString()));
     }
-    public static FotonEntity handle(UUID id) {
+    /** The typed handle for an entity: a player comes back as a {@code Player},
+     * which is not a {@code FotonEntity}. */
+    public static org.bukkit.entity.Entity handle(UUID id) {
         if (id == null) return null;
         String type = Native.entityType(id.toString());
         org.bukkit.entity.Entity wrapped = FotonWorld.wrapEntity(id, type);
-        return wrapped instanceof FotonEntity entity ? entity : new FotonEntity(id);
+        return wrapped != null ? wrapped : new FotonEntity(id);
     }
     @Override public boolean isPersistent() { return Native.entityPersistent(getUniqueId().toString()); }
     @Override public void setPersistent(boolean persistent) { Native.setEntityPersistent(getUniqueId().toString(), persistent); }

@@ -442,7 +442,7 @@ public final class EventBridge {
     }
 
     public static boolean firePotionEffect(String entity, String type, int oldDuration, int oldAmplifier, int newDuration, int newAmplifier, String action) {
-        org.bukkit.entity.LivingEntity living = (org.bukkit.entity.LivingEntity) FotonEntity.handle(Native.parse(entity));
+        org.bukkit.entity.LivingEntity living = living(entity);
         org.bukkit.potion.PotionEffect oldEffect = oldDuration < 0 ? null : new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.getByName(type), oldDuration, oldAmplifier);
         org.bukkit.potion.PotionEffect newEffect = newDuration < 0 ? null : new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.getByName(type), newDuration, newAmplifier);
         org.bukkit.event.entity.EntityPotionEffectEvent event = new org.bukkit.event.entity.EntityPotionEffectEvent(living, oldEffect, newEffect, org.bukkit.event.entity.EntityPotionEffectEvent.Action.valueOf(action));
@@ -557,7 +557,7 @@ public final class EventBridge {
         } catch (RuntimeException ex) { return "!"; }
     }
     public static boolean fireCreatureSpawn(String entity, String world, double x, double y, double z, String reason) {
-        org.bukkit.entity.LivingEntity living = (org.bukkit.entity.LivingEntity) FotonEntity.handle(Native.parse(entity));
+        org.bukkit.entity.LivingEntity living = living(entity);
         org.bukkit.event.entity.CreatureSpawnEvent event =
             new org.bukkit.event.entity.CreatureSpawnEvent(
                 living, new org.bukkit.Location(new FotonWorld(world), x, y, z),
