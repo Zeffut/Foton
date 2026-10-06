@@ -10,3 +10,9 @@ commands:
     description: Writes down the top of the open view.
   probegui:
     description: Opens a menu of the probe's own.
+  probehands:
+    description: Writes down both hands.
+  probestand:
+    description: Writes down the nearest armor stand's helmet.
+  probevehicle:
+    description: Writes down the vehicle the player rides.

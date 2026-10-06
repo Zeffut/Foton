@@ -187,6 +187,12 @@ WATCH_SECONDS = int(os.environ.get("JOIN_WATCH_SECONDS", "0"))
 # shuts it again, which is the only way to read back the tab the server puts
 # the screen on. The advancement updates themselves arrive without it: the
 # server flushes them every tick to every player.
+# `!swaphands` presses the swap-hands key, `!swapclick <slot> <key>` clicks a
+# slot of the open screen with a hotbar number key (`0`-`8`, or `40` for the
+# offhand), `!drag <0|1> <slot>...` spreads the carried stack over slots (`0`
+# splits it evenly, `1` puts one in each), `!movevehicle <x> <y> <z> [yaw]
+# [pitch]` sends the position of the vehicle the player steers, and `!ride
+# <x> <y> <z> <dx> <dz> <steps>` does that in strides, as `!walk` does on foot.
 # The server
 # console is a TUI and only reads a real terminal, so a scripted client is the
 # only way to drive the server from a test -- and it is also the honest way,
@@ -1006,6 +1012,13 @@ FACES = {"down": 0, "up": 1, "north": 2, "south": 3, "west": 4, "east": 5}
 # separate packet from starting to use, and a bow does nothing without it.
 PLAYER_ACTION_RELEASE_USE_ITEM = 5
 PLAYER_ACTION_START_DESTROY_BLOCK = 0
+PLAYER_ACTION_SWAP_ITEM_WITH_OFFHAND = 6
+
+# `ServerboundMoveVehiclePacket`, and the `ClickType`s `!swapclick` and `!drag`
+# send.
+PLAY_S_MOVE_VEHICLE = 34
+CLICK_SWAP = 2
+CLICK_QUICK_CRAFT = 5
 
 # The vertical steps of `!hop`, in blocks. Four up and three down: the rise
 # clears whatever the player was standing on and resets their fall distance the
@@ -1122,6 +1135,38 @@ def send_release_use_item(connection):
     )
     connection.send(PLAY_S_PLAYER_ACTION, payload)
     print("  let go of the drawn item")
+
+
+def send_swap_hands(connection):
+    """Presses the swap-hands key, which no command can."""
+    payload = (
+        varint(PLAYER_ACTION_SWAP_ITEM_WITH_OFFHAND)
+        + struct.pack(">q", packed_block_pos(0, 0, 0))
+        + varint(FACES["down"])
+        + varint(0)  # sequence
+    )
+    connection.send(PLAY_S_PLAYER_ACTION, payload)
+    print("  pressed the swap-hands key")
+
+
+def send_move_vehicle(connection, x, y, z, yaw, pitch):
+    """Sends where the vehicle the player steers now is."""
+    connection.send(
+        PLAY_S_MOVE_VEHICLE,
+        struct.pack(">dddff", x, y, z, yaw, pitch) + b"\x01",
+    )
+
+
+def send_drag(connection, kind, slots):
+    """Spreads the carried stack over `slots`: press, pass over each, release.
+
+    Vanilla encodes the stage in the low two bits of the button and the kind of
+    spread (`0` even, `1` one each) in the next two; the press and the release
+    name no slot.
+    """
+    for stage, slot in [(0, -999)] + [(1, slot) for slot in slots] + [(2, -999)]:
+        send_container_click(connection, slot, CLICK_QUICK_CRAFT, stage | (kind << 2))
+    print(f"  dragged over slots {slots}")
 
 
 def send_fall(connection, x, y, z, ground_y):
@@ -1241,6 +1286,31 @@ def run_directive(connection, directive):
         print(f"  switched slot {parts[1]} {parts[2]}")
     elif parts[0] == "releaseuse":
         send_release_use_item(connection)
+    elif parts[0] == "swaphands":
+        send_swap_hands(connection)
+    elif parts[0] == "swapclick":
+        send_container_click(connection, int(parts[1]), CLICK_SWAP, int(parts[2]))
+        print(f"  clicked slot {parts[1]} with hotbar key {parts[2]}")
+    elif parts[0] == "drag":
+        send_drag(connection, int(parts[1]), [int(part) for part in parts[2:]])
+    elif parts[0] == "movevehicle":
+        x, y, z = (float(part) for part in parts[1:4])
+        yaw = float(parts[4]) if len(parts) > 4 else 0.0
+        pitch = float(parts[5]) if len(parts) > 5 else 0.0
+        send_move_vehicle(connection, x, y, z, yaw, pitch)
+        print(f"  moved the vehicle to {x:.2f} {y:.2f} {z:.2f}")
+    elif parts[0] == "ride":
+        # The vehicle's own `!walk`: strides with a tick or two between them,
+        # so the server sees a mount moving rather than jumping.
+        x, y, z, dx, dz = (float(part) for part in parts[1:6])
+        steps = int(parts[6])
+        for _ in range(steps):
+            x += dx
+            z += dz
+            send_move_vehicle(connection, x, y, z, 0.0, 0.0)
+            if not pump(connection, 0.1, {}):
+                fail("the connection dropped while riding")
+        print(f"  rode {steps} strides to {x:.2f} {y:.2f} {z:.2f}")
     elif parts[0] == "hop":
         # One jump, sent as the arc a client sends: up, then down, never
         # claiming to be on the ground. The descent is what builds the fall

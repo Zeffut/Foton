@@ -14,6 +14,7 @@
 # WAIT_FOR_LOG      a server.log pattern to wait for before the client joins
 # JOIN_AS_OP=1      the client joins in the op group, for vanilla commands
 # EXTRA_CLIENT      a dev/ script run after the join, given the port
+# FOTON_BIN         a server binary to run instead of target/debug/foton
 #
 # Needs dev/build-plugin-api.sh and dev/build-packetevents.sh to have run, and
 # a JDK 21+ at $FOTON_JAVA_HOME (default: the one `javac` belongs to).
@@ -22,7 +23,7 @@ export PATH="$HOME/.cargo/bin:$PATH"
 cd "$(dirname "$0")/.." || exit 1
 ROOT=$(pwd)
 TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
-BIN="$TARGET_DIR/debug/foton"
+BIN="${FOTON_BIN:-$TARGET_DIR/debug/foton}"
 PORT=${PORT:-25567}
 RUN_DIR="${RUN_DIR:-$ROOT/run-plugins}"
 API_JAR="$ROOT/plugin-api/build/foton-plugin-api.jar"
