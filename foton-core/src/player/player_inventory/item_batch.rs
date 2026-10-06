@@ -163,6 +163,7 @@ impl Player {
             let menu = state.menu.take().ok_or(MenuItemBatchError::Closed)?;
             state.dispatch = Some(OpenMenuDispatch {
                 instance: menu.behavior().instance_id(),
+                source: menu.source(),
                 overrides_player_slots: menu.overrides_player_slots(),
                 top_slot_count: size,
                 menu_type: menu.menu_type().map(|kind| kind.key.to_string()),

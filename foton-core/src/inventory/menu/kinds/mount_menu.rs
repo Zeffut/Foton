@@ -22,6 +22,7 @@ use std::sync::Arc;
 use foton_utils::{DowncastType, DowncastTypeKey};
 
 use crate::entity::{Entity, SharedEntity, WeakEntity};
+use crate::inventory::menu::MenuSource;
 use crate::inventory::prelude::*;
 use crate::inventory::slots::{ArmorSlot, MenuSlotReadSource, SlotStorage};
 use crate::player::player_inventory::PlayerInventory;
@@ -80,10 +81,11 @@ pub fn open_mount_screen(
         .equipment_slot_container(EquipmentSlot::Body)
         .1;
     let entity_id = Entity::id(mount.as_ref());
+    let source = MenuSource::Entity(mount.uuid());
     let mount = Arc::clone(mount);
 
     // The mount screen carries no title: the client names it after the entity.
-    player.open_menu("", move |context| {
+    player.open_menu_from(source, "", move |context| {
         mount_menu(MountMenuParts {
             player_inventory: context.player.inventory.clone(),
             container_id: context.container_id,

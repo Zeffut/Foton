@@ -24,7 +24,8 @@ use std::fmt;
 use std::mem;
 
 use foton_registry::{item_stack::ItemStack, menu_type::MenuTypeRef};
-use foton_utils::{Downcast as _, types::GameType};
+use foton_utils::{BlockPos, Downcast as _, types::GameType};
+use uuid::Uuid;
 
 use crate::inventory::container::CraftingContainer;
 use crate::inventory::menu::kinds::InventoryKind;
@@ -47,6 +48,24 @@ pub struct Menu {
     kind: Box<dyn MenuKind>,
     screen: ScreenOpener,
     overrides_player_slots: bool,
+    source: MenuSource,
+}
+
+/// What a menu was opened on.
+///
+/// Bukkit parity: an inventory's `getHolder()` is the block state or the
+/// entity behind it -- a furnace, a chest boat -- and its type follows from
+/// it: the 27 slots of a barrel are a `BARREL`, not a `CHEST`. Vanilla menus
+/// do not record this, so the opener says it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MenuSource {
+    /// Nothing in the world: a command's menu, a plugin's own.
+    #[default]
+    None,
+    /// The block at this position, in the opener's world.
+    Block(BlockPos),
+    /// This entity.
+    Entity(Uuid),
 }
 
 /// Which packet tells the client to put this menu on screen.
@@ -92,7 +111,21 @@ impl Menu {
             kind,
             screen,
             overrides_player_slots,
+            source: MenuSource::None,
         }
+    }
+
+    /// Records what the menu was opened on.
+    #[must_use]
+    pub const fn with_source(mut self, source: MenuSource) -> Self {
+        self.source = source;
+        self
+    }
+
+    /// What the menu was opened on.
+    #[must_use]
+    pub const fn source(&self) -> MenuSource {
+        self.source
     }
 
     /// Returns the packet that puts this menu on the client's screen.

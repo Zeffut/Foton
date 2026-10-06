@@ -23,6 +23,7 @@ use crate::block_entity::{BLOCK_ENTITIES, BlockEntityTicker};
 use crate::entity::Entity;
 use crate::inventory::container::calculate_redstone_signal_from_container;
 use crate::inventory::lock::{ContainerLockGuard, ContainerRef};
+use crate::inventory::menu::MenuSource;
 use crate::inventory::menu::kinds::brewing_stand;
 use crate::player::Player;
 use crate::world::{LevelReader, World};
@@ -93,7 +94,7 @@ impl BlockBehavior for BrewingStandBlock {
 
         let data = stand.data();
         let inventory = player.inventory.clone();
-        player.open_menu(title, move |context| {
+        player.open_menu_from(MenuSource::Block(pos), title, move |context| {
             brewing_stand(inventory, context.container_id, container_ref, data)
         });
 

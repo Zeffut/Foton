@@ -100,6 +100,7 @@ use foton_core::entity::{
 };
 use foton_core::event::TeleportPoint;
 use foton_core::inventory::equipment::EquipmentSlot;
+use foton_core::inventory::menu::MenuSource;
 use foton_core::inventory::menu::kinds::anvil;
 use foton_core::inventory::menu::kinds::cartography;
 use foton_core::inventory::menu::kinds::crafting;
@@ -9947,6 +9948,21 @@ extern "system" fn open_menu_top_slot_count(
 }
 
 /// `foton.Native.openMenuType`
+/// `foton.Native.openMenuSource`: what the open menu was opened on, as
+/// `block x y z` in the player's world, `entity <uuid>`, or null.
+extern "system" fn open_menu_source(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jstring {
+    let source = player(&mut env, &uuid).and_then(|player| match player.open_container_source() {
+        MenuSource::Block(pos) => Some(format!("block {} {} {}", pos.x(), pos.y(), pos.z())),
+        MenuSource::Entity(entity) => Some(format!("entity {entity}")),
+        MenuSource::None => None,
+    });
+    to_java(&mut env, source)
+}
+
 /// Native open menu type
 extern "system" fn open_menu_title(
     mut env: JNIEnv<'_>,
@@ -15751,6 +15767,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "openMenuType",
             "(Ljava/lang/String;)Ljava/lang/String;",
             open_menu_type as *mut c_void,
+        ),
+        method(
+            "openMenuSource",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            open_menu_source as *mut c_void,
         ),
         method(
             "openMenuTitle",

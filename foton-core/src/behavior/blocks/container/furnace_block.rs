@@ -24,6 +24,7 @@ use crate::block_entity::entities::FurnaceBlockEntity;
 use crate::block_entity::{BLOCK_ENTITIES, BlockEntityTicker};
 use crate::inventory::container::calculate_redstone_signal_from_container;
 use crate::inventory::lock::{ContainerLockGuard, ContainerRef};
+use crate::inventory::menu::MenuSource;
 use crate::inventory::menu::kinds::furnace;
 use crate::player::Player;
 use crate::world::{LevelReader, World};
@@ -81,7 +82,8 @@ impl AbstractFurnaceBlock {
         let menu_type = self.menu_type;
         let shared_entity = block_entity.clone();
         // The title is owned by the menu, so the shared behavior hands it a copy.
-        player.open_menu(
+        player.open_menu_from(
+            MenuSource::Block(pos),
             block_entity.display_name(TextComponent::translated(self.title.clone())),
             move |context| {
                 furnace(

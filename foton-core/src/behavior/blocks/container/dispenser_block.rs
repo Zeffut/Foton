@@ -33,6 +33,7 @@ use crate::block_entity::entities::{DispenserBlockEntity, insert_into_containers
 use crate::event::{BlockDispenseEvent, BlockPreDispenseEvent};
 use crate::inventory::container::calculate_redstone_signal_from_container;
 use crate::inventory::lock::{ContainerLockGuard, ContainerRef};
+use crate::inventory::menu::MenuSource;
 use crate::inventory::menu::kinds::dispenser;
 use crate::player::Player;
 use crate::world::{LevelReader, SignalGetter as _, World};
@@ -105,7 +106,8 @@ impl DispenserBase {
 
         let inventory = player.inventory.clone();
         let title = self.title.clone();
-        player.open_menu(
+        player.open_menu_from(
+            MenuSource::Block(pos),
             block_entity.display_name(TextComponent::translated(title)),
             move |context| dispenser(inventory, context.container_id, container_ref),
         );

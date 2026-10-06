@@ -28,6 +28,7 @@ use crate::behavior::block::{BlockBehavior, BlockEntityCreation};
 use crate::behavior::context::{BlockHitResult, BlockPlaceContext, InteractionResult};
 use crate::block_entity::BLOCK_ENTITIES;
 use crate::block_entity::entities::LecternBlockEntity;
+use crate::inventory::menu::MenuSource;
 use crate::inventory::menu::kinds::lectern;
 use crate::player::Player;
 use crate::world::game_event::GameEventContext;
@@ -180,7 +181,8 @@ impl BlockBehavior for LecternBlock {
 
         let inventory = player.inventory.clone();
         let world = Arc::clone(world);
-        player.open_menu(
+        player.open_menu_from(
+            MenuSource::Block(pos),
             TextComponent::translated(translations::CONTAINER_LECTERN.msg()),
             move |context| lectern(inventory, context.container_id, pos, &world),
         );

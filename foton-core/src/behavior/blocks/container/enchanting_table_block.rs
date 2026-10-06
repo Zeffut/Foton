@@ -14,6 +14,7 @@ use text_components::TextComponent;
 use crate::behavior::InventoryAccess;
 use crate::behavior::block::BlockBehavior;
 use crate::behavior::context::{BlockHitResult, BlockPlaceContext, InteractionResult};
+use crate::inventory::menu::MenuSource;
 use crate::inventory::menu::kinds::enchantment;
 use crate::player::Player;
 use crate::world::{LevelReader as _, World};
@@ -117,7 +118,8 @@ impl BlockBehavior for EnchantingTableBlock {
     ) -> InteractionResult {
         let inventory = player.inventory.clone();
         let world = Arc::clone(world);
-        player.open_menu(
+        player.open_menu_from(
+            MenuSource::Block(pos),
             TextComponent::translated(translations::CONTAINER_ENCHANT.msg()),
             move |context| enchantment(inventory, context.container_id, pos, &world),
         );

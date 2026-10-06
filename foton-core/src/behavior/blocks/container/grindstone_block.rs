@@ -17,6 +17,7 @@ use text_components::TextComponent;
 use crate::behavior::InventoryAccess;
 use crate::behavior::block::BlockBehavior;
 use crate::behavior::context::{BlockHitResult, BlockPlaceContext, InteractionResult};
+use crate::inventory::menu::MenuSource;
 use crate::inventory::menu::kinds::grindstone;
 use crate::player::Player;
 use crate::world::World;
@@ -76,7 +77,8 @@ impl BlockBehavior for GrindstoneBlock {
     ) -> InteractionResult {
         let inventory = player.inventory.clone();
         let world = Arc::clone(world);
-        player.open_menu(
+        player.open_menu_from(
+            MenuSource::Block(pos),
             TextComponent::translated(translations::CONTAINER_GRINDSTONE_TITLE.msg()),
             move |context| grindstone(inventory, context.container_id, pos, &world),
         );

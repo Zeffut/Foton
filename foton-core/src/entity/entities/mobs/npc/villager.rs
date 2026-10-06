@@ -61,6 +61,7 @@ use crate::entity::{
     PathfinderMob, SharedEntity, SpawnGroupData,
 };
 use crate::inventory::container::{Container as _, SimpleContainer};
+use crate::inventory::menu::MenuSource;
 use crate::physics::MoveResult;
 use crate::player::Player;
 use crate::trading::{Merchant, open_trading_screen};
@@ -718,7 +719,12 @@ impl VillagerEntity {
             .update_special_prices(player, self.player_reputation(player.uuid()));
         self.merchant.set_trading_player(Some(player.uuid()));
         let merchant: Arc<dyn Merchant> = Arc::clone(&self.merchant) as _;
-        open_trading_screen(&merchant, player, self.profession_name());
+        open_trading_screen(
+            &merchant,
+            player,
+            self.profession_name(),
+            MenuSource::Entity(self.uuid()),
+        );
     }
 
     /// The name the trading screen is titled with.

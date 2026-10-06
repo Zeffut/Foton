@@ -6,7 +6,10 @@ use foton_registry::item_stack::ItemStack;
 use text_components::TextComponent;
 
 use crate::{
-    inventory::{menu::Menu, slots::MenuSlotReadSource},
+    inventory::{
+        menu::{Menu, MenuSource},
+        slots::MenuSlotReadSource,
+    },
     player::Player,
     world::World,
 };
@@ -110,6 +113,7 @@ impl PlayerInventorySyncState {
 /// independently of its cyclic wire container id.
 struct OpenMenuDispatch {
     instance: u64,
+    source: MenuSource,
     overrides_player_slots: bool,
     top_slot_count: usize,
     menu_type: Option<String>,

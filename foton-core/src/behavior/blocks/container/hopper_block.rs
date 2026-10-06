@@ -26,6 +26,7 @@ use crate::entity::ai::path::PathComputationType;
 use crate::entity::{Entity, InsideBlockEffectCollector};
 use crate::inventory::container::calculate_redstone_signal_from_container;
 use crate::inventory::lock::{ContainerLockGuard, ContainerRef};
+use crate::inventory::menu::MenuSource;
 use crate::inventory::menu::kinds::hopper;
 use crate::player::Player;
 use crate::world::{LevelReader, SignalGetter as _, World};
@@ -160,7 +161,8 @@ impl BlockBehavior for HopperBlock {
         container_ref.unpack_loot_table(Some(player));
 
         let inventory = player.inventory.clone();
-        player.open_menu(
+        player.open_menu_from(
+            MenuSource::Block(pos),
             block_entity.display_name(TextComponent::translated(
                 translations::CONTAINER_HOPPER.msg(),
             )),

@@ -13,6 +13,7 @@ use foton_utils::locks::SyncMutex;
 use text_components::TextComponent;
 use uuid::Uuid;
 
+use crate::inventory::menu::MenuSource;
 use crate::inventory::menu::kinds::merchant_menu;
 use crate::player::Player;
 
@@ -111,13 +112,17 @@ pub trait Merchant: Send + Sync {
 /// first content sync -- the same order vanilla sends them in, and the order the
 /// client needs, since it drops merchant offers naming a container it has not
 /// opened yet.
+///
+/// `source` is the trader the screen belongs to, or none for a merchant a
+/// plugin made.
 pub fn open_trading_screen(
     merchant: &Arc<dyn Merchant>,
     player: &Player,
     title: impl Into<TextComponent>,
+    source: MenuSource,
 ) {
     let merchant = Arc::clone(merchant);
-    player.open_menu(title, move |context| {
+    player.open_menu_from(source, title, move |context| {
         merchant_menu(
             context.player.inventory.clone(),
             context.container_id,

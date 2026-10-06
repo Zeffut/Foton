@@ -13,6 +13,7 @@ use text_components::TextComponent;
 use crate::behavior::InventoryAccess;
 use crate::behavior::block::BlockBehavior;
 use crate::behavior::context::{BlockHitResult, BlockPlaceContext, InteractionResult};
+use crate::inventory::menu::MenuSource;
 use crate::inventory::menu::kinds::cartography;
 use crate::player::Player;
 use crate::world::World;
@@ -51,7 +52,8 @@ impl BlockBehavior for CartographyTableBlock {
         };
         let inventory = player.inventory.clone();
         let world = Arc::clone(world);
-        player.open_menu(
+        player.open_menu_from(
+            MenuSource::Block(pos),
             TextComponent::translated(translations::CONTAINER_CARTOGRAPHY_TABLE.msg()),
             move |context| cartography(inventory, context.container_id, pos, &world, maps),
         );

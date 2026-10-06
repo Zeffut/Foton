@@ -19,6 +19,7 @@ use std::sync::{Arc, OnceLock};
 
 use foton_core::entity::Entity as _;
 use foton_core::entity::entities::{VillagerEntity, WanderingTraderEntity};
+use foton_core::inventory::menu::MenuSource;
 use foton_core::player::Player;
 use foton_core::trading::{Merchant, open_trading_screen};
 #[cfg(test)]
@@ -337,7 +338,7 @@ extern "system" fn open_merchant(
         }
     }
     merchant.set_trading_player(Some(player.uuid()));
-    open_trading_screen(&merchant, &player, title);
+    open_trading_screen(&merchant, &player, title, MenuSource::None);
     1
 }
 

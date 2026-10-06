@@ -34,6 +34,7 @@ use crate::behavior::context::{
 use crate::block_entity::entities::{CrafterBlockEntity, insert_into_containers_at};
 use crate::block_entity::{BLOCK_ENTITIES, BlockEntityTicker};
 use crate::event::{CrafterCraftEvent, Event};
+use crate::inventory::menu::MenuSource;
 use crate::inventory::menu::kinds::crafter;
 use crate::player::Player;
 use crate::world::{LevelReader, SignalGetter as _, World};
@@ -280,7 +281,8 @@ impl BlockBehavior for CrafterBlock {
         container.unpack_loot_table(Some(player));
 
         let inventory = player.inventory.clone();
-        player.open_menu(
+        player.open_menu_from(
+            MenuSource::Block(pos),
             TextComponent::translated(translations::CONTAINER_CRAFTER.msg()),
             move |context| {
                 crafter(

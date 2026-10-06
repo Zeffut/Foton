@@ -18,6 +18,7 @@ use crate::behavior::block::{BlockBehavior, BlockEntityCreation};
 use crate::behavior::context::{BlockHitResult, BlockPlaceContext, InteractionResult};
 use crate::block_entity::entities::BeaconBlockEntity;
 use crate::block_entity::{BLOCK_ENTITIES, BlockEntityTicker};
+use crate::inventory::menu::MenuSource;
 use crate::inventory::menu::kinds::beacon;
 use crate::player::Player;
 use crate::world::{LevelReader as _, World};
@@ -88,7 +89,8 @@ impl BlockBehavior for BeaconBlock {
         };
 
         let inventory = player.inventory.clone();
-        player.open_menu(
+        player.open_menu_from(
+            MenuSource::Block(pos),
             block_entity.display_name(TextComponent::translated(
                 translations::CONTAINER_BEACON.msg(),
             )),

@@ -30,6 +30,7 @@ use crate::block_entity::ContainerLoot;
 use crate::entity::{Entity, EntityBase, EntityBaseLoad, EntityMovementEmission, EntitySyncedData};
 use crate::inventory::container::{Container as _, SimpleContainer};
 use crate::inventory::lock::{ContainerRef, SharedContainer};
+use crate::inventory::menu::MenuSource;
 use crate::inventory::menu::kinds::chest;
 use crate::inventory::slot_ranges::container_slot_item;
 use crate::player::Player;
@@ -306,9 +307,13 @@ macro_rules! open_chest_impl {
                 self.unpack_loot_table(Some(player));
                 let inventory = player.inventory.clone();
                 let container = self.container_ref.clone();
-                player.open_menu(self.name(), move |context| {
-                    chest(inventory, context.container_id, container, CHEST_BOAT_ROWS)
-                });
+                player.open_menu_from(
+                    MenuSource::Entity(self.uuid()),
+                    self.name(),
+                    move |context| {
+                        chest(inventory, context.container_id, container, CHEST_BOAT_ROWS)
+                    },
+                );
 
                 // Vanilla parity: the `gameEvent(CONTAINER_OPEN, player)` of
                 // `AbstractChestBoat.interact`, credited to the player rather

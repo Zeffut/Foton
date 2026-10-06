@@ -36,6 +36,7 @@ use crate::inventory::container::{
     Container as _, SimpleContainer, calculate_redstone_signal_from_container,
 };
 use crate::inventory::lock::{ContainerRef, SharedContainer};
+use crate::inventory::menu::MenuSource;
 use crate::inventory::menu::kinds::chest;
 use crate::inventory::slot_ranges::container_slot_item;
 use crate::player::Player;
@@ -163,14 +164,18 @@ impl ChestMinecartEntity {
         self.unpack_loot_table(Some(player));
         let inventory = player.inventory.clone();
         let container = self.container_ref.clone();
-        player.open_menu(self.name(), move |context| {
-            chest(
-                inventory,
-                context.container_id,
-                container,
-                CHEST_MINECART_ROWS,
-            )
-        });
+        player.open_menu_from(
+            MenuSource::Entity(self.uuid()),
+            self.name(),
+            move |context| {
+                chest(
+                    inventory,
+                    context.container_id,
+                    container,
+                    CHEST_MINECART_ROWS,
+                )
+            },
+        );
 
         if let Some(world) = self.level() {
             world.game_event_at(

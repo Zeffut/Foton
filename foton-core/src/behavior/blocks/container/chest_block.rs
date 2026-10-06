@@ -35,6 +35,7 @@ use crate::block_entity::entities::ChestBlockEntity;
 use crate::fluid::get_fluid_state;
 use crate::inventory::container::{Container, calculate_redstone_signal_from_containers};
 use crate::inventory::lock::{AttachedContainers, ContainerLockGuard, ContainerRef};
+use crate::inventory::menu::MenuSource;
 use crate::inventory::menu::kinds::{chest, double_chest};
 use crate::player::Player;
 use crate::world::{LevelReader, ScheduledTickAccess, World};
@@ -424,13 +425,16 @@ impl BlockBehavior for ChestBlock {
 
         let inventory = player.inventory.clone();
         match second {
-            Some(second) => player.open_menu(
+            Some(second) => player.open_menu_from(
+                MenuSource::Block(pos),
                 Self::double_chest_title(state, world, pos),
                 move |context| double_chest(inventory, context.container_id, first, second),
             ),
-            None => player.open_menu(Self::single_chest_title(world, pos), move |context| {
-                chest(inventory, context.container_id, first, CHEST_ROWS)
-            }),
+            None => player.open_menu_from(
+                MenuSource::Block(pos),
+                Self::single_chest_title(world, pos),
+                move |context| chest(inventory, context.container_id, first, CHEST_ROWS),
+            ),
         }
 
         // The open count, and with it the lid animation and the open/close

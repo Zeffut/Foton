@@ -13,6 +13,7 @@ use foton_registry::{
 use foton_utils::{BlockStateId, Direction, translations};
 use text_components::TextComponent;
 
+use crate::inventory::menu::MenuSource;
 use crate::{
     behavior::{BlockBehavior, BlockPlaceContext, InteractionResult, InventoryAccess},
     inventory::menu::kinds::anvil,
@@ -76,7 +77,8 @@ impl BlockBehavior for AnvilBlock {
         _inv: &mut InventoryAccess,
     ) -> InteractionResult {
         let inventory = player.inventory.clone();
-        player.open_menu(
+        player.open_menu_from(
+            MenuSource::Block(pos),
             TextComponent::translated(translations::CONTAINER_REPAIR.msg()),
             move |context| anvil(inventory, context.container_id, pos, context.world),
         );

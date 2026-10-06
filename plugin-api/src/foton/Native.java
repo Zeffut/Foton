@@ -585,6 +585,8 @@ public final class Native {
     public static native foton.item.ItemTransfer openMenuSlot(String uuid, int slot);
     public static native void setOpenMenuItems(String uuid, int[] slots, foton.item.ItemMutation[] items, boolean full);
     public static native String openMenuType(String uuid);
+    /** What the open menu was opened on: `block x y z`, `entity <uuid>`, or null. */
+    public static native String openMenuSource(String uuid);
     public static native String openMenuTitle(String uuid);
     public static native String enchantmentView(String uuid);
     public static native boolean setEnchantmentView(String uuid, long instance, String state);

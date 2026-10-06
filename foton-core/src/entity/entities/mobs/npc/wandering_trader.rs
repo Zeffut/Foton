@@ -42,6 +42,7 @@ use crate::entity::{
     AgeableMob, AgeableMobBase, Entity, EntityBase, EntityBaseLoad, EntityPose, EntitySyncedData,
     LivingEntity, LivingEntityBase, Mob, MobBase, PathfinderMob,
 };
+use crate::inventory::menu::MenuSource;
 use crate::physics::MoveResult;
 use crate::player::Player;
 use crate::trading::{Merchant, open_trading_screen};
@@ -515,6 +516,7 @@ impl Mob for WanderingTraderEntity {
                 fallback: None,
                 args: None,
             }),
+            MenuSource::Entity(self.uuid()),
         );
         InteractionResult::Success
     }

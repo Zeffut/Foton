@@ -21,6 +21,7 @@ use crate::behavior::block::{BlockBehavior, BlockEntityCreation};
 use crate::behavior::context::{BlockHitResult, BlockPlaceContext, InteractionResult};
 use crate::behavior::{BLOCK_BEHAVIORS, InventoryAccess};
 use crate::inventory::lock::{ContainerRef, SharedContainer};
+use crate::inventory::menu::MenuSource;
 use crate::inventory::menu::kinds::chest;
 use crate::player::Player;
 use crate::world::{LevelReader, World};
@@ -80,7 +81,8 @@ impl BlockBehavior for EnderChestBlock {
         let shared: SharedContainer = player.ender_chest.clone();
         let container = ContainerRef::from(shared);
         let inventory = player.inventory.clone();
-        player.open_menu(
+        player.open_menu_from(
+            MenuSource::Block(pos),
             TextComponent::translated(translations::CONTAINER_ENDERCHEST.msg()),
             move |context| chest(inventory, context.container_id, container, MENU_ROWS),
         );

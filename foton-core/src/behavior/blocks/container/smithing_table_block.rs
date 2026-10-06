@@ -13,6 +13,7 @@ use text_components::TextComponent;
 use crate::behavior::InventoryAccess;
 use crate::behavior::block::BlockBehavior;
 use crate::behavior::context::{BlockHitResult, BlockPlaceContext, InteractionResult};
+use crate::inventory::menu::MenuSource;
 use crate::inventory::menu::kinds::smithing;
 use crate::player::Player;
 use crate::world::World;
@@ -47,7 +48,8 @@ impl BlockBehavior for SmithingTableBlock {
         _inv: &mut InventoryAccess,
     ) -> InteractionResult {
         let inventory = player.inventory.clone();
-        player.open_menu(
+        player.open_menu_from(
+            MenuSource::Block(pos),
             TextComponent::translated(translations::CONTAINER_UPGRADE.msg()),
             move |context| smithing(inventory, context.container_id, pos),
         );

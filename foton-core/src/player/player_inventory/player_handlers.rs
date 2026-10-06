@@ -49,7 +49,7 @@ use crate::{
         container::{Container, CraftingContainer, clear_or_count_matching_stack},
         lock::{ContainerId, ContainerLockGuard},
         menu::{
-            Menu, ScreenOpener,
+            Menu, MenuSource, ScreenOpener,
             kinds::{INVENTORY_MENU_CONTAINER_ID, InventoryKind},
         },
         slots::CraftingHandler,
@@ -226,6 +226,7 @@ impl Player {
                 .collect()
         };
         OpenMenuDispatch {
+            source: menu.source(),
             instance: menu.behavior().instance_id(),
             overrides_player_slots: menu.overrides_player_slots(),
             top_slot_count,
@@ -388,14 +389,6 @@ impl Player {
             menu.click_menu_button(self, packet.button_id);
         }
         self.finish_open_menu_callback(menu);
-        // The menu is installed before this callback so Bukkit's view accessors
-        // observe the same open view that the client received. Cancelling closes
-        // that view immediately, matching the externally visible Bukkit result.
-        let mut open_event = InventoryOpenEvent::new(self.gameprofile.id);
-        self.fire_event(&mut open_event);
-        if open_event.is_cancelled() {
-            self.close_container();
-        }
     }
 
     /// Handles the player clicking a trade in a merchant's screen.
@@ -764,6 +757,16 @@ impl Player {
         self.container_counter.lock().next()
     }
 
+    /// Opens a menu built on `source`, the block or entity it belongs to.
+    pub fn open_menu_from(
+        &self,
+        source: MenuSource,
+        title: impl Into<TextComponent>,
+        create: impl for<'a> FnOnce(MenuOpenContext<'a>) -> Menu + Send + 'static,
+    ) {
+        self.open_menu(title, move |context| create(context).with_source(source));
+    }
+
     /// Opens a menu for this player.
     ///
     /// Based on Java's `ServerPlayer::openMenu`.
@@ -890,6 +893,7 @@ impl Player {
             };
             open_menu.dispatch = Some(OpenMenuDispatch {
                 instance: menu.behavior().instance_id(),
+                source: menu.source(),
                 overrides_player_slots: menu.overrides_player_slots(),
                 top_slot_count,
                 menu_type,
@@ -903,6 +907,17 @@ impl Player {
                 actions: Vec::new(),
             });
             break;
+        }
+
+        // Bukkit parity: `InventoryOpenEvent` comes before the screen, while
+        // the view already reads as the new menu; a refused one is never
+        // shown. `on_open` has not run, so nothing it counts is undone.
+        let mut open_event = InventoryOpenEvent::new(self.gameprofile.id);
+        self.fire_event(&mut open_event);
+        if open_event.is_cancelled() {
+            self.open_menu.lock().title = None;
+            self.finish_open_menu_removal();
+            return;
         }
 
         match menu.screen_opener() {
@@ -1180,6 +1195,21 @@ impl Player {
                     .as_ref()
                     .map(|dispatch| dispatch.top_slot_count)
             })
+    }
+
+    /// What the open external menu was opened on, if anything.
+    #[must_use]
+    pub fn open_container_source(&self) -> MenuSource {
+        let open_menu = self.open_menu.lock();
+        open_menu.menu.as_ref().map_or_else(
+            || {
+                open_menu
+                    .dispatch
+                    .as_ref()
+                    .map_or(MenuSource::None, |dispatch| dispatch.source)
+            },
+            Menu::source,
+        )
     }
 
     /// Returns the registry key of the currently open external menu type.
