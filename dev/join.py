@@ -1005,6 +1005,7 @@ FACES = {"down": 0, "up": 1, "north": 2, "south": 3, "west": 4, "east": 5}
 # `ServerboundPlayerActionPacket.Action.RELEASE_USE_ITEM`. Letting go is a
 # separate packet from starting to use, and a bow does nothing without it.
 PLAYER_ACTION_RELEASE_USE_ITEM = 5
+PLAYER_ACTION_START_DESTROY_BLOCK = 0
 
 # The vertical steps of `!hop`, in blocks. Four up and three down: the rise
 # clears whatever the player was standing on and resets their fall distance the
@@ -1096,6 +1097,17 @@ def send_use_item(connection, yaw, pitch):
     connection.send(PLAY_S_USE_ITEM, payload)
 
 
+def send_start_destroy_block(connection, x, y, z, face):
+    """Starts hitting a block face, the first packet of breaking it."""
+    payload = (
+        varint(PLAYER_ACTION_START_DESTROY_BLOCK)
+        + struct.pack(">q", packed_block_pos(x, y, z))
+        + struct.pack(">b", FACES[face])
+        + varint(0)  # sequence
+    )
+    connection.send(PLAY_S_PLAYER_ACTION, payload)
+
+
 def send_release_use_item(connection):
     """Lets go of a drawn item, which is the only thing that fires a bow.
 
@@ -1156,6 +1168,11 @@ def run_directive(connection, directive):
         for _ in range(count):
             send_use_item(connection, yaw, pitch)
         print(f"  used the held item {count} times")
+    elif parts[0] == "dig":
+        x, y, z = (int(part) for part in parts[1:4])
+        face = parts[4] if len(parts) > 4 else "up"
+        send_start_destroy_block(connection, x, y, z, face)
+        print(f"  started hitting {x} {y} {z} on its {face} face")
     elif parts[0] == "useon":
         x, y, z = (int(part) for part in parts[1:4])
         face = parts[4] if len(parts) > 4 else "up"

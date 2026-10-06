@@ -148,6 +148,22 @@ public final class PacketProbe extends JavaPlugin implements Listener {
             + " slot 10 " + item(event.getInventory().getItem(10)));
     }
 
+    private final AtomicInteger interactions = new AtomicInteger();
+
+    /** Every hand use, as a plugin sees it. A right click on an emerald
+     * block is refused, as a plugin guarding its own block would. */
+    @EventHandler(priority = EventPriority.HIGH)
+    public void onInteract(org.bukkit.event.player.PlayerInteractEvent event) {
+        org.bukkit.block.Block block = event.getClickedBlock();
+        String clicked = block == null ? "none" : block.getType() + "@" + block.getX() + "," + block.getY() + "," + block.getZ();
+        org.bukkit.util.Vector point = event.getClickedPosition();
+        facts.put("interact " + interactions.incrementAndGet(), event.getAction() + " " + event.getHand()
+            + " item " + item(event.getItem()) + " block " + clicked + " face " + event.getBlockFace()
+            + " point " + (point == null ? "none" : point.getX() + "," + point.getY() + "," + point.getZ())
+            + " block-use " + event.useInteractedBlock() + " item-use " + event.useItemInHand());
+        if (block != null && block.getType() == org.bukkit.Material.EMERALD_BLOCK) event.setCancelled(true);
+    }
+
     private final AtomicInteger prepares = new AtomicInteger();
     private final AtomicInteger crafts = new AtomicInteger();
 
