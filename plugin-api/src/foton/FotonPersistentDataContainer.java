@@ -20,7 +20,7 @@ import org.bukkit.persistence.PersistentDataType;
  * -- which is how an item's data reaches the server's {@code custom_data}
  * component under {@code PublicBukkitValues}, and survives there.</p>
  */
-public final class FotonPersistentDataContainer implements PersistentDataContainer {
+public class FotonPersistentDataContainer implements PersistentDataContainer {
     private static final int MAX_SERIALIZED_KEY_BYTES = 1024;
     private static final int MAX_NBT_UTF_BYTES = 65_535;
     private static final int MAX_SERIALIZED_ENTRIES = 1_024;

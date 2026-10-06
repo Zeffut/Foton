@@ -87,6 +87,13 @@ public final class Native {
     public static native boolean worldChunkLoaded(String world, int x, int z);
     public static native boolean worldChunkGenerated(String world, int x, int z);
     public static native String[] chunkBlockEntities(String world, int x, int z);
+
+    /** The entity's (or player's) Bukkit persistent data as a binary NBT root compound; null when it is gone. */
+    public static native byte[] entityPersistentData(String uuid);
+    public static native boolean setEntityPersistentData(String uuid, byte[] nbt);
+    /** The chunk's Bukkit persistent data as a binary NBT root compound; null when the chunk is not loaded. */
+    public static native byte[] chunkPersistentData(String world, int x, int z);
+    public static native boolean setChunkPersistentData(String world, int x, int z, byte[] nbt);
     public static native String areaEffectCloudSource(String uuid);
     public static native String areaEffectCloudBasePotionType(String uuid);
     public static native float areaEffectCloudRadius(String uuid);
