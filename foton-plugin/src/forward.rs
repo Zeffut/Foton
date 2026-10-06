@@ -38,9 +38,9 @@ use foton_core::event::{
     PlayerAdvancementCriterionGrantEvent, PlayerAdvancementDoneEvent, PlayerBucketEmptyEvent,
     PlayerBucketFillEvent, PlayerChatEvent, PlayerClientLoadedWorldEvent,
     PlayerCommandPreprocessEvent, PlayerCustomPayloadEvent, PlayerDeathEvent, PlayerDropItemEvent,
-    PlayerFishEvent, PlayerInteractEntityEvent, PlayerInteractEvent, PlayerItemBreakEvent,
-    PlayerJoinEvent, PlayerLocaleChangeEvent, PlayerLoginAbortEvent, PlayerLoginEvent,
-    PlayerMoveEvent, PlayerOpenSignCause, PlayerOpenSignEvent, PlayerPortalEvent, PlayerQuitEvent,
+    PlayerFishEvent, PlayerInteractEntityEvent, PlayerItemBreakEvent, PlayerJoinEvent,
+    PlayerLocaleChangeEvent, PlayerLoginAbortEvent, PlayerLoginEvent, PlayerMoveEvent,
+    PlayerOpenSignCause, PlayerOpenSignEvent, PlayerPortalEvent, PlayerQuitEvent,
     PlayerRespawnEvent, PlayerSpawnLocationEvent, PlayerTakeLecternBookEvent, PortalCreateEvent,
     PreCreatureSpawnEvent, PrepareItemCraftEvent, PrepareItemEnchantEvent, ProjectileLaunchEvent,
     ServerTickEvent, SignChangeEvent, ThunderChangeEvent, WeatherChangeEvent,
@@ -147,18 +147,12 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     }
 
     let jvm = Arc::clone(&vm);
-    events.on::<PlayerInteractEvent, _>(owner(), move |event| {
-        if !interact_call(&jvm, &event.player_id().to_string()) {
-            event.set_cancelled(true);
-        }
-    });
-
-    let jvm = Arc::clone(&vm);
     events.on::<PlayerInteractEntityEvent, _>(owner(), move |event| {
         if !interact_entity_call(
             &jvm,
             &event.player_id().to_string(),
             &event.entity_id().to_string(),
+            matches!(event.hand(), InteractionHand::OffHand),
         ) {
             event.set_cancelled(true);
         }
@@ -1488,24 +1482,7 @@ pub(super) fn login_lifecycle_bridge_check(vm: &JavaVM) -> bool {
         )
 }
 
-fn interact_call(vm: &JavaVM, player_uuid: &str) -> bool {
-    let Some(mut env) = BridgeEnv::attach(vm) else {
-        return true;
-    };
-    let Ok(uuid) = env.new_string(player_uuid) else {
-        return true;
-    };
-    env.call_static_method(
-        BRIDGE,
-        "fireInteract",
-        "(Ljava/lang/String;)Z",
-        &[JValue::Object(&uuid)],
-    )
-    .and_then(JValueGen::z)
-    .unwrap_or(true)
-}
-
-fn interact_entity_call(vm: &JavaVM, player_uuid: &str, entity_uuid: &str) -> bool {
+fn interact_entity_call(vm: &JavaVM, player_uuid: &str, entity_uuid: &str, off_hand: bool) -> bool {
     let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
@@ -1518,8 +1495,12 @@ fn interact_entity_call(vm: &JavaVM, player_uuid: &str, entity_uuid: &str) -> bo
     env.call_static_method(
         BRIDGE,
         "fireInteractEntity",
-        "(Ljava/lang/String;Ljava/lang/String;)Z",
-        &[JValue::Object(&player), JValue::Object(&entity)],
+        "(Ljava/lang/String;Ljava/lang/String;Z)Z",
+        &[
+            JValue::Object(&player),
+            JValue::Object(&entity),
+            JValue::Bool(u8::from(off_hand)),
+        ],
     )
     .and_then(JValueGen::z)
     .unwrap_or(true)

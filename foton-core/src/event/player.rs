@@ -6,7 +6,8 @@
 //! Two events reach two thirds of that corpus, which is why the measurement
 //! came before the design.
 
-use foton_utils::BlockPos;
+use foton_utils::types::InteractionHand;
+use foton_utils::{BlockPos, Direction};
 use glam::DVec3;
 use std::net::SocketAddr;
 
@@ -925,6 +926,7 @@ impl PlayerLoginAbortEvent {
 pub struct PlayerInteractEntityEvent {
     player_id: Uuid,
     entity_id: Uuid,
+    hand: InteractionHand,
     cancelled: bool,
 }
 // SAFETY: This Foton-owned key uniquely identifies the concrete Rust type.
@@ -939,12 +941,19 @@ impl Event for PlayerInteractEntityEvent {
 impl PlayerInteractEntityEvent {
     /// Called by Foton when it fires the event. A plugin receives one of these; it never builds one.
     #[must_use]
-    pub const fn new(player_id: Uuid, entity_id: Uuid) -> Self {
+    pub const fn new(player_id: Uuid, entity_id: Uuid, hand: InteractionHand) -> Self {
         Self {
             player_id,
             entity_id,
+            hand,
             cancelled: false,
         }
+    }
+    /// The hand used. The client asks once per hand, and a plugin that acts
+    /// on one click tells the two apart by this.
+    #[must_use]
+    pub const fn hand(&self) -> InteractionHand {
+        self.hand
     }
     /// Who did it.
     #[must_use]
@@ -967,10 +976,98 @@ impl PlayerInteractEntityEvent {
     }
 }
 
-/// A player attempted to use an item or interact with the air/block.
+/// What a player did with their hand.
+///
+/// Bukkit parity: `org.bukkit.event.block.Action`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InteractAction {
+    /// Started hitting a block.
+    LeftClickBlock,
+    /// Used an item on a block, or the empty hand on it.
+    RightClickBlock,
+    /// Swung at nothing.
+    LeftClickAir,
+    /// Used an item without a block in reach.
+    RightClickAir,
+    /// Stepped on something that reacts: a pressure plate, a tripwire, farmland.
+    Physical,
+}
+
+impl InteractAction {
+    /// Bukkit's name for it.
+    #[must_use]
+    pub const fn bukkit_name(self) -> &'static str {
+        match self {
+            Self::LeftClickBlock => "LEFT_CLICK_BLOCK",
+            Self::RightClickBlock => "RIGHT_CLICK_BLOCK",
+            Self::LeftClickAir => "LEFT_CLICK_AIR",
+            Self::RightClickAir => "RIGHT_CLICK_AIR",
+            Self::Physical => "PHYSICAL",
+        }
+    }
+}
+
+/// Whether one half of an interaction goes ahead.
+///
+/// Bukkit parity: `Event.Result`. `Default` lets the server decide as it
+/// would have; `Allow` forces the action where the server would refuse it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UseResult {
+    /// Refused.
+    Deny,
+    /// As the server would have it.
+    Default,
+    /// Granted.
+    Allow,
+}
+
+impl UseResult {
+    /// Bukkit's name for it.
+    #[must_use]
+    pub const fn bukkit_name(self) -> &'static str {
+        match self {
+            Self::Deny => "DENY",
+            Self::Default => "DEFAULT",
+            Self::Allow => "ALLOW",
+        }
+    }
+
+    /// Reads Bukkit's name back; anything else is `Default`.
+    #[must_use]
+    pub fn from_bukkit_name(name: &str) -> Self {
+        match name {
+            "DENY" => Self::Deny,
+            "ALLOW" => Self::Allow,
+            _ => Self::Default,
+        }
+    }
+}
+
+/// The block an interaction is aimed at.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InteractTarget {
+    /// The block.
+    pub pos: BlockPos,
+    /// The face that was clicked.
+    pub face: Direction,
+    /// Where on it, in world coordinates; none for a left click, which
+    /// Bukkit reports without one.
+    pub location: Option<DVec3>,
+}
+
+/// A player used their hand: on a block, in the air, or with their feet.
+///
+/// Bukkit parity: `PlayerInteractEvent`. The block and the item are decided
+/// separately; cancelling the event denies both.
 pub struct PlayerInteractEvent {
     player_id: Uuid,
-    cancelled: bool,
+    world: String,
+    action: InteractAction,
+    hand: InteractionHand,
+    item: ItemStack,
+    target: Option<InteractTarget>,
+    use_block: UseResult,
+    use_item: UseResult,
 }
 
 // SAFETY: This Foton-owned key uniquely identifies the concrete Rust type.
@@ -979,18 +1076,39 @@ unsafe impl DowncastType for PlayerInteractEvent {
 }
 
 impl Event for PlayerInteractEvent {
+    /// Nothing is left to happen once both halves are denied. Bukkit's own
+    /// `isCancelled` reads the block alone, which makes every interaction
+    /// without a block start out cancelled; listeners must still see those.
     fn is_cancelled(&self) -> bool {
-        self.cancelled
+        self.use_block == UseResult::Deny && self.use_item == UseResult::Deny
     }
 }
 
 impl PlayerInteractEvent {
+    /// Creates the event. As in Bukkit, an interaction with no block starts
+    /// with its block use denied, and every item use undecided.
     #[must_use]
-    /// Creates an uncancelled interaction event.
-    pub const fn new(player_id: Uuid) -> Self {
+    pub fn new(
+        player_id: Uuid,
+        world: String,
+        action: InteractAction,
+        (hand, item): (InteractionHand, ItemStack),
+        target: Option<InteractTarget>,
+    ) -> Self {
+        let use_block = if target.is_some() {
+            UseResult::Allow
+        } else {
+            UseResult::Deny
+        };
         Self {
             player_id,
-            cancelled: false,
+            world,
+            action,
+            hand,
+            item,
+            target,
+            use_block,
+            use_item: UseResult::Default,
         }
     }
     #[must_use]
@@ -998,14 +1116,45 @@ impl PlayerInteractEvent {
     pub const fn player_id(&self) -> Uuid {
         self.player_id
     }
+    /// The world the player is in.
     #[must_use]
-    /// Returns whether the interaction was cancelled.
-    pub const fn cancelled(&self) -> bool {
-        self.cancelled
+    pub fn world(&self) -> &str {
+        &self.world
     }
-    /// Cancels or uncancels the interaction.
-    pub const fn set_cancelled(&mut self, cancelled: bool) {
-        self.cancelled = cancelled;
+    /// What the player did.
+    #[must_use]
+    pub const fn action(&self) -> InteractAction {
+        self.action
+    }
+    /// The hand used.
+    #[must_use]
+    pub const fn hand(&self) -> InteractionHand {
+        self.hand
+    }
+    /// What the hand held.
+    #[must_use]
+    pub const fn item(&self) -> &ItemStack {
+        &self.item
+    }
+    /// The block aimed at, if any.
+    #[must_use]
+    pub const fn target(&self) -> Option<&InteractTarget> {
+        self.target.as_ref()
+    }
+    /// Whether the block's own behaviour runs.
+    #[must_use]
+    pub const fn use_block(&self) -> UseResult {
+        self.use_block
+    }
+    /// Whether the item's own behaviour runs.
+    #[must_use]
+    pub const fn use_item(&self) -> UseResult {
+        self.use_item
+    }
+    /// Decides both halves, as the plugin side answered.
+    pub const fn set_results(&mut self, use_block: UseResult, use_item: UseResult) {
+        self.use_block = use_block;
+        self.use_item = use_item;
     }
 }
 

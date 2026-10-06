@@ -451,6 +451,26 @@ public final class EventRelay {
             + " " + target.getZ() + " " + target.getYaw() + " " + target.getPitch());
     }
 
+    /** Answers `useInteractedBlock, useItemInHand`, as Bukkit's Result names.
+     * `block`, `face` and `location` are empty for an interaction with no
+     * block, and `location` for one Bukkit reports without a point. */
+    public static String fireInteract(String uuid, String world, String action, String hand,
+            String item, String block, String face, String location) {
+        org.bukkit.inventory.ItemStack held = FotonInventory.decode(item);
+        if (held != null && held.getType().isAir()) held = null;
+        org.bukkit.block.Block clicked = block.isEmpty() ? null : block(world, block);
+        org.bukkit.util.Vector point = null;
+        if (clicked != null && !location.isEmpty()) {
+            org.bukkit.util.Vector at = vector(location);
+            point = at.subtract(new org.bukkit.util.Vector(clicked.getX(), clicked.getY(), clicked.getZ()));
+        }
+        org.bukkit.event.player.PlayerInteractEvent event = new org.bukkit.event.player.PlayerInteractEvent(
+            player(uuid), org.bukkit.event.block.Action.valueOf(action), held, clicked,
+            face.isEmpty() ? null : org.bukkit.block.BlockFace.valueOf(face), hand(hand), point);
+        EventBridge.dispatch(event);
+        return answer(event.useInteractedBlock().name(), event.useItemInHand().name());
+    }
+
     /** Answers `cancelled, stacks`. */
     public static String fireHarvest(String uuid, String world, String block, String hand,
             String items) {

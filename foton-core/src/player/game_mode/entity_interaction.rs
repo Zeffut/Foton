@@ -47,7 +47,7 @@ impl Player {
         .component()
     }
 
-    fn eye_position(&self) -> DVec3 {
+    pub(super) fn eye_position(&self) -> DVec3 {
         let position = self.position();
         DVec3::new(position.x, self.get_eye_y(), position.z)
     }
@@ -919,7 +919,7 @@ impl Player {
             return InteractionResult::Pass;
         }
 
-        let mut event = PlayerInteractEntityEvent::new(self.gameprofile.id, entity.uuid());
+        let mut event = PlayerInteractEntityEvent::new(self.gameprofile.id, entity.uuid(), hand);
         self.fire_event(&mut event);
         if event.is_cancelled() {
             return InteractionResult::Pass;

@@ -280,6 +280,9 @@ pub struct Player {
     /// Block breaking state machine.
     pub block_breaking: SyncMutex<BlockBreakingManager>,
 
+    /// The last right click on a block, for the use-item packet that may repeat it.
+    pub(crate) interact_memo: SyncMutex<Option<game_mode::InteractMemo>>,
+
     /// Shared living-entity runtime fields (attributes, speed, damage/death state).
     /// Vanilla: `LivingEntity` (L230-232) + `Entity.invulnerableTime` (L256).
     living_base: LivingEntityBase,
@@ -623,6 +626,7 @@ impl Player {
             respawn_config: SyncMutex::new(None),
             abilities: SyncMutex::new(Abilities::default()),
             block_breaking: SyncMutex::new(BlockBreakingManager::new()),
+            interact_memo: SyncMutex::new(None),
             living_base,
             food_data: SyncMutex::new(FoodData::new()),
             health_sync: SyncMutex::new(HealthSyncState::new()),

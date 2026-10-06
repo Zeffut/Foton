@@ -14,8 +14,9 @@ use foton_core::event::{
     BlockBreakEvent, BlockDropItemEvent, EntitiesLoadEvent, EntitiesUnloadEvent, EntityDamageEvent,
     EntityDismountEvent, EntityPlaceEvent, FurnaceBurnEvent, FurnaceSmeltEvent,
     FurnaceStartSmeltEvent, PlayerArmorChangeEvent, PlayerFailMoveEvent, PlayerHarvestBlockEvent,
-    PlayerItemConsumeEvent, PlayerPurchaseEvent, PlayerTeleportEvent, PlayerToggleFlightEvent,
-    PlayerVelocityEvent, PrepareSmithingEvent, ServerListPingEvent, TeleportPoint,
+    PlayerInteractEvent, PlayerItemConsumeEvent, PlayerPurchaseEvent, PlayerTeleportEvent,
+    PlayerToggleFlightEvent, PlayerVelocityEvent, PrepareSmithingEvent, ServerListPingEvent,
+    TeleportPoint, UseResult,
 };
 use foton_core::server::Server;
 use foton_registry::REGISTRY;
@@ -26,7 +27,7 @@ use foton_registry::trading::MerchantOffer;
 use foton_utils::Identifier;
 use foton_utils::text::json;
 use foton_utils::types::InteractionHand;
-use foton_utils::{BlockPos, ChunkPos};
+use foton_utils::{BlockPos, ChunkPos, Direction};
 use glam::DVec3;
 use jni::JavaVM;
 use jni::errors::Error as JniError;
@@ -141,6 +142,7 @@ pub(crate) fn component(text: &str) -> TextComponent {
 pub(crate) fn subscribe(server: &Arc<Server>, vm: &Arc<JavaVM>) {
     subscribe_movement(server, vm);
     subscribe_player_items(server, vm);
+    subscribe_interactions(server, vm);
     subscribe_entities(server, vm);
     subscribe_blocks(server, vm);
     subscribe_cooking(server, vm);
@@ -245,6 +247,37 @@ fn subscribe_movement(server: &Arc<Server>, vm: &Arc<JavaVM>) {
                 rotation,
             });
         }
+    });
+}
+
+/// A hand used on a block, in the air or underfoot.
+fn subscribe_interactions(server: &Arc<Server>, vm: &Arc<JavaVM>) {
+    let events = server.events();
+
+    let jvm = Arc::clone(vm);
+    events.on::<PlayerInteractEvent, _>(owner(), move |event| {
+        let target = event.target();
+        let Some(answer) = text_call(
+            &jvm,
+            "fireInteract",
+            &[
+                &event.player_id().to_string(),
+                event.world(),
+                event.action().bukkit_name(),
+                hand_name(event.hand()),
+                &describe_slot(event.item()),
+                &target.map_or(String::new(), |target| block_position(target.pos)),
+                target.map_or("", |target| face_name(target.face)),
+                &target
+                    .and_then(|target| target.location)
+                    .map_or(String::new(), |at| format!("{} {} {}", at.x, at.y, at.z)),
+            ],
+        ) else {
+            return;
+        };
+        let answer = fields(&answer);
+        let read = |field: Option<&&str>| UseResult::from_bukkit_name(field.copied().unwrap_or(""));
+        event.set_results(read(answer.first()), read(answer.get(1)));
     });
 }
 
@@ -742,6 +775,18 @@ const fn hand_name(hand: InteractionHand) -> &'static str {
     match hand {
         InteractionHand::MainHand => "HAND",
         InteractionHand::OffHand => "OFF_HAND",
+    }
+}
+
+/// Bukkit's `BlockFace` name for a direction.
+const fn face_name(face: Direction) -> &'static str {
+    match face {
+        Direction::Down => "DOWN",
+        Direction::Up => "UP",
+        Direction::North => "NORTH",
+        Direction::South => "SOUTH",
+        Direction::West => "WEST",
+        Direction::East => "EAST",
     }
 }
 

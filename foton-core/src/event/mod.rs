@@ -93,15 +93,15 @@ pub use movement::{
     PlayerVelocityEvent, TeleportCause, TeleportPoint,
 };
 pub use player::{
-    AsyncPlayerPreLoginEvent, AsyncPlayerPreLoginResult, FoodLevelChangeEvent,
-    PlayerAdvancementCriterionGrantEvent, PlayerAdvancementDoneEvent, PlayerBucketEmptyEvent,
-    PlayerBucketFillEvent, PlayerChangedWorldEvent, PlayerChatEvent, PlayerClientLoadedWorldEvent,
-    PlayerCommandSendEvent, PlayerCustomPayloadEvent, PlayerDeathEvent, PlayerDropItemEvent,
-    PlayerFishEvent, PlayerGameModeChangeEvent, PlayerInteractEntityEvent, PlayerInteractEvent,
-    PlayerItemBreakEvent, PlayerItemHeldEvent, PlayerJoinEvent, PlayerLocaleChangeEvent,
-    PlayerLoginAbortEvent, PlayerLoginEvent, PlayerMoveEvent, PlayerOpenSignCause,
-    PlayerOpenSignEvent, PlayerPortalEvent, PlayerQuitEvent, PlayerRespawnEvent,
-    PlayerSpawnLocationEvent,
+    AsyncPlayerPreLoginEvent, AsyncPlayerPreLoginResult, FoodLevelChangeEvent, InteractAction,
+    InteractTarget, PlayerAdvancementCriterionGrantEvent, PlayerAdvancementDoneEvent,
+    PlayerBucketEmptyEvent, PlayerBucketFillEvent, PlayerChangedWorldEvent, PlayerChatEvent,
+    PlayerClientLoadedWorldEvent, PlayerCommandSendEvent, PlayerCustomPayloadEvent,
+    PlayerDeathEvent, PlayerDropItemEvent, PlayerFishEvent, PlayerGameModeChangeEvent,
+    PlayerInteractEntityEvent, PlayerInteractEvent, PlayerItemBreakEvent, PlayerItemHeldEvent,
+    PlayerJoinEvent, PlayerLocaleChangeEvent, PlayerLoginAbortEvent, PlayerLoginEvent,
+    PlayerMoveEvent, PlayerOpenSignCause, PlayerOpenSignEvent, PlayerPortalEvent, PlayerQuitEvent,
+    PlayerRespawnEvent, PlayerSpawnLocationEvent, UseResult,
 };
 pub use server::{ServerListPingEvent, ServerTickEvent};
 pub use world::{

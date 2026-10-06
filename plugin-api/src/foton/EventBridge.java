@@ -313,20 +313,11 @@ public final class EventBridge {
         } catch (Exception ignored) { return ""; }
     }
 
-    /** A player is attempting an item interaction. */
-    public static boolean fireInteract(String uuid) {
-        org.bukkit.event.player.PlayerInteractEvent event =
-            new org.bukkit.event.player.PlayerInteractEvent(player(uuid),
-                org.bukkit.event.block.Action.RIGHT_CLICK_AIR,
-                null, null, null);
-        dispatch(event);
-        return !event.isCancelled();
-    }
-
-    public static boolean fireInteractEntity(String playerUuid, String entityUuid) {
+    public static boolean fireInteractEntity(String playerUuid, String entityUuid, boolean offHand) {
         org.bukkit.event.player.PlayerInteractEntityEvent event =
             new org.bukkit.event.player.PlayerInteractEntityEvent(
-                player(playerUuid), foton.FotonEntity.handle(Native.parse(entityUuid)));
+                player(playerUuid), foton.FotonEntity.handle(Native.parse(entityUuid)),
+                offHand ? org.bukkit.inventory.EquipmentSlot.OFF_HAND : org.bukkit.inventory.EquipmentSlot.HAND);
         dispatch(event);
         return !event.isCancelled();
     }

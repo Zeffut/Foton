@@ -11,7 +11,11 @@ public class PlayerInteractAtEntityEvent extends PlayerInteractEntityEvent {
     private static final HandlerList HANDLERS = new HandlerList();
 
     public PlayerInteractAtEntityEvent(Player player, Entity rightClicked, Vector clickedPosition) {
-        super(player, rightClicked);
+        this(player, rightClicked, clickedPosition, org.bukkit.inventory.EquipmentSlot.HAND);
+    }
+    public PlayerInteractAtEntityEvent(Player player, Entity rightClicked, Vector clickedPosition,
+            org.bukkit.inventory.EquipmentSlot hand) {
+        super(player, rightClicked, hand);
         this.clickedPosition = clickedPosition == null ? new Vector() : clickedPosition.clone();
     }
 

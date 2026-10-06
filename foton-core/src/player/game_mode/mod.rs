@@ -49,12 +49,14 @@ pub mod block_breaking;
 mod block_interaction;
 mod command_block_editing;
 mod entity_interaction;
+mod interact;
 mod item_interaction;
 mod player_methods;
 mod raycast;
 mod structure_block_editing;
 
 pub(super) use block_breaking::BlockBreakingManager;
+pub use interact::InteractMemo;
 pub use item_interaction::{use_item, use_item_on};
 
 /// Current and previous player game mode stored as one coherent state.

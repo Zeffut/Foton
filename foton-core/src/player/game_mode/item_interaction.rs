@@ -4,7 +4,6 @@ use super::{
     wrap_degrees,
 };
 use crate::advancement::triggers;
-use crate::event::PlayerInteractEvent;
 
 /// Handles using an item on a block.
 ///
@@ -22,6 +21,7 @@ pub fn use_item_on(
     world: &Arc<World>,
     hand: InteractionHand,
     hit_result: &BlockHitResult,
+    allow_item: bool,
 ) -> InteractionResult {
     let pos = hit_result.block_pos;
     let state = world.get_block_state(pos);
@@ -89,6 +89,11 @@ pub fn use_item_on(
                 return empty_result;
             }
         }
+    }
+
+    // A plugin denied the item its part; the block had its chance above.
+    if !allow_item {
+        return InteractionResult::Pass;
     }
 
     let inventory_access = InventoryAccess::new(player.inventory.clone(), hand);
@@ -201,12 +206,6 @@ impl Player {
             return;
         }
 
-        let mut interaction = PlayerInteractEvent::new(self.gameprofile.id);
-        self.fire_event(&mut interaction);
-        if interaction.cancelled() {
-            return;
-        }
-
         let current_rotation = self.rotation();
         // Vanilla entity setters discard each non-finite rotation component independently.
         let target_component = |value: f32, current: f32| {
@@ -222,6 +221,12 @@ impl Player {
         );
         if target_rotation != current_rotation {
             self.set_rotation(target_rotation);
+        }
+
+        // After the rotation: the reach traced is the one the packet looks along.
+        if !self.allow_use_item(packet.hand) {
+            self.broadcast_inventory_changes();
+            return;
         }
 
         let world = self.get_world();

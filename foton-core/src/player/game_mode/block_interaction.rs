@@ -1,5 +1,5 @@
 use super::{block_breaking::BlockBreakAction, *};
-use crate::event::PlayerInteractEvent;
+use crate::event::{InteractAction, InteractTarget, UseResult};
 use crate::event::{PlayerOpenSignCause, PlayerOpenSignEvent, SignChangeEvent};
 use foton_utils::text::DisplayResolutor;
 use std::array::from_fn;
@@ -85,13 +85,25 @@ impl Player {
             return;
         }
 
-        let mut interaction = PlayerInteractEvent::new(self.gameprofile.id);
-        self.fire_event(&mut interaction);
-        if interaction.cancelled() {
+        // Bukkit decides the block and the item apart: a plugin can keep a
+        // door shut and still let the key in the hand do its work.
+        let interaction = self.fire_interact(
+            InteractAction::RightClickBlock,
+            packet.hand,
+            Some(InteractTarget {
+                pos,
+                face: direction,
+                location: Some(packet.block_hit.location),
+            }),
+        );
+        self.remember_interact(&interaction);
+        if interaction.use_block() == UseResult::Deny {
             self.send_block_updates(pos, direction);
+            self.broadcast_inventory_changes();
             return;
         }
-        let result = use_item_on(self, &world, packet.hand, &packet.block_hit);
+        let allow_item = interaction.use_item() != UseResult::Deny;
+        let result = use_item_on(self, &world, packet.hand, &packet.block_hit, allow_item);
 
         if result.should_swing_server() {
             self.swing(packet.hand, true);
@@ -110,6 +122,22 @@ impl Player {
         let world = self.get_world();
         match packet.action {
             PlayerAction::StartDestroyBlock => {
+                // Bukkit parity: the first hit is a LEFT_CLICK_BLOCK, and a
+                // refused one leaves the block standing for the client too.
+                let interaction = self.fire_interact(
+                    InteractAction::LeftClickBlock,
+                    InteractionHand::MainHand,
+                    Some(InteractTarget {
+                        pos: packet.pos,
+                        face: packet.direction,
+                        location: None,
+                    }),
+                );
+                if interaction.use_block() == UseResult::Deny {
+                    self.send_block_updates(packet.pos, packet.direction);
+                    self.ack_block_changes_up_to(packet.sequence);
+                    return;
+                }
                 self.block_breaking.lock().handle_block_break_action(
                     self,
                     &world,
