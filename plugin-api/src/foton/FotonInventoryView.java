@@ -28,6 +28,7 @@ public class FotonInventoryView implements InventoryView {
         if ("minecraft:blast_furnace".equals(menuType)) return new FotonFurnaceMenuInventory(owner, org.bukkit.Material.BLAST_FURNACE);
         if ("minecraft:smoker".equals(menuType)) return new FotonFurnaceMenuInventory(owner, org.bukkit.Material.SMOKER);
         if ("minecraft:smithing".equals(menuType)) return new FotonSmithingInventory(owner);
+        if ("minecraft:merchant".equals(menuType)) return new FotonMerchantMenuInventory(owner);
         return new FotonMenuInventory(owner);
     }
 

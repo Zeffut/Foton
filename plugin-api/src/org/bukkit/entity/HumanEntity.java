@@ -85,6 +85,7 @@ public interface HumanEntity extends LivingEntity, AnimalTamer, org.bukkit.inven
         else if (merchant instanceof Entity entity) handle = entity.getUniqueId().toString();
         else throw new IllegalArgumentException("Can't open merchant " + merchant);
         if (!foton.Native.openMerchant(getUniqueId().toString(), handle, force)) return null;
+        if (merchant instanceof foton.FotonMerchant custom) foton.FotonMerchant.recordOpened(getUniqueId().toString(), custom);
         return getOpenInventory();
     }
 }

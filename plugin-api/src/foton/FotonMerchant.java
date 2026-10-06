@@ -24,6 +24,13 @@ public final class FotonMerchant implements Merchant {
 
     public String handle() { return handle; }
 
+    /** The plugin merchant each player last opened a screen on. */
+    private static final java.util.Map<String, FotonMerchant> OPENED = new java.util.concurrent.ConcurrentHashMap<>();
+
+    public static void recordOpened(String player, FotonMerchant merchant) { OPENED.put(player, merchant); }
+
+    static FotonMerchant openedBy(String player) { return OPENED.get(player); }
+
     @Override public List<MerchantRecipe> getRecipes() {
         foton.item.MerchantOfferTransfer[] encoded = Native.merchantOffers(handle);
         if (encoded == null) return Collections.emptyList();

@@ -8,8 +8,7 @@ import org.bukkit.inventory.ItemStack;
 /** The three furnace slots of a player's open furnace, smoker or blast
  * furnace screen.
  *
- * The screen does not say which block it belongs to, so {@link #getHolder()}
- * answers null here where Bukkit would answer the furnace. */
+ * {@link #getHolder()} is the furnace the screen was opened on, as in Bukkit. */
 final class FotonFurnaceMenuInventory extends FotonMenuInventory implements FurnaceInventory {
     private final Material block;
 
@@ -41,5 +40,5 @@ final class FotonFurnaceMenuInventory extends FotonMenuInventory implements Furn
     @Override public void setResult(ItemStack stack) { setItem(2, stack); }
     @Override public boolean isFuel(ItemStack item) { return fuel(item); }
     @Override public boolean isSmeltable(ItemStack item) { return smeltable(block, item); }
-    @Override public Furnace getHolder() { return null; }
+    @Override public Furnace getHolder() { return FotonMenuSource.holder(owner()) instanceof Furnace furnace ? furnace : null; }
 }

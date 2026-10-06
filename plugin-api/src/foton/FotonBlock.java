@@ -156,7 +156,7 @@ public final class FotonBlock implements Block {
         }
         if (getType() == Material.FURNACE || getType() == Material.BLAST_FURNACE
                 || getType() == Material.SMOKER) {
-            return new FotonFurnace(this, getBlockData());
+            return FotonFurnace.of(this, getBlockData());
         }
         if (getType() == Material.BREWING_STAND) {
             return FotonBrewingStand.placedSnapshot(this, getBlockData());

@@ -148,6 +148,22 @@ public final class PacketProbe extends JavaPlugin implements Listener {
             + " slot 10 " + item(event.getInventory().getItem(10)));
     }
 
+    private final AtomicInteger opens = new AtomicInteger();
+
+    /** Every menu opening, as the view a plugin reads before it is shown.
+     * An anvil is refused, as a plugin that disables one does. */
+    @EventHandler
+    public void onOpen(org.bukkit.event.inventory.InventoryOpenEvent event) {
+        Inventory top = event.getView().getTopInventory();
+        org.bukkit.inventory.InventoryHolder holder = top.getHolder(false);
+        facts.put("open " + opens.incrementAndGet(), top.getType() + "/" + top.getSize()
+            + " ours " + (holder instanceof MenuHolder)
+            + " holder " + (holder == null ? "none" : holder instanceof org.bukkit.entity.Entity entity
+                ? entity.getType().name() : holder.getClass().getInterfaces().length > 0
+                ? holder.getClass().getInterfaces()[0].getSimpleName() : holder.getClass().getSimpleName()));
+        if (top.getType() == org.bukkit.event.inventory.InventoryType.ANVIL) event.setCancelled(true);
+    }
+
     private final AtomicInteger interactions = new AtomicInteger();
 
     /** Every hand use, as a plugin sees it. A right click on an emerald

@@ -18,11 +18,18 @@ public class FotonMenuInventory implements Inventory {
         this.snapshot = snapshot == null ? new ItemStack[0] : snapshot.clone();
     }
 
+    /** The block state or entity the menu was opened on; the player for a
+     * menu opened on nothing, which is what a command's menu shows. */
     @Override
     public InventoryHolder getHolder() {
+        InventoryHolder source = FotonMenuSource.holder(owner);
+        if (source != null || FotonMenuSource.of(owner) != null) return source;
         try { return new FotonPlayer(java.util.UUID.fromString(owner)); }
         catch (IllegalArgumentException ignored) { return null; }
     }
+
+    /** The player whose open menu this is. */
+    protected final String owner() { return owner; }
 
     @Override
     public int getSize() {
@@ -32,6 +39,8 @@ public class FotonMenuInventory implements Inventory {
     }
 
     @Override public org.bukkit.event.inventory.InventoryType getType() {
+        org.bukkit.event.inventory.InventoryType known = FotonMenuSource.type(owner);
+        if (known != null) return known;
         return switch (getSize()) {
             case 9 -> org.bukkit.event.inventory.InventoryType.GENERIC_9X1;
             case 18 -> org.bukkit.event.inventory.InventoryType.GENERIC_9X2;

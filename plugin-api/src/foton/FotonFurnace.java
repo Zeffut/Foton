@@ -6,9 +6,25 @@ import org.bukkit.block.data.BlockData;
 import org.bukkit.inventory.FurnaceInventory;
 
 /** A furnace, smoker or blast furnace snapshot. Its inventory is live, as a
- * Bukkit block state's is; its times are the snapshot's own. */
-final class FotonFurnace extends FotonTileState
-        implements org.bukkit.block.BlastFurnace, org.bukkit.block.Smoker {
+ * Bukkit block state's is; its times are the snapshot's own. Each block gets
+ * its own interface, so a plain furnace is not a {@code BlastFurnace}. */
+class FotonFurnace extends FotonTileState implements org.bukkit.block.Furnace {
+    static FotonFurnace of(Block block, BlockData data) {
+        return switch (block.getType()) {
+            case BLAST_FURNACE -> new Blast(block, data);
+            case SMOKER -> new Smoking(block, data);
+            default -> new FotonFurnace(block, data);
+        };
+    }
+
+    static final class Blast extends FotonFurnace implements org.bukkit.block.BlastFurnace {
+        Blast(Block block, BlockData data) { super(block, data); }
+    }
+
+    static final class Smoking extends FotonFurnace implements org.bukkit.block.Smoker {
+        Smoking(Block block, BlockData data) { super(block, data); }
+    }
+
     private short burnTime;
     private short cookTime;
     private int cookTimeTotal;
