@@ -12,3 +12,9 @@ commands:
     description: Opens a menu of the probe's own.
   probespawn:
     description: Spawns each entity class Zelda Civ spawns, through World.spawn.
+  probehands:
+    description: Writes down both hands.
+  probestand:
+    description: Writes down the nearest armor stand's helmet.
+  probevehicle:
+    description: Writes down the vehicle the player rides.

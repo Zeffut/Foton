@@ -20,11 +20,13 @@ use foton_utils::locks::SyncMutex;
 use glam::DVec3;
 
 use crate::behavior::InteractionResult;
-use crate::entity::Entity;
+use crate::entity::{Entity, SharedEntity};
 use crate::fluid::{FluidStateExt as _, get_height};
 use crate::physics::MoverType;
 use crate::player::Player;
 use crate::world::{LevelReader as _, World};
+
+use super::vehicle_move::{Placement, fire_if_moved, placement_of};
 
 /// How long a submerged boat carries its passengers before throwing them out.
 ///
@@ -114,6 +116,10 @@ pub(super) struct BoatState {
     pub out_of_control_ticks: f32,
     /// Vertical speed last tick, used by the fall check.
     pub last_yd: f64,
+    /// Where the boat stood at the end of its last tick, which is what a
+    /// move is measured from: the rider's client moves a ridden boat between
+    /// ticks.
+    pub last_location: Option<Placement>,
 }
 
 /// What a concrete boat exposes to the shared code.
@@ -154,6 +160,16 @@ pub(super) fn interact_boat<B: BoatLike>(boat: &B, player: &Player) -> Interacti
     }
 }
 
+/// Returns the rider who steers the boat.
+///
+/// Vanilla parity: `AbstractBoat.getControllingPassenger`, the first rider if
+/// it is a living entity. Being the controller is what makes the server accept
+/// the rider's vehicle-move packets instead of moving the boat itself.
+pub(super) fn controlling_passenger(boat: &dyn Entity) -> Option<SharedEntity> {
+    boat.first_passenger()
+        .filter(|passenger| passenger.as_living_entity().is_some())
+}
+
 /// Runs one tick of a boat's own physics.
 ///
 /// Vanilla parity: the server half of `AbstractBoat.tick`. The client half --
@@ -191,6 +207,15 @@ pub(super) fn tick_boat<B: BoatLike>(boat: &B) {
     if boat.controlling_passenger().is_none() {
         boat.move_entity(MoverType::SelfMovement, boat.velocity());
     }
+
+    // Paper compares against where the boat stood last tick, and takes its
+    // new reference after the listeners ran, so a plugin that teleports the
+    // boat back is not told about the way back.
+    let last = boat.boat_state().lock().last_location;
+    if let Some(last) = last {
+        fire_if_moved(boat, last);
+    }
+    boat.boat_state().lock().last_location = Some(placement_of(boat));
 }
 
 /// Applies buoyancy, drag and gravity for this tick.

@@ -11,6 +11,10 @@ public class SmithItemEvent extends InventoryClickEvent {
             int rawSlot) {
         super(whoClicked, currentItem, cursor, click, rawSlot);
     }
+    public SmithItemEvent(HumanEntity whoClicked, ItemStack currentItem, ItemStack cursor, ClickType click,
+            int rawSlot, int hotbarButton) {
+        super(whoClicked, currentItem, cursor, click, rawSlot, hotbarButton);
+    }
 
     @Override public SmithingInventory getInventory() { return (SmithingInventory) super.getInventory(); }
 }

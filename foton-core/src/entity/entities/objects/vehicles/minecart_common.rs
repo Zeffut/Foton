@@ -31,6 +31,8 @@ use crate::entity::Entity;
 use crate::physics::MoverType;
 use crate::world::{LevelReader as _, World};
 
+use super::vehicle_move::{fire_if_moved, placement_of};
+
 /// Vanilla parity: `AbstractMinecart.getAirDrag`.
 const AIR_DRAG: f64 = 0.95;
 
@@ -517,6 +519,7 @@ pub(super) fn tick_minecart<M: MinecartLike>(cart: &M) {
         return;
     };
 
+    let started = placement_of(cart);
     cart.apply_gravity();
 
     let pos = current_block_pos_or_rail_below(cart, &world);
@@ -536,6 +539,7 @@ pub(super) fn tick_minecart<M: MinecartLike>(cart: &M) {
     push_and_pickup_entities(cart, &world);
     cart.apply_effects_from_blocks();
     face_travel(cart);
+    fire_if_moved(cart, started);
 }
 
 /// Shoves what the cart runs into, and scoops up what can ride.

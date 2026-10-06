@@ -185,7 +185,10 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
             &item,
             &cursor,
             event.click(),
-            event.slot().map_or(-1, |slot| slot as i32),
+            (
+                event.slot().map_or(-1, |slot| slot as i32),
+                event.hotbar_button(),
+            ),
             (&recipe, &matrix),
         ) {
             event.set_cancelled(true);
@@ -200,11 +203,9 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
             .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join(",");
-        let old_cursor = format!(
-            "{} {}",
-            event.old_cursor().item().key,
-            event.old_cursor().count()
-        );
+        // Whole stack, components and all: a plugin tells its own items by
+        // their persistent data.
+        let old_cursor = natives::describe_slot(event.old_cursor());
         if !inventory_drag_call(
             &jvm,
             &event.player_id().to_string(),
@@ -1685,7 +1686,7 @@ fn inventory_click_call(
     item: &str,
     cursor: &str,
     click: &str,
-    raw_slot: i32,
+    (raw_slot, hotbar_button): (i32, i32),
     (recipe, matrix): (&str, &str),
 ) -> bool {
     let Some(mut env) = BridgeEnv::attach(vm) else {
@@ -1712,13 +1713,14 @@ fn inventory_click_call(
     env.call_static_method(
         BRIDGE,
         "fireInventoryClick",
-        "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;)Z",
+        "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IILjava/lang/String;Ljava/lang/String;)Z",
         &[
             JValue::Object(&uuid),
             JValue::Object(&item),
             JValue::Object(&cursor),
             JValue::Object(&click),
             JValue::Int(raw_slot),
+            JValue::Int(hotbar_button),
             JValue::Object(&recipe),
             JValue::Object(&matrix),
         ],

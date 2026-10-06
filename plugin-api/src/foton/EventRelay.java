@@ -83,6 +83,15 @@ public final class EventRelay {
         return answer(event.isCancelled());
     }
 
+    /** Answers nothing: the vehicle has already moved, and a plugin that objects teleports it back. */
+    public static String fireVehicleMove(String vehicle, String world, String from, String to) {
+        if (!(FotonEntity.handle(Native.parse(vehicle)) instanceof org.bukkit.entity.Vehicle handle)) return "";
+        World in = new FotonWorld(world);
+        EventBridge.dispatch(new org.bukkit.event.vehicle.VehicleMoveEvent(handle, location(in, from),
+            location(in, to)));
+        return "";
+    }
+
     /** Answers `cancelled, velocity`. */
     public static String fireVelocity(String uuid, String velocity) {
         org.bukkit.event.player.PlayerVelocityEvent event =
@@ -110,6 +119,39 @@ public final class EventRelay {
         org.bukkit.inventory.ItemStack replacement = event.getReplacement();
         return answer(event.isCancelled(), FotonInventory.encode(event.getItem()),
             replacement != null, replacement == null ? "" : FotonInventory.encode(replacement));
+    }
+
+    /** Answers `cancelled`. */
+    public static String fireArmorStandManipulate(String uuid, String stand, String slot, String hand,
+            String playerItem, String standItem) {
+        org.bukkit.entity.Entity entity = FotonEntity.handle(Native.parse(stand));
+        if (!(entity instanceof org.bukkit.entity.ArmorStand armorStand)) return answer(false);
+        org.bukkit.event.player.PlayerArmorStandManipulateEvent event =
+            new org.bukkit.event.player.PlayerArmorStandManipulateEvent(player(uuid), armorStand,
+                orAir(FotonInventory.decode(playerItem)), orAir(FotonInventory.decode(standItem)),
+                org.bukkit.inventory.EquipmentSlot.valueOf(slot), hand(hand));
+        EventBridge.dispatch(event);
+        return answer(event.isCancelled());
+    }
+
+    static org.bukkit.inventory.ItemStack orAir(org.bukkit.inventory.ItemStack stack) {
+        return stack == null ? new org.bukkit.inventory.ItemStack(org.bukkit.Material.AIR) : stack;
+    }
+
+    /** Answers `cancelled, mainChanged, main, offChanged, off`; a hand is read only when it changed. */
+    public static String fireSwapHands(String uuid, String main, String off) {
+        org.bukkit.inventory.ItemStack mainItem = orAir(FotonInventory.decode(main));
+        org.bukkit.inventory.ItemStack offItem = orAir(FotonInventory.decode(off));
+        org.bukkit.event.player.PlayerSwapHandItemsEvent event =
+            new org.bukkit.event.player.PlayerSwapHandItemsEvent(player(uuid), mainItem.clone(),
+                offItem.clone());
+        EventBridge.dispatch(event);
+        if (event.isCancelled()) return answer(true, false, "", false, "");
+        boolean mainChanged = !mainItem.equals(orAir(event.getMainHandItem()));
+        boolean offChanged = !offItem.equals(orAir(event.getOffHandItem()));
+        return answer(false, mainChanged,
+            mainChanged ? FotonInventory.encode(event.getMainHandItem()) : "",
+            offChanged, offChanged ? FotonInventory.encode(event.getOffHandItem()) : "");
     }
 
     static FotonBlock block(String world, String position) {
@@ -481,9 +523,11 @@ public final class EventRelay {
      * event's inventory is a copy of them: the menu is busy with the click. */
     static org.bukkit.event.inventory.InventoryClickEvent clickEvent(Player player,
             org.bukkit.inventory.ItemStack current, org.bukkit.inventory.ItemStack cursor,
-            org.bukkit.event.inventory.ClickType click, int rawSlot, String recipe, String matrix) {
+            org.bukkit.event.inventory.ClickType click, int rawSlot, int hotbarButton, String recipe,
+            String matrix) {
         if (player == null || current == null || current.getType().isAir()) {
-            return new org.bukkit.event.inventory.InventoryClickEvent(player, current, cursor, click, rawSlot);
+            return new org.bukkit.event.inventory.InventoryClickEvent(player, current, cursor, click, rawSlot,
+                hotbarButton);
         }
         org.bukkit.NamespacedKey key = recipe == null || recipe.isEmpty() ? null : org.bukkit.NamespacedKey.fromString(recipe);
         if (key != null && player instanceof FotonPlayer foton) {
@@ -493,13 +537,15 @@ public final class EventRelay {
             for (int i = 0; i < encoded.length; i++) slots[i + 1] = FotonInventory.decode(encoded[i]);
             FotonCraftingInventory grid = new FotonCraftingInventory(player.getUniqueId().toString(), slots);
             return new org.bukkit.event.inventory.CraftItemEvent(new FotonCraftingRecipe(key, current),
-                new FotonInventoryView(foton, grid), player, current, cursor, click, rawSlot);
+                new FotonInventoryView(foton, grid), player, current, cursor, click, rawSlot, hotbarButton);
         }
         String type = Native.openMenuType(player.getUniqueId().toString());
         if ("minecraft:smithing".equals(type) && rawSlot == 3) {
-            return new org.bukkit.event.inventory.SmithItemEvent(player, current, cursor, click, rawSlot);
+            return new org.bukkit.event.inventory.SmithItemEvent(player, current, cursor, click, rawSlot,
+                hotbarButton);
         }
-        return new org.bukkit.event.inventory.InventoryClickEvent(player, current, cursor, click, rawSlot);
+        return new org.bukkit.event.inventory.InventoryClickEvent(player, current, cursor, click, rawSlot,
+            hotbarButton);
     }
 
     /** Answers `motd, maxPlayers`, the MOTD as JSON text. */

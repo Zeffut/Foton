@@ -531,6 +531,7 @@ impl Player {
                 (ClickType::Pickup | ClickType::QuickCraft, 1) => "RIGHT",
                 (ClickType::QuickMove, 0) => "SHIFT_LEFT",
                 (ClickType::QuickMove, 1) => "SHIFT_RIGHT",
+                (ClickType::Swap, 40) => "SWAP_OFFHAND",
                 (ClickType::Swap, _) => "NUMBER_KEY",
                 (ClickType::Clone, _) => "MIDDLE",
                 (ClickType::Throw, 0) => "DROP",
@@ -546,6 +547,11 @@ impl Player {
                 click_name.to_owned(),
                 click.slot(),
             )
+            .with_hotbar_button(if packet.click_type == ClickType::Swap {
+                i32::from(packet.button_num)
+            } else {
+                -1
+            })
             .with_craft(craft);
             self.fire_event(&mut inventory_click);
             if inventory_click.is_cancelled() {

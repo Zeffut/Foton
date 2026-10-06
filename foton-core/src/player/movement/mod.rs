@@ -583,6 +583,7 @@ impl Player {
 
         let world = self.get_world();
         let old_position = vehicle.position();
+        let old_rotation = vehicle.rotation();
         let target_pos = DVec3::new(
             clamp_horizontal(packet.pos.x),
             clamp_vertical(packet.pos.y),
@@ -699,6 +700,9 @@ impl Player {
                 return;
             }
         }
+        if !self.accept_vehicle_move_event(vehicle.as_ref(), old_position, old_rotation) {
+            return;
+        }
         self.movement
             .lock()
             .set_last_known_client_movement(client_delta);
@@ -712,6 +716,59 @@ impl Player {
         self.movement
             .lock()
             .mark_vehicle_last_good_position(vehicle.id(), vehicle.position());
+    }
+
+    /// Tells plugins that the rider moved with the vehicle they steer.
+    ///
+    /// Paper parity: the `PlayerMoveEvent` of `handleMoveVehicle`, fired once
+    /// the vehicle has been snapped to the client's position. Paper answers a
+    /// cancellation by teleporting the rider alone, which only desynchronizes
+    /// them from the mount; here the vehicle goes back where it was, which is
+    /// what a listener that cancels means. A listener's own destination moves
+    /// the vehicle there instead. Returns `false` when the movement was undone
+    /// and the packet is finished.
+    fn accept_vehicle_move_event(
+        &self,
+        vehicle: &dyn Entity,
+        from: DVec3,
+        from_rotation: (f32, f32),
+    ) -> bool {
+        let to = vehicle.position();
+        if from == to && from_rotation == vehicle.rotation() {
+            return true;
+        }
+        let Some(player) = self
+            .server()
+            .online_players()
+            .get_by_uuid(&self.gameprofile.id)
+        else {
+            return true;
+        };
+        let mut event = PlayerMoveEvent::new(player, from, to);
+        self.server().events().fire(&mut event);
+        let destination = if event.is_cancelled() {
+            from
+        } else if event.to() != to {
+            event.to()
+        } else {
+            return true;
+        };
+        if let Err(error) = vehicle.try_set_position(destination) {
+            log::warn!(
+                "Failed to move vehicle {} where a listener sent it: {error}",
+                vehicle.id()
+            );
+        }
+        if event.is_cancelled() {
+            vehicle.set_rotation(from_rotation);
+        }
+        vehicle.refresh_fluid_contact();
+        self.send_packet(Self::move_vehicle_packet_from_entity(vehicle));
+        vehicle.remove_latest_movement_recording();
+        self.movement
+            .lock()
+            .mark_vehicle_last_good_position(vehicle.id(), vehicle.position());
+        false
     }
 
     fn record_client_floating(

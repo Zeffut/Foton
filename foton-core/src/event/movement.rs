@@ -354,3 +354,67 @@ impl PlayerTeleportEvent {
         self.cancelled = cancelled;
     }
 }
+
+/// A boat or minecart ended its tick somewhere else than it began it.
+///
+/// Not cancellable, as in Paper: a listener that wants the vehicle back
+/// teleports it there itself.
+pub struct VehicleMoveEvent {
+    vehicle: Uuid,
+    world: String,
+    from: DVec3,
+    from_rotation: (f32, f32),
+    to: DVec3,
+    to_rotation: (f32, f32),
+}
+
+// SAFETY: This Foton-owned key uniquely identifies the concrete Rust type.
+unsafe impl DowncastType for VehicleMoveEvent {
+    const TYPE_KEY: DowncastTypeKey = DowncastTypeKey::new("foton:event/vehicle_move");
+}
+
+impl Event for VehicleMoveEvent {}
+
+impl VehicleMoveEvent {
+    /// Creates the event for `vehicle` going from one position and rotation to another.
+    #[must_use]
+    pub const fn new(
+        vehicle: Uuid,
+        world: String,
+        from: (DVec3, (f32, f32)),
+        to: (DVec3, (f32, f32)),
+    ) -> Self {
+        Self {
+            vehicle,
+            world,
+            from: from.0,
+            from_rotation: from.1,
+            to: to.0,
+            to_rotation: to.1,
+        }
+    }
+
+    /// The vehicle.
+    #[must_use]
+    pub const fn vehicle(&self) -> Uuid {
+        self.vehicle
+    }
+
+    /// The world it moved in.
+    #[must_use]
+    pub fn world(&self) -> &str {
+        &self.world
+    }
+
+    /// Where it was, and which way it faced.
+    #[must_use]
+    pub const fn from(&self) -> (DVec3, (f32, f32)) {
+        (self.from, self.from_rotation)
+    }
+
+    /// Where it is, and which way it faces.
+    #[must_use]
+    pub const fn to(&self) -> (DVec3, (f32, f32)) {
+        (self.to, self.to_rotation)
+    }
+}

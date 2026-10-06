@@ -83,7 +83,10 @@ pub use entity::{
 pub use entity_lifecycle::{
     EntitiesLoadEvent, EntitiesUnloadEvent, EntityDismountEvent, EntityPlaceEvent,
 };
-pub use equipment::{PlayerArmorChangeEvent, PlayerItemConsumeEvent};
+pub use equipment::{
+    PlayerArmorChangeEvent, PlayerArmorStandManipulateEvent, PlayerItemConsumeEvent,
+    PlayerSwapHandItemsEvent,
+};
 pub use fertilize::BlockFertilizeEvent;
 pub use inventory::{
     CrafterCraftEvent, CraftingClick, InventoryClickEvent, InventoryCloseEvent, InventoryDragEvent,
@@ -93,7 +96,7 @@ pub use lectern::PlayerTakeLecternBookEvent;
 pub use menus::{EnchantOffer, PlayerPurchaseEvent, PrepareSmithingEvent};
 pub use movement::{
     FailMoveReason, PlayerFailMoveEvent, PlayerTeleportEvent, PlayerToggleFlightEvent,
-    PlayerVelocityEvent, TeleportCause, TeleportPoint,
+    PlayerVelocityEvent, TeleportCause, TeleportPoint, VehicleMoveEvent,
 };
 pub use player::{
     AsyncPlayerPreLoginEvent, AsyncPlayerPreLoginResult, FoodLevelChangeEvent, InteractAction,

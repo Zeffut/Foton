@@ -27,7 +27,9 @@ use super::boat_common::{
     self, BOAT_GRAVITY, BOAT_RIDE_HEIGHT, BoatLike, BoatState, MAX_PASSENGERS, RAFT_RIDE_HEIGHT,
 };
 use crate::behavior::InteractionResult;
-use crate::entity::{Entity, EntityBase, EntityBaseLoad, EntityMovementEmission, EntitySyncedData};
+use crate::entity::{
+    Entity, EntityBase, EntityBaseLoad, EntityMovementEmission, EntitySyncedData, SharedEntity,
+};
 use crate::player::Player;
 use crate::world::World;
 
@@ -92,6 +94,10 @@ macro_rules! boat_body {
 
             fn tick(&self) {
                 boat_common::tick_boat(self);
+            }
+
+            fn controlling_passenger(&self) -> Option<SharedEntity> {
+                boat_common::controlling_passenger(self)
             }
 
             fn get_default_gravity(&self) -> f64 {

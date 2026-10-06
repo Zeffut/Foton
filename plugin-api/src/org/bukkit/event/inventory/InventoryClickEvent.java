@@ -69,6 +69,7 @@ public class InventoryClickEvent extends InventoryEvent implements Cancellable {
             case CONTROL_DROP: return InventoryAction.DROP_ONE_SLOT;
             case MIDDLE: return InventoryAction.CLONE_STACK;
             case DOUBLE_CLICK: return InventoryAction.COLLECT_TO_CURSOR;
+            case NUMBER_KEY: case SWAP_OFFHAND: return InventoryAction.HOTBAR_SWAP;
             default: return InventoryAction.UNKNOWN;
         }
     }
