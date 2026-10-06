@@ -139,7 +139,12 @@ public final class FotonInventory implements PlayerInventory {
 
     @Override
     public ItemStack getItemInMainHand() {
-        return getItem(getHeldItemSlot());
+        return orAir(getItem(getHeldItemSlot()));
+    }
+
+    /** Bukkit's hand getters never answer null: an empty hand is air. */
+    private static ItemStack orAir(ItemStack item) {
+        return item == null ? new ItemStack(org.bukkit.Material.AIR) : item;
     }
 
     @Override
@@ -159,7 +164,7 @@ public final class FotonInventory implements PlayerInventory {
 
     @Override
     public ItemStack getItemInOffHand() {
-        return getItem(OFFHAND);
+        return orAir(getItem(OFFHAND));
     }
 
     @Override
