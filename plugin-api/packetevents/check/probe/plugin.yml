@@ -10,3 +10,5 @@ commands:
     description: Writes down the top of the open view.
   probegui:
     description: Opens a menu of the probe's own.
+  probepdc:
+    description: Writes or reads persistent data on the player, entities and chunk.

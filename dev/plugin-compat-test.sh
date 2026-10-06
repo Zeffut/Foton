@@ -14,6 +14,10 @@
 # WAIT_FOR_LOG      a server.log pattern to wait for before the client joins
 # JOIN_AS_OP=1      the client joins in the op group, for vanilla commands
 # EXTRA_CLIENT      a dev/ script run after the join, given the port
+# KEEP_WORLD=1      keep saves/ and the plugins' data from the previous run, so a
+#                   second run sees what the first one saved
+# FOTON_BIN         the server binary to run, instead of $TARGET_DIR/debug/foton
+# SKIP_BUILD=1      do not run cargo build; use FOTON_BIN as it is
 #
 # Needs dev/build-plugin-api.sh and dev/build-packetevents.sh to have run, and
 # a JDK 21+ at $FOTON_JAVA_HOME (default: the one `javac` belongs to).
@@ -22,7 +26,7 @@ export PATH="$HOME/.cargo/bin:$PATH"
 cd "$(dirname "$0")/.." || exit 1
 ROOT=$(pwd)
 TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
-BIN="$TARGET_DIR/debug/foton"
+BIN="${FOTON_BIN:-$TARGET_DIR/debug/foton}"
 PORT=${PORT:-25567}
 RUN_DIR="${RUN_DIR:-$ROOT/run-plugins}"
 API_JAR="$ROOT/plugin-api/build/foton-plugin-api.jar"
@@ -34,8 +38,10 @@ PROBE_SRC="$ROOT/plugin-api/packetevents/check/probe"
 bash "$ROOT/dev/fetch-plugin-runtime-libs.sh" || exit 1
 
 echo "=== Building ==="
-cargo build -p foton 2>&1 | tail -3
-if [ "${PIPESTATUS[0]}" -ne 0 ]; then echo "BUILD FAILED"; exit 1; fi
+if [ "${SKIP_BUILD:-0}" != 1 ]; then
+  cargo build -p foton 2>&1 | tail -3
+  if [ "${PIPESTATUS[0]}" -ne 0 ]; then echo "BUILD FAILED"; exit 1; fi
+fi
 
 echo "=== Building PacketProbe ==="
 PROBE_OUT="$ROOT/plugin-api/build/probe"
@@ -48,7 +54,11 @@ jar --create --file "$PROBE_OUT/PacketProbe.jar" -C "$PROBE_OUT/classes" .
 
 mkdir -p "$RUN_DIR/config" || exit 1
 cd "$RUN_DIR" || exit 1
-rm -rf plugins saves server.log
+if [ "${KEEP_WORLD:-0}" = 1 ]; then
+  rm -f server.log plugins/*.jar
+else
+  rm -rf plugins saves server.log
+fi
 mkdir -p plugins
 cp "$PROBE_OUT/PacketProbe.jar" plugins/
 for jar in "$@"; do cp "$jar" plugins/ || exit 1; done
