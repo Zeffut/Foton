@@ -10,3 +10,5 @@ commands:
     description: Writes down the top of the open view.
   probegui:
     description: Opens a menu of the probe's own.
+  probespawn:
+    description: Spawns each entity class Zelda Civ spawns, through World.spawn.

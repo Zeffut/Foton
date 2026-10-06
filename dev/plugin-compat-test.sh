@@ -22,7 +22,9 @@ export PATH="$HOME/.cargo/bin:$PATH"
 cd "$(dirname "$0")/.." || exit 1
 ROOT=$(pwd)
 TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
-BIN="$TARGET_DIR/debug/foton"
+# FOTON_BIN runs a copy, for when other worktrees share the target directory
+# and may relink debug/foton between this build and the boot.
+BIN="${FOTON_BIN:-$TARGET_DIR/debug/foton}"
 PORT=${PORT:-25567}
 RUN_DIR="${RUN_DIR:-$ROOT/run-plugins}"
 API_JAR="$ROOT/plugin-api/build/foton-plugin-api.jar"
