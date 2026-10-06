@@ -12,3 +12,5 @@ commands:
     description: Opens a menu of the probe's own.
   probespawn:
     description: Spawns each entity class Zelda Civ spawns, through World.spawn.
+  probeitems:
+    description: Gives an elytra with attribute modifiers and player heads with profiles, and reads them back.
