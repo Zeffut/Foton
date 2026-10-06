@@ -171,7 +171,7 @@ use crate::portal::{
     PortalTicketTarget, TeleportPostAction, TeleportPostTransition, TeleportTransition,
 };
 use crate::world::World;
-use foton_protocol::packets::common::SCustomClickAction;
+use foton_protocol::packets::common::{ChatVisibility, SCustomClickAction};
 use foton_utils::text::DisplayResolutor;
 use std::env::current_dir;
 use std::path::PathBuf;
@@ -479,6 +479,17 @@ impl Player {
     #[must_use]
     pub fn main_arm(&self) -> HumanoidArm {
         self.client_information.lock().main_hand
+    }
+
+    /// Whether the player's chat setting lets other players' messages through.
+    ///
+    /// Vanilla parity: `ServerPlayer.acceptsChatMessages`.
+    #[must_use]
+    pub fn accepts_chat_messages(&self) -> bool {
+        matches!(
+            self.client_information.lock().chat_visibility,
+            ChatVisibility::Full
+        )
     }
 
     /// Whether the player agreed to appear in the server list.

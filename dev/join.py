@@ -78,6 +78,7 @@ CLICK_PICKUP = 0
 CLICK_QUICK_MOVE = 1
 PLAY_C_SET_PASSENGERS = 107
 PLAY_C_SYSTEM_CHAT = 121
+PLAY_C_PLAYER_CHAT = 65
 PLAY_C_ANIMATE = 2
 PLAY_C_LEVEL_PARTICLES = 47
 PLAY_C_EXPLODE = 36
@@ -88,6 +89,7 @@ PLAY_C_SET_EXPERIENCE = 103
 PLAY_S_ACCEPT_TELEPORTATION = 0
 PLAY_S_CLIENT_INFORMATION = 14
 PLAY_S_CHAT_COMMAND = 7
+PLAY_S_CHAT = 9
 PLAY_S_SET_CARRIED_ITEM = 53
 PLAY_S_CONTAINER_BUTTON_CLICK = 17
 PLAY_S_CONTAINER_CLICK = 18
@@ -150,6 +152,7 @@ WATCH_SECONDS = int(os.environ.get("JOIN_WATCH_SECONDS", "0"))
 # entity `offset` ids after it -- which is the only way to reach an ender
 # dragon's hitboxes, because the client is never told they exist and derives
 # their ids as `dragonId + 1 ..= dragonId + 8` from the dragon's own.
+# `!say <text>` speaks in chat, unsigned, as a player typing it would.
 # `!useentity <type>` / `!sneakuse <type>` right-click the last entity of
 # that type to spawn, with and without sneaking, and `!spawned <type>` reports
 # whether the client has ever been told one appeared -- which answers "did this
@@ -649,6 +652,8 @@ def run_play(connection, watch_seconds=0):
             note_entity_data(connection, payload)
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)
+        elif packet_id == PLAY_C_PLAYER_CHAT:
+            note_player_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:
             connection.send(PLAY_S_KEEP_ALIVE, payload)
         elif packet_id == PLAY_C_DISCONNECT:
@@ -676,6 +681,21 @@ def run_play(connection, watch_seconds=0):
         f"(joined={joined}, positioned={positioned}, chunks={chunks}; "
         f"got {describe(seen)})"
     )
+
+
+def note_player_chat(payload):
+    """Prints a player's chat message: its body, as the sender typed it.
+
+    Laid out as `ClientboundPlayerChatPacket`: global index, sender, index,
+    optional signature, then the body.
+    """
+    _, rest = read_varint(payload)
+    rest = rest[16:]
+    _, rest = read_varint(rest)
+    if rest[0]:
+        rest = rest[256:]
+    body, _ = read_string(rest[1:])
+    print(f"  player chat: {body}")
 
 
 def note_system_chat(payload):
@@ -989,6 +1009,8 @@ def pump(connection, seconds, spawned):
             note_entity_data(connection, payload)
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)
+        elif packet_id == PLAY_C_PLAYER_CHAT:
+            note_player_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:
             connection.send(PLAY_S_KEEP_ALIVE, payload)
         elif packet_id == PLAY_C_DISCONNECT:
@@ -1388,6 +1410,8 @@ def run_directive(connection, directive):
         send_interact(connection, parts[1], secondary=False)
     elif parts[0] == "sneakuse":
         send_interact(connection, parts[1], secondary=True)
+    elif parts[0] == "say":
+        send_chat(connection, directive[len("!say "):])
     else:
         fail(f"unknown directive {directive}")
     return True
@@ -2158,6 +2182,21 @@ def report_alive(connection):
     print(f"  the player is still connected, at {connection.health} health")
 
 
+def send_chat(connection, text):
+    """Says `text` in chat, unsigned, with nothing acknowledged."""
+    encoded = text.encode()
+    connection.send(
+        PLAY_S_CHAT,
+        varint(len(encoded))
+        + encoded
+        + struct.pack(">qq", int(time.time() * 1000), 0)
+        + b"\x00"  # no signature
+        + varint(0)  # offset
+        + bytes(3)  # acknowledged: 20 bits, none set
+        + b"\x00",  # checksum
+    )
+
+
 def run_commands(connection, commands, spawned):
     """Runs each command as the player would type it, and lets it settle."""
     for command in commands:
@@ -2245,6 +2284,8 @@ def watch_for_spawns(connection, seconds, spawned):
             note_entity_data(connection, payload)
         elif packet_id == PLAY_C_SYSTEM_CHAT:
             note_system_chat(payload)
+        elif packet_id == PLAY_C_PLAYER_CHAT:
+            note_player_chat(payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:
             connection.send(PLAY_S_KEEP_ALIVE, payload)
         elif packet_id == PLAY_C_DISCONNECT:

@@ -330,8 +330,17 @@ impl Player {
         // text, so its signature is dropped and the unsigned path carries it.
         let rewritten = event.was_changed();
         let recipients = event.recipients().to_vec();
-        let chat_message = event.into_message();
+        let (chat_message, content, rendered) = event.into_parts();
         let signature = if rewritten { None } else { signature };
+        foton_utils::chat!(player.gameprofile.name.clone(), "{}", chat_message);
+        // A listener that laid the line out itself has replaced the chat type
+        // vanilla decorates with, so each recipient gets exactly its line.
+        // Paper parity: a non-default `ChatRenderer`.
+        if !rendered.is_empty() {
+            self.deliver_rendered(rendered);
+            self.detect_chat_rate_spam();
+            return;
+        }
 
         let sender_index = {
             let mut chat = player.chat.lock();
@@ -345,11 +354,10 @@ impl Player {
             sender_index,
             signature.clone(),
             &chat_message,
-            packet.timestamp,
-            packet.salt,
+            content,
+            (packet.timestamp, packet.salt),
         );
 
-        foton_utils::chat!(player.gameprofile.name.clone(), "{}", chat_message);
         if let Some(sig_box) = &signature
             && sig_box.len() == 256
         {
@@ -383,6 +391,17 @@ impl Player {
         self.detect_chat_rate_spam();
     }
 
+    /// Sends each recipient the line a listener rendered for it.
+    fn deliver_rendered(&self, rendered: Vec<(uuid::Uuid, TextComponent)>) {
+        for (id, line) in rendered {
+            if let Some(recipient) = self.server().get_player_by_uuid(id)
+                && recipient.accepts_chat_messages()
+            {
+                recipient.send_message(&line);
+            }
+        }
+    }
+
     /// Assembles the packet one chat message goes out as.
     ///
     /// Split out of `handle_chat`, which decides who may speak, lets listeners
@@ -393,8 +412,8 @@ impl Player {
         sender_index: i32,
         signature: Option<Box<[u8]>>,
         chat_message: &str,
-        timestamp: i64,
-        salt: i64,
+        content: Option<TextComponent>,
+        (timestamp, salt): (i64, i64),
     ) -> CPlayerChat {
         let name = player.gameprofile.name.clone();
         CPlayerChat::new(
@@ -406,7 +425,7 @@ impl Player {
             timestamp,
             salt,
             Box::new([]),
-            Some(TextComponent::plain(chat_message.to_owned())),
+            Some(content.unwrap_or_else(|| TextComponent::plain(chat_message.to_owned()))),
             FilterType::PassThrough,
             ChatTypeBound {
                 registry_id: vanilla_chat_types::CHAT.id() as i32,

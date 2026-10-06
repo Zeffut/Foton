@@ -727,16 +727,26 @@ public final class EventBridge {
         dispatch(new org.bukkit.event.player.PlayerLocaleChangeEvent(player(uuid), oldLocale, locale));
     }
 
+    /** A player spoke. Returns null when a plugin stopped it; otherwise the
+     * plain text, the recipients, the message component when a listener
+     * styled it, and each recipient's rendered line when a renderer replaced
+     * vanilla's, separated by U+001E. */
     public static String fireChat(String uuid, String message) {
-        AsyncPlayerChatEvent event = new AsyncPlayerChatEvent(player(uuid), message);
+        Player source = player(uuid);
+        AsyncPlayerChatEvent event = new AsyncPlayerChatEvent(source, message);
         try { event.getRecipients().addAll(org.bukkit.Bukkit.getOnlinePlayers()); }
         catch (Throwable ignored) { }
         dispatch(event);
         if (event.isCancelled()) return null;
+        String said = event.getMessage() == null ? "" : event.getMessage();
         io.papermc.paper.event.player.AsyncChatEvent paper =
-            new io.papermc.paper.event.player.AsyncChatEvent(
-                player(uuid), net.kyori.adventure.text.Component.text(
-                    event.getMessage() == null ? "" : event.getMessage()));
+            new io.papermc.paper.event.player.AsyncChatEvent(source, net.kyori.adventure.text.Component.text(said));
+        // Paper parity: a legacy listener that changed the format chose how the
+        // line reads, and the modern event starts from that choice.
+        String format = event.getFormat();
+        if (!"<%1$s> %2$s".equals(format)) {
+            paper.renderer((who, name, body, viewer) -> legacyLine(format, who, body));
+        }
         for (Player recipient : event.getRecipients()) {
             if (recipient instanceof net.kyori.adventure.audience.Audience audience) {
                 paper.viewers().add(audience);
@@ -744,16 +754,49 @@ public final class EventBridge {
         }
         dispatch(paper);
         if (paper.isCancelled()) return null;
-        event.getRecipients().clear();
+        java.util.List<Player> recipients = new java.util.ArrayList<>();
         for (net.kyori.adventure.audience.Audience viewer : paper.viewers()) {
-            if (viewer instanceof Player recipient) event.getRecipients().add(recipient);
+            if (viewer instanceof Player recipient) recipients.add(recipient);
         }
-        String rendered = net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
-            .plainText().serialize(paper.message());
-        if (event.getRecipients().isEmpty()) return rendered;
-        StringBuilder answer = new StringBuilder(rendered).append('\u001e');
-        for (Player recipient : event.getRecipients()) answer.append(recipient.getUniqueId()).append(',');
+        net.kyori.adventure.text.Component body = paper.message();
+        String plain = net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+            .plainText().serialize(body);
+        StringBuilder answer = new StringBuilder(plain).append('\u001e');
+        for (Player recipient : recipients) answer.append(recipient.getUniqueId()).append(',');
+        answer.append('\u001e');
+        if (!body.equals(net.kyori.adventure.text.Component.text(plain))) {
+            answer.append(FotonComponents.toJson(body));
+        }
+        answer.append('\u001e');
+        io.papermc.paper.chat.ChatRenderer renderer = paper.renderer();
+        if (renderer == io.papermc.paper.chat.ChatRenderer.defaultRenderer()) return answer.toString();
+        net.kyori.adventure.text.Component name = source.displayName();
+        for (Player recipient : recipients) {
+            net.kyori.adventure.text.Component line;
+            try {
+                line = renderer.render(source, name, body, recipient);
+            } catch (Throwable error) {
+                System.out.println("[events] a chat renderer threw: " + rootOf(error));
+                continue;
+            }
+            if (line == null) continue;
+            answer.append(recipient.getUniqueId()).append('\u001d')
+                .append(FotonComponents.toJson(line)).append('\u001c');
+        }
         return answer.toString();
+    }
+
+    /** A legacy {@code String.format} chat format, read back as a component. */
+    private static net.kyori.adventure.text.Component legacyLine(
+            String format, Player source, net.kyori.adventure.text.Component body) {
+        var legacy = net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacySection();
+        String line;
+        try {
+            line = String.format(format, source.getDisplayName(), legacy.serialize(body));
+        } catch (java.util.IllegalFormatException bad) {
+            line = "<" + source.getDisplayName() + "> " + legacy.serialize(body);
+        }
+        return legacy.deserialize(line);
     }
 
     /** A player is breaking a block. Returns false when a plugin stopped it. */

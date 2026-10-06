@@ -1362,6 +1362,8 @@ pub struct PlayerChatEvent {
     recipients: Vec<Uuid>,
     changed: bool,
     cancelled: bool,
+    content: Option<TextComponent>,
+    rendered: Vec<(Uuid, TextComponent)>,
 }
 
 // SAFETY: This Foton-owned key uniquely identifies the concrete Rust type
@@ -1386,7 +1388,34 @@ impl PlayerChatEvent {
             recipients: Vec::new(),
             changed: false,
             cancelled: false,
+            content: None,
+            rendered: Vec::new(),
         }
+    }
+
+    /// The styled message a listener gave, shown in place of the plain text.
+    #[must_use]
+    pub const fn content(&self) -> Option<&TextComponent> {
+        self.content.as_ref()
+    }
+
+    /// Styles the message. The plain text, and so the signature, is
+    /// unchanged; the client shows this instead.
+    pub fn set_content(&mut self, content: TextComponent) {
+        self.content = Some(content);
+    }
+
+    /// Each recipient's whole chat line, when a listener replaced vanilla's
+    /// `<name> message` layout.
+    #[must_use]
+    pub fn rendered(&self) -> &[(Uuid, TextComponent)] {
+        &self.rendered
+    }
+
+    /// Replaces vanilla's layout with a line of the listener's own for each
+    /// recipient it names.
+    pub fn set_rendered(&mut self, rendered: Vec<(Uuid, TextComponent)>) {
+        self.rendered = rendered;
     }
 
     /// UUIDs of players who should receive this message.
@@ -1434,10 +1463,10 @@ impl PlayerChatEvent {
         self.cancelled = cancelled;
     }
 
-    /// Takes the message out, for the server to send.
+    /// Takes the message out with its styled content and rendered lines.
     #[must_use]
-    pub fn into_message(self) -> String {
-        self.message
+    pub fn into_parts(self) -> (String, Option<TextComponent>, Vec<(Uuid, TextComponent)>) {
+        (self.message, self.content, self.rendered)
     }
 }
 

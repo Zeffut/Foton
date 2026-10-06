@@ -282,6 +282,17 @@ public interface Player extends HumanEntity, org.bukkit.OfflinePlayer {
     String getDisplayName();
 
     void setDisplayName(String name);
+
+    /** The display name as a component, as Paper gives it to chat renderers. */
+    default net.kyori.adventure.text.Component displayName() {
+        return net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacySection()
+            .deserialize(getDisplayName());
+    }
+
+    default void displayName(net.kyori.adventure.text.Component name) {
+        setDisplayName(name == null ? null : net.kyori.adventure.text.serializer.legacy
+            .LegacyComponentSerializer.legacySection().serialize(name));
+    }
     default void setPlayerListName(String name) { }
 
     /** The big text in the middle of the screen. Times are in ticks. */

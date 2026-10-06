@@ -58,6 +58,7 @@ use jni::objects::{JObject, JString, JValue, JValueGen};
 use jni::{AttachGuard, JNIEnv, JavaVM};
 use std::net::SocketAddr;
 use std::ops::{Deref, DerefMut};
+use text_components::TextComponent;
 use uuid::Uuid;
 
 /// The Java class that owns the handler lists.
@@ -1158,15 +1159,18 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     events.on::<PlayerChatEvent, _>(owner(), move |event| {
         let uuid = event.player().gameprofile.id.to_string();
         let said = event.message().to_owned();
-        match chat_call(&jvm, &uuid, &said) {
-            None => event.set_cancelled(true),
-            Some((rewritten, recipients)) => {
-                if rewritten != said {
-                    event.set_message(rewritten);
-                }
-                *event.recipients_mut() = recipients;
-            }
+        let Some(answer) = chat_call(&jvm, &uuid, &said) else {
+            event.set_cancelled(true);
+            return;
+        };
+        if answer.text != said {
+            event.set_message(answer.text);
         }
+        *event.recipients_mut() = answer.recipients;
+        if let Some(content) = answer.content {
+            event.set_content(content);
+        }
+        event.set_rendered(answer.rendered);
     });
 
     let jvm = Arc::clone(&vm);
@@ -1366,7 +1370,15 @@ fn string_call(vm: &JavaVM, method: &str, uuid: &str, message: Option<&str>) -> 
     }
 }
 
-fn chat_call(vm: &JavaVM, uuid: &str, message: &str) -> Option<(String, Vec<Uuid>)> {
+/// What the chat events left of a message.
+struct ChatAnswer {
+    text: String,
+    recipients: Vec<Uuid>,
+    content: Option<TextComponent>,
+    rendered: Vec<(Uuid, TextComponent)>,
+}
+
+fn chat_call(vm: &JavaVM, uuid: &str, message: &str) -> Option<ChatAnswer> {
     let mut env = BridgeEnv::attach(vm)?;
     let uuid = env.new_string(uuid).ok()?;
     let message = env.new_string(message).ok()?;
@@ -1385,15 +1397,36 @@ fn chat_call(vm: &JavaVM, uuid: &str, message: &str) -> Option<(String, Vec<Uuid
     }
     let answer: JString<'_> = answer.into();
     let value: String = env.get_string(&answer).ok()?.into();
-    let mut parts = value.splitn(2, '\u{1e}');
-    let text = parts.next()?.to_owned();
+    Some(parse_chat_answer(&value))
+}
+
+/// Reads `EventBridge.fireChat`'s answer: text, recipients, styled content
+/// and rendered lines, separated by U+001E.
+fn parse_chat_answer(value: &str) -> ChatAnswer {
+    let mut parts = value.split('\u{1e}');
+    let text = parts.next().unwrap_or_default().to_owned();
     let recipients = parts
         .next()
         .unwrap_or_default()
         .split(',')
         .filter_map(|value| value.parse::<Uuid>().ok())
         .collect();
-    Some((text, recipients))
+    let content = parts.next().and_then(json::from_json);
+    let rendered = parts
+        .next()
+        .unwrap_or_default()
+        .split('\u{1c}')
+        .filter_map(|entry| {
+            let (id, line) = entry.split_once('\u{1d}')?;
+            Some((id.parse::<Uuid>().ok()?, json::from_json(line)?))
+        })
+        .collect();
+    ChatAnswer {
+        text,
+        recipients,
+        content,
+        rendered,
+    }
 }
 
 fn login_call(vm: &JavaVM, uuid: &str, attempt_id: i32) -> Option<String> {

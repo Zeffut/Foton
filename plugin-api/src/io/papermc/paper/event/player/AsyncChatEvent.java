@@ -10,7 +10,9 @@ import org.bukkit.event.HandlerList;
 public class AsyncChatEvent extends Event implements Cancellable {
     private final Player player;
     private Component message;
-    private io.papermc.paper.chat.ChatRenderer renderer;
+    private final Component originalMessage;
+    private io.papermc.paper.chat.ChatRenderer renderer =
+        io.papermc.paper.chat.ChatRenderer.defaultRenderer();
     private final java.util.Set<net.kyori.adventure.audience.Audience> viewers =
         new java.util.LinkedHashSet<>();
     private boolean cancelled;
@@ -19,12 +21,17 @@ public class AsyncChatEvent extends Event implements Cancellable {
     public AsyncChatEvent(Player player, Component message) {
         this.player = player;
         this.message = message;
+        this.originalMessage = message;
     }
     public Player getPlayer() { return player; }
     public Component message() { return message; }
+    /** What the player typed, before any listener rewrote it. */
+    public Component originalMessage() { return originalMessage; }
     public void message(Component value) { message = value; }
     public io.papermc.paper.chat.ChatRenderer renderer() { return renderer; }
-    public void renderer(io.papermc.paper.chat.ChatRenderer value) { renderer = value; }
+    public void renderer(io.papermc.paper.chat.ChatRenderer value) {
+        renderer = java.util.Objects.requireNonNull(value, "renderer");
+    }
     /** Mutable recipients set, matching Paper's per-message viewer contract. */
     public java.util.Set<net.kyori.adventure.audience.Audience> viewers() { return viewers; }
     @Override public boolean isCancelled() { return cancelled; }
