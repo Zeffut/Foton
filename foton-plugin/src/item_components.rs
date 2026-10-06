@@ -5,6 +5,8 @@
 
 mod extensions;
 
+pub(crate) use extensions::attribute_modifier;
+
 use std::fmt::Write as _;
 use std::io::Cursor;
 

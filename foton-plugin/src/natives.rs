@@ -9409,6 +9409,32 @@ extern "system" fn effective_permissions(
     string_array(&mut env, &values)
 }
 
+/// The login profile's properties (chiefly the signed `textures`), one
+/// `hex(name),hex(value),hex(signature)` per property.
+extern "system" fn player_profile_properties(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) -> jobjectArray {
+    let Some(player) = player(&mut env, &uuid) else {
+        return null_mut();
+    };
+    let values = player
+        .gameprofile
+        .properties
+        .iter()
+        .map(|property| {
+            format!(
+                "{},{},{}",
+                hex_encode(property.name.as_bytes()),
+                hex_encode(property.value.as_bytes()),
+                hex_encode(property.signature.as_deref().unwrap_or_default().as_bytes())
+            )
+        })
+        .collect::<Vec<_>>();
+    string_array(&mut env, &values)
+}
+
 extern "system" fn is_permission_set(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -16489,6 +16515,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "effectivePermissions",
             "(Ljava/lang/String;)[Ljava/lang/String;",
             effective_permissions as *mut c_void,
+        ),
+        method(
+            "playerProfileProperties",
+            "(Ljava/lang/String;)[Ljava/lang/String;",
+            player_profile_properties as *mut c_void,
         ),
     ];
     // Entities, players and world queries live in their own modules.

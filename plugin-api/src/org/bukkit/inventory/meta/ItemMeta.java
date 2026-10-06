@@ -94,6 +94,16 @@ public interface ItemMeta extends Cloneable, org.bukkit.persistence.PersistentDa
         return com.google.common.collect.ImmutableMultimap.of();
     }
 
+    /** Replaces every attribute modifier; null or empty restores the item's default. */
+    default void setAttributeModifiers(com.google.common.collect.Multimap<org.bukkit.attribute.Attribute, org.bukkit.attribute.AttributeModifier> modifiers) { }
+
+    /** A copy of one attribute's modifiers, or null when it has none, as Paper's. */
+    default java.util.Collection<org.bukkit.attribute.AttributeModifier> getAttributeModifiers(org.bukkit.attribute.Attribute attribute) {
+        if (attribute == null) throw new IllegalArgumentException("Attribute cannot be null");
+        java.util.Collection<org.bukkit.attribute.AttributeModifier> values = getAttributeModifiers().get(attribute);
+        return values.isEmpty() ? null : java.util.List.copyOf(values);
+    }
+
     /** Returns whether this meta contains any attribute modifiers. */
     default boolean hasAttributeModifiers() {
         return !getAttributeModifiers().isEmpty();

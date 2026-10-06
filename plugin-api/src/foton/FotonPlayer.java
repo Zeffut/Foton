@@ -184,7 +184,7 @@ public final class FotonPlayer extends foton.entity.CraftPlayer implements org.b
     }
 
     @Override public com.destroystokyo.paper.profile.PlayerProfile getPlayerProfile() {
-        return new FotonPlayerProfile(id, getName());
+        return FotonPlayerProfile.of(id, getName(), Native.playerProfileProperties(id.toString()));
     }
 
     @Override
