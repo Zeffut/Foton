@@ -7890,8 +7890,25 @@ extern "system" fn remove_potion_effect(
     }
 }
 
+/// Reads one value off the living entity a Java handle names, players included.
+fn living_value(
+    env: &mut JNIEnv<'_>,
+    uuid: &JString<'_>,
+    read: fn(&dyn LivingEntity) -> f32,
+) -> Option<f64> {
+    let text: String = env.get_string(uuid).ok()?.into();
+    let (_, entity) = entity_by_uuid(&Uuid::parse_str(&text).ok()?)?;
+    entity
+        .as_living_entity()
+        .map(|living| f64::from(read(living)))
+}
+
+/// `foton.Native.health`, for any living entity as Bukkit's `getHealth` is.
 extern "system" fn health(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) -> jdouble {
-    player(&mut env, &uuid).map_or(0.0, |player| f64::from(player.get_health()))
+    player(&mut env, &uuid)
+        .map(|player| f64::from(player.get_health()))
+        .or_else(|| living_value(&mut env, &uuid, LivingEntity::get_health))
+        .unwrap_or(0.0)
 }
 
 /// `foton.Native.setHealth`
@@ -7912,7 +7929,10 @@ extern "system" fn max_health(
     _class: JClass<'_>,
     uuid: JString<'_>,
 ) -> jdouble {
-    player(&mut env, &uuid).map_or(20.0, |player| f64::from(player.get_max_health()))
+    player(&mut env, &uuid)
+        .map(|player| f64::from(player.get_max_health()))
+        .or_else(|| living_value(&mut env, &uuid, LivingEntity::get_max_health))
+        .unwrap_or(20.0)
 }
 
 fn attribute_ref_from_name(name: &str) -> Option<AttributeRef> {

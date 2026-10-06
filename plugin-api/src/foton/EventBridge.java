@@ -522,7 +522,7 @@ public final class EventBridge {
     }
 
     public static boolean fireEntityPickup(String entity, String item) {
-        org.bukkit.entity.LivingEntity living = new FotonLivingEntity(Native.parse(entity));
+        org.bukkit.entity.LivingEntity living = living(entity);
         org.bukkit.entity.Item itemHandle = new FotonItem(Native.parse(item));
         org.bukkit.entity.Player player = null;
         try { player = Bukkit.getServer().getPlayer(UUID.fromString(entity)); } catch (IllegalArgumentException ignored) { }
@@ -582,7 +582,7 @@ public final class EventBridge {
 
     public static boolean fireEntityRegainHealth(String entity, float amount) {
         org.bukkit.event.entity.EntityRegainHealthEvent event =
-            new org.bukkit.event.entity.EntityRegainHealthEvent(new FotonLivingEntity(Native.parse(entity)), amount);
+            new org.bukkit.event.entity.EntityRegainHealthEvent(living(entity), amount);
         dispatch(event);
         return !event.isCancelled();
     }
@@ -872,8 +872,14 @@ public final class EventBridge {
         return !event.isCancelled();
     }
     public static void fireEntityDeath(String uuid) {
-        dispatch(new org.bukkit.event.entity.EntityDeathEvent(
-            new FotonLivingEntity(java.util.UUID.fromString(uuid))));
+        dispatch(new org.bukkit.event.entity.EntityDeathEvent(living(uuid)));
+    }
+
+    /** The typed handle of a living entity, so `instanceof` answers as on Paper. */
+    static org.bukkit.entity.LivingEntity living(String uuid) {
+        UUID id = Native.parse(uuid);
+        return FotonEntity.handle(id) instanceof org.bukkit.entity.LivingEntity typed
+            ? typed : new FotonLivingEntity(id);
     }
     public static boolean firePlayerTakeLecternBook(String uuid, String world, int x, int y, int z) {
         org.bukkit.event.player.PlayerTakeLecternBookEvent event =
@@ -989,7 +995,7 @@ public final class EventBridge {
     public static float fireExplosionPrime(String uuid, float radius, boolean fire) {
         org.bukkit.event.entity.ExplosionPrimeEvent event =
                 new org.bukkit.event.entity.ExplosionPrimeEvent(
-                        new FotonEntity(java.util.UUID.fromString(uuid)), radius, fire);
+                        FotonEntity.handle(Native.parse(uuid)), radius, fire);
         dispatch(event);
         return event.isCancelled() ? -1.0f : event.getRadius();
     }
