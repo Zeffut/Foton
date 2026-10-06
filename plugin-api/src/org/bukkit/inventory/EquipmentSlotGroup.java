@@ -2,7 +2,7 @@ package org.bukkit.inventory;
 
 /** Equipment groups used by attribute modifiers. */
 public enum EquipmentSlotGroup {
-    ANY, HAND, MAINHAND, OFFHAND, ARMOR, HEAD, CHEST, LEGS, FEET, BODY
+    ANY, HAND, MAINHAND, OFFHAND, ARMOR, HEAD, CHEST, LEGS, FEET, BODY, SADDLE
 
     ;
     public static EquipmentSlotGroup getByName(String name) {

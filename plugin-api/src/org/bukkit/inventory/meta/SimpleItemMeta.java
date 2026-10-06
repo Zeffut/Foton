@@ -155,7 +155,7 @@ public class SimpleItemMeta implements Damageable {
         changed("damage", true);
     }
     private java.util.Map<org.bukkit.enchantments.Enchantment, Integer> enchantments = new java.util.HashMap<>();
-    private java.util.Map<org.bukkit.attribute.Attribute, java.util.List<org.bukkit.attribute.AttributeModifier>> attributes = new java.util.HashMap<>();
+    private java.util.Map<org.bukkit.attribute.Attribute, java.util.List<org.bukkit.attribute.AttributeModifier>> attributes = new java.util.LinkedHashMap<>();
 
     @Override
     public boolean hasDisplayName() {
@@ -419,25 +419,54 @@ public class SimpleItemMeta implements Damageable {
             return list.stream().map(SimpleItemMeta::copyCustomValue).collect(java.util.stream.Collectors.toCollection(ArrayList::new));
         return value; // NBT scalar wrappers and strings are immutable.
     }
+    /** What the journal records: the whole list replaces the item's default, and none restores it. */
+    private void attributesChanged() {
+        if (attributes.isEmpty()) liveState.record("attribute_modifiers", foton.item.ComponentEdits.Operation.RESET);
+        else changed("attribute_modifiers", true);
+    }
+
+    /** As Paper: a modifier key may appear only once on a meta, whatever its attribute. */
     @Override public boolean addAttributeModifier(org.bukkit.attribute.Attribute attribute, org.bukkit.attribute.AttributeModifier modifier) {
-        if (attribute == null || modifier == null) return false;
-        attributes.computeIfAbsent(attribute, ignored -> new java.util.ArrayList<>()).add(modifier); unsupportedChange("attribute_modifiers"); return true;
+        if (attribute == null) throw new IllegalArgumentException("Attribute cannot be null");
+        if (modifier == null) throw new IllegalArgumentException("AttributeModifier cannot be null");
+        for (java.util.List<org.bukkit.attribute.AttributeModifier> values : attributes.values())
+            for (org.bukkit.attribute.AttributeModifier existing : values)
+                if (existing.getKey().equals(modifier.getKey()))
+                    throw new IllegalArgumentException("Cannot register AttributeModifier. Modifier is already applied! " + modifier);
+        attributes.computeIfAbsent(attribute, ignored -> new java.util.ArrayList<>()).add(modifier);
+        attributesChanged();
+        return true;
     }
     @Override public boolean removeAttributeModifier(org.bukkit.attribute.Attribute attribute, org.bukkit.attribute.AttributeModifier modifier) {
-        if (nativeState().hasNativeBase()) unsupportedChange("attribute_modifiers");
+        if (attribute == null) throw new IllegalArgumentException("Attribute cannot be null");
+        if (modifier == null) throw new IllegalArgumentException("AttributeModifier cannot be null");
         java.util.List<org.bukkit.attribute.AttributeModifier> values = attributes.get(attribute);
-        if (values == null || !values.remove(modifier)) return false;
-        unsupportedChange("attribute_modifiers"); return true;
+        if (values == null || !values.removeIf(existing -> existing.getKey().equals(modifier.getKey()))) return false;
+        if (values.isEmpty()) attributes.remove(attribute);
+        attributesChanged();
+        return true;
     }
     @Override public boolean removeAttributeModifier(org.bukkit.attribute.Attribute attribute) {
-        if (nativeState().hasNativeBase()) unsupportedChange("attribute_modifiers");
+        if (attribute == null) throw new IllegalArgumentException("Attribute cannot be null");
         if (attributes.remove(attribute) == null) return false;
-        unsupportedChange("attribute_modifiers"); return true;
+        attributesChanged();
+        return true;
+    }
+    @Override public void setAttributeModifiers(com.google.common.collect.Multimap<org.bukkit.attribute.Attribute, org.bukkit.attribute.AttributeModifier> modifiers) {
+        attributes = new java.util.LinkedHashMap<>();
+        if (modifiers != null) for (java.util.Map.Entry<org.bukkit.attribute.Attribute, org.bukkit.attribute.AttributeModifier> entry : modifiers.entries())
+            addAttributeModifier(entry.getKey(), entry.getValue());
+        attributesChanged();
+    }
+
+    /** Hydration from native state, which vanilla allows to repeat a key across attributes. */
+    public final void hydrateAttributeModifier(org.bukkit.attribute.Attribute attribute, org.bukkit.attribute.AttributeModifier modifier) {
+        attributes.computeIfAbsent(attribute, ignored -> new java.util.ArrayList<>()).add(modifier);
     }
 
     @Override public com.google.common.collect.Multimap<org.bukkit.attribute.Attribute, org.bukkit.attribute.AttributeModifier> getAttributeModifiers() {
-        com.google.common.collect.ArrayListMultimap<org.bukkit.attribute.Attribute, org.bukkit.attribute.AttributeModifier> copy =
-            com.google.common.collect.ArrayListMultimap.create();
+        com.google.common.collect.ListMultimap<org.bukkit.attribute.Attribute, org.bukkit.attribute.AttributeModifier> copy =
+            com.google.common.collect.MultimapBuilder.linkedHashKeys().arrayListValues().build();
         attributes.forEach((key, value) -> copy.putAll(key, value));
         return com.google.common.collect.ImmutableMultimap.copyOf(copy);
     }
@@ -460,7 +489,7 @@ public class SimpleItemMeta implements Damageable {
             copy.useCooldown = useCooldown == null ? null : useCooldown.copy();
             copy.bannerPatterns = bannerPatterns == null ? null : new java.util.ArrayList<>(bannerPatterns);
             copy.otherCustomData = copyCustomData(otherCustomData);
-            copy.attributes = new java.util.HashMap<>();
+            copy.attributes = new java.util.LinkedHashMap<>();
             attributes.forEach((key, value) -> copy.attributes.put(key, new java.util.ArrayList<>(value)));
             return copy;
         } catch (CloneNotSupportedException impossible) {

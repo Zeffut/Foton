@@ -25,6 +25,8 @@ fn repeatable(key: &str) -> bool {
             | "lorejsonhex"
             | "hide"
             | "pattern"
+            | "attrmod"
+            | "profileprop"
             | "modelfloat"
             | "modelflag"
             | "modelstrhex"
@@ -111,7 +113,8 @@ pub(crate) fn validate(text: &str) -> Option<()> {
             // Values are validated by the typed parent-union component decoder.
             "trim" | "pattern" | "basecolor" | "hide" | "glint" | "maxstack" | "cooldown"
             | "cooldowngroup" | "instrument" | "customhex" | "bookrawhex" | "pdcrawhex"
-            | "pdcstrhex" | "pdcbyte" | "pdcint" | "pdcremove" => {}
+            | "pdcstrhex" | "pdcbyte" | "pdcint" | "pdcremove" | "attrmod" | "profileid"
+            | "profilename" | "profileprop" => {}
             "basepotionhex" => {
                 let key = utf8_hex(value)?.parse::<Identifier>().ok()?;
                 REGISTRY.potions.by_key(&key)?;

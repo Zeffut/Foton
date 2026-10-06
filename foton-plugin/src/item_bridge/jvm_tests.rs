@@ -12,6 +12,7 @@ use std::thread as bridge_thread;
 use std::time as bridge_time;
 use text_components::TextComponent;
 
+mod attributes_profile;
 mod components;
 mod java_thread;
 mod migrated;
@@ -54,6 +55,7 @@ pub(crate) fn check(vm: &JavaVM) {
     components::check(&mut env);
     migrated::check(&mut env);
     unsupported::check(&mut env);
+    attributes_profile::check(&mut env);
     super::merchant::check(&mut env);
     java_thread::check(&mut env);
     check_gc_shared_referent(&mut env);

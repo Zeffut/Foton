@@ -20,3 +20,5 @@ commands:
     description: Writes down the vehicle the player rides.
   probepdc:
     description: Writes or reads persistent data on the player, entities and chunk.
+  probeitems:
+    description: Gives an elytra with attribute modifiers and player heads with profiles, and reads them back.

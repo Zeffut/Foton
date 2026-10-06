@@ -1,10 +1,14 @@
 //! Owning Java mutations become detached candidates before any native destination changes.
 
+use crate::item_components::attribute_modifier as parse_attribute_modifier;
 use crate::natives as bridge_native_bridge;
 use foton_registry::data_components::vanilla_components as bridge_vanilla_components;
 use foton_registry::data_components::{
     ComponentData,
-    components::{BannerPatternLayers, CustomModelData, ItemEnchantments, TooltipDisplay},
+    components::{
+        BannerPatternLayers, CustomModelData, ItemAttributeModifiers, ItemEnchantments,
+        TooltipDisplay,
+    },
 };
 use foton_registry::items as bridge_items;
 use foton_registry::vanilla_items as bridge_vanilla_items;
@@ -218,6 +222,46 @@ fn decode_potion_edit(
     })
 }
 
+/// Paper replaces the whole list; an empty one restores the item's default.
+/// Entries the stack already carried keep their tooltip display, which Bukkit
+/// cannot express.
+fn decode_attribute_edit(
+    base: &ItemStack,
+    projection: &str,
+    operation: &str,
+) -> Result<Edit, ItemBridgeError> {
+    let operation = match operation {
+        "REMOVE" => Operation::Remove,
+        "RESET" => Operation::Reset,
+        "SET" => {
+            let previous = base.get(bridge_vanilla_components::ATTRIBUTE_MODIFIERS);
+            let modifiers = projection
+                .split('\u{1d}')
+                .skip(1)
+                .filter_map(|field| field.strip_prefix("attrmod="))
+                .map(|value| {
+                    let mut entry = parse_attribute_modifier(value)
+                        .ok_or(ItemBridgeError::InvalidEdit("invalid attribute modifier"))?;
+                    if let Some(old) = previous.and_then(|list| {
+                        list.modifiers.iter().find(|old| {
+                            old.attribute.key == entry.attribute.key && old.id == entry.id
+                        })
+                    }) {
+                        entry.display = old.display.clone();
+                    }
+                    Ok(entry)
+                })
+                .collect::<Result<Vec<_>, ItemBridgeError>>()?;
+            Operation::Set(ComponentData::new(ItemAttributeModifiers { modifiers }))
+        }
+        _ => return Err(ItemBridgeError::InvalidEdit("unknown edit operation")),
+    };
+    Ok(Edit {
+        key: bridge_vanilla_components::ATTRIBUTE_MODIFIERS.key().clone(),
+        operation,
+    })
+}
+
 fn group_prefixes(group: &str) -> Result<&'static [&'static str], ItemBridgeError> {
     Ok(match group {
         "custom_name" => &["namehex=", "namejsonhex="],
@@ -240,6 +284,7 @@ fn group_prefixes(group: &str) -> Result<&'static [&'static str], ItemBridgeErro
         "custom_data" => &["customhex=", "pdcrawhex=", "pdcidentity=", "pdc"],
         "trim" => &["trim="],
         "banner_patterns" => &["pattern="],
+        "profile" => &["profileid=", "profilename=", "profileprop="],
         "base_color" => &["basecolor="],
         "enchantment_glint_override" => &["glint="],
         "max_stack_size" => &["maxstack="],
@@ -266,9 +311,11 @@ fn decode_edit(
     if group == "potion_effects" || group == "potion_base" {
         return decode_potion_edit(base, projection, group, operation);
     }
+    if group == "attribute_modifiers" {
+        return decode_attribute_edit(base, projection, operation);
+    }
     if group.starts_with("unsupported:") {
         let capability = match group {
-            "unsupported:attribute_modifiers" => "attribute modifiers",
             "unsupported:item_flags" => "item flags",
             "unsupported:bundle_contents" => "bundle contents",
             "unsupported:charged_projectiles" => "charged projectiles",
@@ -277,7 +324,6 @@ fn decode_edit(
             "unsupported:banner" => "banner patterns/color",
             "unsupported:fireworks" => "fireworks",
             "unsupported:firework_explosion" => "firework explosion",
-            "unsupported:profile" => "skull profile",
             "unsupported:map" => "map metadata",
             "unsupported:stew_effects" => "suspicious stew effects",
             "unsupported:base_potion" => "base potion",
@@ -526,6 +572,48 @@ mod tests {
     }
 
     #[test]
+    fn attribute_edit_keeps_the_display_bukkit_cannot_express() {
+        use foton_registry::data_components::components::ItemAttributeModifierDisplay;
+        init_vanilla_registry();
+        let mut hidden =
+            parse_attribute_modifier("minecraft:armor,fixture:x,1,add_value,chest").expect("entry");
+        hidden.display = ItemAttributeModifierDisplay::Hidden;
+        let mut base = ItemStack::new(&vanilla_items::IRON_CHESTPLATE);
+        base.set(
+            ATTRIBUTE_MODIFIERS,
+            ItemAttributeModifiers {
+                modifiers: vec![hidden],
+            },
+        );
+        let projection = "minecraft:iron_chestplate 1\u{1d}attrmod=minecraft:armor,fixture:x,2,add_value,chest\u{1d}attrmod=minecraft:luck,fixture:y,1,add_value,any";
+        let edit = decode_edit(&base, projection, "attribute_modifiers", "SET").expect("set");
+        let store = super::super::SnapshotStore::new(bridge_num::NonZeroUsize::MIN);
+        let candidate = Edits::new(vec![edit])
+            .expect("journal")
+            .apply(store.candidate(base.clone()).expect("candidate"))
+            .expect("apply");
+        let modifiers = candidate.stack.get(ATTRIBUTE_MODIFIERS).expect("set");
+        assert_eq!(modifiers.modifiers.len(), 2);
+        assert_eq!(modifiers.modifiers[0].amount.to_bits(), 2.0_f64.to_bits());
+        assert_eq!(
+            modifiers.modifiers[0].display,
+            ItemAttributeModifierDisplay::Hidden
+        );
+        assert_eq!(
+            modifiers.modifiers[1].display,
+            ItemAttributeModifierDisplay::Default
+        );
+        let reset = decode_edit(
+            &base,
+            "minecraft:iron_chestplate 1",
+            "attribute_modifiers",
+            "RESET",
+        )
+        .expect("reset");
+        assert!(matches!(reset.operation, Operation::Reset));
+    }
+
+    #[test]
     fn explicit_damage_is_full_width_and_tooltip_flag_preserves_hidden_components() {
         init_vanilla_registry();
         let mut base = ItemStack::new(&vanilla_items::IRON_CHESTPLATE);
@@ -563,10 +651,10 @@ mod tests {
             decode_edit(
                 &candidate.stack,
                 "minecraft:iron_chestplate 1",
-                "unsupported:attribute_modifiers",
+                "unsupported:item_flags",
                 "SET"
             ),
-            Err(ItemBridgeError::Unsupported("attribute modifiers"))
+            Err(ItemBridgeError::Unsupported("item flags"))
         ));
     }
 }
