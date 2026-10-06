@@ -71,15 +71,20 @@ public final class FotonCommands implements Commands {
         return result;
     }
 
-    /** Executes a line against this plugin's registered Brigadier tree. */
+    /** Executes a line against this plugin's registered Brigadier tree.
+     * False, and silent, for a command this plugin does not have: every
+     * plugin's tree is offered the line in turn, and each one that lacked it
+     * used to tell the player the command was unknown. A command it does
+     * have is its own, usage errors included. */
     public boolean dispatch(org.bukkit.command.CommandSender sender, String line) {
+        String label = line.split("\\s+", 2)[0];
+        if (dispatcher.getRoot().getChild(label) == null) return false;
         try {
             dispatcher.execute(line, new CommandSourceStack(sender,
                 sender instanceof org.bukkit.entity.Entity entity ? entity.getLocation() : null));
-            return true;
         } catch (com.mojang.brigadier.exceptions.CommandSyntaxException error) {
             sender.sendMessage(error.getMessage());
-            return false;
         }
+        return true;
     }
 }
