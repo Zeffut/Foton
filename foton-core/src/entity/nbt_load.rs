@@ -44,7 +44,7 @@ const MAX_LOADED_MOTION: f64 = 10.0;
 ///
 /// Removing them from the compound that goes on to `load_additional` keeps a
 /// type's own reader from having to know about keys it does not own.
-const BASE_FIELDS: [&str; 20] = [
+const BASE_FIELDS: [&str; 21] = [
     "id",
     "Pos",
     "Motion",
@@ -65,6 +65,7 @@ const BASE_FIELDS: [&str; 20] = [
     "HasVisualFire",
     "Tags",
     "data",
+    "BukkitValues",
 ];
 
 /// One entity decoded from a vanilla save compound.
@@ -150,6 +151,9 @@ pub(crate) fn read_entity_nbt(nbt: &BorrowedNbtCompoundView<'_, '_>) -> Option<E
             tags: read_tags(nbt),
             custom_data: nbt
                 .compound("data")
+                .map_or_else(NbtCompound::new, |compound| compound.to_owned()),
+            bukkit_values: nbt
+                .compound("BukkitValues")
                 .map_or_else(NbtCompound::new, |compound| compound.to_owned()),
             persistent: !nbt.contains("PersistenceRequired")
                 || read_flag(nbt, "PersistenceRequired"),
@@ -245,6 +249,10 @@ pub(crate) fn load_live_entity(entity: &dyn Entity, nbt: BorrowedNbtCompoundView
     base.set_visual_fire(read_flag(&nbt, "HasVisualFire"));
     entity.set_custom_data(
         nbt.compound("data")
+            .map_or_else(NbtCompound::new, |compound| compound.to_owned()),
+    );
+    entity.base().set_bukkit_values(
+        nbt.compound("BukkitValues")
             .map_or_else(NbtCompound::new, |compound| compound.to_owned()),
     );
     base.set_tags(read_tags(&nbt));

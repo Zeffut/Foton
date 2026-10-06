@@ -59,7 +59,8 @@ pub const REGION_MAGIC: [u8; 4] = *b"STLR";
 /// v20: Added chunk-owned light section persistence.
 /// v21: Matched vanilla scheduled-tick persistence by rebuilding sub-tick order on load.
 /// v22: Preserve Vanilla pending `DUMMY` block entities across chunk stages.
-pub const FORMAT_VERSION: u16 = 22;
+/// v23: Added Bukkit persistent data (`BukkitValues`) for entities and chunks.
+pub const FORMAT_VERSION: u16 = 23;
 
 /// Number of chunks per region side (32×32 = 1024 chunks per region).
 pub const REGION_SIZE: usize = 32;
@@ -392,6 +393,8 @@ pub struct PersistentChunk<'a> {
     pub structure_references: Vec<PersistentStructureReference>,
     /// POI occupancy data (ticket state for beds, workstations, etc.).
     pub pois: Vec<PersistentPoi>,
+    /// Bukkit persistent data compound, as Paper's `ChunkBukkitValues`; empty when unset.
+    pub bukkit_values_nbt: Vec<u8>,
 }
 
 /// A 16×16×16 section of a chunk.
@@ -506,6 +509,8 @@ pub struct PersistentEntity {
     pub tags: Vec<String>,
     /// Vanilla custom data compound.
     pub custom_data_nbt: Vec<u8>,
+    /// Bukkit persistent data compound (`BukkitValues`); empty when unset.
+    pub bukkit_values_nbt: Vec<u8>,
     /// Type-specific NBT data from `save_additional`.
     pub nbt_data: Vec<u8>,
     /// Direct passengers nested under this entity.

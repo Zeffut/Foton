@@ -478,6 +478,10 @@ impl ChunkStorage {
                 structure_references,
                 light,
             );
+            chunk.set_bukkit_values(Self::compound_from_persistent(
+                &persistent.bukkit_values_nbt,
+                pos,
+            ));
             let full = FullChunkRef::from_full_context(&chunk);
 
             // Load block entities
@@ -557,6 +561,10 @@ impl ChunkStorage {
                 level.clone(),
                 light,
             );
+            chunk.set_bukkit_values(Self::compound_from_persistent(
+                &persistent.bukkit_values_nbt,
+                pos,
+            ));
 
             for persistent_be in &persistent.block_entities {
                 let block_entity_pos = Self::persistent_block_entity_pos(persistent_be, pos);

@@ -797,6 +797,11 @@ impl EntityBase {
         self.save_data.lock().custom_data.clone()
     }
 
+    /// Returns a snapshot of the Bukkit persistent data container (`BukkitValues`).
+    pub fn bukkit_values(&self) -> NbtCompound {
+        self.save_data.lock().bukkit_values.clone()
+    }
+
     /// Returns true when vanilla `ServerEntity` should consider a velocity sync.
     #[inline]
     pub fn needs_velocity_sync(&self) -> bool {
@@ -1062,8 +1067,10 @@ impl EntityBase {
 
         let mut save_data = self.save_data.lock();
         let tags = mem::take(&mut save_data.tags);
+        let bukkit_values = mem::take(&mut save_data.bukkit_values);
         *save_data = EntityBaseSaveData::new();
         save_data.tags = tags;
+        save_data.bukkit_values = bukkit_values;
     }
 
     /// Updates the world reference used by this entity.
@@ -1512,6 +1519,11 @@ impl EntityBase {
     /// Replaces vanilla custom data.
     pub fn set_custom_data(&self, custom_data: NbtCompound) {
         self.save_data.lock().custom_data = custom_data;
+    }
+
+    /// Replaces the Bukkit persistent data container (`BukkitValues`).
+    pub fn set_bukkit_values(&self, bukkit_values: NbtCompound) {
+        self.save_data.lock().bukkit_values = bukkit_values;
     }
 
     /// Marks velocity for vanilla `ServerEntity` synchronization.

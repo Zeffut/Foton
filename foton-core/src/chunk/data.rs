@@ -18,6 +18,7 @@ use foton_utils::{
 };
 use parking_lot::{MappedRwLockWriteGuard, RwLockReadGuard, RwLockWriteGuard};
 use rustc_hash::FxHashMap;
+use simdnbt::owned::NbtCompound;
 
 use crate::behavior::{BLOCK_BEHAVIORS, BlockEntityCreation};
 use crate::block_entity::{BlockEntityLookup, BlockEntityStorage, SharedBlockEntity};
@@ -107,6 +108,8 @@ pub struct Chunk {
     pub sky_light_sources: SyncRwLock<ChunkSkyLightSources>,
     /// Chunk-owned light sections and section emptiness maps.
     pub light: SyncRwLock<ChunkLightData>,
+    /// Bukkit persistent data container, saved as Paper's `ChunkBukkitValues`.
+    bukkit_values: SyncMutex<NbtCompound>,
     /// Full-only runtime state, installed once before Full publication.
     full_runtime: OnceLock<Box<FullChunkRuntime>>,
     /// Generator-owned state retained only between generation stages.
@@ -150,6 +153,7 @@ impl Chunk {
                 min_y, height,
             )),
             light: SyncRwLock::new(ChunkLightData::for_valid_world_height(min_y, height)),
+            bukkit_values: SyncMutex::new(NbtCompound::new()),
             full_runtime: OnceLock::new(),
             transient_generation_state: SyncMutex::new(TransientGenerationState::default()),
         }
@@ -219,6 +223,7 @@ impl Chunk {
                 min_y, height,
             )),
             light: SyncRwLock::new(light),
+            bukkit_values: SyncMutex::new(NbtCompound::new()),
             full_runtime: OnceLock::new(),
             transient_generation_state: SyncMutex::new(TransientGenerationState::default()),
         };
@@ -650,6 +655,18 @@ impl Chunk {
     /// Marks the chunk as unsaved.
     fn mark_unsaved(&self) {
         self.dirty.store(true, Ordering::Release);
+    }
+
+    /// Returns a snapshot of the Bukkit persistent data container.
+    #[must_use]
+    pub fn bukkit_values(&self) -> NbtCompound {
+        self.bukkit_values.lock().clone()
+    }
+
+    /// Replaces the Bukkit persistent data container and queues the chunk for saving.
+    pub fn set_bukkit_values(&self, bukkit_values: NbtCompound) {
+        *self.bukkit_values.lock() = bukkit_values;
+        self.mark_unsaved();
     }
 
     /// Returns the weak reference to the world.

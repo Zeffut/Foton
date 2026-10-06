@@ -148,6 +148,7 @@ fn test_persistent_entity(
         glowing: false,
         tags: Vec::new(),
         custom_data_nbt: Vec::new(),
+        bukkit_values_nbt: Vec::new(),
         nbt_data: Vec::new(),
         passengers: Vec::new(),
     }

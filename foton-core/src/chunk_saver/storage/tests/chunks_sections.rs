@@ -302,6 +302,7 @@ fn full_chunk_postprocessing_roundtrips_through_persistent_chunk() {
         Vec::new(),
         Vec::new(),
         Vec::new(),
+        &NbtCompound::new(),
         pos,
     );
 

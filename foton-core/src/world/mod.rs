@@ -523,6 +523,24 @@ impl World {
         positions
     }
 
+    /// Returns the Bukkit persistent data of a loaded full chunk, or `None` when it is not loaded.
+    #[must_use]
+    pub fn chunk_bukkit_values(&self, x: i32, z: i32) -> Option<NbtCompound> {
+        self.chunk_map
+            .with_full_chunk(ChunkPos::new(x, z), |full| full.common().bukkit_values())
+    }
+
+    /// Replaces the Bukkit persistent data of a loaded full chunk and queues it for saving.
+    ///
+    /// Returns `false` when the chunk is not loaded.
+    pub fn set_chunk_bukkit_values(&self, x: i32, z: i32, values: NbtCompound) -> bool {
+        self.chunk_map
+            .with_full_chunk(ChunkPos::new(x, z), |full| {
+                full.common().set_bukkit_values(values);
+            })
+            .is_some()
+    }
+
     /// Returns block-entity positions and states for a loaded full chunk.
     #[must_use]
     pub fn block_entity_positions_in_chunk(&self, x: i32, z: i32) -> Vec<(BlockPos, BlockStateId)> {
