@@ -48,7 +48,6 @@ use foton_core::event::{
 use foton_core::event::{
     PlayerChangedWorldEvent, PlayerCommandSendEvent, PlayerGameModeChangeEvent, PlayerItemHeldEvent,
 };
-use foton_core::player::Player;
 use foton_core::server::Server;
 use foton_registry::item_stack::ItemStack;
 use foton_utils::text::json;
@@ -1208,7 +1207,7 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
 
     let jvm = Arc::clone(&vm);
     events.on::<BlockPlaceEvent, _>(owner(), move |event| {
-        if !block_place_call(&jvm, event.player(), event.position(), event.item()) {
+        if !block_place_call(&jvm, event) {
             event.set_cancelled(true);
         }
     });
@@ -2189,15 +2188,13 @@ fn hanging_place_call(
 ///
 /// A failed crossing answers `true`: a plugin host that cannot be reached must
 /// not silently start cancelling the world's block changes.
-fn block_place_call(
-    vm: &JavaVM,
-    player: &Arc<Player>,
-    position: BlockPos,
-    item: &ItemStack,
-) -> bool {
+fn block_place_call(vm: &JavaVM, event: &BlockPlaceEvent) -> bool {
     let Some(mut env) = BridgeEnv::attach(vm) else {
         return true;
     };
+    let player = event.player();
+    let position = event.position();
+    let against = event.against();
     let Ok(uuid) = env.new_string(player.gameprofile.id.to_string()) else {
         return true;
     };
@@ -2206,14 +2203,19 @@ fn block_place_call(
     };
     // The whole stack: a plugin tells its own placeable items apart by their
     // components, not their material.
-    let item = env.new_string(natives::describe_slot(item)).ok();
-    let Some(item) = item else {
+    let Ok(item) = env.new_string(natives::describe_slot(event.item())) else {
+        return true;
+    };
+    let Some(replaced) = natives::describe_state(event.replaced_state()) else {
+        return true;
+    };
+    let Ok(replaced) = env.new_string(replaced) else {
         return true;
     };
     env.call_static_method(
         BRIDGE,
         "fireBlockPlace",
-        "(Ljava/lang/String;IIILjava/lang/String;Ljava/lang/String;)Z",
+        "(Ljava/lang/String;IIILjava/lang/String;Ljava/lang/String;Ljava/lang/String;III)Z",
         &[
             JValue::Object(&uuid),
             JValue::Int(position.x()),
@@ -2221,6 +2223,10 @@ fn block_place_call(
             JValue::Int(position.z()),
             JValue::Object(&world),
             JValue::Object(&item),
+            JValue::Object(&replaced),
+            JValue::Int(against.x()),
+            JValue::Int(against.y()),
+            JValue::Int(against.z()),
         ],
     )
     .and_then(JValueGen::z)

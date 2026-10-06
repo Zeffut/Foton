@@ -10,6 +10,9 @@ public class BlockPlaceEvent extends BlockEvent implements Cancellable {
     private final Player player;
     private final org.bukkit.inventory.ItemStack item;
     private final org.bukkit.block.BlockState replacedState;
+    private final Block blockAgainst;
+    private final org.bukkit.inventory.EquipmentSlot hand;
+    private boolean canBuild = true;
     private boolean cancelled;
 
     public BlockPlaceEvent(Block block, Player player) {
@@ -20,6 +23,8 @@ public class BlockPlaceEvent extends BlockEvent implements Cancellable {
         this.player = player;
         this.item = item == null ? null : item.clone();
         this.replacedState = block == null ? null : block.getState();
+        this.blockAgainst = null;
+        this.hand = org.bukkit.inventory.EquipmentSlot.HAND;
     }
 
     public BlockPlaceEvent(Block block, org.bukkit.block.BlockState replacedState,
@@ -35,16 +40,22 @@ public class BlockPlaceEvent extends BlockEvent implements Cancellable {
         this.player = player;
         this.item = item == null ? null : item.clone();
         this.replacedState = replacedState;
-        this.cancelled = !canBuild;
+        this.blockAgainst = blockAgainst;
+        this.hand = hand == null ? org.bukkit.inventory.EquipmentSlot.HAND : hand;
+        this.canBuild = canBuild;
     }
 
     public Player getPlayer() { return player; }
     public Player getPlayerPlacing() { return player; }
     /** The block whose placement this event describes. */
     public Block getBlockPlaced() { return getBlock(); }
-    public Block getBlockAgainst() { return null; }
+    /** The block that was clicked to place this one. */
+    public Block getBlockAgainst() { return blockAgainst; }
     public org.bukkit.inventory.ItemStack getItemInHand() { return item == null ? null : item.clone(); }
     public org.bukkit.block.BlockState getBlockReplacedState() { return replacedState; }
+    public org.bukkit.inventory.EquipmentSlot getHand() { return hand; }
+    public boolean canBuild() { return canBuild; }
+    public void setBuild(boolean canBuild) { this.canBuild = canBuild; }
 
     @Override public boolean isCancelled() { return cancelled; }
     @Override public void setCancelled(boolean value) { this.cancelled = value; }

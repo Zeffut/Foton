@@ -1,5 +1,7 @@
 //! Block item behavior implementation.
 
+use std::sync::Arc;
+
 use foton_macros::item_behavior;
 use foton_registry::data_components::vanilla_components::BLOCK_STATE;
 use foton_registry::sound_event::SoundEventRef;
@@ -17,6 +19,7 @@ use crate::behavior::{BLOCK_BEHAVIORS, ItemBehavior};
 use crate::entity::Entity;
 use crate::event::{BlockPlaceEvent, Event as _};
 use crate::fluid::{FluidStateExt as _, get_fluid_state};
+use crate::world::World;
 use crate::world::game_event::GameEventContext;
 
 /// Behavior for items that place blocks.
@@ -90,30 +93,50 @@ impl BlockItem {
             return InteractionResult::Fail;
         }
 
-        // Every vanilla check has passed by now, so a listener is only asked
-        // about placements that would otherwise have happened. A dispenser
-        // firing a block has no player and does not reach this.
-        if let Some(player) = context.player()
-            && let Some(shared) = player.shared()
-        {
-            let item = context.with_item(Clone::clone);
-            let mut event = BlockPlaceEvent::new(shared, place_pos, new_state, item);
-            player.fire_event(&mut event);
-            if event.is_cancelled() {
-                return InteractionResult::Fail;
-            }
-        }
+        // Taken before anything is written, so a listener that vetoes the
+        // placement finds the world as the player left it.
+        let before = context
+            .player()
+            .map(|_| PlacementSnapshot::capture(context.world, place_pos));
 
         if !place_block(&context, new_state) {
             return InteractionResult::Fail;
         }
 
         let mut placed_state = context.world.get_block_state(place_pos);
-        if placed_state.get_block() == new_state.get_block() {
+        let landed = placed_state.get_block() == new_state.get_block();
+        if landed {
             placed_state = Self::update_block_state_from_tag(&context, place_pos, placed_state);
             Self::update_block_entity_components(&context, place_pos);
             let placed_behavior = BLOCK_BEHAVIORS.get_behavior(placed_state.get_block());
             placed_behavior.set_placed_by(placed_state, context.world, place_pos, context.source());
+        }
+
+        // Paper parity: `CraftEventFactory.callBlockPlaceEvent` runs once the
+        // block is in the world, so a listener reads what landed and what it
+        // replaced; a veto restores the blocks. A dispenser firing a block has
+        // no player and does not reach this.
+        if let Some(player) = context.player()
+            && let Some(shared) = player.shared()
+            && let Some(before) = before
+        {
+            let item = context.with_item(Clone::clone);
+            let mut event = BlockPlaceEvent::new(
+                shared,
+                place_pos,
+                placed_state,
+                before.state_at(place_pos).unwrap_or(placed_state),
+                context.hit_pos(),
+                item,
+            );
+            player.fire_event(&mut event);
+            if event.is_cancelled() {
+                before.restore(context.world);
+                return InteractionResult::Fail;
+            }
+        }
+
+        if landed {
             // Vanilla parity: the `CriteriaTriggers.PLACED_BLOCK` of
             // `BlockItem.place`, which sits inside this same
             // "the block that landed is the one we asked for" branch and runs
@@ -208,6 +231,47 @@ impl BlockItem {
     }
 }
 
+/// The blocks a placement can touch, as they stood before it.
+///
+/// Paper reverts a vetoed placement from the block states it captured while
+/// placing. Foton keeps the cube around the target instead: a double-high or
+/// bed half lands in the next cell, and shape updates reach the six
+/// neighbours, which is the whole reach of one placement.
+struct PlacementSnapshot {
+    cells: Vec<(BlockPos, BlockStateId)>,
+}
+
+impl PlacementSnapshot {
+    fn capture(world: &Arc<World>, center: BlockPos) -> Self {
+        let mut cells = Vec::with_capacity(27);
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    let pos = BlockPos::new(center.x() + dx, center.y() + dy, center.z() + dz);
+                    cells.push((pos, world.get_block_state(pos)));
+                }
+            }
+        }
+        Self { cells }
+    }
+
+    fn state_at(&self, pos: BlockPos) -> Option<BlockStateId> {
+        self.cells
+            .iter()
+            .find_map(|(cell, state)| (*cell == pos).then_some(*state))
+    }
+
+    /// Puts back every cell that changed, without waking its neighbours: the
+    /// blocks around it are being restored too.
+    fn restore(&self, world: &Arc<World>) {
+        for (pos, state) in &self.cells {
+            if world.get_block_state(*pos) != *state {
+                world.set_block(*pos, *state, UpdateFlags::UPDATE_CLIENTS);
+            }
+        }
+    }
+}
+
 impl ItemBehavior for BlockItem {
     fn use_on(&self, context: &mut UseOnContext) -> InteractionResult {
         self.place(context.build_place_context())
@@ -277,5 +341,39 @@ impl ItemBehavior for DoubleHighBlockItem {
             |c| self.base.placement_state(c),
             Self::place_block,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use foton_registry::init_vanilla_registry;
+    use foton_utils::ChunkPos;
+
+    use super::*;
+    use crate::behavior::init_behaviors;
+    use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
+
+    /// A vetoed door has two halves in two cells, and the replaced grass under
+    /// the lower one has to come back with them.
+    #[test]
+    fn a_restored_snapshot_takes_back_both_halves_and_what_they_replaced() {
+        init_vanilla_registry();
+        init_behaviors();
+        let world = fresh_test_world("block_item_snapshot");
+        insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+        let pos = BlockPos::new(8, 64, 8);
+        let grass = vanilla_blocks::SHORT_GRASS.default_state();
+        assert!(world.set_block(pos, grass, UpdateFlags::UPDATE_NONE));
+
+        let before = PlacementSnapshot::capture(&world, pos);
+        assert_eq!(before.state_at(pos), Some(grass));
+        let door = vanilla_blocks::OAK_DOOR.default_state();
+        assert!(world.set_block(pos, door, UpdateFlags::UPDATE_NONE));
+        assert!(world.set_block(pos.above(), door, UpdateFlags::UPDATE_NONE));
+
+        before.restore(&world);
+
+        assert_eq!(world.get_block_state(pos), grass);
+        assert!(world.get_block_state(pos.above()).is_air());
     }
 }
