@@ -8,7 +8,7 @@ package foton.entity;
  * {@code addChannel} and {@code removeChannel}, before it starts at all, and
  * ViaVersion looks for it at login. Every player Foton hands out is one.
  *
- * <p>Only what CraftBukkit itself offers here, and only what Foton can honour,
+ * <p>Only what CraftBukkit itself offers here, and only what Foton can honor,
  * is declared: there is no Minecraft server object behind it to hand out.
  */
 public abstract class CraftPlayer implements org.bukkit.entity.Player, net.kyori.adventure.audience.Audience {

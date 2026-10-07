@@ -210,7 +210,7 @@ extern "system" fn send_action_bar_component(
 /// A chat message from a component's JSON, formatting kept.
 ///
 /// Paper parity: `Player.sendMessage(Component)`. Flattening to plain text
-/// dropped every colour, hover and click a plugin put in its messages.
+/// dropped every color, hover and click a plugin put in its messages.
 extern "system" fn send_message_component(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,

@@ -6,8 +6,8 @@ import net.md_5.bungee.api.chat.BaseComponent;
 /** BungeeCord chat components, as the Adventure components Foton sends.
  *
  * The two describe the same JSON text, so the conversion goes through it and
- * keeps everything: translations, colours, hovers, clicks. Flattening to
- * legacy text, as a plugin's Spigot call used to be, kept only the colours.
+ * keeps everything: translations, colors, hovers, clicks. Flattening to
+ * legacy text, as a plugin's Spigot call used to be, kept only the colors.
  */
 public final class FotonBungee {
     private FotonBungee() {}
