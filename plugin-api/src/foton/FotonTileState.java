@@ -13,16 +13,22 @@ import org.bukkit.block.data.BlockData;
  * where Paper keeps it too. */
 public class FotonTileState extends FotonBlockState implements TileState {
     private byte[] loaded;
+    /** Whether the block entity's data has been read into this snapshot. It is
+     * read on first use, so a snapshot nobody asks for its data costs no call. */
+    private boolean fetched;
 
     protected FotonTileState(Block block, BlockData data) {
-        this(block, data, block == null || block.getWorld() == null ? null
-            : Native.blockEntityPersistentData(
-                block.getWorld().getName(), block.getX(), block.getY(), block.getZ()));
+        super(block, data);
     }
 
     /** A snapshot whose block entity data was already fetched; null when none stands there. */
     FotonTileState(Block block, BlockData data, byte[] stored) {
         super(block, data);
+        load(stored);
+    }
+
+    private void load(byte[] stored) {
+        fetched = true;
         if (stored == null) return;
         try {
             persistentData.readFromBytes(stored, true);
@@ -31,6 +37,17 @@ public class FotonTileState extends FotonBlockState implements TileState {
             // Data this API cannot read stays on the block entity untouched.
             loaded = null;
         }
+    }
+
+    @Override
+    public org.bukkit.persistence.PersistentDataContainer getPersistentDataContainer() {
+        if (!fetched) {
+            Block block = getBlock();
+            load(block == null || block.getWorld() == null ? null
+                : Native.blockEntityPersistentData(
+                    block.getWorld().getName(), block.getX(), block.getY(), block.getZ()));
+        }
+        return super.getPersistentDataContainer();
     }
 
     @Override

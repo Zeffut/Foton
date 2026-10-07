@@ -47,7 +47,9 @@ final class Events {
 
         Checks.expect(foton.EventBridge.fireChat(id, "hush now") == null,
             "a cancelled chat should come back as nothing");
-        Checks.same(foton.EventBridge.fireChat(id, "hello"), "hello",
+        // The answer is the text, the recipients, a styled message and the
+        // rendered lines, separated by U+001E; only the first part was said.
+        Checks.same(foton.EventBridge.fireChat(id, "hello").split("\u001e", -1)[0], "hello",
             "an uncancelled chat should come back unchanged");
 
         // The LOWEST handler cancels; the HIGH one would undo it but did not
