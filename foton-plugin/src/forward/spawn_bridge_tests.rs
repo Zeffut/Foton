@@ -5,6 +5,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Weak;
+use std::{panic, thread};
 
 use foton_core::block_entity::BlockEntity as _;
 use foton_core::block_entity::entities::{BEEHIVE_MIN_OCCUPATION_TICKS_NECTAR, BeehiveBlockEntity};
@@ -40,6 +41,19 @@ fn conversion_reasons_use_exact_paper_names() {
 #[test]
 #[ignore = "requires the built plugin API; dev/ci.sh runs this after the Java build"]
 fn spawn_bridge_dispatches_cancellation_and_queries_released_bee() -> Result<(), Box<dyn Error>> {
+    // The live server this builds needs more than the test harness's 2 MiB
+    // stack in a debug build; the server itself runs its worlds on 8 MiB.
+    let outcome = thread::Builder::new()
+        .stack_size(8 * 1024 * 1024)
+        .spawn(|| dispatches_and_releases_bee().map_err(|error| error.to_string()))?
+        .join();
+    match outcome {
+        Ok(result) => result.map_err(Into::into),
+        Err(panic) => panic::resume_unwind(panic),
+    }
+}
+
+fn dispatches_and_releases_bee() -> Result<(), Box<dyn Error>> {
     let (scratch, host) = spawn_check_host()?;
     let mut env = host.vm.attach_current_thread()?;
     let plugins = env.new_string(scratch.path().join("plugins").to_string_lossy())?;
@@ -414,7 +428,7 @@ fn java_entity_handle<'local>(
         .call_static_method(
             "foton/FotonEntity",
             "handle",
-            "(Ljava/util/UUID;)Lfoton/FotonEntity;",
+            "(Ljava/util/UUID;)Lorg/bukkit/entity/Entity;",
             &[JValue::Object(&uuid)],
         )?
         .l()?)

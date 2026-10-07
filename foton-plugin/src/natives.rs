@@ -56,6 +56,7 @@ use foton_core::entity::TamableAnimal;
 use foton_core::entity::conversion::{
     ConversionParams, ConversionReason, convert_to, replace_entity,
 };
+use foton_core::entity::damage::DamageSource;
 use foton_core::entity::entities::TropicalFishPattern;
 use foton_core::entity::entities::decoration::ArmorStandEntity;
 use foton_core::entity::entities::mobs::hostile::PhantomEntity;
@@ -162,7 +163,7 @@ use foton_registry::vanilla_block_entity_types::SIGN;
 use foton_registry::vanilla_game_rules::TNT_EXPLOSION_DROP_DECAY;
 use foton_registry::{
     REGISTRY, RegistryEntry as _, RegistryExt as _, RegistryReference, TaggedRegistryExt as _,
-    vanilla_blocks, vanilla_entities, vanilla_items,
+    vanilla_blocks, vanilla_damage_types, vanilla_entities, vanilla_items,
 };
 use foton_utils::codec::VarInt;
 use foton_utils::entity_events::EntityStatus;
@@ -7913,7 +7914,10 @@ extern "system" fn health(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString
         .unwrap_or(0.0)
 }
 
-/// `foton.Native.setHealth`
+/// `foton.Native.setHealth`, for any living entity as Bukkit's `setHealth` is.
+///
+/// Paper parity: `CraftLivingEntity.setHealth` kills a mob set to zero health
+/// through `die`, so it drops its loot and raises its death event.
 extern "system" fn set_health(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -7922,6 +7926,24 @@ extern "system" fn set_health(
 ) {
     if let Some(player) = player(&mut env, &uuid) {
         player.set_health(health as f32);
+        return;
+    }
+    let Ok(text) = env.get_string(&uuid) else {
+        return;
+    };
+    let Ok(id) = Uuid::parse_str(&String::from(text)) else {
+        return;
+    };
+    let Some((_, entity)) = entity_by_uuid(&id) else {
+        return;
+    };
+    let Some(living) = entity.as_living_entity() else {
+        return;
+    };
+    let was_alive = !living.is_dead_or_dying();
+    living.set_health(health as f32);
+    if was_alive && living.is_dead_or_dying() {
+        living.die(&DamageSource::environment(&vanilla_damage_types::GENERIC));
     }
 }
 
