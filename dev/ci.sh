@@ -89,6 +89,7 @@ run "published registry JNI bridge"                 cargo test -p foton-plugin -
 # This test needs the built API and runs in its own process because a JVM
 # cannot be restarted inside the ordinary Rust test process.
 run "spawn events cross JNI"                       cargo test -p foton-plugin --lib spawn_bridge_dispatches -- --ignored
+run "brewing getters cross JNI without clones"     cargo test -p foton-plugin --lib brewing_union_actual_jni_getters_reject_without_deep_clones -- --ignored
 # RegisterNatives is all-or-nothing: one registered method the class does
 # not declare and no plugin loads at all, one declared method left
 # unregistered and the first plugin to call it takes an

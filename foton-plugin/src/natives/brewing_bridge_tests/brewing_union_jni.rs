@@ -310,12 +310,13 @@ fn assert_scalar_and_apply_allocations(
 }
 
 #[test]
+#[ignore = "requires the built plugin API; dev/ci.sh runs this after the Java build"]
 fn brewing_union_actual_jni_getters_reject_without_deep_clones() -> TestResult {
     // One JVM per isolated process preserves the normal parallel test suite.
     const CHILD: &str = "FOTON_BREWING_JNI_ALLOCATION_CHILD";
     if env::var_os(CHILD).is_none() {
         let output = Command::new(env::current_exe()?)
-            .args(["--exact", "natives::brewing_bridge_tests::brewing_union_jni::brewing_union_actual_jni_getters_reject_without_deep_clones", "--nocapture"])
+            .args(["--exact", "natives::brewing_bridge_tests::brewing_union_jni::brewing_union_actual_jni_getters_reject_without_deep_clones", "--include-ignored", "--nocapture"])
             // JNI assertions run on the ordinary libtest stack, regardless of caller settings.
             .env_remove("RUST_MIN_STACK")
             .env(CHILD, "1").output()?;
