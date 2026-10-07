@@ -16,6 +16,12 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# A JAVA_HOME names the JDK to build with, ahead of whatever javac comes first
+# on PATH: a caller that puts /usr/bin first would otherwise get a system JDK
+# too old for --release 21.
+if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/javac" ]; then
+  export PATH="$JAVA_HOME/bin:$PATH"
+fi
 SRC="$REPO/plugin-api/src"
 OUT="$REPO/plugin-api/build"
 JAR="$OUT/foton-plugin-api.jar"
