@@ -314,12 +314,20 @@ fn brewing_union_actual_jni_getters_reject_without_deep_clones() -> TestResult {
     // One JVM per isolated process preserves the normal parallel test suite.
     const CHILD: &str = "FOTON_BREWING_JNI_ALLOCATION_CHILD";
     if env::var_os(CHILD).is_none() {
-        let status = Command::new(env::current_exe()?)
+        let output = Command::new(env::current_exe()?)
             .args(["--exact", "natives::brewing_bridge_tests::brewing_union_jni::brewing_union_actual_jni_getters_reject_without_deep_clones", "--nocapture"])
             // JNI assertions run on the ordinary libtest stack, regardless of caller settings.
             .env_remove("RUST_MIN_STACK")
-            .env(CHILD, "1").status()?;
-        assert!(status.success(), "actual JNI allocation child failed");
+            .env(CHILD, "1").output()?;
+        // The child's own report is the only trace of why it failed; a CI
+        // summary that keeps the parent's panic message must carry it.
+        assert!(
+            output.status.success(),
+            "actual JNI allocation child failed ({}):\n{}\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
         return Ok(());
     }
     // Cold generated Recipes::init has large aggregate debug frames. Initialize
