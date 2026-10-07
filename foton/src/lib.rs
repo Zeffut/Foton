@@ -721,7 +721,7 @@ fn installed_plugin_runtime_directory() -> Result<Option<PathBuf>, String> {
     Ok(None)
 }
 
-const PLUGIN_RUNTIME_JARS: [&str; 48] = [
+const PLUGIN_RUNTIME_JARS: [&str; 49] = [
     "adventure-api-5.2.0.jar",
     "adventure-key-5.2.0.jar",
     "adventure-text-minimessage-5.2.0.jar",
@@ -734,6 +734,7 @@ const PLUGIN_RUNTIME_JARS: [&str; 48] = [
     "auto-service-annotations-1.1.1.jar",
     "annotations-26.1.0.jar",
     "brigadier-1.3.10.jar",
+    "bungeecord-chat-1.21-R0.2-deprecated+build.21.jar",
     "error_prone_annotations-2.47.0.jar",
     "failureaccess-1.0.3.jar",
     "gson-2.14.0.jar",
@@ -772,10 +773,11 @@ const PLUGIN_RUNTIME_JARS: [&str; 48] = [
     "commons-lang3-3.20.0.jar",
 ];
 
-const PLUGIN_RUNTIME_LICENSES: [&str; 6] = [
+const PLUGIN_RUNTIME_LICENSES: [&str; 7] = [
     "ADVENTURE-MIT.txt",
     "APACHE-2.0.txt",
     "BRIGADIER-MIT.txt",
+    "BUNGEECORD-BSD.txt",
     "JOML-MIT.txt",
     "SLF4J-MIT.txt",
     "THIRD-PARTY-NOTICES.txt",
@@ -1149,7 +1151,7 @@ mod tests {
     }
 
     #[test]
-    fn installed_plugin_runtime_manifest_matches_all_48_classpath_pins() {
+    fn installed_plugin_runtime_manifest_matches_all_49_classpath_pins() {
         let mut manifest: Vec<_> = include_str!("../../plugin-api/lib/manifest.txt")
             .lines()
             .filter(|line| !line.trim().is_empty() && !line.starts_with('#'))
@@ -1161,7 +1163,7 @@ mod tests {
         manifest.sort();
         let mut installed = super::PLUGIN_RUNTIME_JARS.to_vec();
         installed.sort_unstable();
-        assert_eq!(manifest.len(), 48);
+        assert_eq!(manifest.len(), 49);
         assert_eq!(manifest, installed);
     }
 

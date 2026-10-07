@@ -18,6 +18,14 @@ MIT license
 * joml 1.10.8: JOML-MIT.txt
 * slf4j-api 2.0.17: SLF4J-MIT.txt
 
+BSD-style license (BungeeCord)
+------------------------------
+
+* bungeecord-chat 1.21-R0.2-deprecated+build.21: BUNGEECORD-BSD.txt
+  (copyright 2012 md_5). Its terms add one condition to the BSD clauses:
+  no use for commercial software hosting services without the author's
+  written permission. Paper ships the same artifact in paper-api.
+
 Apache License 2.0
 ------------------
 

@@ -125,7 +125,7 @@ POM, not from memory and not carried over from the previous version.
 | adventure-text-minimessage | 5.2.0 | MIT | PaperMC Maven POM |
 | adventure-text-serializer-plain | 5.2.0 | MIT | Maven Central POM |
 | adventure-text-serializer-legacy | 5.2.0 | MIT | Maven Central POM |
-| bungeecord-chat | 1.21-R0.2-deprecated+build.21 | BSD-3-Clause | `LICENSE` in SpigotMC/BungeeCord |
+| bungeecord-chat | 1.21-R0.2-deprecated+build.21 | BSD-style, no commercial hosting service without permission | `LICENSE` in SpigotMC/BungeeCord |
 | adventure-text-serializer-gson | 5.2.0 | MIT | PaperMC Maven POM |
 | adventure-text-serializer-json | 5.2.0 | MIT | PaperMC Maven POM |
 | adventure-text-serializer-commons | 5.2.0 | MIT | PaperMC Maven POM |

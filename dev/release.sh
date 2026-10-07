@@ -105,8 +105,8 @@ PLUGIN_JARS=(plugin-api/lib/*.jar)
 if [ ! -e "${PLUGIN_JARS[0]}" ]; then
   die "plugin-api/lib contains no runtime dependency jars"
 fi
-if [ "${#PLUGIN_JARS[@]}" -ne 48 ]; then
-  die "the plugin runtime must contain exactly 48 pinned dependency jars; found ${#PLUGIN_JARS[@]}"
+if [ "${#PLUGIN_JARS[@]}" -ne 49 ]; then
+  die "the plugin runtime must contain exactly 49 pinned dependency jars; found ${#PLUGIN_JARS[@]}"
 fi
 for plugin_jar in "${PLUGIN_JARS[@]}"; do
   [ -f "$plugin_jar" ] && [ ! -L "$plugin_jar" ] \
@@ -116,6 +116,7 @@ PLUGIN_LICENSE_NAMES=(
   ADVENTURE-MIT.txt
   APACHE-2.0.txt
   BRIGADIER-MIT.txt
+  BUNGEECORD-BSD.txt
   JOML-MIT.txt
   SLF4J-MIT.txt
   THIRD-PARTY-NOTICES.txt
@@ -127,10 +128,10 @@ for license_name in "${PLUGIN_LICENSE_NAMES[@]}"; do
     || die "the plugin runtime license input is missing or unsafe: $license_path"
   PLUGIN_LICENSES+=("$license_path")
 done
-if [ "${#PLUGIN_LICENSES[@]}" -ne 6 ]; then
-  die "the plugin runtime must contain exactly 6 pinned license/notice texts; found ${#PLUGIN_LICENSES[@]}"
+if [ "${#PLUGIN_LICENSES[@]}" -ne 7 ]; then
+  die "the plugin runtime must contain exactly 7 pinned license/notice texts; found ${#PLUGIN_LICENSES[@]}"
 fi
-if [ "$(find plugin-api/lib/licenses -type f -name '*.txt' | wc -l | tr -d ' ')" -ne 6 ]; then
+if [ "$(find plugin-api/lib/licenses -type f -name '*.txt' | wc -l | tr -d ' ')" -ne 7 ]; then
   die "plugin-api/lib/licenses contains an unexpected license/notice file"
 fi
 PLUGIN_RUNTIME="$OUT/plugin-runtime"

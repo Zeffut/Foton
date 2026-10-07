@@ -77,6 +77,7 @@ runtime_library_is_expected() {
     adventure-text-serializer-json-5.2.0.jar|adventure-text-serializer-gson-5.2.0.jar|\
     adventure-text-serializer-commons-5.2.0.jar|option-1.1.0.jar|\
     auto-service-annotations-1.1.1.jar|annotations-26.1.0.jar|brigadier-1.3.10.jar|\
+    bungeecord-chat-1.21-R0.2-deprecated+build.21.jar|\
     error_prone_annotations-2.47.0.jar|\
     adventure-text-serializer-legacy-5.2.0.jar|\
     failureaccess-1.0.3.jar|gson-2.14.0.jar|guava-33.6.0-jre.jar|\
@@ -101,7 +102,7 @@ runtime_library_is_expected() {
 
 runtime_license_is_expected() {
   case "$1" in
-    ADVENTURE-MIT.txt|APACHE-2.0.txt|BRIGADIER-MIT.txt|JOML-MIT.txt|\
+    ADVENTURE-MIT.txt|APACHE-2.0.txt|BRIGADIER-MIT.txt|BUNGEECORD-BSD.txt|JOML-MIT.txt|\
     SLF4J-MIT.txt|THIRD-PARTY-NOTICES.txt) return 0 ;;
     *) return 1 ;;
   esac
@@ -158,7 +159,7 @@ runtime_archive_is_safe() {
       *) return 1 ;;
     esac
   done < "$runtime_archive_list"
-  [ "$runtime_archive_files" -eq 56 ] && [ "$runtime_archive_directories" -eq 3 ]
+  [ "$runtime_archive_files" -eq 58 ] && [ "$runtime_archive_directories" -eq 3 ]
 }
 
 runtime_is_complete() {
@@ -215,17 +216,17 @@ runtime_is_complete() {
   runtime_actual_libs=$(find "$runtime_dir/lib" -type f -name '*.jar' | wc -l | tr -d ' ')
   runtime_all_lib_files=$(find "$runtime_dir/lib" -type f | wc -l | tr -d ' ')
   runtime_license_files=$(find "$runtime_dir/licenses" -type f | wc -l | tr -d ' ')
-  for runtime_license in ADVENTURE-MIT.txt APACHE-2.0.txt BRIGADIER-MIT.txt \
+  for runtime_license in ADVENTURE-MIT.txt APACHE-2.0.txt BRIGADIER-MIT.txt BUNGEECORD-BSD.txt \
     JOML-MIT.txt SLF4J-MIT.txt THIRD-PARTY-NOTICES.txt; do
     [ -f "$runtime_dir/licenses/$runtime_license" ] \
       && [ ! -L "$runtime_dir/licenses/$runtime_license" ] || return 1
   done
   [ "$runtime_api_seen" -eq 1 ] \
-    && [ "$runtime_libs_seen" -eq 48 ] \
-    && [ "$runtime_actual_libs" -eq 48 ] \
-    && [ "$runtime_all_lib_files" -eq 48 ] \
-    && [ "$runtime_licenses_seen" -eq 6 ] \
-    && [ "$runtime_license_files" -eq 6 ] \
+    && [ "$runtime_libs_seen" -eq 49 ] \
+    && [ "$runtime_actual_libs" -eq 49 ] \
+    && [ "$runtime_all_lib_files" -eq 49 ] \
+    && [ "$runtime_licenses_seen" -eq 7 ] \
+    && [ "$runtime_license_files" -eq 7 ] \
     && [ "$runtime_manifest_entries" -eq "$runtime_actual_entries" ]
 }
 

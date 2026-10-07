@@ -220,9 +220,9 @@ grep -q '^FROM rustlang/rust:nightly-alpine3.23-2026-07-23@sha256:e4a0ce16a94f25
 # Durable notices are required inputs, not files synthesized at publication.
 dependency_jar_count="$(find "$REPO/plugin-api/lib" -maxdepth 1 -type f -name '*.jar' | wc -l)"
 license_file_count="$(find "$REPO/plugin-api/lib/licenses" -maxdepth 1 -type f -name '*.txt' | wc -l)"
-[ "$dependency_jar_count" -eq 48 ]
-[ "$license_file_count" -eq 6 ]
-for license in ADVENTURE-MIT.txt APACHE-2.0.txt BRIGADIER-MIT.txt JOML-MIT.txt \
+[ "$dependency_jar_count" -eq 49 ]
+[ "$license_file_count" -eq 7 ]
+for license in ADVENTURE-MIT.txt APACHE-2.0.txt BRIGADIER-MIT.txt BUNGEECORD-BSD.txt JOML-MIT.txt \
   SLF4J-MIT.txt THIRD-PARTY-NOTICES.txt; do
   [ -f "$REPO/plugin-api/lib/licenses/$license" ]
 done
@@ -263,8 +263,8 @@ for library in adventure-text-minimessage-5.2.0.jar adventure-text-serializer-co
   grep -qx "./lib/$library" "$SCRATCH/tar-list"
   grep -qx "lib/$library" "$SCRATCH/zip-list"
 done
-[ "$(grep -c '^\./licenses/.*\.txt$' "$SCRATCH/tar-list")" -eq 6 ]
-[ "$(grep -c '^licenses/.*\.txt$' "$SCRATCH/zip-list")" -eq 6 ]
+[ "$(grep -c '^\./licenses/.*\.txt$' "$SCRATCH/tar-list")" -eq 7 ]
+[ "$(grep -c '^licenses/.*\.txt$' "$SCRATCH/zip-list")" -eq 7 ]
 grep -qx './foton-plugin-api.jar' "$SCRATCH/tar-list"
 grep -qx './lib/snakeyaml-2.2.jar' "$SCRATCH/tar-list"
 grep -qx './lib/netty-codec-base-4.2.15.Final.jar' "$SCRATCH/tar-list"

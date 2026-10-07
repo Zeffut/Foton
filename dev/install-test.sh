@@ -50,6 +50,7 @@ adventure-text-serializer-plain-5.2.0.jar
 auto-service-annotations-1.1.1.jar
 annotations-26.1.0.jar
 brigadier-1.3.10.jar
+bungeecord-chat-1.21-R0.2-deprecated+build.21.jar
 error_prone_annotations-2.47.0.jar
 failureaccess-1.0.3.jar
 gson-2.14.0.jar
@@ -100,7 +101,7 @@ write_runtime() {
   for library in $(runtime_libraries); do
     printf 'library %s %s\n' "$marker" "$library" > "$directory/lib/$library"
   done
-  for license in ADVENTURE-MIT.txt APACHE-2.0.txt BRIGADIER-MIT.txt JOML-MIT.txt \
+  for license in ADVENTURE-MIT.txt APACHE-2.0.txt BRIGADIER-MIT.txt BUNGEECORD-BSD.txt JOML-MIT.txt \
     SLF4J-MIT.txt THIRD-PARTY-NOTICES.txt; do
     printf 'license fixture %s\n' "$license" > "$directory/licenses/$license"
   done

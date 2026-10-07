@@ -10,8 +10,8 @@ command -v jar >/dev/null 2>&1 || { echo 'jar is required' >&2; exit 1; }
 
 bash dev/fetch-plugin-api-libs.sh --check
 mapfile -t jars < <(find plugin-api/lib -maxdepth 1 -type f -name '*.jar' -print | LC_ALL=C sort)
-[ "${#jars[@]}" -eq 48 ] || {
-  echo "plugin runtime must contain exactly 48 dependency jars; found ${#jars[@]}" >&2
+[ "${#jars[@]}" -eq 49 ] || {
+  echo "plugin runtime must contain exactly 49 dependency jars; found ${#jars[@]}" >&2
   exit 1
 }
 # The release copies every pinned JAR, while Foton validates an exact filename

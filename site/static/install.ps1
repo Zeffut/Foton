@@ -190,6 +190,7 @@ function Test-RuntimeComplete {
         'auto-service-annotations-1.1.1.jar',
         'annotations-26.1.0.jar',
         'brigadier-1.3.10.jar',
+        'bungeecord-chat-1.21-R0.2-deprecated+build.21.jar',
         'error_prone_annotations-2.47.0.jar',
         'failureaccess-1.0.3.jar',
         'gson-2.14.0.jar',
@@ -259,7 +260,7 @@ function Test-RuntimeComplete {
     $sortedExpectedLibraries = @($expectedLibraries | Sort-Object)
     if (($actualLibraryNames -join "`n") -cne ($sortedExpectedLibraries -join "`n")) { return $false }
     $expectedLicenses = @(
-        'ADVENTURE-MIT.txt', 'APACHE-2.0.txt', 'BRIGADIER-MIT.txt',
+        'ADVENTURE-MIT.txt', 'APACHE-2.0.txt', 'BRIGADIER-MIT.txt', 'BUNGEECORD-BSD.txt',
         'JOML-MIT.txt', 'SLF4J-MIT.txt', 'THIRD-PARTY-NOTICES.txt'
     )
     $licenseEntries = @(Get-ChildItem -LiteralPath $licenses -Force)
@@ -267,9 +268,9 @@ function Test-RuntimeComplete {
     foreach ($licenseName in $expectedLicenses) {
         if (-not (Test-RegularFile (Join-Path $licenses $licenseName))) { return $false }
     }
-    return $apiSeen -eq 1 -and $librariesSeen -eq 48 -and
-        $jarFiles.Count -eq 48 -and $libraryFiles.Count -eq 48 -and
-        $licensesSeen -eq 6 -and $manifestEntries -eq $actualFiles.Count
+    return $apiSeen -eq 1 -and $librariesSeen -eq 49 -and
+        $jarFiles.Count -eq 49 -and $libraryFiles.Count -eq 49 -and
+        $licensesSeen -eq 7 -and $manifestEntries -eq $actualFiles.Count
 }
 
 function Restore-PendingTransaction {

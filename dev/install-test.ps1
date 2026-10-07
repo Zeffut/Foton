@@ -42,6 +42,7 @@ function New-Runtime {
         'auto-service-annotations-1.1.1.jar',
         'adventure-text-serializer-legacy-5.2.0.jar',
         'annotations-26.1.0.jar', 'brigadier-1.3.10.jar',
+        'bungeecord-chat-1.21-R0.2-deprecated+build.21.jar',
         'error_prone_annotations-2.47.0.jar', 'failureaccess-1.0.3.jar',
         'gson-2.14.0.jar', 'guava-33.6.0-jre.jar', 'j2objc-annotations-3.1.jar',
         'joml-1.10.8.jar', 'jspecify-1.0.0.jar', 'kotlin-stdlib-1.8.20.jar',
@@ -67,6 +68,7 @@ function New-Runtime {
         'ADVENTURE-MIT.txt',
         'APACHE-2.0.txt',
         'BRIGADIER-MIT.txt',
+        'BUNGEECORD-BSD.txt',
         'JOML-MIT.txt',
         'SLF4J-MIT.txt',
         'THIRD-PARTY-NOTICES.txt'
