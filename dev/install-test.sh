@@ -119,7 +119,10 @@ package_release() {
   tar -czf "$ASSETS/foton-plugin-runtime.tar.gz" -C "$ASSETS/runtime" .
   (
     cd "$ASSETS"
-    printf '%s  foton-linux-x86_64-musl\n' "$(sha256sum foton | awk '{print $1}')" > SHA256SUMS
+    : > SHA256SUMS
+    for name in foton-linux-x86_64-gnu foton-linux-x86_64-musl; do
+      printf '%s  %s\n' "$(sha256sum foton | awk '{print $1}')" "$name" >> SHA256SUMS
+    done
     printf '%s  foton-plugin-runtime.tar.gz\n' "$(sha256sum foton-plugin-runtime.tar.gz | awk '{print $1}')" >> SHA256SUMS
   )
 }
@@ -151,7 +154,7 @@ case "$url" in
     printf '{"tag_name":"v9.8.7"}\n' > "$out"
     printf '200'
     ;;
-  */foton-linux-x86_64-musl) cp "$FOTON_INSTALL_ASSETS/foton" "$out" ;;
+  */foton-linux-x86_64-gnu|*/foton-linux-x86_64-musl) cp "$FOTON_INSTALL_ASSETS/foton" "$out" ;;
   */foton-plugin-runtime.tar.gz) cp "$FOTON_INSTALL_ASSETS/foton-plugin-runtime.tar.gz" "$out" ;;
   */SHA256SUMS) cp "$FOTON_INSTALL_ASSETS/SHA256SUMS" "$out" ;;
   *) exit 22 ;;
@@ -178,6 +181,28 @@ if [ "${FOTON_INSTALL_FAIL_RESTORE:-0}" = 1 ]; then
 fi
 exec "$FOTON_INSTALL_REAL_CP" "$@"
 EOF
+# The fake C library is chosen per run by FOTON_TEST_LIBC: glibc-<version>
+# (getconf and ldd answer), ldd-glibc-<version> (only ldd answers, as without
+# getconf), or musl (neither answers like glibc, as on Alpine).
+cat > "$MOCK_BIN/getconf" <<'EOF'
+#!/bin/sh
+case "${FOTON_TEST_LIBC:-glibc-2.36}" in
+  glibc-*) [ "${1:-}" = GNU_LIBC_VERSION ] && { printf 'glibc %s\n' "${FOTON_TEST_LIBC#glibc-}"; exit 0; } ;;
+esac
+printf 'getconf: unknown variable\n' >&2
+exit 1
+EOF
+cat > "$MOCK_BIN/ldd" <<'EOF'
+#!/bin/sh
+case "${FOTON_TEST_LIBC:-glibc-2.36}" in
+  glibc-*|ldd-glibc-*)
+    printf 'ldd (Debian GLIBC %s-9) %s\n' "${FOTON_TEST_LIBC##*-}" "${FOTON_TEST_LIBC##*-}"
+    printf 'Copyright (C) 2022 Free Software Foundation, Inc.\n'
+    ;;
+  *) printf 'musl libc (x86_64)\nVersion 1.2.5\n' >&2; exit 1 ;;
+esac
+EOF
+chmod +x "$MOCK_BIN/getconf" "$MOCK_BIN/ldd"
 chmod +x "$MOCK_BIN/uname" "$MOCK_BIN/curl" "$MOCK_BIN/mv" "$MOCK_BIN/cp"
 
 export FOTON_INSTALL_ASSETS="$ASSETS"
@@ -228,6 +253,36 @@ grep -qx 'keep save' "$INSTALL/saves/sentinel"
 )
 grep -q 'Already on v9.8.7' "$SCRATCH/current.log"
 [ "$(wc -l < "$FOTON_INSTALL_CURL_LOG")" -eq 1 ]
+
+# Linux asset choice. Only a glibc binary can load a JVM, so a glibc system
+# gets the gnu asset; anything else gets the static musl one, plus a clear
+# statement that plugins need the glibc build.
+check_libc() {
+  libc=$1 expected=$2 note=$3
+  libc_dir="$SCRATCH/libc-$libc"
+  mkdir -p "$libc_dir/plugin-runtime"
+  write_binary "$libc_dir/foton" 9.8.7
+  printf 'incomplete\n' > "$libc_dir/plugin-runtime/foton-plugin-api.jar"
+  : > "$FOTON_INSTALL_CURL_LOG"
+  (
+    cd "$libc_dir"
+    FOTON_TEST_LIBC=$libc bash "$REPO/site/static/install.sh" --update > "$SCRATCH/libc-$libc.log" 2>&1
+  )
+  grep -q "^Asset for this machine: $expected\$" "$SCRATCH/libc-$libc.log"
+  grep -q "/$expected\$" "$FOTON_INSTALL_CURL_LOG"
+  if [ -n "$note" ]; then
+    grep -q "$note" "$SCRATCH/libc-$libc.log"
+    grep -q 'Plugins need the glibc build' "$SCRATCH/libc-$libc.log"
+  else
+    ! grep -q 'musl' "$SCRATCH/libc-$libc.log"
+  fi
+}
+check_libc glibc-2.36 foton-linux-x86_64-gnu ''
+check_libc glibc-2.35 foton-linux-x86_64-gnu ''
+check_libc glibc-2.40 foton-linux-x86_64-gnu ''
+check_libc ldd-glibc-2.39 foton-linux-x86_64-gnu ''
+check_libc glibc-2.31 foton-linux-x86_64-musl 'glibc 2.31 is older than 2.35'
+check_libc musl foton-linux-x86_64-musl 'this system has no glibc'
 
 # Pre-existing control paths are untrusted. Links must be rejected before
 # recovery and must never make cleanup remove content outside the destination.

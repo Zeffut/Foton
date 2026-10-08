@@ -230,6 +230,34 @@ runtime_is_complete() {
     && [ "$runtime_manifest_entries" -eq "$runtime_actual_entries" ]
 }
 
+# Prints the system's glibc version (e.g. 2.36), or nothing without glibc.
+# musl's getconf and ldd answer differently, so Alpine falls through.
+glibc_version() {
+  glibc_found=$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '$1 == "glibc" { print $2; exit }')
+  if [ -z "$glibc_found" ]; then
+    glibc_found=$(ldd --version 2>&1 | awk 'NR == 1 && /GLIBC|GNU libc/ { print $NF; exit }')
+  fi
+  case "$glibc_found" in
+    [0-9]*.[0-9]*) printf '%s' "$glibc_found" ;;
+  esac
+}
+
+# glibc_at_least <version> <major> <minor>
+glibc_at_least() {
+  glibc_rest=${1#*.}
+  glibc_major=${1%%.*}
+  glibc_minor=${glibc_rest%%[!0-9]*}
+  case "$glibc_major$glibc_minor" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$glibc_major" -gt "$2" ] || { [ "$glibc_major" -eq "$2" ] && [ "$glibc_minor" -ge "$3" ]; }
+}
+
+# Said before the download and again at the end, where it is not lost above
+# the install transcript: the server runs, but plugins cannot.
+musl_plugin_note() {
+  [ -n "${MUSL_REASON:-}" ] || return 0
+  red "note: $MUSL_REASON, so this is the static musl build. It cannot load a JVM, so plugins will not run. Plugins need the glibc build (glibc 2.35 or newer: Debian 12, Ubuntu 22.04, Raspberry Pi OS bookworm and later)."
+}
+
 # Windows has no native POSIX shell, so this script only ever runs there
 # inside Git Bash, MSYS2 or Cygwin, which report one of these uname strings.
 # WSL reports plain "Linux" and needs no special case: the Linux binary is
@@ -247,7 +275,25 @@ case "$(uname -m)" in
 esac
 
 case "$OS" in
-  linux)   ASSET="foton-linux-$ARCH-musl" ;;
+  linux)
+    # Plugins need a JVM, and only a dynamically linked glibc binary can load
+    # libjvm.so. The release glibc builds need at least the glibc of the
+    # runner that links them (2.35); the static musl build runs anywhere but
+    # cannot host plugins, so it is the fallback.
+    GLIBC=$(glibc_version)
+    if [ -z "$GLIBC" ]; then
+      MUSL_REASON="this system has no glibc"
+    elif ! glibc_at_least "$GLIBC" 2 35; then
+      MUSL_REASON="this system's glibc $GLIBC is older than 2.35"
+    else
+      MUSL_REASON=""
+    fi
+    if [ -n "$MUSL_REASON" ]; then
+      ASSET="foton-linux-$ARCH-musl"
+    else
+      ASSET="foton-linux-$ARCH-gnu"
+    fi
+    ;;
   windows)
     [ "$ARCH" = x86_64 ] || die "Windows builds are x86_64 only for now; yours is $ARCH"
     ASSET="foton-windows-x86_64.exe"
@@ -493,6 +539,7 @@ BASE="https://github.com/$REPO/releases/download/$TAG"
 
 printf 'Latest release: %s\n' "$TAG"
 printf 'Asset for this machine: %s\n' "$ASSET"
+musl_plugin_note
 
 if [ "$UPDATE" -eq 1 ]; then
   [ -x "./$BIN" ] || die "--update must run inside an existing installation"
@@ -608,6 +655,7 @@ if ! rm -rf "$TRANSACTION_DIR"; then
   red "warning: committed transaction cleanup remains at $TRANSACTION_DIR"
 fi
 bold "Installed $TAG to ./$BIN with the optional plugin runtime in ./plugin-runtime/"
+musl_plugin_note
 
 if [ "$UPDATE" -eq 1 ]; then
   bold "Updated. Your config/, plugins/ and saves/ were left alone."
