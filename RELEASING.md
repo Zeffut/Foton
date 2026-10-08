@@ -85,7 +85,8 @@ What it does, in order, stopping at the first failure:
    stand-alone`.
 5. **Builds the Linux musl binary in a container**, so the result is static and
    runs on any distribution without a runtime. This is why a laptop can produce
-   a Linux artifact at all.
+   a Linux artifact at all. A static binary cannot load a JVM, so it cannot host
+   plugins; the glibc `-gnu` builds can, and only CI builds them for release.
 6. **Packages the plugin API and its pinned runtime libraries** in `.tar.gz`
    and `.zip` forms, with the complete third-party license/notices and an
    exhaustive internal checksum manifest. The runtime is exactly the API jar
@@ -93,20 +94,22 @@ What it does, in order, stopping at the first failure:
    transitive runtime closure and the five Netty modules used by the direct
    Via transport bridge.
 7. **Writes `SHA256SUMS`** over every artifact.
-8. **Prints platform coverage**: which of the seven release assets (below) it
+8. **Prints platform coverage**: which of the nine release assets (below) it
    is about to publish and which are missing, so a partial release is never
    mistaken for a complete one. CI publishes only its complete matrix;
    `--dry-run` still permits inspecting a partial local set.
 9. **Dispatches the Build Release workflow** for the exact verified
-   `origin/master` commit. CI builds all five platforms, repeats the checks,
+   `origin/master` commit. CI builds all seven platform binaries, repeats the checks,
    creates the immutable tag and attaches the complete asset set.
 
-A full release has five platform binaries and two plugin-runtime archives:
+A full release has seven platform binaries and two plugin-runtime archives:
 
 | Asset | Platform | Built by |
 |-------|----------|----------|
-| `foton-linux-x86_64-musl` | Linux, Intel/AMD | a laptop (Docker) or CI |
-| `foton-linux-aarch64-musl` | Linux, ARM | CI only (`ubuntu-24.04-arm` runner) |
+| `foton-linux-x86_64-gnu` | Linux glibc, Intel/AMD, **plugins** | CI only (`ubuntu-22.04` runner) |
+| `foton-linux-aarch64-gnu` | Linux glibc, ARM (Raspberry Pi), **plugins** | CI only (`ubuntu-22.04-arm` runner) |
+| `foton-linux-x86_64-musl` | Linux static, Intel/AMD, no plugins | a laptop (Docker) or CI |
+| `foton-linux-aarch64-musl` | Linux static, ARM, no plugins | CI only (`ubuntu-24.04-arm` runner) |
 | `foton-macos-aarch64` | macOS, Apple Silicon | a laptop (native) or CI |
 | `foton-macos-x86_64` | macOS, Intel | CI only (cross-compiled from `macos-latest`) |
 | `foton-windows-x86_64.exe` | Windows, Intel/AMD | CI only |
@@ -121,7 +124,12 @@ ViaVersion and ViaBackwards are opt-in operator plugins and are not bundled.
 (protocol 774) client through the unmodified official 5.11.0 JARs to Foton 26.2
 (protocol 776), followed by a native 26.2 join while both plugins remain active.
 
-A laptop can produce two of the five platform binaries: its native binary and
+The glibc builds run on an old runner image on purpose: a binary needs at least
+the glibc it was linked against, so building on Ubuntu 22.04 (glibc 2.35) keeps
+them loadable on Raspberry Pi OS bookworm (glibc 2.36) and anything newer.
+Never move them to `ubuntu-latest`.
+
+A laptop can produce two of the seven platform binaries: its native binary and
 `foton-linux-x86_64-musl` through the container. The other platforms need
 GitHub Actions. `dev/release.sh` prints the locally available subset, then asks
 the "Build Release" workflow to build and publish the complete set. A dry run

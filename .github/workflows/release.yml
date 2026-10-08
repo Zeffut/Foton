@@ -162,7 +162,21 @@ jobs:
     strategy:
       matrix:
         include:
-          # Static musl builds so no distribution's libc matters.
+          # glibc builds, the only Linux binaries that can load a JVM and so
+          # host plugins. Built on Ubuntu 22.04 (glibc 2.35): a binary links
+          # against the glibc it was built with, so an older builder runs on
+          # anything newer, including Raspberry Pi OS bookworm (glibc 2.36).
+          # Never move these to ubuntu-latest.
+          - name: foton-linux-x86_64-gnu
+            os: ubuntu-22.04
+            artifact: foton
+            target: x86_64-unknown-linux-gnu
+          - name: foton-linux-aarch64-gnu
+            os: ubuntu-22.04-arm
+            artifact: foton
+            target: aarch64-unknown-linux-gnu
+          # Static musl builds so no distribution's libc matters. A static
+          # binary cannot dlopen libjvm.so, so these cannot host plugins.
           - name: foton-linux-x86_64-musl
             os: ubuntu-latest
             artifact: foton
@@ -190,6 +204,8 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: ${{ matrix.name }}
       - name: Install musl toolchain
         if: contains(matrix.target, 'musl')
         run: |
@@ -229,6 +245,8 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release
+          mv artifacts/foton-linux-x86_64-gnu/foton release/foton-linux-x86_64-gnu
+          mv artifacts/foton-linux-aarch64-gnu/foton release/foton-linux-aarch64-gnu
           mv artifacts/foton-linux-x86_64-musl/foton release/foton-linux-x86_64-musl
           mv artifacts/foton-linux-aarch64-musl/foton release/foton-linux-aarch64-musl
           mv artifacts/foton-windows-x86_64/foton.exe release/foton-windows-x86_64.exe
@@ -265,7 +283,9 @@ jobs:
         run: |
           expected_assets=(
             SHA256SUMS
+            foton-linux-aarch64-gnu
             foton-linux-aarch64-musl
+            foton-linux-x86_64-gnu
             foton-linux-x86_64-musl
             foton-macos-aarch64
             foton-macos-x86_64

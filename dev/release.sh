@@ -81,7 +81,11 @@ case "$HOST_ARCH" in
 esac
 case "$(uname -s)" in
   Darwin) HOST_NAME="foton-macos-$HOST_ARCH" ;;
-  Linux)  HOST_NAME="foton-linux-$HOST_ARCH" ;;
+  # A host build links the host libc: gnu loads a JVM (plugins), musl cannot.
+  Linux)  case "$(rustc -vV | sed -n 's/^host: //p')" in
+            *-musl) HOST_NAME="foton-linux-$HOST_ARCH-musl" ;;
+            *)      HOST_NAME="foton-linux-$HOST_ARCH-gnu" ;;
+          esac ;;
   *) die "unsupported build host: $(uname -s)" ;;
 esac
 cp "$TARGET_DIR/release/foton" "$OUT/$HOST_NAME"
@@ -153,6 +157,8 @@ say "Platform coverage"
 # A laptop cannot cross-compile to Windows or to the other Mac architecture --
 # say so plainly rather than publishing a partial release that looks complete.
 ALL_ASSETS=(
+  foton-linux-x86_64-gnu
+  foton-linux-aarch64-gnu
   foton-linux-x86_64-musl
   foton-linux-aarch64-musl
   foton-macos-aarch64
@@ -171,7 +177,7 @@ for asset in "${ALL_ASSETS[@]}"; do
   fi
 done
 if [ "$MISSING" -eq 1 ]; then
-  printf '\nThis is a partial release. A full release with all seven assets comes\n'
+  printf '\nThis is a partial release. A full release with all nine assets comes\n'
   printf 'from the "Build Release" GitHub Actions workflow, not from this script.\n'
 fi
 

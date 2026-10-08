@@ -138,6 +138,16 @@ grep -q 'already exists for this exact commit; leaving it immutable' "$WORKFLOW"
 grep -q 'partial or unexpected release asset set' "$WORKFLOW"
 grep -q 'different SHA256SUMS manifest' "$WORKFLOW"
 grep -q 'fails SHA256SUMS' "$WORKFLOW"
+# Plugins need a JVM, which only the glibc Linux builds can load. They must be
+# linked on a runner whose glibc is no newer than Raspberry Pi OS bookworm's
+# (2.36), or the Pi refuses to start the binary.
+for gnu_build in 'foton-linux-x86_64-gnu ubuntu-22.04' 'foton-linux-aarch64-gnu ubuntu-22.04-arm'; do
+  gnu_name=${gnu_build% *}
+  gnu_runner=${gnu_build#* }
+  [ "$(grep -A2 -- "- name: $gnu_name\$" "$WORKFLOW" | sed -n 's/^ *os: //p')" = "$gnu_runner" ] \
+    || { echo "$gnu_name must be built on $gnu_runner" >&2; exit 1; }
+  grep -q "release/$gnu_name\$" "$WORKFLOW"
+done
 [ "$(grep -c 'git ls-remote --tags origin' "$FIXTURE/dev/release.sh")" -eq 2 ]
 for workflow in "$WORKFLOW" "$REPO/.github/workflows/test.yml" \
   "$REPO/.github/workflows/docker-build.yml" "$REPO/.github/workflows/docs.yml"; do
@@ -401,7 +411,7 @@ printf '"%s"\n' "$argfile_source" > "$ARGFILE_DIR/sources.txt"
 javac -d "$ARGFILE_DIR/classes" "@$ARGFILE_DIR/sources.txt"
 [ -f "$ARGFILE_DIR/classes/SpacedSource.class" ]
 
-# Reusing an immutable GitHub release is allowed only when all eight assets
+# Reusing an immutable GitHub release is allowed only when all ten assets
 # exist and every downloaded payload matches the published checksum manifest.
 RELEASE_REUSE_SCRIPT="$SCRATCH/release-reuse.sh"
 tr -d '\r' < "$WORKFLOW" | awk '
@@ -416,7 +426,8 @@ REUSE_FIXTURE="$SCRATCH/reuse-release"
 REUSE_REMOTE="$SCRATCH/reuse-remote"
 REUSE_BIN="$SCRATCH/reuse-bin"
 mkdir -p "$REUSE_FIXTURE/release" "$REUSE_REMOTE" "$REUSE_BIN"
-for asset in foton-linux-aarch64-musl foton-linux-x86_64-musl \
+for asset in foton-linux-aarch64-gnu foton-linux-aarch64-musl \
+  foton-linux-x86_64-gnu foton-linux-x86_64-musl \
   foton-macos-aarch64 foton-macos-x86_64 foton-plugin-runtime.tar.gz \
   foton-plugin-runtime.zip foton-windows-x86_64.exe; do
   printf 'asset %s\n' "$asset" > "$REUSE_FIXTURE/release/$asset"
@@ -434,7 +445,7 @@ if [ "${1:-}" = api ]; then
       printf '%s\n' "$TEST_RELEASE_SHA"
       ;;
     */releases/tags/*)
-      assets='[{"name":"SHA256SUMS"},{"name":"foton-linux-aarch64-musl"},{"name":"foton-linux-x86_64-musl"},{"name":"foton-macos-aarch64"},{"name":"foton-macos-x86_64"},{"name":"foton-plugin-runtime.tar.gz"},{"name":"foton-plugin-runtime.zip"},{"name":"foton-windows-x86_64.exe"}]'
+      assets='[{"name":"SHA256SUMS"},{"name":"foton-linux-aarch64-gnu"},{"name":"foton-linux-aarch64-musl"},{"name":"foton-linux-x86_64-gnu"},{"name":"foton-linux-x86_64-musl"},{"name":"foton-macos-aarch64"},{"name":"foton-macos-x86_64"},{"name":"foton-plugin-runtime.tar.gz"},{"name":"foton-plugin-runtime.zip"},{"name":"foton-windows-x86_64.exe"}]'
       if [ "$TEST_RELEASE_MODE" = partial ]; then
         assets='[{"name":"SHA256SUMS"},{"name":"foton-linux-aarch64-musl"}]'
       fi
