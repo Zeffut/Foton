@@ -19,7 +19,10 @@ use foton_utils::Identifier;
 use crate::tcp_client::{ConnectionAction, ConnectionUpdate, JavaTcpClient};
 use foton_core::event::AsyncPlayerPreLoginEvent;
 
-const BRAND_PAYLOAD: [u8; 5] = *b"Foton";
+/// The `minecraft:brand` payload: a protocol string, its `VarInt` length then
+/// the UTF-8 bytes. Vanilla parity: `BrandPayload` writes it with `writeUtf`,
+/// and a client reading a bare name fails the whole connection.
+const BRAND_PAYLOAD: [u8; 6] = *b"\x05Foton";
 
 impl JavaTcpClient {
     /// Handles a custom payload packet during the configuration state.
@@ -170,5 +173,23 @@ impl JavaTcpClient {
         self.server.queue_player_join(player);
 
         ConnectionAction::upgrade(connection)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use foton_utils::codec::VarInt;
+    use foton_utils::serial::PrefixedRead as _;
+
+    use super::BRAND_PAYLOAD;
+
+    #[test]
+    fn brand_payload_is_a_whole_protocol_string() {
+        let mut data = Cursor::new(&BRAND_PAYLOAD[..]);
+        let brand = String::read_prefixed::<VarInt>(&mut data).expect("brand string");
+        assert_eq!(brand, "Foton");
+        assert_eq!(data.position() as usize, BRAND_PAYLOAD.len());
     }
 }

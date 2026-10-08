@@ -39,6 +39,7 @@ LOGIN_C_COMPRESSION = 3
 LOGIN_S_HELLO = 0
 LOGIN_S_ACKNOWLEDGED = 3
 
+CONFIG_C_CUSTOM_PAYLOAD = 1
 CONFIG_C_DISCONNECT = 2
 CONFIG_C_FINISH = 3
 CONFIG_C_KEEP_ALIVE = 4
@@ -394,6 +395,22 @@ def run_login(connection):
             print(f"  (login packet {packet_id} ignored)")
 
 
+def note_custom_payload(payload):
+    """Decodes a custom payload the way the vanilla client would.
+
+    The client decodes `minecraft:brand` as a protocol string and drops the
+    connection when the bytes are not exactly one: a bare name read as its own
+    length prefix is what "Failed to decode packet ... (minecraft:brand)" is.
+    """
+    channel, rest = read_string(payload)
+    if channel != "minecraft:brand":
+        return
+    length, body = read_varint(rest)
+    if length != len(body):
+        fail(f"the brand payload is not one protocol string: length {length}, {len(body)} bytes follow")
+    print(f"  server brand: {body.decode('utf-8', 'replace')}")
+
+
 def run_configuration(connection):
     """Walks the configuration state until the server hands over to play."""
     connection.send(CONFIG_S_CLIENT_INFORMATION, client_information())
@@ -412,6 +429,8 @@ def run_configuration(connection):
             connection.send(CONFIG_S_KEEP_ALIVE, payload)
         elif packet_id == CONFIG_C_PING:
             connection.send(CONFIG_S_PONG, payload)
+        elif packet_id == CONFIG_C_CUSTOM_PAYLOAD:
+            note_custom_payload(payload)
         elif packet_id == CONFIG_C_DISCONNECT:
             fail(f"disconnected during configuration: {payload[:200]!r}")
         else:
