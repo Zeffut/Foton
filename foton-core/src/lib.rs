@@ -52,6 +52,7 @@ pub mod stat;
 #[cfg(test)]
 #[path = "../tests/support/mod.rs"]
 pub(crate) mod test_support;
+pub mod text_json;
 pub mod trading;
 pub mod world;
 pub mod worldgen;
