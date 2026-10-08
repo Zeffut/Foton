@@ -455,6 +455,73 @@ public final class FotonPlayer extends foton.entity.CraftPlayer implements org.b
         else Native.kickPlayer(id.toString(), answer);
     }
 
+    @Override
+    public void setResourcePack(String url, byte[] hash, String prompt, boolean force) {
+        java.util.Objects.requireNonNull(url, "url");
+        setResourcePack(UUID.nameUUIDFromBytes(url.getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+            url, hash, prompt, force);
+    }
+
+    @Override
+    public void setResourcePack(UUID id, String url, byte[] hash, String prompt, boolean force) {
+        setResourcePack(id, url, hash, prompt == null ? null
+            : net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacySection().deserialize(prompt), force);
+    }
+
+    @Override
+    public void setResourcePack(UUID id, String url, byte[] hash, net.kyori.adventure.text.Component prompt, boolean force) {
+        sendResourcePacks(packRequest(id, url, hash, prompt, force, true));
+    }
+
+    @Override
+    public void addResourcePack(UUID id, String url, byte[] hash, String prompt, boolean force) {
+        sendResourcePacks(packRequest(id, url, hash, prompt == null ? null
+            : net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacySection().deserialize(prompt),
+            force, false));
+    }
+
+    private static net.kyori.adventure.resource.ResourcePackRequest packRequest(UUID id, String url, byte[] hash,
+            net.kyori.adventure.text.Component prompt, boolean required, boolean replace) {
+        java.util.Objects.requireNonNull(id, "id");
+        java.util.Objects.requireNonNull(url, "url");
+        return net.kyori.adventure.resource.ResourcePackRequest.resourcePackRequest()
+            .required(required)
+            .replace(replace)
+            .prompt(prompt)
+            .packs(net.kyori.adventure.resource.ResourcePackInfo.resourcePackInfo(
+                id, java.net.URI.create(url), FotonResourcePacks.hex(hash)))
+            .build();
+    }
+
+    @Override
+    public void sendResourcePacks(net.kyori.adventure.resource.ResourcePackRequest request) {
+        FotonResourcePacks.send(id, request, this);
+    }
+
+    @Override
+    public void removeResourcePack(UUID pack) {
+        FotonResourcePacks.remove(id, java.util.Objects.requireNonNull(pack, "id"));
+    }
+
+    @Override
+    public void removeResourcePacks(UUID pack, UUID... others) {
+        removeResourcePack(pack);
+        if (others != null) for (UUID other : others) removeResourcePack(other);
+    }
+
+    @Override
+    public void removeResourcePacks() { FotonResourcePacks.remove(id, null); }
+
+    @Override
+    public void clearResourcePacks() { FotonResourcePacks.remove(id, null); }
+
+    @Override
+    public org.bukkit.event.player.PlayerResourcePackStatusEvent.Status getResourcePackStatus() {
+        int status = Native.resourcePackStatus(id.toString());
+        var statuses = org.bukkit.event.player.PlayerResourcePackStatusEvent.Status.values();
+        return status < 0 || status >= statuses.length ? null : statuses[status];
+    }
+
     private static final java.util.Map<UUID, org.bukkit.scoreboard.Scoreboard> SCOREBOARDS =
         new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -819,6 +886,7 @@ public final class FotonPlayer extends foton.entity.CraftPlayer implements org.b
             if (OPEN_SESSION_GENERATIONS.getOrDefault(id, 0L) != sessionGeneration) return;
             OPEN_SESSION_GENERATIONS.remove(id);
             PERMISSIONS.remove(sessionKey());
+            FotonResourcePacks.forget(id);
         }
     }
 

@@ -40,9 +40,10 @@ use foton_core::event::{
     PlayerFishEvent, PlayerInteractEntityEvent, PlayerItemBreakEvent, PlayerJoinEvent,
     PlayerLocaleChangeEvent, PlayerLoginAbortEvent, PlayerLoginEvent, PlayerMoveEvent,
     PlayerOpenSignCause, PlayerOpenSignEvent, PlayerPortalEvent, PlayerQuitEvent,
-    PlayerRespawnEvent, PlayerSpawnLocationEvent, PlayerTakeLecternBookEvent, PortalCreateEvent,
-    PreCreatureSpawnEvent, PrepareItemCraftEvent, PrepareItemEnchantEvent, ProjectileLaunchEvent,
-    ServerTickEvent, SignChangeEvent, ThunderChangeEvent, WeatherChangeEvent,
+    PlayerResourcePackStatusEvent, PlayerRespawnEvent, PlayerSpawnLocationEvent,
+    PlayerTakeLecternBookEvent, PortalCreateEvent, PreCreatureSpawnEvent, PrepareItemCraftEvent,
+    PrepareItemEnchantEvent, ProjectileLaunchEvent, ServerTickEvent, SignChangeEvent,
+    ThunderChangeEvent, WeatherChangeEvent,
 };
 use foton_core::event::{
     PlayerChangedWorldEvent, PlayerCommandSendEvent, PlayerGameModeChangeEvent, PlayerItemHeldEvent,
@@ -1138,6 +1139,16 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
             event.player().gameprofile.id,
             event.old_locale(),
             event.new_locale(),
+        );
+    });
+
+    let jvm = Arc::clone(&vm);
+    events.on::<PlayerResourcePackStatusEvent, _>(owner(), move |event| {
+        resource_pack_status_call(
+            &jvm,
+            event.player().gameprofile.id,
+            event.pack(),
+            event.action() as i32,
         );
     });
 
@@ -3043,6 +3054,28 @@ fn client_loaded_world_call(vm: &JavaVM, player: uuid::Uuid, from_networking: bo
         Ok(value) => value.z().unwrap_or(true),
         Err(_) => true,
     }
+}
+
+fn resource_pack_status_call(vm: &JavaVM, player: uuid::Uuid, pack: uuid::Uuid, status: i32) {
+    let Some(mut env) = BridgeEnv::attach(vm) else {
+        return;
+    };
+    let Ok(player) = env.new_string(player.to_string()) else {
+        return;
+    };
+    let Ok(pack) = env.new_string(pack.to_string()) else {
+        return;
+    };
+    let _ = env.call_static_method(
+        BRIDGE,
+        "fireResourcePackStatus",
+        "(Ljava/lang/String;Ljava/lang/String;I)V",
+        &[
+            JValue::Object(&player),
+            JValue::Object(&pack),
+            JValue::Int(status),
+        ],
+    );
 }
 
 fn locale_change_call(vm: &JavaVM, player: uuid::Uuid, old_locale: &str, new_locale: &str) {

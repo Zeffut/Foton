@@ -32,7 +32,10 @@ use foton_protocol::{
     },
     packet_writer::TCPNetworkEncoder,
     packets::{
-        common::{CDisconnect, SClientInformation, SCustomPayload, SPingRequest},
+        common::{
+            CDisconnect, ResourcePackAction, SClientInformation, SCustomPayload, SPingRequest,
+            SResourcePack,
+        },
         config::SSelectKnownPacks,
         handshake::{ClientIntent, SClientIntention},
         login::{CLoginDisconnect, SHello, SKey},
@@ -252,6 +255,9 @@ pub struct JavaTcpClient {
     pub connection_updated: Arc<Notify>,
 
     pub(crate) pre_play_state: SyncMutex<PrePlayState>,
+    /// What the client said about resource packs while configuring, for the
+    /// player it becomes to hear about.
+    pub(crate) resource_pack_answers: SyncMutex<Vec<(Uuid, ResourcePackAction)>>,
     /// The hostname the client's handshake declared, captured so the login
     /// handler can check it for an encrypted Floodgate payload.
     pub(crate) hostname: SyncMutex<String>,
@@ -350,6 +356,7 @@ impl JavaTcpClient {
             connection_updates,
             connection_updated: Arc::new(Notify::new()),
             pre_play_state: SyncMutex::new(PrePlayState::new()),
+            resource_pack_answers: SyncMutex::new(Vec::new()),
             hostname: SyncMutex::new(String::new()),
             bedrock,
             connection_lifetime: ConnectionLifetimePermit::new(connection_permit),
@@ -1117,6 +1124,9 @@ impl JavaTcpClient {
                     .await;
                 Ok(ConnectionAction::none())
             }
+            config::S_RESOURCE_PACK => Ok(self
+                .handle_resource_pack_response(SResourcePack::read_packet(data)?)
+                .await),
             config::S_FINISH_CONFIGURATION => {
                 if let Err(error) = self.expect_pre_play_packet(PrePlayPacket::FinishConfiguration)
                 {

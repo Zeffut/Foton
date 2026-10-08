@@ -95,6 +95,7 @@ mod tests {
             chunk_generation_threads: None,
             chunk_encoding_threads: None,
             bug_report_webhook: None,
+            resource_pack: None,
         }
     }
 

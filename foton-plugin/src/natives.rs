@@ -213,6 +213,7 @@ mod merchants;
 mod particles;
 mod persistent_data;
 mod players;
+mod resource_packs;
 mod support;
 use crate::item_components;
 use crate::scoreboard_natives;
@@ -16567,6 +16568,7 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
     bindings.extend(merchants::bindings());
     bindings.extend(persistent_data::bindings());
     bindings.extend(players::bindings());
+    bindings.extend(resource_packs::bindings());
     // Beside the table rather than in it: the packet tap is its own module.
     bindings.extend(packet_tap::bindings());
     bindings
@@ -16740,6 +16742,7 @@ pub(crate) mod entity_bridge_tests {
             chunk_generation_threads: Some(1),
             chunk_encoding_threads: Some(1),
             bug_report_webhook: None,
+            resource_pack: None,
         })
     }
 

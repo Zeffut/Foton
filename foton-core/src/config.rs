@@ -25,6 +25,7 @@ use text_components::TextComponent;
 use toml::map::Map;
 
 use crate::chunk_saver::registry::WorldStorageRegistry;
+use crate::resource_pack::ServerResourcePack;
 use crate::worldgen::registry::{ValidatedWorldGeneratorConfig, WorldGeneratorRegistry};
 
 /// Error returned when online mode is configured without its authentication handshake.
@@ -132,6 +133,8 @@ pub struct RuntimeConfig {
     pub chunk_encoding_threads: Option<usize>,
     /// Where filed bug reports are forwarded, if anywhere.
     pub bug_report_webhook: Option<BugReportWebhook>,
+    /// The resource pack every client is asked to load during configuration.
+    pub resource_pack: Option<ServerResourcePack>,
 }
 
 impl RuntimeConfig {

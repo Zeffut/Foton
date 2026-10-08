@@ -16,12 +16,47 @@ public abstract class CraftPlayer implements org.bukkit.entity.Player, net.kyori
     @Override public abstract void resetTitle();
     @Override public abstract void showTitle(net.kyori.adventure.title.Title title);
     @Override public abstract void sendMessage(net.kyori.adventure.text.Component message);
+    @Override public abstract void sendResourcePacks(net.kyori.adventure.resource.ResourcePackRequest request);
+    @Override public abstract void removeResourcePacks(java.util.UUID id, java.util.UUID... others);
+    @Override public abstract void clearResourcePacks();
 
     // Player and Audience both carry these as defaults; Player's are the ones
     // that reach the client, so they are chosen here, where Player is direct.
     @Override
     public void sendSignChange(org.bukkit.Location location, String[] lines, org.bukkit.DyeColor color) {
         org.bukkit.entity.Player.super.sendSignChange(location, lines, color);
+    }
+
+    @Override
+    public void sendResourcePacks(net.kyori.adventure.resource.ResourcePackRequestLike request) {
+        org.bukkit.entity.Player.super.sendResourcePacks(request);
+    }
+
+    @Override
+    public void sendResourcePacks(net.kyori.adventure.resource.ResourcePackInfoLike first,
+            net.kyori.adventure.resource.ResourcePackInfoLike... others) {
+        org.bukkit.entity.Player.super.sendResourcePacks(first, others);
+    }
+
+    @Override
+    public void removeResourcePacks(Iterable<java.util.UUID> ids) {
+        org.bukkit.entity.Player.super.removeResourcePacks(ids);
+    }
+
+    @Override
+    public void removeResourcePacks(net.kyori.adventure.resource.ResourcePackRequestLike request) {
+        org.bukkit.entity.Player.super.removeResourcePacks(request);
+    }
+
+    @Override
+    public void removeResourcePacks(net.kyori.adventure.resource.ResourcePackRequest request) {
+        org.bukkit.entity.Player.super.removeResourcePacks(request);
+    }
+
+    @Override
+    public void removeResourcePacks(net.kyori.adventure.resource.ResourcePackInfoLike first,
+            net.kyori.adventure.resource.ResourcePackInfoLike... others) {
+        org.bukkit.entity.Player.super.removeResourcePacks(first, others);
     }
 
     @Override

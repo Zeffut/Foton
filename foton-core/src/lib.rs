@@ -46,12 +46,14 @@ pub mod player;
 pub mod poi;
 pub(crate) mod portal;
 pub mod raid;
+pub mod resource_pack;
 pub mod scoreboard;
 pub mod server;
 pub mod stat;
 #[cfg(test)]
 #[path = "../tests/support/mod.rs"]
 pub(crate) mod test_support;
+pub mod text_json;
 pub mod trading;
 pub mod world;
 pub mod worldgen;

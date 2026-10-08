@@ -34,6 +34,7 @@ pub(crate) fn test_runtime_config(max_players: u32) -> Arc<RuntimeConfig> {
         chunk_generation_threads: Some(1),
         chunk_encoding_threads: Some(1),
         bug_report_webhook: None,
+        resource_pack: None,
     })
 }
 

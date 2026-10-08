@@ -6,6 +6,76 @@ import org.bukkit.command.CommandSender;
 
 /** A player on the server, as a plugin sees one. */
 public interface Player extends HumanEntity, org.bukkit.OfflinePlayer {
+    // Resource packs. Every overload funnels into the four abstract ones, as in
+    // Paper; a hash is the pack's SHA-1, hex-encoded, at most 40 characters.
+    default void setResourcePack(String url) { setResourcePack(url, (byte[]) null); }
+    default void setResourcePack(String url, byte[] hash) { setResourcePack(url, hash, false); }
+    default void setResourcePack(String url, byte[] hash, String prompt) { setResourcePack(url, hash, prompt, false); }
+    default void setResourcePack(String url, byte[] hash, net.kyori.adventure.text.Component prompt) {
+        setResourcePack(url, hash, prompt, false);
+    }
+    default void setResourcePack(String url, byte[] hash, boolean force) { setResourcePack(url, hash, (String) null, force); }
+    void setResourcePack(String url, byte[] hash, String prompt, boolean force);
+    default void setResourcePack(String url, byte[] hash, net.kyori.adventure.text.Component prompt, boolean force) {
+        setResourcePack(java.util.UUID.nameUUIDFromBytes(url.getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+            url, hash, prompt, force);
+    }
+    void setResourcePack(java.util.UUID id, String url, byte[] hash, String prompt, boolean force);
+    void setResourcePack(java.util.UUID id, String url, byte[] hash, net.kyori.adventure.text.Component prompt, boolean force);
+    default void setResourcePack(String url, String hash) { setResourcePack(url, hash, false); }
+    default void setResourcePack(String url, String hash, boolean required) { setResourcePack(url, hash, required, null); }
+    default void setResourcePack(String url, String hash, boolean required, net.kyori.adventure.text.Component prompt) {
+        setResourcePack(java.util.UUID.nameUUIDFromBytes(url.getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+            url, hash, prompt, required);
+    }
+    default void setResourcePack(java.util.UUID id, String url, String hash,
+            net.kyori.adventure.text.Component prompt, boolean required) {
+        sendResourcePacks(net.kyori.adventure.resource.ResourcePackRequest.resourcePackRequest()
+            .required(required)
+            .replace(true)
+            .prompt(prompt)
+            .packs(net.kyori.adventure.resource.ResourcePackInfo.resourcePackInfo(id, java.net.URI.create(url), hash))
+            .build());
+    }
+    /** What the client last reported about a pack, or null before it has said anything. */
+    org.bukkit.event.player.PlayerResourcePackStatusEvent.Status getResourcePackStatus();
+    /** Always null: the client no longer sends the hash back. */
+    @Deprecated(forRemoval = true)
+    default String getResourcePackHash() { return null; }
+    default boolean hasResourcePack() {
+        return getResourcePackStatus() == org.bukkit.event.player.PlayerResourcePackStatusEvent.Status.SUCCESSFULLY_LOADED;
+    }
+    void addResourcePack(java.util.UUID id, String url, byte[] hash, String prompt, boolean force);
+    void removeResourcePack(java.util.UUID id);
+    void removeResourcePacks();
+    // Adventure's Audience carries these; a plugin built against Paper names
+    // them on Player, so Player has to answer to them too.
+    void sendResourcePacks(net.kyori.adventure.resource.ResourcePackRequest request);
+    default void sendResourcePacks(net.kyori.adventure.resource.ResourcePackRequestLike request) {
+        sendResourcePacks(request.asResourcePackRequest());
+    }
+    default void sendResourcePacks(net.kyori.adventure.resource.ResourcePackInfoLike first,
+            net.kyori.adventure.resource.ResourcePackInfoLike... others) {
+        sendResourcePacks(net.kyori.adventure.resource.ResourcePackRequest.addingRequest(first, others));
+    }
+    void removeResourcePacks(java.util.UUID id, java.util.UUID... others);
+    default void removeResourcePacks(Iterable<java.util.UUID> ids) {
+        for (java.util.UUID id : ids) removeResourcePack(id);
+    }
+    default void removeResourcePacks(net.kyori.adventure.resource.ResourcePackRequestLike request) {
+        removeResourcePacks(request.asResourcePackRequest());
+    }
+    default void removeResourcePacks(net.kyori.adventure.resource.ResourcePackRequest request) {
+        for (net.kyori.adventure.resource.ResourcePackInfo pack : request.packs()) removeResourcePack(pack.id());
+    }
+    default void removeResourcePacks(net.kyori.adventure.resource.ResourcePackInfoLike first,
+            net.kyori.adventure.resource.ResourcePackInfoLike... others) {
+        removeResourcePack(first.asResourcePackInfo().id());
+        for (net.kyori.adventure.resource.ResourcePackInfoLike other : others)
+            removeResourcePack(other.asResourcePackInfo().id());
+    }
+    void clearResourcePacks();
+
     default void playEffect(org.bukkit.EntityEffect effect) { }
     default void playEffect(org.bukkit.Location location, org.bukkit.Effect effect, Object data) {
         if (location != null && location.getWorld() != null && data instanceof Number number)

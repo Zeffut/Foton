@@ -14,7 +14,7 @@ use foton_protocol::packet_traits::{
 use foton_protocol::packet_writer::TCPNetworkEncoder;
 use foton_protocol::packets::common::{
     CDisconnect, CKeepAlive, CPongResponse, SClientInformation, SCustomClickAction, SCustomPayload,
-    SKeepAlive, SPingRequest,
+    SKeepAlive, SPingRequest, SResourcePack,
 };
 use foton_protocol::packets::game::{
     CBundleDelimiter, CCommandSuggestions, ClientCommandAction, PlayerAction, PlayerCommandAction,
@@ -837,6 +837,7 @@ enum ScheduledPlayPacketKind {
     Interact(SInteract),
     CustomClickAction(SCustomClickAction),
     CustomPayload(SCustomPayload),
+    ResourcePack(SResourcePack),
     Chat(Box<SChat>),
     ChatAck(SChatAck),
     ChatSessionUpdate(SChatSessionUpdate),
@@ -1013,6 +1014,7 @@ impl ScheduledPlayPacket {
             | ScheduledPlayPacketKind::Interact(_)
             | ScheduledPlayPacketKind::CustomClickAction(_)
             | ScheduledPlayPacketKind::CustomPayload(_)
+            | ScheduledPlayPacketKind::ResourcePack(_)
             | ScheduledPlayPacketKind::ContainerButtonClick(_)
             | ScheduledPlayPacketKind::SelectTrade(_) => ScheduledPacketExecution::Exclusive,
         }
@@ -1027,6 +1029,7 @@ impl ScheduledPlayPacket {
                 | ScheduledPlayPacketKind::ClientTickEnd
                 | ScheduledPlayPacketKind::CustomClickAction(_)
                 | ScheduledPlayPacketKind::CustomPayload(_)
+                | ScheduledPlayPacketKind::ResourcePack(_)
                 | ScheduledPlayPacketKind::ChatAck(_)
                 | ScheduledPlayPacketKind::ChatSessionUpdate(_)
                 | ScheduledPlayPacketKind::PlayerLoaded
@@ -1141,6 +1144,7 @@ impl ScheduledPlayPacket {
             ScheduledPlayPacketKind::CustomPayload(packet) => {
                 player.handle_custom_payload(packet);
             }
+            ScheduledPlayPacketKind::ResourcePack(packet) => player.handle_resource_pack(packet),
             ScheduledPlayPacketKind::Chat(packet) => {
                 player.handle_chat(*packet, Arc::clone(&player));
             }
@@ -1843,6 +1847,7 @@ impl JavaConnection {
                 | play::S_PING_REQUEST
                 | play::S_CLIENT_INFORMATION
                 | play::S_CUSTOM_PAYLOAD
+                | play::S_RESOURCE_PACK
                 | play::S_CHUNK_BATCH_RECEIVED
                 | play::S_CHAT_SESSION_UPDATE
                 | play::S_CHAT_ACK
@@ -1948,6 +1953,9 @@ impl JavaConnection {
             )),
             play::S_CUSTOM_PAYLOAD => scheduled(ScheduledPlayPacketKind::CustomPayload(
                 SCustomPayload::read_packet(data)?,
+            )),
+            play::S_RESOURCE_PACK => scheduled(ScheduledPlayPacketKind::ResourcePack(
+                SResourcePack::read_packet(data)?,
             )),
             play::S_CHAT => scheduled(ScheduledPlayPacketKind::Chat(Box::new(SChat::read_packet(
                 data,

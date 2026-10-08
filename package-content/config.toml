@@ -93,6 +93,22 @@ jar_path = ""
 # The token the endpoint expects. Without it the post is rejected.
 # webhook_token = ""
 
+# The resource pack every client is asked to load while it joins. These are the
+# resource-pack* and require-resource-pack entries of vanilla's server.properties.
+[server.resource_pack]
+# Where clients download the pack from. Empty sends no pack.
+url = ""
+# The pack's UUID. Empty derives one from the URL, as vanilla does.
+id = ""
+# The pack file's SHA-1 in hex. Clients cache the pack by it; without one they
+# only refresh it when the URL changes.
+sha1 = ""
+# Text on the confirmation screen, as vanilla text component JSON,
+# for example '{"text":"Zelda Civ resources","color":"gold"}'.
+prompt = ""
+# Whether a client that declines the pack is disconnected.
+required = false
+
 # Optional worker counts for server thread pools. 0 or omitted uses each pool's automatic default.
 [server.threads]
 # Worker threads for the primary Tokio runtime.
