@@ -377,6 +377,38 @@
             }
           },
           "additionalProperties": false
+        },
+        "resource_pack": {
+          "type": "object",
+          "description": "The resource pack every client is asked to load while it joins. Replaces the resource-pack* and require-resource-pack entries of vanilla's server.properties",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "Where clients download the pack from (resource-pack). Empty sends no pack",
+              "default": ""
+            },
+            "id": {
+              "type": "string",
+              "description": "The pack's UUID (resource-pack-id). Empty derives one from the URL, as vanilla does",
+              "default": ""
+            },
+            "sha1": {
+              "type": "string",
+              "description": "The pack file's SHA-1 in hex, at most 40 characters (resource-pack-sha1). Clients cache the pack by it; without one they only refresh it when the URL changes",
+              "default": ""
+            },
+            "prompt": {
+              "type": "string",
+              "description": "Text on the confirmation screen, as vanilla text component JSON (resource-pack-prompt)",
+              "default": ""
+            },
+            "required": {
+              "type": "boolean",
+              "description": "Whether a client that declines the pack is disconnected (require-resource-pack)",
+              "default": false
+            }
+          },
+          "additionalProperties": false
         }
       },
       "required": [

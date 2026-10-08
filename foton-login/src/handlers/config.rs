@@ -1,5 +1,6 @@
 //! Configuration state packet handlers.
 
+use std::mem;
 use std::sync::Arc;
 
 use foton_core::entity::next_entity_id;
@@ -8,18 +9,26 @@ use foton_core::player::PlayerConnection;
 use foton_core::player::connection::JavaConnection;
 use foton_core::player::{ClientInformation, Player};
 use foton_protocol::packets::common::CCustomPayload;
-use foton_protocol::packets::common::{SClientInformation, SCustomPayload};
+use foton_protocol::packets::common::{
+    ResourcePackAction, SClientInformation, SCustomPayload, SResourcePack,
+};
 use foton_protocol::packets::config::CFinishConfiguration;
 use foton_protocol::packets::config::CSelectKnownPacks;
 use foton_protocol::packets::config::SSelectKnownPacks;
 use foton_protocol::packets::shared_implementation::KnownPack;
 use foton_protocol::utils::ConnectionProtocol;
-use foton_utils::Identifier;
+use foton_utils::{Identifier, translations};
 
 use crate::tcp_client::{ConnectionAction, ConnectionUpdate, JavaTcpClient};
 use foton_core::event::AsyncPlayerPreLoginEvent;
 
 const BRAND_PAYLOAD: [u8; 5] = *b"Foton";
+
+/// How many answers about packs a client in configuration is remembered for.
+///
+/// A client sends a handful per pack; the cap only stops one that never
+/// stops from growing the list.
+const MAX_RESOURCE_PACK_ANSWERS: usize = 32;
 
 impl JavaTcpClient {
     /// Handles a custom payload packet during the configuration state.
@@ -74,7 +83,11 @@ impl JavaTcpClient {
 
     /// Handles the select known packs packet during the configuration state.
     pub async fn handle_select_known_packs(&self, packet: SSelectKnownPacks) {
-        let sequence_result = self.pre_play_state.lock().select_known_packs();
+        let resource_pack = self.server.config.resource_pack.as_ref();
+        let sequence_result = self
+            .pre_play_state
+            .lock()
+            .select_known_packs(resource_pack.is_some());
         if let Err(error) = sequence_result {
             self.reject_unexpected_packet(error).await;
             return;
@@ -90,8 +103,61 @@ impl JavaTcpClient {
         self.send_packet_now(&self.server.registry_cache.tags_packet)
             .await;
 
-        // Finish configuration with CFinishConfigurationPacket
+        // Vanilla parity: `ServerResourcePackConfigurationTask` runs between
+        // registry synchronization and the end of configuration, and the client's
+        // verdict on the pack is what lets configuration go on.
+        match resource_pack {
+            Some(pack) => self.send_bare_packet_now(pack.push_packet()).await,
+            None => self.send_bare_packet_now(CFinishConfiguration {}).await,
+        }
+    }
+
+    /// Handles the client's answer to a resource pack during configuration.
+    ///
+    /// Vanilla parity: `ServerConfigurationPacketListenerImpl.handleResourcePackResponse`.
+    /// Progress reports are fine at any time; an answer that ends the exchange
+    /// finishes the pack task, so it is only valid while one is running.
+    pub(crate) async fn handle_resource_pack_response(
+        &self,
+        packet: SResourcePack,
+    ) -> ConnectionAction {
+        if packet.action == ResourcePackAction::Declined
+            && self
+                .server
+                .config
+                .resource_pack
+                .as_ref()
+                .is_some_and(|pack| pack.required)
+        {
+            log::info!(
+                "Disconnecting client {} due to resource pack {} rejection",
+                self.id,
+                packet.id
+            );
+            self.kick(
+                translations::MULTIPLAYER_REQUIRED_TEXTURE_PROMPT_DISCONNECT
+                    .msg()
+                    .into(),
+            )
+            .await;
+            return ConnectionAction::none();
+        }
+
+        {
+            let mut answers = self.resource_pack_answers.lock();
+            if answers.len() < MAX_RESOURCE_PACK_ANSWERS {
+                answers.push((packet.id, packet.action));
+            }
+        }
+        if !packet.action.is_terminal() {
+            return ConnectionAction::none();
+        }
+        let sequence_result = self.pre_play_state.lock().finish_resource_pack();
+        if let Err(error) = sequence_result {
+            return self.reject_unexpected_packet(error).await;
+        }
         self.send_bare_packet_now(CFinishConfiguration {}).await;
+        ConnectionAction::none()
     }
 
     /// Finishes the configuration process and transitions to the play state.
@@ -111,6 +177,7 @@ impl JavaTcpClient {
         self.protocol.store(ConnectionProtocol::Play);
 
         let client_info = self.client_information.lock().await.clone();
+        let resource_pack_answers = mem::take(&mut *self.resource_pack_answers.lock());
 
         let world = self.server.overworld().clone();
         let entity_id = next_entity_id();
@@ -140,6 +207,8 @@ impl JavaTcpClient {
                 player_weak,
             )
         });
+
+        player.adopt_configuration_resource_pack(resource_pack_answers);
 
         if let Some(tap) = self.server.packet_taps.current() {
             tap.playing(self.id, player.gameprofile.id, entity_id);

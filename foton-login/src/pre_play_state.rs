@@ -21,6 +21,8 @@ pub(crate) enum LoginPhase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ConfigurationPhase {
     SynchronizeRegistries,
+    /// Waiting for the client to finish with the server's resource pack.
+    ServerResourcePack,
     JoinWorld,
 }
 
@@ -47,6 +49,9 @@ impl Display for PrePlayPhase {
             Self::Configuration(ConfigurationPhase::SynchronizeRegistries) => {
                 formatter.write_str("known-pack negotiation")
             }
+            Self::Configuration(ConfigurationPhase::ServerResourcePack) => {
+                formatter.write_str("resource pack download")
+            }
             Self::Configuration(ConfigurationPhase::JoinWorld) => {
                 formatter.write_str("configuration finish")
             }
@@ -63,6 +68,8 @@ pub(crate) enum PrePlayPacket {
     Key,
     LoginAcknowledged,
     SelectKnownPacks,
+    /// A resource pack answer that ends the exchange.
+    ResourcePackOutcome,
     FinishConfiguration,
 }
 
@@ -75,6 +82,7 @@ impl Display for PrePlayPacket {
             Self::Key => formatter.write_str("key packet"),
             Self::LoginAcknowledged => formatter.write_str("login acknowledgement"),
             Self::SelectKnownPacks => formatter.write_str("known-pack selection"),
+            Self::ResourcePackOutcome => formatter.write_str("resource pack outcome"),
             Self::FinishConfiguration => formatter.write_str("configuration acknowledgement"),
         }
     }
@@ -186,6 +194,13 @@ impl PrePlayState {
                 )
                 | (
                     State::Configuration {
+                        phase: ConfigurationPhase::ServerResourcePack,
+                        ..
+                    },
+                    PrePlayPacket::ResourcePackOutcome
+                )
+                | (
+                    State::Configuration {
                         phase: ConfigurationPhase::JoinWorld,
                         ..
                     },
@@ -267,10 +282,29 @@ impl PrePlayState {
         }
     }
 
-    pub(crate) fn select_known_packs(&mut self) -> Result<(), PacketSequenceError> {
+    /// Accepts the client's known-pack answer. With a server resource pack to
+    /// send, configuration waits for the client's verdict on it before it ends.
+    pub(crate) fn select_known_packs(
+        &mut self,
+        resource_pack: bool,
+    ) -> Result<(), PacketSequenceError> {
         self.expect(PrePlayPacket::SelectKnownPacks)?;
         let State::Configuration { phase, .. } = &mut self.state else {
             return Err(self.unexpected(PrePlayPacket::SelectKnownPacks));
+        };
+        *phase = if resource_pack {
+            ConfigurationPhase::ServerResourcePack
+        } else {
+            ConfigurationPhase::JoinWorld
+        };
+        Ok(())
+    }
+
+    /// Accepts a terminal resource pack answer, which ends that configuration task.
+    pub(crate) fn finish_resource_pack(&mut self) -> Result<(), PacketSequenceError> {
+        self.expect(PrePlayPacket::ResourcePackOutcome)?;
+        let State::Configuration { phase, .. } = &mut self.state else {
+            return Err(self.unexpected(PrePlayPacket::ResourcePackOutcome));
         };
         *phase = ConfigurationPhase::JoinWorld;
         Ok(())
@@ -357,7 +391,7 @@ mod tests {
             .acknowledge_login()
             .expect("client should acknowledge login");
         state
-            .select_known_packs()
+            .select_known_packs(false)
             .expect("client should select known packs");
         let accepted = state
             .finish_configuration()
@@ -379,7 +413,7 @@ mod tests {
             .acknowledge_login()
             .expect("client should acknowledge login");
         state
-            .select_known_packs()
+            .select_known_packs(false)
             .expect("client should select known packs");
         let accepted = state
             .finish_configuration()
@@ -424,6 +458,37 @@ mod tests {
     }
 
     #[test]
+    fn a_server_resource_pack_holds_configuration_until_it_is_answered() {
+        let mut state = login_state();
+        state
+            .complete_login(profile(offline_uuid("Steve"), "Steve"))
+            .expect("offline profile should complete login");
+        state
+            .acknowledge_login()
+            .expect("client should acknowledge login");
+
+        // An answer that ends the exchange means nothing before a pack was sent.
+        assert!(state.finish_resource_pack().is_err());
+
+        state
+            .select_known_packs(true)
+            .expect("client should select known packs");
+        assert_eq!(
+            state.phase(),
+            PrePlayPhase::Configuration(ConfigurationPhase::ServerResourcePack)
+        );
+        assert!(state.finish_configuration().is_err());
+
+        state
+            .finish_resource_pack()
+            .expect("the pack's verdict should end that task");
+        assert!(state.finish_resource_pack().is_err());
+        state
+            .finish_configuration()
+            .expect("client should finish configuration");
+    }
+
+    #[test]
     fn repeated_packets_do_not_advance_the_sequence() {
         let mut state = login_state();
         state
@@ -457,9 +522,9 @@ mod tests {
         );
 
         state
-            .select_known_packs()
+            .select_known_packs(false)
             .expect("client should select known packs");
-        assert!(state.select_known_packs().is_err());
+        assert!(state.select_known_packs(false).is_err());
         assert_eq!(
             state.phase(),
             PrePlayPhase::Configuration(ConfigurationPhase::JoinWorld)

@@ -102,6 +102,18 @@ Where player-filed bug reports are sent, on top of the local file
 | `webhook_url` | string |  |  | Endpoint each filed report is posted to; unset keeps reports local |
 | `webhook_token` | string |  |  | Optional bearer token sent with each post |
 
+#### `[server.resource_pack]`
+
+The resource pack every client is asked to load while it joins. Replaces the resource-pack* and require-resource-pack entries of vanilla's server.properties
+
+| Key | Type | Default | Range | Meaning |
+|---|---|---|---|---|
+| `url` | string | `""` |  | Where clients download the pack from (resource-pack). Empty sends no pack |
+| `id` | string | `""` |  | The pack's UUID (resource-pack-id). Empty derives one from the URL, as vanilla does |
+| `sha1` | string | `""` |  | The pack file's SHA-1 in hex, at most 40 characters (resource-pack-sha1). Clients cache the pack by it; without one they only refresh it when the URL changes |
+| `prompt` | string | `""` |  | Text on the confirmation screen, as vanilla text component JSON (resource-pack-prompt) |
+| `required` | boolean | `false` |  | Whether a client that declines the pack is disconnected (require-resource-pack) |
+
 ### `[log]`
 
 Logging configuration

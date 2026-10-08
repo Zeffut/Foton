@@ -6,13 +6,10 @@ import org.bukkit.event.HandlerList;
 
 /** Fired when a client reports what it did with a resource pack.
  *
- * <p>Foton sends no resource packs, so nothing constructs this yet. It exists
- * anyway, and the reason is worth stating rather than leaving as dead weight:
- * a listener class references every event type in its method signatures, so a
- * plugin registering a listener with one `PlayerResourcePackStatusEvent`
- * handler fails to register *all* of its handlers when the class is missing.
- * The absent class costs the plugin its other features; the present one costs
- * only the feature that was never there.
+ * <p>This is one of the exchanges a pack push starts: the client accepts it,
+ * downloads it, then loads it or fails to, and each report arrives here.
+ * Reports made while the player was still configuring, which is where the
+ * server's own pack is answered, are delivered right after the player joins.
  */
 public class PlayerResourcePackStatusEvent extends PlayerEvent {
     /** What the client did with the pack.
@@ -53,6 +50,12 @@ public class PlayerResourcePackStatusEvent extends PlayerEvent {
 
     public Status getStatus() {
         return status;
+    }
+
+    /** Always null: the client no longer sends the hash back. */
+    @Deprecated(forRemoval = true)
+    public String getHash() {
+        return null;
     }
 
     @Override public HandlerList getHandlers() { return HANDLERS; }

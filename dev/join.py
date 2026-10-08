@@ -15,6 +15,7 @@ import io
 import json
 import socket
 import time
+import uuid
 import struct
 import sys
 import zlib
@@ -40,6 +41,9 @@ LOGIN_S_HELLO = 0
 LOGIN_S_ACKNOWLEDGED = 3
 
 CONFIG_C_DISCONNECT = 2
+CONFIG_C_RESOURCE_PACK_POP = 8
+CONFIG_C_RESOURCE_PACK_PUSH = 9
+CONFIG_S_RESOURCE_PACK = 6
 CONFIG_C_FINISH = 3
 CONFIG_C_KEEP_ALIVE = 4
 CONFIG_C_PING = 5
@@ -51,6 +55,9 @@ CONFIG_S_PONG = 5
 CONFIG_S_SELECT_KNOWN_PACKS = 7
 
 PLAY_C_ADD_ENTITY = 1
+PLAY_C_RESOURCE_PACK_POP = 80
+PLAY_C_RESOURCE_PACK_PUSH = 81
+PLAY_S_RESOURCE_PACK = 49
 PLAY_C_CHUNK_BATCH_FINISHED = 11
 PLAY_C_LOGIN = 49
 PLAY_C_DISCONNECT = 32
@@ -364,6 +371,65 @@ def client_information(skin_parts=0x7F, main_hand=1):
     )
 
 
+# Vanilla parity: `ServerboundResourcePackPacket.Action`, in its order.
+PACK_ACTIONS = [
+    "successful", "declined", "failed_download", "accepted",
+    "downloaded", "invalid_url", "failed_reload", "discarded",
+]
+
+# What this client answers to a resource pack push, in order, comma separated:
+# any of the names above. The default is a client that takes the pack.
+PACK_RESPONSES = [
+    name for name in os.environ.get("JOIN_PACK_RESPONSES", "accepted,downloaded,successful").split(",")
+    if name
+]
+
+# The same, for pushes that arrive once the player is in the world; by default
+# the client answers them as it answered the one in configuration.
+PLAY_PACK_RESPONSES = [
+    name for name in os.environ.get("JOIN_PLAY_PACK_RESPONSES", ",".join(PACK_RESPONSES)).split(",")
+    if name
+]
+
+
+def printable(payload):
+    """The readable runs of a packet, for text that arrives as NBT."""
+    text = bytes(byte if 32 <= byte < 127 else 0x20 for byte in payload).decode("ascii")
+    return " ".join(word for word in text.split() if len(word) >= 3)
+
+
+def read_pack_push(payload):
+    """Splits a `ClientboundResourcePackPushPacket`: id, url, hash, required, prompt."""
+    pack_id = str(uuid.UUID(bytes=payload[:16]))
+    url, rest = read_string(payload[16:])
+    sha1, rest = read_string(rest)
+    required = bool(rest[0])
+    has_prompt = bool(rest[1])
+    prompt = printable(rest[2:]) if has_prompt else None
+    return pack_id, url, sha1, required, prompt
+
+
+def note_resource_pack(connection, phase, packet_id, payload):
+    """Reports a pack push or pop, and answers a push the way JOIN_PACK_RESPONSES says.
+
+    The same two packets arrive in configuration and in play; only the ids
+    differ, and the answer goes out under the phase's own serverbound id.
+    """
+    if packet_id in (CONFIG_C_RESOURCE_PACK_POP, PLAY_C_RESOURCE_PACK_POP):
+        popped = str(uuid.UUID(bytes=payload[1:17])) if payload[0] else "all"
+        print(f"  [{phase}] resource pack popped: {popped}")
+        return
+    pack_id, url, sha1, required, prompt = read_pack_push(payload)
+    print(
+        f"  [{phase}] resource pack pushed: id={pack_id} url={url} sha1={sha1!r} "
+        f"required={required} prompt={prompt!r}"
+    )
+    answer_id = CONFIG_S_RESOURCE_PACK if phase == "configuration" else PLAY_S_RESOURCE_PACK
+    for name in PACK_RESPONSES if phase == "configuration" else PLAY_PACK_RESPONSES:
+        connection.send(answer_id, uuid.UUID(pack_id).bytes + varint(PACK_ACTIONS.index(name)))
+        print(f"  [{phase}] answered {name}")
+
+
 def fail(message):
     print(f"JOIN FAILED: {message}")
     sys.exit(1)
@@ -412,8 +478,10 @@ def run_configuration(connection):
             connection.send(CONFIG_S_KEEP_ALIVE, payload)
         elif packet_id == CONFIG_C_PING:
             connection.send(CONFIG_S_PONG, payload)
+        elif packet_id in (CONFIG_C_RESOURCE_PACK_PUSH, CONFIG_C_RESOURCE_PACK_POP):
+            note_resource_pack(connection, "configuration", packet_id, payload)
         elif packet_id == CONFIG_C_DISCONNECT:
-            fail(f"disconnected during configuration: {payload[:200]!r}")
+            fail(f"disconnected during configuration: {printable(payload)}")
         else:
             registry_packets += 1
 
@@ -660,6 +728,8 @@ def run_play(connection, watch_seconds=0):
             note_system_chat(payload)
         elif packet_id == PLAY_C_PLAYER_CHAT:
             note_player_chat(payload)
+        elif packet_id in (PLAY_C_RESOURCE_PACK_PUSH, PLAY_C_RESOURCE_PACK_POP):
+            note_resource_pack(connection, "play", packet_id, payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:
             connection.send(PLAY_S_KEEP_ALIVE, payload)
         elif packet_id == PLAY_C_DISCONNECT:
@@ -1017,6 +1087,8 @@ def pump(connection, seconds, spawned):
             note_system_chat(payload)
         elif packet_id == PLAY_C_PLAYER_CHAT:
             note_player_chat(payload)
+        elif packet_id in (PLAY_C_RESOURCE_PACK_PUSH, PLAY_C_RESOURCE_PACK_POP):
+            note_resource_pack(connection, "play", packet_id, payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:
             connection.send(PLAY_S_KEEP_ALIVE, payload)
         elif packet_id == PLAY_C_DISCONNECT:
@@ -2356,6 +2428,8 @@ def watch_for_spawns(connection, seconds, spawned):
             note_system_chat(payload)
         elif packet_id == PLAY_C_PLAYER_CHAT:
             note_player_chat(payload)
+        elif packet_id in (PLAY_C_RESOURCE_PACK_PUSH, PLAY_C_RESOURCE_PACK_POP):
+            note_resource_pack(connection, "play", packet_id, payload)
         elif packet_id == PLAY_C_KEEP_ALIVE:
             connection.send(PLAY_S_KEEP_ALIVE, payload)
         elif packet_id == PLAY_C_DISCONNECT:

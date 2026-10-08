@@ -157,6 +157,9 @@ impl Server {
         if let Some(message) = event.into_message() {
             self.broadcast_system_chat(&message, Some(uuid));
         }
+        // The server's pack is answered in configuration, before there is a
+        // player to tell a listener about.
+        player.announce_configuration_resource_pack();
     }
 
     /// Announces a player's departure, after anything listening has had its say.

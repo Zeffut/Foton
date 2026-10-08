@@ -25,6 +25,7 @@ pub mod player_data_storage;
 pub mod player_inventory;
 mod profile;
 pub mod recipe_book;
+mod resource_pack;
 mod shoulder;
 mod sleep;
 mod sleep_state;
@@ -377,6 +378,9 @@ pub struct Player {
     /// list by uuid; Foton keeps it on the player and restores it from the
     /// save, the same way the advancements above are handled.
     stats: SyncMutex<StatsCounter>,
+
+    /// What the client has said about resource packs.
+    resource_packs: SyncMutex<resource_pack::ResourcePackState>,
 }
 
 // SAFETY: This key is owned by Foton and uniquely identifies `Player`.
@@ -659,6 +663,7 @@ impl Player {
                 vec![ItemStack::empty(); PlayerInventory::CONTAINER_SIZE].into_boxed_slice(),
             ),
             stats: SyncMutex::new(StatsCounter::new()),
+            resource_packs: SyncMutex::new(resource_pack::ResourcePackState::default()),
         }
     }
 

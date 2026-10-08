@@ -843,6 +843,13 @@ public final class Native {
     public static native void sendTitleComponents(String uuid, String titleJson, String subtitleJson,
         int fadeIn, int stay, int fadeOut);
     public static native void kickPlayerComponent(String uuid, String json);
+    /** Pushes a resource pack; a null prompt shows none. False when the packet cannot be sent. */
+    public static native boolean sendResourcePack(String uuid, String pack, String url, String hash,
+        boolean required, String promptJson);
+    /** Pops one pack, or every pack when {@code pack} is null. */
+    public static native void removeResourcePacks(String uuid, String pack);
+    /** The ordinal of the client's last reported pack status, or -1 before it reported any. */
+    public static native int resourcePackStatus(String uuid);
     public static native void setPlayerListNameComponent(String uuid, String json);
     public static native void setPlayerListHeaderFooterComponents(String uuid, String header, String footer);
     public static native void setEntityGliding(String uuid, boolean gliding);

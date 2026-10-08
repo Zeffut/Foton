@@ -83,6 +83,9 @@ public final class PacketProbe extends JavaPlugin implements Listener {
         getCommand("probespawn").setExecutor(new SpawnProbe(facts));
         getCommand("probeitems").setExecutor(new ItemProbe(facts));
         getCommand("probebanner").setExecutor(new BannerProbe(facts));
+        ResourcePackProbe packs = new ResourcePackProbe(facts);
+        getServer().getPluginManager().registerEvents(packs, this);
+        getCommand("proberp").setExecutor(packs);
     }
 
     @EventHandler

@@ -55,6 +55,7 @@ pub mod menus;
 /// How a player moves, and the server correcting it.
 pub mod movement;
 pub mod player;
+mod resource_pack;
 pub mod server;
 /// Events about a world rather than anyone in it.
 pub mod world;
@@ -109,6 +110,7 @@ pub use player::{
     PlayerMoveEvent, PlayerOpenSignCause, PlayerOpenSignEvent, PlayerPortalEvent, PlayerQuitEvent,
     PlayerRespawnEvent, PlayerSpawnLocationEvent, UseResult,
 };
+pub use resource_pack::PlayerResourcePackStatusEvent;
 pub use server::{ServerListPingEvent, ServerTickEvent};
 pub use world::{
     ChunkLoadEvent, ChunkPopulateEvent, ChunkUnloadEvent, PortalCreateEvent, ThunderChangeEvent,

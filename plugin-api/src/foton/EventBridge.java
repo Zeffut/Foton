@@ -705,6 +705,17 @@ public final class EventBridge {
         return !event.isCancelled();
     }
 
+    /** A client answered a resource pack. The callbacks a request carried hear
+     * first, so a listener has the final say. */
+    public static void fireResourcePackStatus(String uuid, String pack, int status) {
+        org.bukkit.event.player.PlayerResourcePackStatusEvent.Status[] statuses =
+            org.bukkit.event.player.PlayerResourcePackStatusEvent.Status.values();
+        if (status < 0 || status >= statuses.length) return;
+        UUID packId = UUID.fromString(pack);
+        FotonResourcePacks.received(UUID.fromString(uuid), packId, statuses[status]);
+        dispatch(new org.bukkit.event.player.PlayerResourcePackStatusEvent(player(uuid), packId, statuses[status]));
+    }
+
     /** A player spoke. Returns the message, or null when a plugin stopped it. */
     public static void fireLocaleChange(String uuid, String oldLocale, String locale) {
         dispatch(new org.bukkit.event.player.PlayerLocaleChangeEvent(player(uuid), oldLocale, locale));

@@ -36,3 +36,5 @@ commands:
     description: Spawns two cows in love mode beside the player.
   probebanner:
     description: Walks the Banner block state pattern API on a banner placed beside the player.
+  proberp:
+    description: Pushes, pops and reports resource packs through the Player API.

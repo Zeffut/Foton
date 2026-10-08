@@ -11,6 +11,7 @@ use foton_core::{
     config::{
         BugReportWebhook, CompressionInfo, RuntimeConfig, ServerLinks, validate_login_security,
     },
+    resource_pack::ServerResourcePack,
 };
 use reqwest::Url;
 use serde::Deserialize;
@@ -93,6 +94,42 @@ pub struct ServerConfig {
     /// Where player-filed bug reports are sent, on top of the local file.
     #[serde(default)]
     pub bug_reports: BugReportsConfig,
+    /// The resource pack every client is asked to load.
+    #[serde(default)]
+    pub resource_pack: ResourcePackConfig,
+}
+
+/// The server resource pack.
+///
+/// Vanilla parity: the `resource-pack`, `resource-pack-id`,
+/// `resource-pack-sha1`, `resource-pack-prompt` and `require-resource-pack`
+/// entries of `server.properties`, which this table replaces one for one.
+/// Leaving `url` empty sends no pack.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ResourcePackConfig {
+    /// Where clients download the pack from.
+    pub url: String,
+    /// The pack's UUID; empty derives one from the URL, as vanilla does.
+    pub id: String,
+    /// The pack's SHA-1 in hex. Clients cache by it.
+    pub sha1: String,
+    /// Text shown on the confirmation screen, as vanilla component JSON.
+    pub prompt: String,
+    /// Whether a client that declines the pack is disconnected.
+    pub required: bool,
+}
+
+impl ResourcePackConfig {
+    pub(super) fn into_server_pack(self) -> Result<Option<ServerResourcePack>, String> {
+        ServerResourcePack::from_settings(
+            &self.url,
+            &self.id,
+            &self.sha1,
+            &self.prompt,
+            self.required,
+        )
+    }
 }
 
 /// Where player-filed bug reports go once they are on disk.
@@ -154,6 +191,7 @@ impl ServerConfig {
             None
         };
         let bug_report_webhook = self.bug_reports.into_webhook()?;
+        let resource_pack = self.resource_pack.into_server_pack()?;
         Ok(RuntimeConfig {
             max_players: self.max_players,
             view_distance: self.view_distance,
@@ -179,6 +217,7 @@ impl ServerConfig {
             chunk_generation_threads: self.threads.chunk_generation,
             chunk_encoding_threads: self.threads.chunk_encoding,
             bug_report_webhook,
+            resource_pack,
         })
     }
 }
