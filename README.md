@@ -32,6 +32,14 @@ irm https://foton.zeffut.fr/install.ps1 | iex
 
 Or from source: `cargo run -p foton`.
 
+On Linux the installer picks the **glibc** build (`foton-linux-x86_64-gnu` or
+`foton-linux-aarch64-gnu`, built against glibc 2.35 so it also runs on Raspberry
+Pi OS bookworm) when the system has glibc 2.35 or newer, and the static **musl**
+build (`foton-linux-x86_64-musl`, `foton-linux-aarch64-musl`) otherwise, for
+example on Alpine. A static binary cannot load a JVM, so **only the glibc build
+can run [plugins](#javapaper-plugins)**; the musl build says so at startup if a
+plugin directory is configured.
+
 ## Contributing
 
 The engineering rules are in [`AGENTS.md`](AGENTS.md), the bar a change has to
@@ -73,6 +81,11 @@ FOTON_PLUGIN_DIRECTORY=./plugins
 FOTON_JAVA_HOME=/path/to/jdk
 cargo run
 ```
+
+Plugins need the **glibc** Linux release (`foton-linux-*-gnu`), a macOS or
+Windows build, or a source build on a glibc system. The static `-musl` Linux
+assets and the Alpine-based Docker image cannot dlopen `libjvm.so` and refuse
+to start the plugin host with an error saying so.
 
 The JVM must be **Java 21 or newer** -- the API jar is compiled with
 `--release 21`, matching what Paper 26.2 itself requires.

@@ -27,6 +27,7 @@
         </div>
       </div>
       <p>The installer asks for the server name, port, player limit, authentication and difficulty, then creates the configuration files.</p>
+      <p class="rest">On Linux it installs the glibc build when your system has glibc 2.35 or newer (Debian 12, Ubuntu 22.04, Raspberry Pi OS bookworm). That build is the only one that can run Bukkit/Paper plugins. Alpine and other systems without a suitable glibc get a static musl build, which runs the server but not plugins.</p>
     </div>
   </section>
 
