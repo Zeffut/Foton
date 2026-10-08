@@ -206,6 +206,13 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           key: ${{ matrix.name }}
+      # .cargo/config.toml links *-linux-gnu with lld, which the arm64
+      # Ubuntu image does not ship; the x86_64 image happens to.
+      - name: Install lld for glibc builds
+        if: contains(matrix.target, 'linux-gnu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lld
       - name: Install musl toolchain
         if: contains(matrix.target, 'musl')
         run: |

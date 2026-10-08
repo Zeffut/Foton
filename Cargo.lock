@@ -838,7 +838,7 @@ dependencies = [
 
 [[package]]
 name = "foton"
-version = "0.16.2+mc26.2"
+version = "0.16.3+mc26.2"
 dependencies = [
  "chrono",
  "crossterm",
@@ -874,7 +874,7 @@ dependencies = [
 
 [[package]]
 name = "foton-bedrock"
-version = "0.16.2+mc26.2"
+version = "0.16.3+mc26.2"
 dependencies = [
  "aes-gcm",
  "base64 0.23.0",
@@ -892,7 +892,7 @@ dependencies = [
 
 [[package]]
 name = "foton-core"
-version = "0.16.2+mc26.2"
+version = "0.16.3+mc26.2"
 dependencies = [
  "arc-swap",
  "base64 0.23.0",
@@ -946,7 +946,7 @@ dependencies = [
 
 [[package]]
 name = "foton-crypto"
-version = "0.16.2+mc26.2"
+version = "0.16.3+mc26.2"
 dependencies = [
  "log",
  "rand 0.10.2",
@@ -957,7 +957,7 @@ dependencies = [
 
 [[package]]
 name = "foton-login"
-version = "0.16.2+mc26.2"
+version = "0.16.3+mc26.2"
 dependencies = [
  "base64 0.23.0",
  "crossbeam",
@@ -983,7 +983,7 @@ dependencies = [
 
 [[package]]
 name = "foton-macros"
-version = "0.16.2+mc26.2"
+version = "0.16.3+mc26.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -992,11 +992,11 @@ dependencies = [
 
 [[package]]
 name = "foton-math"
-version = "0.16.2+mc26.2"
+version = "0.16.3+mc26.2"
 
 [[package]]
 name = "foton-plugin"
-version = "0.16.2+mc26.2"
+version = "0.16.3+mc26.2"
 dependencies = [
  "allocation-counter",
  "foton-core",
@@ -1023,7 +1023,7 @@ dependencies = [
 
 [[package]]
 name = "foton-protocol"
-version = "0.16.2+mc26.2"
+version = "0.16.3+mc26.2"
 dependencies = [
  "aes",
  "cfb8",
@@ -1046,7 +1046,7 @@ dependencies = [
 
 [[package]]
 name = "foton-registry"
-version = "0.16.2+mc26.2"
+version = "0.16.3+mc26.2"
 dependencies = [
  "allocation-counter",
  "flate2",
@@ -1068,7 +1068,7 @@ dependencies = [
 
 [[package]]
 name = "foton-utils"
-version = "0.16.2+mc26.2"
+version = "0.16.3+mc26.2"
 dependencies = [
  "allocation-counter",
  "bitflags",
@@ -1104,7 +1104,7 @@ dependencies = [
 
 [[package]]
 name = "foton-worldgen"
-version = "0.16.2+mc26.2"
+version = "0.16.3+mc26.2"
 dependencies = [
  "criterion",
  "foton-math",
