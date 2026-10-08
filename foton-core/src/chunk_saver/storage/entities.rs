@@ -37,7 +37,7 @@ impl ChunkStorage {
         )
     }
 
-    pub(super) fn custom_name_to_persistent(custom_name: Option<&TextComponent>) -> Vec<u8> {
+    pub(crate) fn custom_name_to_persistent(custom_name: Option<&TextComponent>) -> Vec<u8> {
         let Some(custom_name) = custom_name else {
             return Vec::new();
         };
