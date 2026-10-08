@@ -27,6 +27,7 @@ const IDS: &str = "vanilla_translations/ids";
 const REGISTRY: &str = "vanilla_translations/registry";
 const ENTITY_EVENTS: &str = "entity_events";
 const VERSION: &str = "version";
+const VERSION_JSON: &str = "version.json";
 const ASSET_LOCK_TIMEOUT: Duration = Duration::from_mins(5);
 
 #[derive(Deserialize)]
@@ -105,9 +106,15 @@ fn try_acquire_asset_lock(path: &Path) -> Result<Option<AssetLock>, String> {
     }
 }
 
-fn assets_are_valid(version_file: &Path, en_us_dest: &Path, target_ver: &str) -> bool {
+fn assets_are_valid(
+    version_file: &Path,
+    en_us_dest: &Path,
+    version_json_dest: &Path,
+    target_ver: &str,
+) -> bool {
     version_file.exists()
         && en_us_dest.exists()
+        && version_json_dest.exists()
         && fs::read_to_string(version_file).is_ok_and(|v| v.trim() == target_ver)
 }
 
@@ -115,6 +122,7 @@ fn acquire_asset_lock(
     lock_file: &Path,
     version_file: &Path,
     en_us_dest: &Path,
+    version_json_dest: &Path,
     target_ver: &str,
 ) -> Option<AssetLock> {
     let start = Instant::now();
@@ -122,7 +130,7 @@ fn acquire_asset_lock(
         match try_acquire_asset_lock(lock_file) {
             Ok(Some(lock)) => return Some(lock),
             Ok(None) => {
-                if assets_are_valid(version_file, en_us_dest, target_ver) {
+                if assets_are_valid(version_file, en_us_dest, version_json_dest, target_ver) {
                     return None;
                 }
                 assert!(
@@ -244,17 +252,23 @@ fn download_and_extract_assets(manifest_dir: &str) {
     let datapack_dir = datapack_base.join("minecraft");
     let version_file = datapack_dir.join(".version");
     let en_us_dest = build_assets.join("en_us.json");
+    let version_json_dest = build_assets.join(VERSION_JSON);
     let lock_file = build_assets.join(".asset-extract.lock");
 
-    if assets_are_valid(&version_file, &en_us_dest, &target_ver) {
+    if assets_are_valid(&version_file, &en_us_dest, &version_json_dest, &target_ver) {
         return;
     }
 
-    let Some(_lock) = acquire_asset_lock(&lock_file, &version_file, &en_us_dest, &target_ver)
-    else {
+    let Some(_lock) = acquire_asset_lock(
+        &lock_file,
+        &version_file,
+        &en_us_dest,
+        &version_json_dest,
+        &target_ver,
+    ) else {
         return;
     };
-    if assets_are_valid(&version_file, &en_us_dest, &target_ver) {
+    if assets_are_valid(&version_file, &en_us_dest, &version_json_dest, &target_ver) {
         return;
     }
 
@@ -275,6 +289,7 @@ fn download_and_extract_assets(manifest_dir: &str) {
 
     let mut archive = get_server_archive(jar_data);
     let mut extracted_en_us = false;
+    let mut extracted_version_json = false;
 
     for i in 0..archive.len() {
         let mut file = archive
@@ -304,6 +319,12 @@ fn download_and_extract_assets(manifest_dir: &str) {
                 .unwrap_or_else(|e| panic!("Failed to create file {}: {e}", en_us_dest.display()));
             copy(&mut file, &mut out_file).expect("Failed to extract en_us.json");
             extracted_en_us = true;
+        } else if name == VERSION_JSON {
+            let mut out_file = fs::File::create(&version_json_dest).unwrap_or_else(|e| {
+                panic!("Failed to create file {}: {e}", version_json_dest.display())
+            });
+            copy(&mut file, &mut out_file).expect("Failed to extract version.json");
+            extracted_version_json = true;
         }
     }
 
@@ -311,16 +332,35 @@ fn download_and_extract_assets(manifest_dir: &str) {
         extracted_en_us,
         "Failed to find assets/minecraft/lang/en_us.json in server jar"
     );
+    assert!(
+        extracted_version_json,
+        "Failed to find version.json in server jar"
+    );
     fs::write(&version_file, &target_ver).expect("Failed to write version file");
     println!(
         "cargo:warning=Successfully extracted datapack and translation files for Minecraft {target_ver}."
     );
 }
 
-fn build_version_constant() -> String {
+#[derive(Deserialize)]
+struct ServerVersionJson {
+    world_version: i32,
+}
+
+fn build_version_constant(manifest_dir: &str) -> String {
     let target_version = get_target_mc_version();
+    let version_json = Path::new(manifest_dir)
+        .join("build_assets")
+        .join(VERSION_JSON);
+    let json = fs::read_to_string(&version_json)
+        .unwrap_or_else(|e| panic!("Failed to read {}: {e}", version_json.display()));
+    let server: ServerVersionJson = serde_json::from_str(&json)
+        .unwrap_or_else(|e| panic!("Failed to parse {}: {e}", version_json.display()));
+    let world_version = server.world_version;
     format!(
-        "/// The targeted Minecraft version.\npub const MINECRAFT_VERSION: &str = {target_version:?};\n"
+        "/// The targeted Minecraft version.\npub const MINECRAFT_VERSION: &str = {target_version:?};\n\
+         /// The `DataVersion` Minecraft stamps on saved worlds of the targeted version.\n\
+         pub const WORLD_VERSION: i32 = {world_version};\n"
     )
 }
 
@@ -349,7 +389,7 @@ pub fn main() {
     let content = entity_events::build();
     write_if_changed(format!("{OUT_DIR}/{ENTITY_EVENTS}.rs"), content.to_string());
 
-    let content = build_version_constant();
+    let content = build_version_constant(&manifest_dir);
     write_if_changed(format!("{OUT_DIR}/{VERSION}.rs"), content);
 
     if FMT && let Ok(entries) = fs::read_dir(OUT_DIR) {

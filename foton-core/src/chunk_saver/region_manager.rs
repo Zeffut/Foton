@@ -68,6 +68,8 @@ pub struct RegionManager {
     base_path: PathBuf,
     /// Open region file handles with their headers.
     regions: AsyncRwLock<FxHashMap<RegionPos, RegionHandle>>,
+    /// Whether each chunk's data is fsynced before the header that points at it.
+    sync_chunk_data: bool,
     #[cfg(test)]
     directory_sync_failure: SyncMutex<Option<PathBuf>>,
     #[cfg(test)]
@@ -127,6 +129,7 @@ impl RegionManager {
         Self {
             base_path: base_path.into(),
             regions: AsyncRwLock::new(FxHashMap::default()),
+            sync_chunk_data: true,
             #[cfg(test)]
             directory_sync_failure: SyncMutex::new(None),
             #[cfg(test)]
@@ -140,6 +143,20 @@ impl RegionManager {
             #[cfg(test)]
             resume_header_writes: Notify::new(),
         }
+    }
+
+    /// Creates a manager for writing a whole world in one go, as the Anvil
+    /// import does.
+    ///
+    /// Chunk data is not fsynced one chunk at a time. The write that publishes
+    /// a region's chunks still is, and fsyncing a file makes everything written
+    /// to it before durable too, so the header remains the commit point; what
+    /// changes is that a crash may lose the whole batch rather than a chunk.
+    /// The caller is expected to publish the result atomically.
+    pub fn new_for_bulk_write(base_path: impl Into<PathBuf>) -> Self {
+        let mut manager = Self::new(base_path);
+        manager.sync_chunk_data = false;
+        manager
     }
 
     /// Gets the file path for a region.
@@ -590,6 +607,7 @@ impl RegionManager {
         sector_offset: u32,
         data: &[u8],
         file_sectors: &mut u32,
+        sync: bool,
     ) -> io::Result<()> {
         let sectors_used = u32::try_from(data.len().div_ceil(SECTOR_SIZE)).map_err(|_| {
             io::Error::new(
@@ -623,7 +641,9 @@ impl RegionManager {
         // that will point at these sectors is fsynced separately, and the two
         // orderings only mean anything if the data is durable first -- so this
         // one is a real fsync.
-        file.sync_all().await?;
+        if sync {
+            file.sync_all().await?;
+        }
         Ok(())
     }
 
@@ -705,6 +725,7 @@ impl RegionManager {
             sector_offset,
             &compressed,
             &mut handle.file_sectors,
+            self.sync_chunk_data,
         )
         .await;
         let loaded_chunk_count = handle.loaded_chunk_count;
@@ -1442,9 +1463,10 @@ mod tests {
             .expect("test file should be created");
         let mut file_sectors = FIRST_DATA_SECTOR;
 
-        let error = RegionManager::write_chunk_data(&mut file, u32::MAX, &[1], &mut file_sectors)
-            .await
-            .expect_err("a sector range outside the format must be rejected");
+        let error =
+            RegionManager::write_chunk_data(&mut file, u32::MAX, &[1], &mut file_sectors, true)
+                .await
+                .expect_err("a sector range outside the format must be rejected");
 
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
         assert_eq!(file_sectors, FIRST_DATA_SECTOR);

@@ -17,8 +17,9 @@ use std::{env, io, panic, process, thread};
 
 use crossterm::style::Attribute::{Bold, Dim, Reset};
 use crossterm::style::{Color, ResetColor, SetForegroundColor};
-use foton::args::{self, Action};
+use foton::args::{self, Action, USAGE};
 use foton::config::{self, LogConfig};
+use foton::import;
 use foton::logger::CommandLogger;
 use foton::{FotonServer, SERVER, logger::LoggerLayer};
 use foton_core::player::player_data::PersistentPlayerData;
@@ -191,9 +192,21 @@ fn foton_main() {
             println!("wrote config/config.toml, config/worlds.toml and config/groups.toml");
             return;
         }
+        Action::ImportAnvil(import_args) => {
+            if let Err(error) = import::run(import_args) {
+                eprintln!("foton import-anvil: {error}");
+                process::exit(1);
+            }
+            return;
+        }
         Action::Unknown(argument) => {
             eprintln!("foton: unknown argument {argument}");
-            eprintln!("usage: foton [--version] [--generate-config]");
+            eprintln!("{USAGE}");
+            process::exit(2);
+        }
+        Action::Invalid(message) => {
+            eprintln!("foton: {message}");
+            eprintln!("{USAGE}");
             process::exit(2);
         }
     }

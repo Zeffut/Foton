@@ -30,6 +30,7 @@
 //! - **Homogeneous section optimization** (single block type = no bit array)
 //! - **zstd compression** per-chunk for good compression ratios
 
+pub mod anvil;
 mod bit_pack;
 mod format;
 mod nesting;

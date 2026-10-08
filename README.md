@@ -47,6 +47,88 @@ clear is in [`CONTRIBUTING.md`](CONTRIBUTING.md), and
 [`PARITY.md`](PARITY.md) is the honest inventory of where vanilla parity
 actually stands — it opens by explaining how its own measurement used to lie.
 
+## Importing a vanilla or Paper world
+
+Foton keeps worlds in its own region format and has no DataFixer, so it cannot
+open an Anvil (`.mca`) world directly, and it does not convert one between
+Minecraft versions. `foton import-anvil` is the one-way bridge: it reads a
+vanilla or Paper world that is **already at Foton's Minecraft version** and
+writes it into the world storage `config/worlds.toml` configures.
+
+1. **Back up the world.** The next step rewrites it.
+2. **Upgrade it once with the vanilla 26.2 server**, which brings the chunks,
+   the entity files and `level.dat` to the right `DataVersion` in place. Put the
+   world folder where the server expects it (`world/`, or whatever `level-name`
+   names), run it, and stop it once it has finished starting:
+
+   ```
+   java -jar server.jar --forceUpgrade nogui
+   ```
+
+   A Paper map that keeps its dimensions in separate folders (`world`,
+   `world_nether`, `world_the_end`) needs this once per folder. Paper 26.2
+   itself cannot do this step: it does not implement `--forceUpgrade`.
+   `foton import-anvil` checks the version of `level.dat` and of every chunk and
+   entity file, and refuses a world that is not current with a message telling
+   you to do this; it writes nothing in that case.
+
+   Two things worth knowing, both seen when testing against a Paper 1.21.11 map:
+
+   - After upgrading, the vanilla server loads the spawn area and any forced
+     chunks and saves them back with only the data vanilla knows, which drops
+     Paper's plugin data (`ChunkBukkitValues`, `PublicBukkitValues`,
+     `BukkitValues`) in those chunks. If the map keeps plugin data there,
+     run `/forceload remove all` in each dimension and `/gamerule
+     spawnChunkRadius 0` on the old Paper server first, then stop it. Chunks
+     that only the upgrader touched keep everything.
+   - `--forceUpgrade` can leave a chunk behind at the old `DataVersion`
+     (one in about 800 in testing), and running it again does not help. The
+     import stops and names the chunk; `--skip-outdated` leaves such chunks out
+     so Foton generates them instead.
+3. **Import it** from the Foton directory (the one that holds `config/`), with
+   the server stopped:
+
+   ```
+   foton import-anvil path/to/world
+   ```
+
+   A 26.x world keeps its dimensions under `dimensions/<namespace>/<path>/`;
+   older layouts (`region/`, `DIM-1/`, `DIM1/`) are recognized too. Each
+   dimension goes to the default domain's world of the same name
+   (`overworld`, `the_nether`, `the_end` in the stock `worlds.toml`).
+   For a split Paper map, import each folder with the dimension it holds:
+
+   ```
+   foton import-anvil botw/world
+   foton import-anvil botw/world_nether --dimension the_nether
+   foton import-anvil botw/world_the_end --dimension the_end
+   ```
+
+   Other options: `--world <name>` or `--world <domain>:<name>` chooses the
+   receiving world, `--seed <n>` supplies a seed the world does not record,
+   `--skip-outdated` is described above, and `--replace` moves an existing
+   Foton world in that slot to `pre-import-<time>/` beside it instead of
+   refusing to touch it.
+
+Chunks are written as fully generated, so Foton loads them and never
+regenerates them; chunks vanilla had not finished are left out and Foton
+generates them from the imported seed. The import is all-or-nothing: it stages
+into `region.importing/` and moves it into place only once every dimension has
+been read.
+
+**Carried over:** every block state, biomes, block entities with their items and
+Paper's `PublicBukkitValues`, entities with their scoreboard tags, custom names,
+custom data, passengers and Paper's `BukkitValues`, a chunk's
+`ChunkBukkitValues`, scheduled block and fluid ticks, vanilla's light, and the
+level data Foton has a place for: seed, game time, clocks, weather, difficulty,
+spawn, game rules and each dimension's world border.
+
+**Not carried over:** structure data (a village stays built, but Foton does not
+know it is one), villager POI claims, forced-chunk tickets, scoreboards,
+command storage, maps, player data, and blocks, block entities or entities Foton
+does not know (modded content): these are counted and listed in the report
+rather than silently lost.
+
 ## Bedrock players
 
 Foton runs a [Geyser](https://geysermc.org) of its own, so Bedrock Edition

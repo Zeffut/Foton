@@ -59,6 +59,8 @@ async fn accept_or_backoff<T>(accept_result: io::Result<T>, duration: Duration) 
 pub mod args;
 /// Server configuration module.
 pub mod config;
+/// Offline import of vanilla worlds.
+pub mod import;
 /// A module for logging utilities.
 pub mod logger;
 /// Remote administration over the Source Rcon protocol.
