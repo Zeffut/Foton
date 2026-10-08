@@ -81,6 +81,14 @@ const LIBRARY_MANIFEST: &str = include_str!("../../plugin-api/lib/manifest.txt")
 /// Why a plugin host could not start, or could not do its job.
 #[derive(Debug, Error)]
 pub enum PluginHostError {
+    /// A statically linked (musl) binary has no dynamic loader to map a JVM with.
+    #[error(
+        "this Foton build is statically linked (musl) and cannot load a Java runtime, so it \
+         cannot run plugins; use the glibc build (foton-linux-x86_64-gnu or \
+         foton-linux-aarch64-gnu from the release assets), or unset FOTON_PLUGIN_DIRECTORY to \
+         run without plugins"
+    )]
+    StaticBuild,
     /// No Java runtime was found where the configuration said one would be.
     #[error("no Java runtime at {0}: {1}")]
     NoRuntime(PathBuf, String),
@@ -454,6 +462,11 @@ impl PluginHost {
         config: &PluginHostConfig,
         server: &Weak<Server>,
     ) -> Result<Self, PluginHostError> {
+        // Without this the musl loader fails with the bare "Dynamic loading
+        // not supported", which names neither the cause nor the way out.
+        if cfg!(target_env = "musl") {
+            return Err(PluginHostError::StaticBuild);
+        }
         let class_path = config.class_path()?;
         let library = config.runtime_library();
 

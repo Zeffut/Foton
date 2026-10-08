@@ -86,6 +86,28 @@ fn resolved_library_directory_prefers_the_explicit_override() {
     );
 }
 
+/// A static musl binary cannot map `libjvm.so`; the operator must be told why
+/// and which release asset to take, not shown the loader's bare refusal.
+#[test]
+fn the_static_build_error_names_the_cause_and_the_fix() {
+    let message = PluginHostError::StaticBuild.to_string();
+
+    assert!(message.contains("statically linked"), "{message}");
+    assert!(message.contains("foton-linux-x86_64-gnu"), "{message}");
+    assert!(message.contains("foton-linux-aarch64-gnu"), "{message}");
+}
+
+/// The refusal comes before any path is inspected, so it is the same whatever
+/// the plugin configuration says.
+#[cfg(target_env = "musl")]
+#[test]
+fn a_musl_build_refuses_to_start_a_plugin_host() {
+    assert!(matches!(
+        PluginHost::start(&config(), &Weak::new()),
+        Err(PluginHostError::StaticBuild)
+    ));
+}
+
 /// A missing API jar is named, not discovered as a class-loading failure later.
 ///
 /// The jar is produced by `dev/build-plugin-api.sh`, which a first-time
