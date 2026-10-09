@@ -630,6 +630,9 @@ public final class Native {
 
     /** Writes one inventory slot. An empty string empties it. */
     public static native void setInventorySlot(String uuid, int slot, foton.item.ItemMutation item);
+    /** Writes the slot only if it still holds {@code expected}; false when it changed and nothing was written. */
+    public static native boolean setInventorySlotIfUnchanged(String uuid, int slot,
+        foton.item.ItemMutation expected, foton.item.ItemMutation item);
     public static native foton.item.ItemTransfer enderChestSlot(String uuid, int slot);
     public static native void setEnderChestSlot(String uuid, int slot, foton.item.ItemMutation item);
     public static native void setPlayerInventorySlots(String uuid, boolean ender, int[] slots, foton.item.ItemMutation[] items);

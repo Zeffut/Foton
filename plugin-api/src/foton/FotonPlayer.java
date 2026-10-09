@@ -286,7 +286,7 @@ public final class FotonPlayer extends foton.entity.CraftPlayer implements org.b
 
     @Override
     public org.bukkit.inventory.EntityEquipment getEquipment() {
-        return new FotonEntityEquipment(id.toString());
+        return new FotonEntityEquipment(id.toString(), new FotonInventory(id.toString()));
     }
 
     @Override

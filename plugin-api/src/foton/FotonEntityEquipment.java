@@ -9,7 +9,13 @@ final class FotonEntityEquipment implements EntityEquipment {
     private static final java.util.concurrent.ConcurrentHashMap<String, float[]> CHANCES = new java.util.concurrent.ConcurrentHashMap<>();
     private final String owner;
     private final float[] dropChances;
+    /** The player's own inventory, whose slots these are; null for a mob. */
+    private final FotonInventory playerInventory;
     FotonEntityEquipment(String owner) {
+        this(owner, null);
+    }
+    FotonEntityEquipment(String owner, FotonInventory playerInventory) {
+        this.playerInventory = playerInventory;
         this.owner = owner;
         dropChances = CHANCES.computeIfAbsent(owner, ignored -> new float[] {0.085f, 0.085f, 0.085f, 0.085f, 0.085f});
     }
@@ -41,6 +47,10 @@ final class FotonEntityEquipment implements EntityEquipment {
     @Override public void setItemInOffHand(ItemStack item) { setItem(EquipmentSlot.OFF_HAND, item); }
     @Override public ItemStack getItem(EquipmentSlot slot) {
         if (slot == null) throw new IllegalArgumentException("slot cannot be null");
+        if (playerInventory != null) {
+            ItemStack mirror = playerInventory.equipment(slot);
+            if (mirror != null) return mirror;
+        }
         ItemStack item = FotonInventory.decode(Native.entityEquipmentSlot(owner, slotIndex(slot)));
         return item == null ? new ItemStack(org.bukkit.Material.AIR) : item;
     }

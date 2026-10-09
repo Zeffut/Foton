@@ -9557,7 +9557,7 @@ extern "system" fn recipe_remove(
 /// The stack a plugin recipe produces, kept whole: its components and
 /// persistent data are part of the result, not just the item and count.
 fn read_recipe_result(env: &mut JNIEnv<'_>, mutation: &JObject<'_>) -> Option<RecipeResult> {
-    let candidate = match crate::item_bridge::mutation::materialize(env, mutation) {
+    let candidate = match bridge_item_bridge::mutation::materialize(env, mutation) {
         Ok(candidate) => candidate,
         Err(error) => {
             error.throw_java(env);
@@ -15975,6 +15975,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "setInventorySlot",
             "(Ljava/lang/String;ILfoton/item/ItemMutation;)V",
             bridge_item_bridge::inventory::set_inventory_slot as *mut c_void,
+        ),
+        method(
+            "setInventorySlotIfUnchanged",
+            "(Ljava/lang/String;ILfoton/item/ItemMutation;Lfoton/item/ItemMutation;)Z",
+            bridge_item_bridge::inventory::set_inventory_slot_if_unchanged as *mut c_void,
         ),
         method(
             "enderChestSlot",

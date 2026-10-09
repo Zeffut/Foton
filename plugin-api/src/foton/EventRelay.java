@@ -582,6 +582,11 @@ public final class EventRelay {
             String item, String block, String face, String location) {
         org.bukkit.inventory.ItemStack held = FotonInventory.decode(item);
         if (held != null && held.getType().isAir()) held = null;
+        if (held != null) {
+            // The stack in use is the player's own: edits to it reach the slot.
+            org.bukkit.inventory.ItemStack inSlot = new FotonInventory(uuid).hand(hand.equals("OFF_HAND"));
+            if (inSlot != null && inSlot.isSimilar(held)) held = inSlot;
+        }
         org.bukkit.block.Block clicked = block.isEmpty() ? null : block(world, block);
         org.bukkit.util.Vector point = null;
         if (clicked != null && !location.isEmpty()) {

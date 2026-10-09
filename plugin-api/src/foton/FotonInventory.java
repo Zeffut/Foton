@@ -48,9 +48,33 @@ public final class FotonInventory implements PlayerInventory {
         return org.bukkit.event.inventory.InventoryType.PLAYER;
     }
 
+    /** A live view of the slot, as Paper's {@code CraftItemStack.asCraftMirror}: see {@link FotonItemMirror}. */
     @Override
     public ItemStack getItem(int slot) {
+        return FotonItemMirror.of(owner, slot, Native.inventorySlot(owner, slot));
+    }
+
+    /** The slot's stack as a copy that writes nothing back; for code that edits then sets whole contents. */
+    private ItemStack read(int slot) {
         return decodeTransfer(Native.inventorySlot(owner, slot));
+    }
+
+    /** The mirror of the hand's slot, for an event that reports the stack being used. */
+    ItemStack hand(boolean offHand) {
+        return getItem(offHand ? OFFHAND : getHeldItemSlot());
+    }
+
+    /** The mirror behind an equipment slot of this player, or null if the slot is not in the inventory. */
+    ItemStack equipment(org.bukkit.inventory.EquipmentSlot slot) {
+        return switch (slot) {
+            case HAND -> getItemInMainHand();
+            case OFF_HAND -> getItemInOffHand();
+            case FEET -> orAir(getItem(ARMOR));
+            case LEGS -> orAir(getItem(ARMOR + 1));
+            case CHEST -> orAir(getItem(ARMOR + 2));
+            case HEAD -> orAir(getItem(ARMOR + 3));
+            default -> null;
+        };
     }
 
     @Override
@@ -62,7 +86,8 @@ public final class FotonInventory implements PlayerInventory {
     public java.util.HashMap<Integer, ItemStack> addItem(ItemStack... items) {
         java.util.HashMap<Integer, ItemStack> leftovers = new java.util.HashMap<>();
         if (items == null) return leftovers;
-        ItemStack[] contents = getContents();
+        ItemStack[] contents = new ItemStack[SIZE];
+        for (int slot = 0; slot < SIZE; slot++) contents[slot] = read(slot);
         for (int index = 0; index < items.length; index++) {
             ItemStack incoming = items[index] == null ? null : items[index].clone();
             if (incoming == null || incoming.getType().isAir() || incoming.getAmount() <= 0) continue;
@@ -119,7 +144,7 @@ public final class FotonInventory implements PlayerInventory {
             return -1;
         }
         for (int slot = 0; slot < SIZE; slot++) {
-            ItemStack item = getItem(slot);
+            ItemStack item = read(slot);
             if (item != null && item.getType() == material) {
                 return slot;
             }
