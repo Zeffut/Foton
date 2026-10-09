@@ -686,13 +686,6 @@ impl Server {
         });
     }
 
-    pub(super) fn broadcast_to_online_with<P: ClientPacket, F: Fn(&Player) -> P>(&self, packet: F) {
-        self.online_players.iter_players(|_, player| {
-            player.send_packet(packet(player));
-            true
-        });
-    }
-
     /// Sends full tab list synchronization for a newly joined player.
     ///
     /// Server membership mirrors vanilla `PlayerList`; world entity spawning remains

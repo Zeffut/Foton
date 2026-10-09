@@ -82,6 +82,7 @@ pub use profile::{
 use shoulder::ShoulderEntities;
 use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
 use sleep_state::PlayerSleepState;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
 use crate::inventory::container::SimpleContainer;
@@ -184,6 +185,9 @@ pub struct Player {
     pub gameprofile: GameProfile,
     /// Optional tab-list display name supplied by Bukkit plugins.
     tab_list_name: SyncMutex<Option<TextComponent>>,
+    /// Whether a plugin has set this player's tab-list header or footer, which
+    /// ends the server's own statistics there.
+    plugin_tab_list: AtomicBool,
     /// The player's connection (abstracted for testing).
     pub connection: Arc<PlayerConnection>,
 
@@ -437,6 +441,18 @@ impl Player {
         self.tab_list_name.lock().clone()
     }
 
+    /// Whether a plugin owns this player's tab-list header and footer.
+    #[must_use]
+    pub fn has_plugin_tab_list(&self) -> bool {
+        self.plugin_tab_list.load(Ordering::Relaxed)
+    }
+
+    /// Records that a plugin set this player's tab-list header or footer, so
+    /// the server's statistics stop replacing it.
+    pub fn mark_plugin_tab_list(&self) {
+        self.plugin_tab_list.store(true, Ordering::Relaxed);
+    }
+
     /// Updates the tab-list display name for every online viewer.
     pub fn set_tab_list_name(&self, name: Option<TextComponent>) {
         (*self.tab_list_name.lock()).clone_from(&name);
@@ -600,6 +616,7 @@ impl Player {
             connection,
 
             tab_list_name: SyncMutex::new(None),
+            plugin_tab_list: AtomicBool::new(false),
             world: ArcSwap::new(world),
             server,
             config,

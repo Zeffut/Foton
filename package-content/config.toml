@@ -32,6 +32,8 @@ encryption = true
 allow_flight = false
 # Message of the day displayed in server lists
 motd = "A Foton Server"
+# Whether the server shows its TPS and MSPT statistics in the player list header and footer
+tab_list_stats = true
 
 # Whether to use a custom favicon for the server
 use_favicon = true

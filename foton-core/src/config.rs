@@ -111,6 +111,8 @@ pub struct RuntimeConfig {
     pub allow_flight: bool,
     /// The message of the day.
     pub motd: String,
+    /// Whether the server writes its TPS/MSPT line into players' tab lists.
+    pub tab_list_stats: bool,
     /// Whether to use a favicon.
     pub use_favicon: bool,
     /// Pre-encoded favicon data URI, loaded and validated during startup.

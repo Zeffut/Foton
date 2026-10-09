@@ -16,6 +16,10 @@ use foton_core::{
 use reqwest::Url;
 use serde::Deserialize;
 
+const fn default_tab_list_stats() -> bool {
+    true
+}
+
 const fn default_spam_threshold_seconds() -> i32 {
     10
 }
@@ -66,6 +70,9 @@ pub struct ServerConfig {
     pub allow_flight: bool,
     /// The message of the day.
     pub motd: String,
+    /// Whether the server shows its TPS/MSPT statistics in the tab list.
+    #[serde(default = "default_tab_list_stats")]
+    pub tab_list_stats: bool,
     /// Whether to use a favicon.
     pub use_favicon: bool,
     /// The path to the favicon.
@@ -206,6 +213,7 @@ impl ServerConfig {
             encryption: self.encryption,
             allow_flight: self.allow_flight,
             motd: self.motd,
+            tab_list_stats: self.tab_list_stats,
             use_favicon: favicon.is_some(),
             favicon: favicon.unwrap_or_default(),
             enforce_secure_chat: self.enforce_secure_chat,

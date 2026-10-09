@@ -84,6 +84,7 @@ mod tests {
             encryption: true,
             allow_flight: false,
             motd: String::new(),
+            tab_list_stats: true,
             use_favicon: true,
             favicon,
             enforce_secure_chat: false,

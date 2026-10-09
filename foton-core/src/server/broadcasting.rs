@@ -98,7 +98,12 @@ impl Server {
     pub(super) fn broadcast_tab_list(&self, tick_stats: TabListTickStats) {
         let (header, footer) = Self::tab_list_components(tick_stats);
 
-        self.broadcast_to_online_with(|player| CTabList::new(&header, &footer, player));
+        self.online_players.iter_players(|_, player| {
+            if !player.has_plugin_tab_list() {
+                player.send_packet(CTabList::new(&header, &footer, player));
+            }
+            true
+        });
     }
 
     /// Broadcasts a sprint completion report to all players.
