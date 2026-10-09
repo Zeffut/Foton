@@ -174,6 +174,40 @@ cat > "$PACK/test/tags/function/incomplete.json" <<'EOF'
 {"values": ["test:tagged_a", "test:nobody_wrote_this"]}
 EOF
 
+# A datapack can also be a .zip with pack.mcmeta and data/ at its root, and its
+# predicates are read the same way. The archive below carries one function, a
+# function tag and two predicates; the second archive wraps the same pack in a
+# folder, which vanilla does not accept either, and must be named in the log.
+python3 - "$RUN_DIR/saves/datapacks" <<'PYEOF' || exit 1
+import json, sys, zipfile
+
+root = sys.argv[1]
+rod = lambda marker: {
+    "condition": "minecraft:entity_properties",
+    "entity": "this",
+    "predicate": {"equipment": {"mainhand": {
+        "items": ["minecraft:fishing_rod"],
+        "components": {"minecraft:custom_data": {marker: 1}},
+    }}},
+}
+files = {
+    "pack.mcmeta": json.dumps({"pack": {"description": "zip", "pack_format": 96}}),
+    "data/zip/function/from_zip.mcfunction": 'tellraw @a {"text":"FN_ZIP_RAN"}\n',
+    "data/zip/tags/function/group.json": json.dumps({"values": ["zip:from_zip"]}),
+    "data/zip/predicate/rod_marker.json": json.dumps(rod("zip_probe")),
+    "data/zip/predicate/other_marker.json": json.dumps(rod("zip_other")),
+    # A predicate that cannot be modeled must be refused, not loaded weaker.
+    "data/zip/predicate/unsupported.json": json.dumps(
+        {"condition": "minecraft:value_check", "value": 1, "range": 1}),
+}
+with zipfile.ZipFile(root + "/zip_pack.zip", "w") as archive:
+    for name, text in files.items():
+        archive.writestr(name, text)
+with zipfile.ZipFile(root + "/wrapped_pack.zip", "w") as archive:
+    for name, text in files.items():
+        archive.writestr("Wrapped/" + name, text)
+PYEOF
+
 cd "$RUN_DIR" || exit 1
 nohup "$BIN" > server.log 2>&1 < /dev/null &
 PID=$!
@@ -293,6 +327,30 @@ CMDS="$CMDS;;execute store result entity @n[tag=fn_probe,distance=..20] data.ret
 CMDS="$CMDS;;!wait 1"
 CMDS="$CMDS;;execute if entity @e[tag=fn_probe,nbt={data:{ret:5}},distance=..20] run tellraw @s {\"text\":\"FN_RETURN_VALUE\"}"
 
+# --- a function read out of a .zip datapack ------------------------------
+CMDS="$CMDS;;function zip:from_zip"
+CMDS="$CMDS;;!wait 1"
+CMDS="$CMDS;;function #zip:group"
+CMDS="$CMDS;;!wait 1"
+
+# --- execute if|unless predicate, with predicates read out of the .zip ---
+# The marker is a byte because that is what the JSON `1` decodes to, so a rod
+# given `1b` is the one the predicate means.
+CMDS="$CMDS;;give @s minecraft:fishing_rod[custom_data={zip_probe:1b}]"
+CMDS="$CMDS;;!wait 1"
+CMDS="$CMDS;;execute if predicate zip:rod_marker run tellraw @s {\"text\":\"FN_PRED_IF_HELD\"}"
+CMDS="$CMDS;;execute unless predicate zip:rod_marker run tellraw @s {\"text\":\"FN_PRED_UNLESS_HELD_RAN\"}"
+CMDS="$CMDS;;execute if predicate zip:other_marker run tellraw @s {\"text\":\"FN_PRED_OTHER_RAN\"}"
+CMDS="$CMDS;;execute unless predicate zip:other_marker run tellraw @s {\"text\":\"FN_PRED_UNLESS_OTHER\"}"
+CMDS="$CMDS;;execute if predicate zip:nobody_wrote_this run tellraw @s {\"text\":\"FN_PRED_MISSING_RAN\"}"
+CMDS="$CMDS;;execute if predicate zip:unsupported run tellraw @s {\"text\":\"FN_PRED_UNSUPPORTED_RAN\"}"
+CMDS="$CMDS;;!wait 1"
+# Without the item in hand the same predicate must fail.
+CMDS="$CMDS;;clear @s minecraft:fishing_rod"
+CMDS="$CMDS;;!wait 1"
+CMDS="$CMDS;;execute if predicate zip:rod_marker run tellraw @s {\"text\":\"FN_PRED_EMPTY_HAND_RAN\"}"
+CMDS="$CMDS;;!wait 1"
+
 CMDS="$CMDS;;tellraw @s {\"text\":\"FN_ALIVE\"}"
 CMDS="$CMDS;;kill @e[tag=fn_probe,distance=..20]"
 
@@ -362,6 +420,23 @@ said FN_TICK_TAG || fail "#minecraft:tick never changed what #minecraft:load lef
 said FN_RETURN_INNER || fail "return run never reached the function it names"
 said FN_RETURN_TAIL_RAN && fail "return run did not end the function it ran in"
 said FN_RETURN_VALUE || fail "return run's value never reached the outer caller"
+
+said FN_ZIP_RAN || fail "a function inside a .zip datapack never ran"
+[ "$(said_times FN_ZIP_RAN)" = "2" ] \
+  || fail "the .zip's function or its function tag did not run exactly once each"
+said FN_PRED_IF_HELD || fail "execute if predicate never ran for the held marked rod"
+said FN_PRED_UNLESS_HELD_RAN && fail "execute unless predicate ran for a predicate that holds"
+said FN_PRED_OTHER_RAN && fail "execute if predicate matched a marker the rod does not carry"
+said FN_PRED_UNLESS_OTHER || fail "execute unless predicate never ran for a predicate that fails"
+said FN_PRED_MISSING_RAN && fail "execute if predicate ran for a predicate nobody wrote"
+said FN_PRED_UNSUPPORTED_RAN && fail "a predicate Foton cannot model was loaded and ran"
+said FN_PRED_EMPTY_HAND_RAN && fail "execute if predicate held with the rod gone from the hand"
+sed 's/\x1b\[[0-9;]*[A-Za-z]//g' "$RUN_DIR/server.log" | grep -q "Reading datapack archive zip_pack.zip" \
+  || fail "the server never logged which archive it read"
+sed 's/\x1b\[[0-9;]*[A-Za-z]//g' "$RUN_DIR/server.log" | grep -q "skipped datapack archive wrapped_pack.zip" \
+  || fail "a zip with the pack inside a folder was not skipped by name"
+sed 's/\x1b\[[0-9;]*[A-Za-z]//g' "$RUN_DIR/server.log" | grep -q "predicate zip:unsupported" \
+  || fail "the refused predicate was not named in the log"
 
 said FN_ALIVE || fail "the server stopped answering after an unknown function name"
 

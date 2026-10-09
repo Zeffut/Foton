@@ -10,6 +10,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::super::CommandDispatcher;
 use super::super::execution::CommandSource;
+use super::super::predicate::{PredicateLibrary, load_predicate};
 use super::library::{CommandFunction, FunctionLibrary};
 use super::loader::{self, DatapackInfo, TagEntry};
 use super::parser::parse_function;
@@ -24,6 +25,7 @@ pub(crate) const TICK_FUNCTION_TAG: Identifier = Identifier::vanilla_static("tic
 pub(crate) struct FunctionReloadReport {
     pub(crate) functions: usize,
     pub(crate) tags: usize,
+    pub(crate) predicates: usize,
     pub(crate) errors: Vec<String>,
 }
 
@@ -39,6 +41,7 @@ pub(crate) struct FunctionManager {
 
 struct FunctionManagerState {
     library: Arc<FunctionLibrary>,
+    predicates: Arc<PredicateLibrary>,
     ticking: Vec<Arc<CommandFunction>>,
     packs: Vec<DatapackInfo>,
     post_reload: bool,
@@ -50,6 +53,7 @@ impl FunctionManager {
             root,
             state: SyncRwLock::new(FunctionManagerState {
                 library: Arc::new(FunctionLibrary::default()),
+                predicates: Arc::new(PredicateLibrary::default()),
                 ticking: Vec::new(),
                 packs: Vec::new(),
                 post_reload: false,
@@ -70,6 +74,20 @@ impl FunctionManager {
         let contents = loader::collect(&self.root);
         let mut errors = contents.errors;
 
+        let mut predicates = FxHashMap::default();
+        for (id, source) in contents.predicates {
+            match load_predicate(&source.text) {
+                Ok(predicate) => {
+                    predicates.insert(id, predicate);
+                }
+                Err(error) => errors.push(format!(
+                    "failed to load predicate {id} from datapack {}: {error}",
+                    source.source_pack
+                )),
+            }
+        }
+        let predicates = Arc::new(PredicateLibrary::new(predicates));
+
         let mut functions: FxHashMap<Identifier, Arc<CommandFunction>> = FxHashMap::default();
         for (id, source) in contents.functions {
             match parse_function(id.clone(), &source.text, dispatcher, compilation_source) {
@@ -88,12 +106,14 @@ impl FunctionManager {
         let report = FunctionReloadReport {
             functions: library.function_count(),
             tags: library.tag_count(),
+            predicates: predicates.len(),
             errors,
         };
 
         let ticking = library.tag(&TICK_FUNCTION_TAG).to_vec();
         let mut state = self.state.write();
         state.library = library;
+        state.predicates = predicates;
         state.ticking = ticking;
         state.packs = contents.packs;
         state.post_reload = true;
@@ -108,6 +128,7 @@ impl FunctionManager {
     pub(crate) fn unload(&self) {
         let mut state = self.state.write();
         state.library = Arc::new(FunctionLibrary::default());
+        state.predicates = Arc::new(PredicateLibrary::default());
         state.ticking.clear();
         state.packs.clear();
         state.post_reload = false;
@@ -115,6 +136,10 @@ impl FunctionManager {
 
     pub(crate) fn library(&self) -> Arc<FunctionLibrary> {
         Arc::clone(&self.state.read().library)
+    }
+
+    pub(crate) fn predicates(&self) -> Arc<PredicateLibrary> {
+        Arc::clone(&self.state.read().predicates)
     }
 
     /// Returns the `#minecraft:load` functions once per reload.

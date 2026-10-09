@@ -251,6 +251,7 @@ pub fn item_predicate(path: &str, value: &Value) -> TokenStream {
                 banner_patterns: #banner_patterns,
                 item_name_translate: #item_name_translate,
             },
+            datapack: None,
         }
     }
 }

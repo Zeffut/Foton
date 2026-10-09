@@ -16,6 +16,8 @@
 //! is strictly worse than one that never fires -- every such gap is marked with
 //! a `// Not implemented:` comment naming the vanilla check it stands in for.
 
+use std::sync::Arc;
+
 use foton_registry::advancement::predicate::{
     BannerPatternLayer, BlockPredicate, ConditionTerm, ContextAwarePredicate, DamagePredicate,
     DamageSourcePredicate, DistancePredicate, EnchantmentPredicate, EntityComponentMatch,
@@ -44,7 +46,9 @@ use crate::behavior::blocks::building::campfire_block::is_smokey_pos;
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::{CatEntity, LightningBoltEntity, WolfEntity};
 use crate::entity::{Entity, LivingEntity};
+use crate::item_predicate;
 use crate::player::Player;
+use crate::world::World;
 
 /// The seven equipment slots vanilla's `EntityEquipmentPredicate` reads, in the
 /// order it reads them.
@@ -75,16 +79,20 @@ pub enum Subject<'a> {
     /// No subject at all, vanilla's null `THIS_ENTITY`.
     None,
     /// The player the trigger fired for.
-    Player,
+    Player(&'a Player),
     /// Some other entity the trigger handed over.
     Entity(&'a dyn Entity),
 }
 
 /// Vanilla parity: the `LootContext` an advancement predicate is evaluated with.
+///
+/// Datapack `predicate` files and `execute if predicate` use the same context
+/// with the command source's world, position and entity, so nothing here
+/// requires a player.
 pub struct PredicateContext<'a> {
-    /// The player the trigger fired for. Vanilla takes the level and, for most
-    /// triggers, the origin from them.
-    pub player: &'a Player,
+    /// Vanilla's `LootContext.getLevel()`. `None` fails every key that has to
+    /// read the world.
+    pub level: Option<Arc<World>>,
     /// Vanilla's `LootContextParams.ORIGIN`. The player's own position for most
     /// triggers; the block center for the location triggers.
     pub origin: DVec3,
@@ -98,10 +106,10 @@ pub struct PredicateContext<'a> {
 
 impl PredicateContext<'_> {
     /// The entity a [`Subject`] names, `None` for vanilla's null.
-    fn subject_entity<'s>(&'s self, subject: &'s Subject<'_>) -> Option<&'s dyn Entity> {
+    fn subject_entity<'s>(subject: &'s Subject<'_>) -> Option<&'s dyn Entity> {
         match subject {
             Subject::None => None,
-            Subject::Player => Some(self.player as &dyn Entity),
+            Subject::Player(player) => Some(*player as &dyn Entity),
             Subject::Entity(entity) => Some(*entity),
         }
     }
@@ -151,13 +159,25 @@ impl PredicateContext<'_> {
             ConditionTerm::AnyOf(terms) => terms.iter().any(|term| self.matches_condition(term)),
             ConditionTerm::AllOf(terms) => terms.iter().all(|term| self.matches_condition(term)),
             ConditionTerm::Inverted(term) => !self.matches_condition(term),
+            // Vanilla `LootItemRandomChanceCondition.test`:
+            // `random.nextFloat() < probability`.
+            ConditionTerm::RandomChance(chance) => rand::random::<f32>() < *chance,
+            // Vanilla `WeatherCheck.test` reads the level's weather and
+            // ignores each key that was not asked for.
+            ConditionTerm::WeatherCheck {
+                raining,
+                thundering,
+            } => self.level.as_ref().is_some_and(|level| {
+                raining.is_none_or(|expected| expected == level.is_raining())
+                    && thundering.is_none_or(|expected| expected == level.is_thundering())
+            }),
         }
     }
 
     /// Vanilla parity: `EntityPredicate.matches(level, position, entity)`.
     #[must_use]
     pub fn matches_entity(&self, predicate: &EntityPredicate, subject: &Subject<'_>) -> bool {
-        self.entity_matches(predicate, self.subject_entity(subject))
+        self.entity_matches(predicate, Self::subject_entity(subject))
     }
 
     /// The body of [`Self::matches_entity`], on a resolved entity.
@@ -309,7 +329,7 @@ impl PredicateContext<'_> {
 
         // Vanilla always has a `ServerLevel` here; a player without one cannot
         // answer any of the remaining keys, so they all fail.
-        let Some(level) = self.player.level() else {
+        let Some(level) = self.level.clone() else {
             return false;
         };
 
@@ -426,7 +446,7 @@ impl PredicateContext<'_> {
         let Some(id) = id else {
             return false;
         };
-        let Some(level) = self.player.level() else {
+        let Some(level) = self.level.clone() else {
             return false;
         };
         let Some(entity) = level.get_entity_by_id(id) else {
@@ -610,6 +630,11 @@ pub fn item_matches(predicate: &ItemPredicate, stack: &ItemStack) -> bool {
     if !predicate.count.matches(stack.count()) {
         return false;
     }
+    if let Some(datapack) = predicate.datapack
+        && !item_predicate::matches(datapack, stack)
+    {
+        return false;
+    }
     item_components_match(predicate, stack)
 }
 
@@ -751,6 +776,7 @@ mod tests {
     use glam::DVec3;
 
     use super::{PredicateContext, Subject, item_matches, state_properties_match};
+    use crate::entity::Entity as _;
     use crate::player::Player;
     use crate::test_support::{TestPlayerBuilder, test_world};
 
@@ -770,7 +796,7 @@ mod tests {
         tool: Option<&'a ItemStack>,
     ) -> PredicateContext<'a> {
         PredicateContext {
-            player,
+            level: player.level(),
             origin: DVec3::ZERO,
             subject: Subject::None,
             block_state: None,

@@ -811,6 +811,13 @@ impl ItemPredicate {
     }
 
     pub(crate) fn from_owned_nbt(tag: &NbtTag) -> Option<Self> {
+        Self::from_nbt(tag)
+    }
+
+    /// Decodes the predicate from its NBT form, the shape datapack JSON takes
+    /// once converted. `None` when any key or value is not a valid predicate.
+    #[must_use]
+    pub fn from_nbt(tag: &NbtTag) -> Option<Self> {
         Self::from_owned_compound(tag.compound()?)
     }
 

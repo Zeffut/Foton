@@ -352,6 +352,14 @@ impl FotonArgumentType {
         Self::new(FunctionParser)
     }
 
+    /// A datapack predicate by id.
+    ///
+    /// Vanilla parity: `ResourceOrIdArgument.lootPredicate`, minus its inline
+    /// SNBT form, which Foton does not accept yet.
+    pub(crate) fn loot_predicate() -> Self {
+        Self::new(LootPredicateParser)
+    }
+
     pub(crate) fn boss_bar_id() -> Self {
         Self::new(BossBarIdParser)
     }
@@ -1147,6 +1155,21 @@ unit_argument_parser!(
     )
 );
 unit_argument_parser!(
+    LootPredicateParser,
+    "foton:command/parser/loot_predicate",
+    IdentifierValue,
+    parse | reader,
+    _source | { parse_identifier(reader).map(IdentifierValue) },
+    suggest | context,
+    builder | {
+        suggest_predicates(context.source(), builder);
+    },
+    protocol(
+        ProtocolArgumentType::LootPredicate,
+        Some(ProtocolSuggestionType::AskServer),
+    )
+);
+unit_argument_parser!(
     StorageKeyParser,
     "foton:command/parser/storage_key",
     IdentifierValue,
@@ -1562,6 +1585,18 @@ where
 {
     let ids = source
         .boss_bar_ids()
+        .into_iter()
+        .filter_map(|id| id.parse::<Identifier>().ok())
+        .collect::<Vec<_>>();
+    suggest_resources(ids.iter(), builder);
+}
+
+fn suggest_predicates<S>(source: &S, builder: &mut SuggestionsBuilder<'_>)
+where
+    S: CommandArgumentSource + ?Sized,
+{
+    let ids = source
+        .command_predicate_names()
         .into_iter()
         .filter_map(|id| id.parse::<Identifier>().ok())
         .collect::<Vec<_>>();

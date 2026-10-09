@@ -78,9 +78,10 @@ impl CommandResultSuspension for ReloadDatapacks {
                     log::error!("Datapack reload: {error}");
                 }
                 log::info!(
-                    "Reloaded {} function(s) and {} function tag(s)",
+                    "Reloaded {} function(s), {} function tag(s) and {} predicate(s)",
                     report.functions,
-                    report.tags
+                    report.tags,
+                    report.predicates
                 );
                 self.source.send_success(
                     &TextComponent::from(&translations::COMMANDS_RELOAD_SUCCESS),

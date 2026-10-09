@@ -229,7 +229,7 @@ impl ItemComponentsPredicate {
 /// A check on an item stack.
 ///
 /// Vanilla parity: `ItemPredicate`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ItemPredicate {
     /// The items accepted, `None` for any item.
     pub items: Option<RegistrySet>,
@@ -244,6 +244,13 @@ pub struct ItemPredicate {
     pub jukebox_playable: bool,
     /// Component checks from the `components` map.
     pub components: ItemComponentsPredicate,
+    /// The whole vanilla predicate, decoded from a datapack file.
+    ///
+    /// Vanilla advancement data only asks the questions modeled above, so the
+    /// generator leaves this `None`. A datapack predicate may ask for any item
+    /// component, and its `ItemPredicate` is held here complete instead of
+    /// being squeezed into the modeled subset.
+    pub datapack: Option<&'static crate::item_predicate::ItemPredicate>,
 }
 
 impl ItemPredicate {
@@ -254,6 +261,7 @@ impl ItemPredicate {
         enchantments: &[],
         jukebox_playable: false,
         components: ItemComponentsPredicate::ANY,
+        datapack: None,
     };
 }
 
@@ -336,7 +344,7 @@ pub struct EntityFlagsPredicate {
 /// A check on what an entity is wearing or holding.
 ///
 /// Vanilla parity: `EntityEquipmentPredicate`.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct EntityEquipmentPredicate {
     /// The helmet slot.
     pub head: Option<ItemPredicate>,
@@ -452,6 +460,17 @@ pub enum ConditionTerm {
     AllOf(&'static [ConditionTerm]),
     /// `minecraft:inverted`: the term must fail.
     Inverted(&'static ConditionTerm),
+    /// `minecraft:random_chance`, with the chance already resolved.
+    ///
+    /// Only datapack predicates produce this; no vanilla advancement rolls dice.
+    RandomChance(f32),
+    /// `minecraft:weather_check` on the context's level.
+    WeatherCheck {
+        /// Whether it must be raining, `None` for either.
+        raining: Option<bool>,
+        /// Whether it must be thundering, `None` for either.
+        thundering: Option<bool>,
+    },
 }
 
 /// A criterion's condition list: every term must pass.

@@ -19,7 +19,7 @@ use crate::player::Player;
 /// Vanilla parity: `EntityPredicate.createContext(player, entity)`.
 fn context_for<'a>(player: &'a Player, entity: &'a dyn Entity) -> PredicateContext<'a> {
     PredicateContext {
-        player,
+        level: player.level(),
         origin: player.position(),
         subject: Subject::Entity(entity),
         block_state: None,

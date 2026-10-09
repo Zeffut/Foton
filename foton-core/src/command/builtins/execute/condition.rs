@@ -13,6 +13,7 @@ use foton_utils::{
 use simdnbt::owned::NbtTag;
 use text_components::TextComponent;
 
+use super::super::super::predicate::test_predicate;
 use super::super::super::{
     brigadier::{CommandNodeBuilder, CommandRedirectTarget, CommandSyntaxError},
     execution::{
@@ -33,7 +34,6 @@ const EXECUTE_ROOT: CommandRedirectTarget = CommandRedirectTarget::CommandRoot;
 const MAX_BLOCKS_REGION: i64 = 32_768;
 
 pub(super) fn conditionals(name: &'static str, expected: bool) -> Builder {
-    // TODO: Add predicate after its runtime registry is ported.
     // TODO: Restore Foton stopwatch conditions with the stopwatch command system.
     literal(name)
         .then(biome_condition(expected))
@@ -45,6 +45,7 @@ pub(super) fn conditionals(name: &'static str, expected: bool) -> Builder {
         .then(function_condition(expected))
         .then(items_condition(expected))
         .then(loaded_condition(expected))
+        .then(predicate_condition(expected))
         .then(score_condition(expected))
 }
 
@@ -233,6 +234,45 @@ pub(super) fn invalid_block_data_source() -> CommandSyntaxError {
     CommandSyntaxError::dynamic(TextComponent::from(
         &translations::COMMANDS_DATA_BLOCK_INVALID,
     ))
+}
+
+/// `execute if|unless predicate <id>`.
+///
+/// Vanilla parity: `ExecuteCommand.checkCustomPredicate`.
+fn predicate_condition(expected: bool) -> Builder {
+    literal("predicate").then(
+        argument("predicate", FotonArgumentType::loot_predicate())
+            .forks(EXECUTE_ROOT, move |context| {
+                let matches = predicate_matches(context)?;
+                Ok(conditional_sources(context.source(), expected, matches))
+            })
+            .executes(move |context| {
+                execute_boolean_condition(context, expected, predicate_matches(context)?)
+            }),
+    )
+}
+
+fn predicate_matches(
+    context: &FotonCommandContext<CommandSource>,
+) -> Result<bool, CommandSyntaxError> {
+    let id = context.identifier("predicate")?;
+    let source = context.source();
+    let predicate = source
+        .server()
+        .functions
+        .predicates()
+        .get(id)
+        .ok_or_else(|| {
+            CommandSyntaxError::dynamic(
+                translations::ARGUMENT_RESOURCE_OR_ID_NO_SUCH_ELEMENT
+                    .message([
+                        TextComponent::from(id.to_string()),
+                        TextComponent::from("minecraft:predicate"),
+                    ])
+                    .component(),
+            )
+        })?;
+    Ok(test_predicate(source, predicate))
 }
 
 fn dimension_condition(expected: bool) -> Builder {

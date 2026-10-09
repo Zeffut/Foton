@@ -6,6 +6,7 @@ pub(crate) mod brigadier;
 mod builtins;
 pub(crate) mod execution;
 pub(crate) mod functions;
+pub(crate) mod predicate;
 mod protocol;
 mod queue;
 pub mod rcon;

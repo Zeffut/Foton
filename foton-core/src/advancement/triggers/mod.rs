@@ -48,9 +48,9 @@ pub fn fire(
     // Vanilla: `EntityPredicate.createContext(player, player)` -- the player as
     // both `THIS_ENTITY` and the source of `ORIGIN`.
     let context = PredicateContext {
-        player,
+        level: player.level(),
         origin: player.position(),
-        subject: Subject::Player,
+        subject: Subject::Player(player),
         block_state: None,
         tool: None,
     };

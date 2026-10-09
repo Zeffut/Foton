@@ -8,6 +8,7 @@ use glam::DVec3;
 
 use super::fire;
 use crate::advancement::predicate::{PredicateContext, Subject, state_properties_match};
+use crate::entity::Entity as _;
 use crate::player::Player;
 
 /// Fired once per player tick.
@@ -84,13 +85,13 @@ fn item_used_on_location(
     tool: &ItemStack,
 ) {
     let context = PredicateContext {
-        player,
+        level: player.level(),
         origin: DVec3::new(
             f64::from(pos.x()) + 0.5,
             f64::from(pos.y()) + 0.5,
             f64::from(pos.z()) + 0.5,
         ),
-        subject: Subject::Player,
+        subject: Subject::Player(player),
         block_state: Some(state),
         tool: Some(tool),
     };

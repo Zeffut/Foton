@@ -512,7 +512,9 @@ a furnace has no behavior. These scripts can:
 - `dev/function-test.sh` -- a datapack's functions are read off disk and run:
   plain calls, nested calls, tags, macros, `execute if function`, the
   `#minecraft:load` and `#minecraft:tick` tags, and `/reload` picking a
-  rewritten file back up.
+  rewritten file back up. Also `.zip` datapacks (a pack zipped inside a folder
+  is skipped by name) and `execute if|unless predicate` over predicates read
+  out of the archive.
 - `dev/nether-test.sh` -- a client crosses dimensions and sees Nether mobs.
 - `dev/sapling-test.sh` -- a planted sapling becomes a tree.
 - `dev/container-test.sh` -- placed container blocks have block entities.
