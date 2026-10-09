@@ -1,6 +1,6 @@
 use std::{fmt, sync::Arc};
 
-use simdnbt::owned::NbtCompound;
+use simdnbt::owned::{NbtCompound, NbtTag};
 
 use super::{
     BiomeOrTag, BlockPredicate, CommandArgumentSource, Coordinates, IntRange, ItemPredicate,
@@ -12,7 +12,7 @@ use super::{
     item::{parse_item_stack, suggest_item_stack},
     item_modifier::{ItemModifierArgument, parse_item_modifier, suggest_item_modifiers},
     item_predicate::{parse_item_predicate, suggest_item_predicate},
-    nbt::{parse_nbt_compound, parse_nbt_path},
+    nbt::{parse_nbt_compound, parse_nbt_path, parse_nbt_tag},
     permission::{PermissionGroupParser, PermissionMetadataParser, PermissionRuleParser},
     profile::{GameProfileParser, GameProfileSuggestionMode},
     score::{parse_int_range, parse_score_holder, suggest_score_holders},
@@ -40,12 +40,13 @@ use foton_protocol::packets::game::{
     ArgumentType as ProtocolArgumentType, DisplaySlot, SuggestionType as ProtocolSuggestionType,
     TextStyle,
 };
+use foton_registry::attribute::AttributeRef;
 use foton_registry::damage_type::DamageTypeRef;
 use foton_registry::{
-    DAMAGE_TYPE_REGISTRY, ENCHANTMENT_REGISTRY, ENTITY_TYPE_REGISTRY, REGISTRY, RegistryExt as _,
-    TIMELINE_REGISTRY, WORLD_CLOCK_REGISTRY, enchantment::EnchantmentRef,
-    entity_type::EntityTypeRef, item_stack::ItemStack, timeline::TimelineRef,
-    world_clock::WorldClockRef,
+    DAMAGE_TYPE_REGISTRY, ENCHANTMENT_REGISTRY, ENTITY_TYPE_REGISTRY, MOB_EFFECT_REGISTRY,
+    REGISTRY, RegistryExt as _, TIMELINE_REGISTRY, WORLD_CLOCK_REGISTRY,
+    enchantment::EnchantmentRef, entity_type::EntityTypeRef, item_stack::ItemStack,
+    mob_effect::MobEffectRef, timeline::TimelineRef, world_clock::WorldClockRef,
 };
 use foton_utils::{
     Downcast as _, DowncastType, DowncastTypeKey, ErasedType, Identifier,
@@ -343,6 +344,18 @@ impl FotonArgumentType {
         Self::new(DamageTypeParser)
     }
 
+    pub(crate) fn identifier() -> Self {
+        Self::new(IdentifierParser)
+    }
+
+    pub(crate) fn mob_effect() -> Self {
+        Self::new(MobEffectParser)
+    }
+
+    pub(crate) fn attribute() -> Self {
+        Self::new(AttributeParser)
+    }
+
     pub(crate) fn item_stack() -> Self {
         Self::new(ItemStackParser)
     }
@@ -373,6 +386,10 @@ impl FotonArgumentType {
 
     pub(crate) fn nbt_path() -> Self {
         Self::new(NbtPathParser)
+    }
+
+    pub(crate) fn nbt_tag() -> Self {
+        Self::new(NbtTagParser)
     }
 
     pub(crate) fn nbt_compound_tag() -> Self {
@@ -594,6 +611,14 @@ argument_value_wrapper!(
     DamageTypeValue(DamageTypeRef),
     "foton:command/value/damage_type"
 );
+argument_value_wrapper!(
+    MobEffectValue(MobEffectRef),
+    "foton:command/value/mob_effect"
+);
+argument_value_wrapper!(
+    AttributeValue(AttributeRef),
+    "foton:command/value/attribute"
+);
 argument_value_wrapper!(ItemStackValue(ItemStack), "foton:command/value/item_stack");
 argument_value_wrapper!(
     ItemSlotsValue(&'static SlotRange),
@@ -605,6 +630,7 @@ argument_value_wrapper!(
     "foton:command/value/component"
 );
 argument_value_wrapper!(NbtPathValue(NbtPath), "foton:command/value/nbt_path");
+argument_value_wrapper!(NbtTagValue(NbtTag), "foton:command/value/nbt_tag");
 argument_value_wrapper!(
     NbtCompoundValue(NbtCompound),
     "foton:command/value/nbt_compound"
@@ -1118,6 +1144,77 @@ unit_argument_parser!(
     )
 );
 unit_argument_parser!(
+    IdentifierParser,
+    "foton:command/parser/identifier",
+    IdentifierValue,
+    parse | reader,
+    _source | { parse_identifier(reader).map(IdentifierValue) },
+    suggest | _context,
+    _builder | {},
+    protocol(ProtocolArgumentType::ResourceLocation, None)
+);
+unit_argument_parser!(
+    MobEffectParser,
+    "foton:command/parser/mob_effect",
+    MobEffectValue,
+    parse | reader,
+    _source | {
+        let key = parse_identifier(reader)?;
+        REGISTRY.mob_effects.by_key(&key).map_or_else(
+            || Err(unknown_resource(reader, &key, &MOB_EFFECT_REGISTRY)),
+            |effect| Ok(MobEffectValue(effect)),
+        )
+    },
+    suggest | _context,
+    builder | {
+        suggest_resources(
+            REGISTRY.mob_effects.iter().map(|(_, effect)| &effect.key),
+            builder,
+        );
+    },
+    protocol(
+        ProtocolArgumentType::Resource {
+            identifier: "minecraft:mob_effect",
+        },
+        None,
+    )
+);
+unit_argument_parser!(
+    AttributeParser,
+    "foton:command/parser/attribute",
+    AttributeValue,
+    parse | reader,
+    _source | {
+        let key = parse_identifier(reader)?;
+        REGISTRY.attributes.by_key(&key).map_or_else(
+            || {
+                Err(unknown_resource(
+                    reader,
+                    &key,
+                    &Identifier::vanilla_static("attribute"),
+                ))
+            },
+            |attribute| Ok(AttributeValue(attribute)),
+        )
+    },
+    suggest | _context,
+    builder | {
+        suggest_resources(
+            REGISTRY
+                .attributes
+                .iter()
+                .map(|(_, attribute)| &attribute.key),
+            builder,
+        );
+    },
+    protocol(
+        ProtocolArgumentType::Resource {
+            identifier: "minecraft:attribute",
+        },
+        None,
+    )
+);
+unit_argument_parser!(
     DamageTypeParser,
     "foton:command/parser/damage_type",
     DamageTypeValue,
@@ -1268,6 +1365,16 @@ unit_argument_parser!(
     suggest | _context,
     _builder | {},
     protocol(ProtocolArgumentType::NbtPath, None)
+);
+unit_argument_parser!(
+    NbtTagParser,
+    "foton:command/parser/nbt_tag",
+    NbtTagValue,
+    parse | reader,
+    _source | { parse_nbt_tag(reader).map(NbtTagValue) },
+    suggest | _context,
+    _builder | {},
+    protocol(ProtocolArgumentType::NbtTag, None)
 );
 unit_argument_parser!(
     NbtCompoundParser,

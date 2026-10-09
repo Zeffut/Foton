@@ -484,6 +484,28 @@ impl AttributeMap {
         }
     }
 
+    /// Resets an attribute's base value to its entity-type default.
+    ///
+    /// Vanilla parity: `AttributeMap.resetBaseValue`, whose supplier is the
+    /// entity type's default attribute set. Returns the restored value, or
+    /// `None` when the entity type has no such attribute.
+    pub fn reset_base_value(
+        &mut self,
+        attribute: AttributeRef,
+        entity_type: EntityTypeRef,
+    ) -> Option<f64> {
+        if !self.has_attribute(attribute) {
+            return None;
+        }
+        let default = entity_type
+            .default_attributes
+            .iter()
+            .find(|(name, _)| Identifier::vanilla_static(name) == attribute.key)
+            .map(|&(_, value)| value)?;
+        self.set_base_value(attribute, default);
+        Some(default)
+    }
+
     /// Adds a modifier to an attribute. Returns `false` if the modifier ID already exists
     pub fn add_modifier(
         &mut self,
@@ -712,6 +734,29 @@ mod tests {
         assert_eq!(
             modifiers[0].string("operation").map(ToString::to_string),
             Some("add_multiplied_base".to_owned())
+        );
+    }
+
+    #[test]
+    fn reset_base_value_restores_the_entity_type_default() {
+        init_vanilla_registry();
+        let mut attributes = AttributeMap::new_for_entity(&vanilla_entities::PLAYER);
+        let default = attributes.get_base_value(vanilla_attributes::MAX_HEALTH);
+        attributes.set_base_value(vanilla_attributes::MAX_HEALTH, 99.0);
+
+        assert_eq!(
+            attributes.reset_base_value(vanilla_attributes::MAX_HEALTH, &vanilla_entities::PLAYER),
+            default
+        );
+        assert_eq!(
+            attributes.get_base_value(vanilla_attributes::MAX_HEALTH),
+            default
+        );
+        // A player has no flying speed, so there is nothing to reset to.
+        assert_eq!(
+            attributes
+                .reset_base_value(vanilla_attributes::FLYING_SPEED, &vanilla_entities::PLAYER),
+            None
         );
     }
 

@@ -19,8 +19,8 @@ pub use path::{
     parse_nbt_path_argument,
 };
 pub use snbt::{
-    SnbtError, SnbtErrorKind, SnbtNumberType, parse_snbt, parse_snbt_argument, parse_snbt_compound,
-    parse_snbt_compound_argument, to_canonical_snbt, write_compound_snbt_nbt,
+    SnbtError, SnbtErrorKind, SnbtNumberType, java_double_string, parse_snbt, parse_snbt_argument,
+    parse_snbt_compound, parse_snbt_compound_argument, to_canonical_snbt, write_compound_snbt_nbt,
 };
 
 /// Mirrors vanilla `NbtUtils.compareNbt`.

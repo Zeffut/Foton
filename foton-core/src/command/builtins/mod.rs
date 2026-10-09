@@ -1,14 +1,18 @@
 //! Foton-owned built-in command declarations.
 
+mod attribute;
 pub(crate) mod bossbar;
 mod bug;
 mod clear;
 mod damage;
+mod data;
 mod difficulty;
 mod domain;
+mod effect;
 mod enchant;
 mod execute;
 mod experience;
+mod fill;
 mod fly;
 mod function;
 pub(crate) mod gamemode;
@@ -19,6 +23,8 @@ mod item;
 mod kill;
 mod list;
 mod locate;
+#[cfg(test)]
+mod modification_commands_tests;
 mod operator;
 mod perms;
 mod raid;
@@ -67,16 +73,20 @@ pub(crate) fn create_registered_dispatcher(
     builder.declare_permission(perms::MANAGE_ALL_PERMISSION)?;
     builder.declare_permission(perms::GROUP_ALL_PERMISSION)?;
     builder.declare_permission(perms::METADATA_PERMISSION)?;
+    builder.register(attribute::registration())?;
     builder.register(bossbar::registration())?;
     builder.register(bug::registration())?;
     builder.register(clear::registration())?;
     builder.register(operator::deop_registration())?;
     builder.register(damage::registration())?;
+    builder.register(data::registration())?;
     builder.register(difficulty::registration())?;
     builder.register(domain::registration())?;
+    builder.register(effect::registration())?;
     builder.register(enchant::registration())?;
     builder.register(execute::registration())?;
     builder.register(experience::registration())?;
+    builder.register(fill::registration())?;
     builder.register(fly::registration())?;
     builder.register(function::registration())?;
     builder.register(gamemode::registration()?)?;
@@ -148,6 +158,7 @@ mod tests {
         assert_eq!(
             names,
             [
+                "attribute",
                 "bossbar",
                 "bug",
                 "report",
@@ -155,12 +166,15 @@ mod tests {
                 "clear",
                 "deop",
                 "damage",
+                "data",
                 "difficulty",
                 "domain",
+                "effect",
                 "enchant",
                 "execute",
                 "experience",
                 "xp",
+                "fill",
                 "fly",
                 "function",
                 "gamemode",
