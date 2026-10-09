@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["VANILLA_HORIZONTAL_DIRECTIONS"],"enum":["PathTypeMode"],"fn":["clockwise_direction_index"],"struct":["AcceptedNodeRequest","Neighbors","WalkNodeEvaluator"]};

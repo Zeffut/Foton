@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ALL_LAYERS","MODEL_PARTS","VALID_POSES"],"fn":["default_description","hidden_parts_from_shown","pose_from_name","pose_name","shown_parts_from_hidden"],"struct":["MannequinEntity","MannequinState"]};

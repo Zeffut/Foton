@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CHEST_HALF_SLOTS"],"fn":["chest","double_chest","menu_type_for_rows"],"struct":["ChestKind"]};

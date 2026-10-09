@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_DEPTH","MAX_TEMPLATE_DEPTH"],"enum":["Node"],"fn":["check","check_component","check_java_nbt","check_string"],"mod":["components","predicates","text"],"struct":["Walker"]};

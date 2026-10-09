@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CORNER_SEARCH_RADIUS","DEFAULT_OFFSET","MAX_OFFSET_PER_AXIS","MAX_SIZE_PER_AXIS"],"enum":["StructureMirror","StructureRotation"],"fn":["clamp_offset","clamp_size","encapsulate","enclosing_bounds","mode_from_ordinal","mode_ordinal"],"struct":["StructureBlockEntity","StructureBlockState"],"type":["Corner","ScannedBounds"]};

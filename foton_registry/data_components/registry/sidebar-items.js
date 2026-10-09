@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["bounded_nbt","codecs","component_map","indirect_text","patch","patch_network","patch_persistence","recursive_codec","validation"],"struct":["DataComponentRegistry","DataComponentType"]};

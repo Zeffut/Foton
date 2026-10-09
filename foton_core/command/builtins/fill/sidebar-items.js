@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["FillFilter","FillFilterSource","FillMode"],"fn":["block_input","command","fill","filter_matches","loaded_block_pos","registration","wrap_with_mode"],"struct":["BlockInput"]};

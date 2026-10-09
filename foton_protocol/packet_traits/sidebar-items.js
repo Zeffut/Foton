@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["TRANSLATION_TIMEOUT"],"enum":["PacketDirection"],"static":["TRANSLATION_WORKERS"],"struct":["CompressionInfo","EncodedPacket","PacketTranslation","TranslationBatch","TranslationCallCompletion"],"trait":["ClientPacket","PacketTranslator","ServerPacket"]};

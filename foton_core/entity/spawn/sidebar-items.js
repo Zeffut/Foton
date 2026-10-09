@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["EntitySpawnReason","PluginSpawnReason","SpawnGroupData"],"struct":["AgeableMobGroupData","AxolotlGroupData","HorseGroupData","LlamaGroupData","RabbitGroupData","TropicalFishGroupData"]};

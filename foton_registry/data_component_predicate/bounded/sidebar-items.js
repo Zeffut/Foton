@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"macro":[["compound",1],["holder_predicate",1],["list_predicate",1]]};

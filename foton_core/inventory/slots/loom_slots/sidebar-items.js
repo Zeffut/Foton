@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["LOOM_BANNER","LOOM_DYE","LOOM_PATTERN","MAX_LAYERS","PATTERN_NOT_SET"],"fn":["is_banner","is_dye_item","is_pattern_item","selectable_patterns"],"struct":["LoomHandler"]};

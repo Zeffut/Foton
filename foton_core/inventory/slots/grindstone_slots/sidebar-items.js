@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["GRINDSTONE_ADDITIONAL","GRINDSTONE_INPUT","WELD_BONUS_PERCENT"],"fn":["experience_from","grindstone_accepts","grindstone_result","is_curse","merge_enchantments_from","merge_items","remove_non_curses"],"struct":["GrindstoneHandler"]};

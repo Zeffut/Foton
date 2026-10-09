@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_MAX_RAID_OMEN_LEVEL","DEFAULT_PRE_RAID_TICKS"],"enum":["RaidPhase","RaiderType"],"fn":["num_groups"],"mod":["raid","raids","wave"],"struct":["Raid","Raids"]};

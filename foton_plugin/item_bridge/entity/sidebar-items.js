@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["capture_item","drop_item","get","identity","set"]};

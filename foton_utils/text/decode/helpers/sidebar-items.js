@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["as_bool","as_f32","as_f64","as_i32","as_string","invalid","is_allowed_url","is_identifier","optional_bool","optional_identifier","optional_string","parse_color","parse_shadow_color","parse_uuid","required_chat_string","required_compound","required_i32","required_identifier","required_string","validate_player_name"]};

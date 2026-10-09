@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["parse_effects","repeatable","utf8_hex","validate"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["add_modifier","command","description","get_base","get_modifier","get_value","living_target","living_with_attribute","modifier_value","no_such_attribute","no_such_modifier","number","operation_node","registration","remove_modifier","reset_base","scaled","scaled_result","set_base"],"type":["Executor"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["menu_top_slot_count"]};

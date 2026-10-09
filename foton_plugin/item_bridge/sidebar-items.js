@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["initialize","require_registry","store"],"mod":["block_inventory","block_item","edits","entity","error","inventory","legacy","menu","merchant","meta_kind","mounts","mutation","preflight","public_components","queries","serialization","snapshot","transfer","transitions"],"static":["STORE"]};

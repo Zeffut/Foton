@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_SERIALIZED_BYTES"],"fn":["deserialize","serialize"]};

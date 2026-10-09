@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["banner_base_color"],"struct":["MapBanner","MapDecoration","MapFrame"]};

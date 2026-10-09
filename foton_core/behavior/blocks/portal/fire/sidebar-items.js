@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["AGE","MAX_AGE","WATERLOGGED"],"fn":["burn_odds","can_burn","face_property","fire_tick_delay","ignite_odds","remove_fire_with_event"],"mod":["flammability"],"struct":["FireBlock","SoulFireBlock"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["default_keep_spawn_in_memory","describe_generation_settings","generation_config_string","wrap_degrees","write_level_data"],"struct":["LevelData","LevelDataManager","RespawnData","SavedLevelSeed","SerializedRespawnData","SpawnPoint","WeatherState","WorldBorderData","WorldGenerationSettings"]};

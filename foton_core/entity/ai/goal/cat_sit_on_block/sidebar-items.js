@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SEARCH_RANGE"],"fn":["is_bed_head","is_valid_seat"],"struct":["CatSitOnBlockGoal"]};

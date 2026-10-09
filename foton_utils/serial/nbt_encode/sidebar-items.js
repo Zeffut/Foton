@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["check_depth","end","field","field_with","identifier_field","list","write_bounded"],"macro":[["number",1]],"trait":["NbtEncode"]};

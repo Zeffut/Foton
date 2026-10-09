@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["check_depth","double_bits","float_bits","invalid","valid_mutf8","wire_size","write_compound","write_compound_bounded","write_compound_fields","write_length","write_list","write_payload","write_string","write_tag","write_tag_bounded"],"mod":["writer_work"],"struct":["LimitedWriter","ScratchWriter"],"trait":["NbtWrite"]};

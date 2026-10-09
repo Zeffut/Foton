@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CHUNK_SIZE","PACK_SCATTER","PLACEMENT_ATTEMPTS"],"fn":["biome_for_chunk","generate","pick_weighted","place_pack","spawn_mobs_for_chunk_generation","top_non_colliding_pos"]};

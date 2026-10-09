@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["TIMEOUT_TO_GET_WITHIN_ATTACK_RANGE"],"struct":["StopAttackingIfTargetInvalid"],"type":["StopAttackCondition","TargetErasedCallback"]};

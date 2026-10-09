@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CONVERSION_TIME","FIRE_IN_NEIGHBOR_MALUS","FIRE_MALUS","TAG_INVENTORY"],"enum":["PiglinArmPose"],"fn":["apply_constructor","is_holding_melee_weapon","load_inventory","save_inventory","tick_conversion"],"trait":["ConvertiblePiglin"]};

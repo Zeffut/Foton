@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["commit","get","set","set_contents","write"]};

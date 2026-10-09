@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["PROJECTILE_ATTACK_RANGE_BUFFER"],"struct":["SetWalkTargetFromAttackTargetIfTargetOutOfReach"],"type":["SpeedModifier"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BOOK_TYPES"],"struct":["PersistentRecipeBook","ServerRecipeBook"]};

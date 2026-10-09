@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["EXPLOSION_PACKET_RANGE_SQ","RAY_GRID_SIZE","RAY_STEP","RAY_STEP_COST"],"enum":["ExplosionBlockInteraction"],"fn":["add_or_append_stack","default_explosion_block_particles","default_explosion_damage_source"],"struct":["ExplosionSpec","StackCollector"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_CLOSE_ENOUGH_DIST","ENTRY_CONDITION","TEMPTATION_COOLDOWN","WALK_TARGET_CLOSE_ENOUGH"],"struct":["FollowTemptation"],"type":["MobDistance"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SWIM_LOOK_CONTROL","SWIM_MOVE_CONTROL"],"struct":["ZombieNautilusEntity"]};

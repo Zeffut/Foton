@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["recipe_unlocked"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["COLLISION","LIQUID","MAX_BLOCK_ENTITY_DATA_BYTES","OCCLUDING","OUTLINE"],"fn":["bindings","block_entity_persistent_data","block_normalize","block_shape_boxes","block_state_flags","face_ordinal","ray_trace_blocks","set_block_entity_persistent_data"]};

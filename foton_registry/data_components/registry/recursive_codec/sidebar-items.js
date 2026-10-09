@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["owned_reader","write","write_list"],"macro":[["template_list",1],["template_wrapper",1]]};

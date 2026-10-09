@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["block_face","entity_place_allowed"]};

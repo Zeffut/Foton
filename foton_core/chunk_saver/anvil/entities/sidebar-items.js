@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BLOCK_ENTITY_METADATA"],"fn":["convert_block_entities","convert_entities","convert_entity"]};

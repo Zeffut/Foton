@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["GENERATE_MAX_DISTANCE"],"fn":["generate_jigsaw","jigsaw_assets"],"static":["JIGSAW_ASSETS"],"struct":["JigsawAssets"]};

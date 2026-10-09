@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["spawner_block","trial_spawner_block","vault_block"]};

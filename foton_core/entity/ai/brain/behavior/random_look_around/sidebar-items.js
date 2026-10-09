@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ENTRY_CONDITION","MAX_PITCH","MIN_PITCH"],"fn":["wrap_degrees"],"struct":["RandomLookAround"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CLOSE_ENOUGH_DISTANCE_TO_TARGET","ITEM_PICKUP_COOLDOWN_AFTER_THROWING","THROW_AIM_ABOVE","THROW_HAND_Y_DISTANCE_FROM_EYE","THROW_VELOCITY","WALK_CLOSE_ENOUGH"],"struct":["GoAndGiveItemsToTarget","StayCloseToTarget"],"type":["ItemThrower","ShouldRun","TargetPositionGetter"]};

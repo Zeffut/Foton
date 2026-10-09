@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SPAWN_Y_OFFSET"],"fn":["check_wither_spawn","clear_and_update","is_wither_skull"],"static":["WITHER_FULL"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CAN_SUMMON","DARKNESS_RADIUS","DEFAULT_WARNING_LEVEL","LISTENER_RADIUS","SHRIEKING","SHRIEKING_TICKS","WARDEN_SPAWN_ATTEMPTS","WARDEN_SPAWN_RANGE_XZ","WARDEN_SPAWN_RANGE_Y","WARNING_SOUND_RADIUS"],"fn":["with_shrieking_player"],"struct":["SculkShriekerBlockEntity","SculkShriekerState","SculkShriekerVibrationUser"]};

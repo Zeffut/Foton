@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["early_kind","kind","middle_kind","query"],"static":["KINDS"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ADVANCE_CHANCE","AGE","HANGING","MAX_AGE","WATERLOGGED"],"fn":["is_fully_grown","is_hanging","ripened"],"struct":["MangrovePropaguleBlock"]};

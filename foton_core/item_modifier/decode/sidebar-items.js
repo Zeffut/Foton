@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["boolean","constant","decode","decode_function","decode_into","decode_set_custom_data","decode_set_enchantments","decode_set_name","from_json","from_nbt","identifier","int_range","narrow","options","provider","required"]};

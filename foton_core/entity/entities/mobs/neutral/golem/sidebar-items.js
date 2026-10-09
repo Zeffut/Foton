@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["AMBIENT_SOUND_INTERVAL","EQUIPMENT_SLOT_ANTENNA"],"enum":["CopperGolemState"],"mod":["copper_golem","copper_golem_ai","iron_golem","snow_golem"],"struct":["CopperGolemEntity","IronGolemEntity","SnowGolemEntity"]};

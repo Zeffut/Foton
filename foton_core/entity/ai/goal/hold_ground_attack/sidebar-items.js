@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["LOOK_SPEED","SHOUT_CHANCE_DENOMINATOR","SHOUT_RANGE"],"struct":["HoldGroundAttackGoal"]};

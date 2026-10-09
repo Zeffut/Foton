@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["attributes","holder","optional_text","pattern","write"]};

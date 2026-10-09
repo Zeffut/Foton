@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["PlayerDetector"],"fn":["center_of","closer_than","in_line_of_sight"]};

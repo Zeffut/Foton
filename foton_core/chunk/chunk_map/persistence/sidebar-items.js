@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["finish_save_after_close"]};

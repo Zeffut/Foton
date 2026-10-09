@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["TradeCostComponents"],"fn":["result_stores_any_of"],"struct":["TradeCost","VillagerTrade"],"type":["VillagerTradeRef"]};

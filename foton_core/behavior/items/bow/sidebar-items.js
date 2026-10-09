@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BOW_PROJECTILE_RANGE","BOW_USE_DURATION","FULL_DRAW_POWER","MAX_DRAW_DURATION","MINIMUM_POWER","SHOT_POWER_SCALE","SHOT_UNCERTAINTY"],"fn":["find_arrow_slot","has_arrow","held_arrow","take_one_arrow"],"struct":["BowItem"]};

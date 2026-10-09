@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["any_merchant","bindings","create_merchant","merchant","merchant_offers","merchant_trader","merchants","open_merchant","release_merchant","set_merchant_offer","set_merchant_offers"],"static":["MERCHANTS"],"struct":["PluginMerchant"]};

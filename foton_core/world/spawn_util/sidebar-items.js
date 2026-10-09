@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["SpawnStrategy"],"fn":["possible_spawn_position"]};

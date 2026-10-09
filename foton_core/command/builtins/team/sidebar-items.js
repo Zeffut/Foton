@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["add_team","command","empty_team","join_team","leave_team","list_members","list_teams","modify_subcommands","registration","remove_team","set_friendly_fire","set_see_friendly_invisibles","source_scoreboard","team"]};

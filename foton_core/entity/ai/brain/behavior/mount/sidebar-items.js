@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CLOSE_ENOUGH_TO_START_RIDING_DIST"],"struct":["DismountOrSkipMounting","Mount"],"type":["DontRideCondition"]};

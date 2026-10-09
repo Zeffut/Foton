@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["brewing_stand"],"struct":["BrewingStandKind"]};

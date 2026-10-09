@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["AXIS"],"fn":["host_state_by_infested","infested_state_by_host","is_compatible_host_block","prevents_infested_spawns","spawn_after_break_infested","spawn_infestation"],"static":["INFESTED_BY_HOST"],"struct":["InfestedBlock","InfestedRotatedPillarBlock"],"trait":["Infested"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["add_attribute_modifier_keyed","attribute","attribute_modifier_list","attribute_values","bindings","operation","operation_name","remove_attribute_modifier_keyed"]};

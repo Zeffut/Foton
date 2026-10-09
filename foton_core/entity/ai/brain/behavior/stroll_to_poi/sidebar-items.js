@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MIN_TIME_BETWEEN_LIST_WALKS","MIN_TIME_BETWEEN_STROLLS","MIN_TIME_BETWEEN_WALKS","STROLL_MAX_XZ_DIST","STROLL_MAX_Y_DIST"],"struct":["StrollAroundPoi","StrollToPoi","StrollToPoiList"]};

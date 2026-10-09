@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["adult_sensor_memories","remember_nearest_visible_adult"],"struct":["AdultSensor","AdultSensorAnyType"]};

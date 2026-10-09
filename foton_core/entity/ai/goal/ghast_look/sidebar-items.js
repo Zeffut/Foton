@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FACE_TARGET_RANGE_SQR"],"fn":["face_movement_direction"],"struct":["GhastLookGoal"]};

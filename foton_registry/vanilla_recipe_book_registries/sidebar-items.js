@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["recipe_book_category","recipe_display_type","slot_display_type"]};

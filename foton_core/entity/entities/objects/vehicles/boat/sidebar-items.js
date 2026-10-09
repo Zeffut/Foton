@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"macro":[["boat_body",1]],"struct":["BoatEntity","RaftEntity"]};

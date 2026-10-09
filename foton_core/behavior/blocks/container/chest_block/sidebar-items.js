@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CHEST_ROWS","FACING","LID_VOLUME","TYPE","WATERLOGGED"],"enum":["ChestPairing"],"fn":["lid_pitch"],"struct":["ChestBlock"]};

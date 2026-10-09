@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ModifierFunction"],"fn":["from_json","from_nbt","nbt_to_json"],"mod":["decode"],"struct":["ItemModifier","ModifierContext"]};

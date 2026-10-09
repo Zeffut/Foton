@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_START_NODE_CANDIDATES","SMALL_MOB_INFLATED_START_BOX","SMALL_MOB_SIZE","WALKABLE_NODE_MALUS"],"fn":["fly_path_type"],"struct":["FlyNodeEvaluator"]};

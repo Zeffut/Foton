@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ScoreboardPacket"],"fn":["objective_data"],"struct":["ObjectiveData"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["translated_death","translated_death_alone"],"struct":["DamageSource"]};

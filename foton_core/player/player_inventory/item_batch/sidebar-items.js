@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["MenuItemBatchError","MenuItemBatchStatus"],"fn":["apply","single","sources","validate","validate_batch"],"struct":["MenuSlotWrite","NativeBatch"],"trait":["MenuItemBatch"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_PAGES","MAX_PAGE_LENGTH","MAX_TITLE_LENGTH"],"struct":["SEditBook"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["consume_item","filled_bucket","item_only","shot_crossbow","speared_mobs","using_item"]};

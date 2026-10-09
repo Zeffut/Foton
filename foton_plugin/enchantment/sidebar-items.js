@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["close","decode","encode","item","set_item","set_view","title","view"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["write_nbt_tag_bounded"],"struct":["OptionalNbt"]};

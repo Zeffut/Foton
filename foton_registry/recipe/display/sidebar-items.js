@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["CookingStation","RecipeBookCategory","RecipeDisplay","SlotDisplay"],"fn":["present","write_ingredient_contents","write_item","write_list"],"struct":["DisplaySource","RecipeDisplayEntry"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CUSTOM","TRIGGER"],"fn":["identifier_by_dot","stat_criteria","stat_name","team_color_names","team_criteria"],"struct":["ObjectiveCriteria"]};

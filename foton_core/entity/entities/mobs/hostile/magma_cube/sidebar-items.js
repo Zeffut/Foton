@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ARMOR_PER_SIZE","ATTACK_DAMAGE_BONUS","JUMP_BOOST_PER_SIZE","JUMP_DELAY_MULTIPLIER","LAVA_JUMP_BASE","LAVA_JUMP_PER_SIZE"],"fn":["check_magma_cube_spawn_rules"],"struct":["MagmaCubeEntity"]};

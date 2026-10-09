@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["VILLAGERS_NEEDED_TO_AGREE_WHEN_GOSSIPING"],"mod":["merchant_state","offer_nbt","villager","villager_ai","wandering_trader","zombie_villager"],"struct":["VillagerEntity","WanderingTraderEntity","ZombieVillagerEntity"]};

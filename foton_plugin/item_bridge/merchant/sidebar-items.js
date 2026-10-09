@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["capture","get","integer","prepare","read","set","take","transfers"],"struct":["CapturedOffer","OfferBatch"]};

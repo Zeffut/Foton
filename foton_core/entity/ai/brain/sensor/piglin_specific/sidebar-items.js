@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["REPELLENT_DETECTION_RANGE_HORIZONTAL","REPELLENT_DETECTION_RANGE_VERTICAL"],"fn":["find_nearby_adult_piglins","find_nearest_repellent","is_adult_piglin","is_lit_campfire","is_nemesis","is_zombified","visible"],"struct":["HoglinSpecificSensor","PiglinBruteSpecificSensor","PiglinSpecificSensor"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_DEPTH"],"enum":["TypedArrayKind"],"fn":["list_from_tags","parse_snbt","parse_snbt_argument","parse_snbt_compound","parse_snbt_compound_argument"],"mod":["compound_work"],"struct":["Parser"]};

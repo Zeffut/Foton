@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["PermitKind"],"fn":["menu_batch"],"struct":["Admission","AdmissionState","Candidate","Capture","LeaseKey","MenuCandidates","Permit","Snapshot","SnapshotStore"]};

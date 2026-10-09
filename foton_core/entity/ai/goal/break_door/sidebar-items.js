@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BREAK_PROGRESS_STAGES","DEFAULT_DOOR_BREAK_TIME","DOOR_REACH","KNOCK_CHANCE_DENOMINATOR"],"struct":["BreakDoorGoal"],"type":["DifficultyPredicate"]};

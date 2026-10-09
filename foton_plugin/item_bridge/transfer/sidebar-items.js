@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["close","construct","from_capture","lease_key","parse_key","release"]};

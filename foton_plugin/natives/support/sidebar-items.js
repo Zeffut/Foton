@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["component","doubles","entity","key","method","player","text","world"]};

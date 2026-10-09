@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["command","count","data","format_list","number_formats","objective","registration","resolved_component","scoreboard_error","source_scoreboard","text","writable_objective"],"mod":["objectives","players"],"type":["Context"]};

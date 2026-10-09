@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"macro":[["compound",1]],"struct":["List","RestrictedText","WrittenPages"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["IMAGE_SIZE"],"fn":["add_color","apply_post_processing","correct_state_for_fluid_block","create_map","default_map_color","highest_count_first","holds_map","map_invisibility_equipped","map_storage","player_state","saved_data","tick_carried_by","update"],"struct":["EmptyMapItem","MapItem","OnlineMapHolders"]};
