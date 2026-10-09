@@ -4,11 +4,15 @@
 //! execution: objective identity and mutability, score values and locks, and
 //! team membership, plus what a team shows the client -- its prefix, suffix,
 //! color and name-tag rules, which every change queues as a team packet for
-//! the server to send (see [`Scoreboard::take_team_updates`]). Display slots
-//! are outside this scope.
+//! the server to send (see [`Scoreboard::take_team_updates`]). Objectives keep
+//! their criteria, look and number format, scores their display name and
+//! format, and objectives shown in a display slot are synchronized to clients
+//! through [`ScoreboardPacket`]s (see [`Scoreboard::take_objective_updates`]).
 
 use std::{
-    collections::{BTreeMap, BTreeSet, btree_map::Entry},
+    cmp::Ordering as ComparisonOrdering,
+    collections::{BTreeMap, BTreeSet},
+    hash::{Hash, Hasher},
     io, mem,
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -16,33 +20,109 @@ use std::{
 use std::sync::Arc;
 
 use foton_protocol::packets::game::{
-    CSetPlayerTeam, TeamCollisionRule, TeamColor, TeamMethod, TeamParameters, TeamVisibility,
+    CSetPlayerTeam, DisplaySlot, NumberFormat, ObjectiveRenderType, TeamCollisionRule, TeamColor,
+    TeamMethod, TeamParameters, TeamVisibility,
 };
 use foton_utils::locks::{AsyncMutex, SyncMutex, SyncRwLock};
 use serde::{Deserialize, Serialize};
-use text_components::TextComponent;
+use text_components::{Modifier as _, TextComponent, interactivity::HoverEvent};
 use thiserror::Error;
 
 use crate::{server::worlds::WorldMap, world::World};
 use foton_utils::saved_data::names as saved_data_names;
 
+mod criteria;
+mod objectives;
+
+pub use criteria::ObjectiveCriteria;
+pub use objectives::{ObjectiveData, ScoreboardPacket};
+
 /// Score holder name stored by the vanilla scoreboard.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+///
+/// Vanilla parity: `ScoreHolder`. Holders are identified by name alone; the
+/// display name only rides along for the entities that have one, so that
+/// `displayautoupdate` objectives can copy it into the score.
+#[derive(Clone, Debug)]
 pub struct ScoreHolder {
     name: String,
+    display_name: Option<TextComponent>,
 }
 
 impl ScoreHolder {
     /// Creates a score holder from its scoreboard name.
+    ///
+    /// Vanilla parity: `ScoreHolder.forNameOnly`.
     #[must_use]
     pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into() }
+        Self {
+            name: name.into(),
+            display_name: None,
+        }
+    }
+
+    /// Gives the holder the display name an entity would report.
+    ///
+    /// Vanilla parity: `ScoreHolder.getDisplayName` of a `Player` or `Entity`.
+    #[must_use]
+    pub fn with_display_name(mut self, display_name: TextComponent) -> Self {
+        self.display_name = Some(display_name);
+        self
     }
 
     /// Returns the scoreboard name.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Returns the display name, if the holder has one.
+    #[must_use]
+    pub const fn display_name(&self) -> Option<&TextComponent> {
+        self.display_name.as_ref()
+    }
+
+    /// The name a command reports the holder by.
+    ///
+    /// Vanilla parity: `ScoreHolder.getFeedbackDisplayName` -- the display
+    /// name hovering to the scoreboard name, or the scoreboard name itself.
+    #[must_use]
+    pub fn feedback_display_name(&self) -> TextComponent {
+        match &self.display_name {
+            Some(display_name) => {
+                display_name
+                    .clone()
+                    .hover_event(HoverEvent::show_text(TextComponent::plain(
+                        self.name.clone(),
+                    )))
+            }
+            None => TextComponent::plain(self.name.clone()),
+        }
+    }
+}
+
+impl PartialEq for ScoreHolder {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+
+impl Eq for ScoreHolder {}
+
+impl PartialOrd for ScoreHolder {
+    fn partial_cmp(&self, other: &Self) -> Option<ComparisonOrdering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ScoreHolder {
+    fn cmp(&self, other: &Self) -> ComparisonOrdering {
+        self.name.cmp(&other.name)
+    }
+}
+
+impl Hash for ScoreHolder {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
     }
 }
 
@@ -82,12 +162,18 @@ impl ScoreboardTeam {
 }
 
 /// Stored score fields used by command execution.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Vanilla parity: `Score`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ScoreboardScore {
     value: i32,
     #[serde(default = "default_score_locked")]
     locked: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    display: Option<TextComponent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    number_format: Option<NumberFormat>,
 }
 
 impl ScoreboardScore {
@@ -95,19 +181,33 @@ impl ScoreboardScore {
         Self {
             value,
             locked: true,
+            display: None,
+            number_format: None,
         }
     }
 
     /// Returns the integer score value.
     #[must_use]
-    pub const fn value(self) -> i32 {
+    pub const fn value(&self) -> i32 {
         self.value
     }
 
     /// Returns whether `/trigger`-style writes are locked.
     #[must_use]
-    pub const fn is_locked(self) -> bool {
+    pub const fn is_locked(&self) -> bool {
         self.locked
+    }
+
+    /// Returns the text drawn in place of the holder's name, if any.
+    #[must_use]
+    pub const fn display(&self) -> Option<&TextComponent> {
+        self.display.as_ref()
+    }
+
+    /// Returns this score's own number format, if it overrides the objective's.
+    #[must_use]
+    pub const fn number_format(&self) -> Option<&NumberFormat> {
+        self.number_format.as_ref()
     }
 }
 
@@ -121,10 +221,33 @@ const fn default_score_locked() -> bool {
     true
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Vanilla parity: `Objective`, less its name, which is its key.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct ObjectiveState {
     read_only: bool,
+    /// `ObjectiveCriteria.getName`.
+    criteria: String,
+    /// `None` is the objective's name as literal text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    display_name: Option<TextComponent>,
+    render_type: ObjectiveRenderType,
+    display_auto_update: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    number_format: Option<NumberFormat>,
+}
+
+impl Default for ObjectiveState {
+    fn default() -> Self {
+        Self {
+            read_only: false,
+            criteria: ObjectiveCriteria::dummy().name().to_owned(),
+            display_name: None,
+            render_type: ObjectiveRenderType::default(),
+            display_auto_update: false,
+            number_format: None,
+        }
+    }
 }
 
 /// The options a team carries beyond its name.
@@ -255,6 +378,8 @@ struct PersistentScoreboard {
     holder_teams: BTreeMap<String, String>,
     /// Presentation, for teams whose look was ever changed from the default.
     team_display: BTreeMap<String, TeamDisplay>,
+    /// `Scoreboard.displayObjectives`: slot name to objective name.
+    display_slots: BTreeMap<String, String>,
 }
 
 /// Incoming saves stored prefix alongside flags; runtime state has one prefix.
@@ -285,6 +410,7 @@ struct SavedScoreboard {
     teams: BTreeMap<String, SavedTeamOptions>,
     holder_teams: BTreeMap<String, String>,
     team_display: BTreeMap<String, TeamDisplay>,
+    display_slots: BTreeMap<String, String>,
 }
 
 impl From<SavedScoreboard> for PersistentScoreboard {
@@ -309,12 +435,22 @@ impl From<SavedScoreboard> for PersistentScoreboard {
                 )
             })
             .collect();
+        // Vanilla parity: `ServerScoreboard.load` hands a slot a missing
+        // objective as null, which leaves the slot empty.
+        let display_slots = saved
+            .display_slots
+            .into_iter()
+            .filter(|(slot, objective)| {
+                DisplaySlot::by_name(slot).is_some() && saved.objectives.contains_key(objective)
+            })
+            .collect();
         Self {
             objectives: saved.objectives,
             scores: saved.scores,
             teams,
             holder_teams: saved.holder_teams,
             team_display: display,
+            display_slots,
         }
     }
 }
@@ -385,6 +521,13 @@ pub struct Scoreboard {
     /// broadcast as they happen. Queued here because this scoreboard does not
     /// know who is online; the server drains it every tick.
     team_updates: SyncMutex<Vec<CSetPlayerTeam>>,
+    /// Objective, score and display-slot packets for every change since the
+    /// server last sent them.
+    ///
+    /// Vanilla parity: `ServerScoreboard`'s `onScoreChanged`,
+    /// `setDisplayObjective` and friends, which broadcast the same packets as
+    /// the change happens.
+    objective_updates: SyncMutex<Vec<ScoreboardPacket>>,
 }
 
 impl Scoreboard {
@@ -396,6 +539,7 @@ impl Scoreboard {
             revision: AtomicU64::new(0),
             saved_revision: AtomicU64::new(0),
             team_updates: SyncMutex::new(Vec::new()),
+            objective_updates: SyncMutex::new(Vec::new()),
         }
     }
 
@@ -406,61 +550,8 @@ impl Scoreboard {
             revision: AtomicU64::new(0),
             saved_revision: AtomicU64::new(0),
             team_updates: SyncMutex::new(Vec::new()),
+            objective_updates: SyncMutex::new(Vec::new()),
         })
-    }
-
-    /// Adds a writable objective.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the objective name is empty or already exists.
-    pub fn add_objective(
-        &self,
-        name: impl Into<String>,
-    ) -> Result<ScoreboardObjective, ScoreboardError> {
-        self.add_objective_with_read_only(name, false)
-    }
-
-    /// Adds an objective with explicit command mutability.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the objective name is empty or already exists.
-    pub fn add_objective_with_read_only(
-        &self,
-        name: impl Into<String>,
-        read_only: bool,
-    ) -> Result<ScoreboardObjective, ScoreboardError> {
-        let name = name.into();
-        ensure_objective_name(&name)?;
-        let mut state = self.state.write();
-        if state.objectives.contains_key(&name) {
-            return Err(ScoreboardError::DuplicateObjective(name));
-        }
-        state
-            .objectives
-            .insert(name.clone(), ObjectiveState { read_only });
-        self.mark_dirty();
-        Ok(ScoreboardObjective { name, read_only })
-    }
-
-    /// Returns an objective by name.
-    #[must_use]
-    pub fn objective(&self, name: &str) -> Option<ScoreboardObjective> {
-        self.state
-            .read()
-            .objectives
-            .get(name)
-            .map(|objective| ScoreboardObjective {
-                name: name.to_owned(),
-                read_only: objective.read_only,
-            })
-    }
-
-    /// Returns objective names in stable order.
-    #[must_use]
-    pub fn objective_names(&self) -> Vec<String> {
-        self.state.read().objectives.keys().cloned().collect()
     }
 
     /// Adds a team.
@@ -813,87 +904,6 @@ impl Scoreboard {
             .collect()
     }
 
-    /// Returns the complete score entry for a holder and objective.
-    #[must_use]
-    pub fn score_entry(
-        &self,
-        holder: &ScoreHolder,
-        objective: &ScoreboardObjective,
-    ) -> Option<ScoreboardScore> {
-        self.state
-            .read()
-            .scores
-            .get(holder.name())
-            .and_then(|scores| scores.get(objective.name()).copied())
-    }
-
-    /// Returns the integer score for a holder and objective.
-    #[must_use]
-    pub fn score(&self, holder: &ScoreHolder, objective: &ScoreboardObjective) -> Option<i32> {
-        self.score_entry(holder, objective)
-            .map(ScoreboardScore::value)
-    }
-
-    /// Sets a holder's score, preserving its lock state when already present.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for an empty holder, a missing objective, or a read-only objective.
-    pub fn set_score(
-        &self,
-        holder: &ScoreHolder,
-        objective: &ScoreboardObjective,
-        value: i32,
-    ) -> Result<(), ScoreboardError> {
-        ensure_holder_name(holder.name())?;
-        let mut state = self.state.write();
-        ensure_writable_objective(&state, objective)?;
-        let scores = state.scores.entry(holder.name().to_owned()).or_default();
-        match scores.entry(objective.name().to_owned()) {
-            Entry::Vacant(entry) => {
-                entry.insert(ScoreboardScore::new(value));
-            }
-            Entry::Occupied(mut entry) => {
-                if entry.get().value == value {
-                    return Ok(());
-                }
-                entry.get_mut().value = value;
-            }
-        }
-        self.mark_dirty();
-        Ok(())
-    }
-
-    /// Changes a score's trigger lock state.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for an empty holder or a missing objective.
-    pub fn set_score_locked(
-        &self,
-        holder: &ScoreHolder,
-        objective: &ScoreboardObjective,
-        locked: bool,
-    ) -> Result<(), ScoreboardError> {
-        ensure_holder_name(holder.name())?;
-        let mut state = self.state.write();
-        ensure_objective_exists(&state, objective)?;
-        let scores = state.scores.entry(holder.name().to_owned()).or_default();
-        match scores.entry(objective.name().to_owned()) {
-            Entry::Vacant(entry) => {
-                entry.insert(ScoreboardScore { value: 0, locked });
-            }
-            Entry::Occupied(mut entry) => {
-                if entry.get().locked == locked {
-                    return Ok(());
-                }
-                entry.get_mut().locked = locked;
-            }
-        }
-        self.mark_dirty();
-        Ok(())
-    }
-
     /// Returns objective names that have a score for the holder.
     #[must_use]
     pub fn holder_objectives(&self, holder: &ScoreHolder) -> BTreeSet<String> {
@@ -984,14 +994,13 @@ const fn ensure_holder_name(name: &str) -> Result<(), ScoreboardError> {
     }
 }
 
-fn ensure_objective_exists(
-    state: &PersistentScoreboard,
+fn ensure_objective_exists<'a>(
+    state: &'a PersistentScoreboard,
     objective: &ScoreboardObjective,
-) -> Result<ObjectiveState, ScoreboardError> {
+) -> Result<&'a ObjectiveState, ScoreboardError> {
     state
         .objectives
         .get(objective.name())
-        .copied()
         .ok_or_else(|| ScoreboardError::MissingObjective(objective.name().to_owned()))
 }
 
