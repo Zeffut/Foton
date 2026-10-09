@@ -19,7 +19,7 @@ public class EntityChangeBlockEvent extends EntityEvent implements Cancellable {
     public Block getBlock() { return block; }
     public Material getTo() { return to; }
     public org.bukkit.block.data.BlockData getBlockData() {
-        return to == null ? null : new org.bukkit.block.data.SimpleBlockData("minecraft:" + to.getKeyName());
+        return to == null ? null : org.bukkit.block.data.PropertyBlockData.parse("minecraft:" + to.getKeyName());
     }
     @Override public boolean isCancelled() { return cancelled; }
     @Override public void setCancelled(boolean value) { cancelled = value; }

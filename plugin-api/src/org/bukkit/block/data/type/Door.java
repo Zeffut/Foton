@@ -2,12 +2,12 @@ package org.bukkit.block.data.type;
 
 import org.bukkit.block.data.Bisected;
 import org.bukkit.block.data.Directional;
+import org.bukkit.block.data.Openable;
+import org.bukkit.block.data.Powerable;
 
 /** Door block data contract. */
-public interface Door extends Bisected, Directional {
+public interface Door extends Bisected, Directional, Openable, Powerable {
     enum Hinge { LEFT, RIGHT }
-    default Hinge getHinge() { return Hinge.LEFT; }
-    default void setHinge(Hinge hinge) { }
-    default boolean isOpen() { return false; }
-    default void setOpen(boolean open) { }
+    Hinge getHinge();
+    void setHinge(Hinge hinge);
 }

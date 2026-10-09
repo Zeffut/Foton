@@ -44,6 +44,7 @@ public final class Checks {
         PotionEffectCheck.check();
         LiveBackedApiCheck.check();
         Items.check();
+        BlockDataCheck.check();
         RegistryValues.check();
         ItemComponentsCheck.check();
         foton.CustomInventoryCheck.check();

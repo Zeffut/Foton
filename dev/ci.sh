@@ -86,6 +86,7 @@ run "POSIX installer transactions"                bash dev/install-test.sh
 # registry and JVM cannot be reset within the ordinary Rust test process.
 run "pre-publication registry JNI defaults"         cargo test -p foton-plugin --lib generated_java_apis_are_safe_before_registry_publication -- --ignored
 run "published registry JNI bridge"                 cargo test -p foton-plugin --lib generated_java_apis_reach_live_registry_natives -- --ignored
+run "block data follows registry properties"        cargo test -p foton-plugin --lib block_data_follows_the_registry_properties -- --ignored
 # This test needs the built API and runs in its own process because a JVM
 # cannot be restarted inside the ordinary Rust test process.
 run "spawn events cross JNI"                       cargo test -p foton-plugin --lib spawn_bridge_dispatches -- --ignored
