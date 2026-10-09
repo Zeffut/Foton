@@ -8,8 +8,14 @@ rustflags = ["-Zthreads=0"]
 [target.x86_64-unknown-linux-gnu]
 rustflags = ["-Clink-arg=-fuse-ld=lld", "-Zthreads=0"]
 
+# --no-relax: lld rewrites a GOT load (adrp+ldr) into adrp+add even when
+# another path branches straight to the ldr with the adrp skipped, which is
+# code GCC emits (llvm/llvm-project#138254). aws-lc's SHA-512 dispatch was
+# one such pair: it tested a stray word instead of OPENSSL_armcap_P, and
+# 0.16.3 died in sha512su0 on a Pi 4 (#21). dev/check-arm64-got-relax.py
+# guards the release binary.
 [target.aarch64-unknown-linux-gnu]
-rustflags = ["-Clink-arg=-fuse-ld=lld", "-Zthreads=0"]
+rustflags = ["-Clink-arg=-fuse-ld=lld", "-Clink-arg=-Wl,--no-relax", "-Zthreads=0"]
 
 [alias]
 build-native = [
@@ -19,7 +25,7 @@ build-native = [
   "--config",
   "target.x86_64-unknown-linux-gnu.rustflags=[\"-Clink-arg=-fuse-ld=lld\",\"-Zthreads=0\",\"-C\",\"target-cpu=native\"]",
   "--config",
-  "target.aarch64-unknown-linux-gnu.rustflags=[\"-Clink-arg=-fuse-ld=lld\",\"-Zthreads=0\",\"-C\",\"target-cpu=native\"]",
+  "target.aarch64-unknown-linux-gnu.rustflags=[\"-Clink-arg=-fuse-ld=lld\",\"-Clink-arg=-Wl,--no-relax\",\"-Zthreads=0\",\"-C\",\"target-cpu=native\"]",
 ]
 run-native = [
   "run",
@@ -28,5 +34,5 @@ run-native = [
   "--config",
   "target.x86_64-unknown-linux-gnu.rustflags=[\"-Clink-arg=-fuse-ld=lld\",\"-Zthreads=0\",\"-C\",\"target-cpu=native\"]",
   "--config",
-  "target.aarch64-unknown-linux-gnu.rustflags=[\"-Clink-arg=-fuse-ld=lld\",\"-Zthreads=0\",\"-C\",\"target-cpu=native\"]",
+  "target.aarch64-unknown-linux-gnu.rustflags=[\"-Clink-arg=-fuse-ld=lld\",\"-Clink-arg=-Wl,--no-relax\",\"-Zthreads=0\",\"-C\",\"target-cpu=native\"]",
 ]

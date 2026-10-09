@@ -224,6 +224,19 @@ jobs:
         run: rustup target add ${{ matrix.target }}
       - name: Build portable release binary
         run: cargo build --locked --release ${{ matrix.target && format('--target {0}', matrix.target) || '' }} --features stand-alone,deadlock_detection --verbose
+      # The arm runners have every crypto extension, so nothing above would
+      # notice a binary that needs one: 0.16.3's aarch64-gnu build died in
+      # SIGILL on a Raspberry Pi 4 (#21). The first check reads the machine
+      # code for the linker defect behind it; the second boots the binary on
+      # an emulated Cortex-A72, which lacks SHA-512 and SHA-3, through its
+      # first TLS handshake.
+      - name: Verify the aarch64 binary on a CPU without SHA-512
+        if: startsWith(matrix.target, 'aarch64-unknown-linux')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user
+          python3 dev/check-arm64-got-relax.py target/${{ matrix.target }}/release/${{ matrix.artifact }}
+          bash dev/arm64-cpu-test.sh target/${{ matrix.target }}/release/${{ matrix.artifact }} cortex-a72
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.name }}
