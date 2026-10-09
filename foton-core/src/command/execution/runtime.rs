@@ -12,13 +12,14 @@ use crate::command::brigadier::{
     CommandContext, CommandNodeBuilder, CommandRedirectTarget, CommandRuntime, CommandSyntaxError,
     ContextChain,
 };
+use foton_registry::attribute::AttributeRef;
 use foton_registry::damage_type::DamageTypeRef;
 use foton_registry::{
     enchantment::EnchantmentRef, entity_type::EntityTypeRef, item_stack::ItemStack,
-    timeline::TimelineRef, world_clock::WorldClockRef,
+    mob_effect::MobEffectRef, timeline::TimelineRef, world_clock::WorldClockRef,
 };
 use foton_utils::{DowncastType, Identifier, nbt::NbtPath, translations, types::GameType};
-use simdnbt::owned::NbtCompound;
+use simdnbt::owned::{NbtCompound, NbtTag};
 use text_components::TextComponent;
 
 use super::{
@@ -29,11 +30,12 @@ use super::{
     argument::{
         ComponentValue, CoordinateAxes, DomainValue, EnchantmentValue, EntityTypeValue,
         FotonArgumentValue, GameModeValue, IdentifierValue, ItemSlotsValue, ItemStackValue,
-        NbtCompoundValue, NbtPathValue, ObjectiveValue, TimeValue, TimelineValue, WorldClockValue,
+        NbtCompoundValue, NbtPathValue, NbtTagValue, ObjectiveValue, TimeValue, TimelineValue,
+        WorldClockValue,
     },
     selector::EntitySelector,
 };
-use crate::command::execution::argument::DamageTypeValue;
+use crate::command::execution::argument::{AttributeValue, DamageTypeValue, MobEffectValue};
 use crate::command::incorrectly_typed_argument;
 use crate::inventory::slot_ranges::SlotRange;
 use crate::{
@@ -318,6 +320,16 @@ where
             .map(|value| value.0)
     }
 
+    pub(crate) fn mob_effect(&self, name: &str) -> Result<MobEffectRef, CommandSyntaxError> {
+        self.typed_argument::<MobEffectValue>(name)
+            .map(|value| value.0)
+    }
+
+    pub(crate) fn attribute(&self, name: &str) -> Result<AttributeRef, CommandSyntaxError> {
+        self.typed_argument::<AttributeValue>(name)
+            .map(|value| value.0)
+    }
+
     pub(crate) fn damage_type(&self, name: &str) -> Result<DamageTypeRef, CommandSyntaxError> {
         self.typed_argument::<DamageTypeValue>(name)
             .map(|value| value.0)
@@ -353,6 +365,11 @@ where
 
     pub(crate) fn nbt_path(&self, name: &str) -> Result<&NbtPath, CommandSyntaxError> {
         self.typed_argument::<NbtPathValue>(name)
+            .map(|value| &value.0)
+    }
+
+    pub(crate) fn nbt_tag(&self, name: &str) -> Result<&NbtTag, CommandSyntaxError> {
+        self.typed_argument::<NbtTagValue>(name)
             .map(|value| &value.0)
     }
 

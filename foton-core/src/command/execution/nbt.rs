@@ -1,9 +1,10 @@
 //! NBT command arguments.
 
 use foton_utils::nbt::{
-    NbtPath, parse_nbt_path_argument as parse_path, parse_snbt_compound_argument,
+    NbtPath, parse_nbt_path_argument as parse_path, parse_snbt_argument,
+    parse_snbt_compound_argument,
 };
-use simdnbt::owned::NbtCompound;
+use simdnbt::owned::{NbtCompound, NbtTag};
 use text_components::TextComponent;
 
 use crate::command::brigadier::{CommandSyntaxError, CommandSyntaxErrorKind, StringReader};
@@ -26,6 +27,26 @@ pub(super) fn parse_nbt_compound(
         Err(error) => {
             if !reader.advance_bytes(error.cursor()) {
                 return Err(dynamic_error(reader, "Invalid NBT compound cursor"));
+            }
+            Err(dynamic_error(reader, error.component()))
+        }
+    }
+}
+
+/// Reads one SNBT tag of any type from the command line.
+///
+/// Vanilla parity: `NbtTagArgument`, i.e. `TagParser.parseAsArgument`.
+pub(super) fn parse_nbt_tag(reader: &mut StringReader<'_>) -> Result<NbtTag, CommandSyntaxError> {
+    match parse_snbt_argument(reader.remaining()) {
+        Ok((tag, consumed)) => {
+            if !reader.advance_bytes(consumed) {
+                return Err(dynamic_error(reader, "Invalid NBT tag cursor"));
+            }
+            Ok(tag)
+        }
+        Err(error) => {
+            if !reader.advance_bytes(error.cursor()) {
+                return Err(dynamic_error(reader, "Invalid NBT tag cursor"));
             }
             Err(dynamic_error(reader, error.component()))
         }

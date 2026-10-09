@@ -148,7 +148,9 @@ pub(super) fn java_float_string(value: f32) -> String {
     )
 }
 
-pub(super) fn java_double_string(value: f64) -> String {
+/// Formats a double the way `Double.toString` does.
+#[must_use]
+pub fn java_double_string(value: f64) -> String {
     java_floating_string(
         value.is_sign_negative(),
         value.is_nan(),
