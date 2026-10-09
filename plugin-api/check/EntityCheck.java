@@ -12,6 +12,9 @@ final class EntityCheck {
         generatedWrapperSupportMatchesRuntimeWrappers();
         entityContractsPreservePaperInheritance();
         entityAbiMatchesPaper26();
+        playerAnswersEntityQueriesLikeEveryOtherLivingEntity();
+        clickOutsideTheWindowIsNothingOrACursorDrop();
+        schedulerAcceptsSelfCancellingTasks();
         transformReasonsMatchPaper26();
         paperDeprecationMetadataIsExact();
         dimensionsComeFromTheBoundingBox();
@@ -25,6 +28,73 @@ final class EntityCheck {
             double.class, double.class, double.class);
         assertEntityMethod("getFallDistance", float.class);
         assertEntityMethod("setFallDistance", void.class, float.class);
+    }
+
+    /** The player handle once fell back to Entity's and LivingEntity's defaults
+     * (never on the ground, no velocity, no effects) because it did not inherit
+     * the living-entity implementation every other mob has. */
+    private static void playerAnswersEntityQueriesLikeEveryOtherLivingEntity() {
+        Checks.expect(foton.FotonLivingEntity.class.isAssignableFrom(foton.FotonPlayer.class),
+            "a player must share FotonLivingEntity's implementation");
+        for (String name : new String[] { "isOnGround", "getVelocity", "getFireTicks", "getEyeLocation",
+                "getActivePotionEffects", "getBoundingBox", "isInvulnerable", "getAir" }) {
+            assertImplemented(name);
+        }
+        assertImplemented("setVelocity", org.bukkit.util.Vector.class);
+        assertImplemented("setFireTicks", int.class);
+        assertImplemented("hasPotionEffect", org.bukkit.potion.PotionEffectType.class);
+        assertImplemented("getPotionEffect", org.bukkit.potion.PotionEffectType.class);
+        assertImplemented("removePotionEffect", org.bukkit.potion.PotionEffectType.class);
+    }
+
+    private static void assertImplemented(String name, Class<?>... parameterTypes) {
+        try {
+            Class<?> owner = foton.FotonPlayer.class.getMethod(name, parameterTypes).getDeclaringClass();
+            Checks.expect(!owner.isInterface(), "Player." + name + " fell back to the default of " + owner.getName());
+        } catch (ReflectiveOperationException error) {
+            throw new AssertionError("Player." + name + " is missing", error);
+        }
+    }
+
+    private static void clickOutsideTheWindowIsNothingOrACursorDrop() {
+        org.bukkit.inventory.ItemStack stone = new org.bukkit.inventory.ItemStack(org.bukkit.Material.STONE);
+        org.bukkit.inventory.ItemStack air = new org.bukkit.inventory.ItemStack(org.bukkit.Material.AIR);
+        Checks.same(outsideClick(air, org.bukkit.event.inventory.ClickType.LEFT).getAction(),
+            org.bukkit.event.inventory.InventoryAction.NOTHING, "outside click with an empty cursor");
+        Checks.same(outsideClick(stone, org.bukkit.event.inventory.ClickType.LEFT).getAction(),
+            org.bukkit.event.inventory.InventoryAction.DROP_ALL_CURSOR, "outside left click holding a stack");
+        Checks.same(outsideClick(stone, org.bukkit.event.inventory.ClickType.RIGHT).getAction(),
+            org.bukkit.event.inventory.InventoryAction.DROP_ONE_CURSOR, "outside right click holding a stack");
+        Checks.same(outsideClick(air, org.bukkit.event.inventory.ClickType.LEFT).getSlotType(),
+            org.bukkit.event.inventory.InventoryType.SlotType.OUTSIDE, "outside click slot type");
+    }
+
+    private static org.bukkit.event.inventory.InventoryClickEvent outsideClick(
+            org.bukkit.inventory.ItemStack cursor, org.bukkit.event.inventory.ClickType click) {
+        return new org.bukkit.event.inventory.InventoryClickEvent(null, null, cursor, click,
+            org.bukkit.inventory.InventoryView.OUTSIDE, -1);
+    }
+
+    private static void schedulerAcceptsSelfCancellingTasks() {
+        for (String name : new String[] { "runTask", "runTaskAsynchronously" }) {
+            assertSchedulerMethod(name, org.bukkit.plugin.Plugin.class, java.util.function.Consumer.class);
+        }
+        for (String name : new String[] { "runTaskLater", "runTaskLaterAsynchronously" }) {
+            assertSchedulerMethod(name, org.bukkit.plugin.Plugin.class, java.util.function.Consumer.class, long.class);
+        }
+        for (String name : new String[] { "runTaskTimer", "runTaskTimerAsynchronously" }) {
+            assertSchedulerMethod(name, org.bukkit.plugin.Plugin.class, java.util.function.Consumer.class,
+                long.class, long.class);
+        }
+    }
+
+    private static void assertSchedulerMethod(String name, Class<?>... parameterTypes) {
+        try {
+            Checks.same(org.bukkit.scheduler.BukkitScheduler.class.getMethod(name, parameterTypes).getReturnType(),
+                void.class, "BukkitScheduler." + name + " Consumer overload");
+        } catch (ReflectiveOperationException error) {
+            throw new AssertionError("BukkitScheduler." + name + " Consumer overload is missing", error);
+        }
     }
 
     private static void assertEntityMethod(String name, Class<?> returnType,

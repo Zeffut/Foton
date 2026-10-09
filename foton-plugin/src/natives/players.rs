@@ -301,7 +301,21 @@ extern "system" fn set_player_list_header_footer_components(
     player_tab_lists()
         .write()
         .insert(player.uuid(), (header.clone(), footer.clone()));
+    player.mark_plugin_tab_list();
     player.send_packet(CTabList::new(&header, &footer, player.as_ref()));
+}
+
+/// `Player#updateCommands`: the command tree and the permission level the
+/// client shows, projected again for what the player may use now.
+extern "system" fn update_player_commands(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) {
+    let (Some(server), Some(player)) = (super::server(), player(&mut env, &uuid)) else {
+        return;
+    };
+    server.resend_player_permission_context(&player);
 }
 
 /// Vanilla's fall-flying shared flag. A player's client reports its own
@@ -410,6 +424,11 @@ pub(super) fn bindings() -> Vec<jni::NativeMethod> {
             "setPlayerListHeaderFooterComponents",
             "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",
             set_player_list_header_footer_components as *mut c_void,
+        ),
+        method(
+            "updatePlayerCommands",
+            "(Ljava/lang/String;)V",
+            update_player_commands as *mut c_void,
         ),
         method(
             "setEntityGliding",

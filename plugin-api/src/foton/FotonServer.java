@@ -152,6 +152,15 @@ public final class FotonServer implements Server {
         return parsed == null ? null : new FotonPlayer(parsed);
     }
 
+    /** One lookup by UUID in the server's entity index, not a walk over every world's entities. */
+    @Override
+    public org.bukkit.entity.Entity getEntity(UUID id) {
+        if (id == null) return null;
+        String text = id.toString();
+        if (Native.entityWorld(text) == null || Native.entityIsPending(text)) return null;
+        return FotonEntity.handle(id);
+    }
+
     @Override
     public Player getPlayer(UUID id) {
         if (id == null) {

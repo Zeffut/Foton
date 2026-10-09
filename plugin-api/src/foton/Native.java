@@ -698,6 +698,11 @@ public final class Native {
 
     /** Writes one block from the same text. */
     public static native void setBlock(String world, int x, int y, int z, String state);
+    public static native void updatePlayerCommands(String uuid);
+    /** The stack as the server's own item NBT, for what the legacy byte layout cannot hold. */
+    public static native byte[] serializeItem(foton.item.ItemMutation item);
+    public static native foton.item.ItemTransfer deserializeItem(byte[] bytes);
+    public static native void setBlockWithoutPhysics(String world, int x, int y, int z, String state);
     public static native boolean breakBlock(String world, int x, int y, int z);
 
     /** Every loaded world's key, in no promised order. */

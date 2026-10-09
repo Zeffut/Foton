@@ -149,6 +149,10 @@ fn server_config_defaults_backward_compatible_fields() {
 
     assert!(!config.server.allow_flight);
     assert!(!config.server.allow_insecure_auth_server);
+    assert!(
+        config.server.tab_list_stats,
+        "configs from before the option keep the statistics"
+    );
     assert_eq!(config.server.max_chained_neighbor_updates, 1_000_000);
     assert_eq!(config.server.rcon.bind.to_string(), "127.0.0.1");
     assert_eq!(config.server.rcon.max_connections, 8);

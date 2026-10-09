@@ -181,6 +181,7 @@ pub struct InventoryClickEvent {
     slot: Option<usize>,
     hotbar_button: i32,
     craft: Option<CraftingClick>,
+    outside: bool,
     cancelled: bool,
 }
 
@@ -225,8 +226,20 @@ impl InventoryClickEvent {
             slot,
             hotbar_button: -1,
             craft: None,
+            outside: false,
             cancelled: false,
         }
+    }
+    /// Marks the click as one outside the window, which Bukkit gives raw slot `-999`.
+    #[must_use]
+    pub const fn with_outside(mut self, outside: bool) -> Self {
+        self.outside = outside;
+        self
+    }
+    /// Whether the click landed outside the window.
+    #[must_use]
+    pub const fn is_outside(&self) -> bool {
+        self.outside
     }
     /// Names the hotbar key of a swap click: `0..=8`, or `40` for the offhand.
     #[must_use]

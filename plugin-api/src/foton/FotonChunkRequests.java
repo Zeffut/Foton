@@ -1,20 +1,28 @@
 package foton;
 
-/** Daemon polling bridge for ticket-backed chunk futures. */
+/** Chunk futures waiting on the server, settled from the tick so that a
+ * plugin's callbacks run on the main thread as they do under Paper. */
 final class FotonChunkRequests {
-    private static final java.util.concurrent.ScheduledExecutorService EXECUTOR =
-        java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "foton-chunk-futures"); t.setDaemon(true); return t;
-        });
+    private record Pending(String request, java.util.concurrent.CompletableFuture<org.bukkit.Chunk> future,
+            java.util.function.Supplier<org.bukkit.Chunk> chunk) {}
+
+    private static final java.util.concurrent.ConcurrentLinkedQueue<Pending> PENDING =
+        new java.util.concurrent.ConcurrentLinkedQueue<>();
+
     private FotonChunkRequests() {}
-    static void watch(String request, Runnable ready) {
-        java.util.concurrent.atomic.AtomicReference<java.util.concurrent.ScheduledFuture<?>> task =
-            new java.util.concurrent.atomic.AtomicReference<>();
-        task.set(EXECUTOR.scheduleWithFixedDelay(() -> {
-            if (!Native.chunkRequestReady(request)) return;
-            java.util.concurrent.ScheduledFuture<?> current = task.get();
-            if (current != null) current.cancel(false);
-            ready.run();
-        }, 0L, 10L, java.util.concurrent.TimeUnit.MILLISECONDS));
+
+    static void watch(String request, java.util.concurrent.CompletableFuture<org.bukkit.Chunk> future,
+            java.util.function.Supplier<org.bukkit.Chunk> chunk) {
+        PENDING.add(new Pending(request, future, chunk));
+    }
+
+    /** Completes the futures whose chunk is now fully loaded. Called once per tick. */
+    static void tick() {
+        PENDING.removeIf(pending -> {
+            if (pending.future.isDone()) return true;
+            if (!Native.chunkRequestReady(pending.request)) return false;
+            pending.future.complete(pending.chunk.get());
+            return true;
+        });
     }
 }

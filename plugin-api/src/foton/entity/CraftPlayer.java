@@ -10,8 +10,14 @@ package foton.entity;
  *
  * <p>Only what CraftBukkit itself offers here, and only what Foton can honor,
  * is declared: there is no Minecraft server object behind it to hand out.
+ *
+ * <p>It extends {@link foton.FotonLivingEntity}, so a player answers every
+ * entity and living-entity query through the same natives as any other mob.
  */
-public abstract class CraftPlayer implements org.bukkit.entity.Player, net.kyori.adventure.audience.Audience {
+public abstract class CraftPlayer extends foton.FotonLivingEntity
+        implements org.bukkit.entity.Player, net.kyori.adventure.audience.Audience {
+    protected CraftPlayer(java.util.UUID id) { super(id); }
+
     // Declared by both Player and Audience; every player implements its own.
     @Override public abstract void resetTitle();
     @Override public abstract void showTitle(net.kyori.adventure.title.Title title);

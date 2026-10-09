@@ -30,6 +30,7 @@ Server configuration
 | `services_server` | string |  | uri | Optional endpoint for Mojang-compatible service public keys. Omit to use Mojang's services endpoint. |
 | `encryption` *(required)* | boolean | `true` |  | Whether to enable encryption for client-server communication. Required in online mode. |
 | `allow_flight` | boolean | `false` |  | Whether the server allows unauthorized client flight |
+| `tab_list_stats` | boolean | `true` |  | Whether the server shows its TPS and MSPT statistics in the player list header and footer. A plugin's own header or footer for a player always takes precedence |
 | `motd` *(required)* | string | `"A Foton Server"` |  | Message of the day displayed in server lists |
 | `use_favicon` *(required)* | boolean | `true` |  | Whether to use a custom favicon for the server |
 | `favicon` *(required)* | string | `"config/favicon.png"` |  | Path to the favicon file (PNG format, 64x64 pixels) |

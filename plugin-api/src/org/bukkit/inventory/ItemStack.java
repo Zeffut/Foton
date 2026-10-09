@@ -305,7 +305,13 @@ public class ItemStack implements Cloneable {
      * @throws IllegalStateException if the stack cannot be encoded
      */
     public byte[] serializeAsBytes() {
-        requireLegacyPersistence(true);
+        try {
+            requireLegacyPersistence(true);
+        } catch (UnsupportedOperationException unrepresented) {
+            // Whatever the legacy layout has no field for goes through the server's own item NBT.
+            if (!foton.PluginHost.itemBridgeBound()) throw unrepresented;
+            return foton.Native.serializeItem(nativeMutation());
+        }
         try {
             ByteArrayOutputStream bytes = new ByteArrayOutputStream();
             DataOutputStream out = new DataOutputStream(bytes);
@@ -361,6 +367,9 @@ public class ItemStack implements Cloneable {
      */
     public static ItemStack deserializeBytes(byte[] bytes) {
         if (bytes == null) throw new IllegalArgumentException("bytes");
+        // A root compound tag begins with 0x0A; the legacy layout begins with "FTON".
+        if (bytes.length > 0 && bytes[0] == 0x0A && foton.PluginHost.itemBridgeBound())
+            return foton.FotonInventory.decodeTransfer(foton.Native.deserializeItem(bytes));
         try {
             DataInputStream in = new DataInputStream(new ByteArrayInputStream(bytes));
             if (in.readInt() != 0x46544F4E) throw new IllegalArgumentException("invalid ItemStack binary header");

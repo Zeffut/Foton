@@ -83,6 +83,11 @@
           "description": "Whether the server allows unauthorized client flight",
           "default": false
         },
+        "tab_list_stats": {
+          "type": "boolean",
+          "description": "Whether the server shows its TPS and MSPT statistics in the player list header and footer. A plugin's own header or footer for a player always takes precedence",
+          "default": true
+        },
         "motd": {
           "type": "string",
           "description": "Message of the day displayed in server lists",

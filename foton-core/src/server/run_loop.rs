@@ -252,7 +252,9 @@ impl Server {
                 tick_start.elapsed().as_nanos() as u64,
             );
 
-            if let Some(tick_stats) = tab_list_tick_stats {
+            if self.config.tab_list_stats
+                && let Some(tick_stats) = tab_list_tick_stats
+            {
                 self.broadcast_tab_list(tick_stats);
             }
 

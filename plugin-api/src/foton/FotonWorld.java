@@ -113,6 +113,24 @@ public final class FotonWorld implements World {
         return new FotonChunk(this, x, z);
     }
 
+    /** Asks the server for the chunk and completes once it is fully loaded, as
+     * Paper does; without {@code generate}, a chunk never generated is {@code null}. */
+    @Override
+    public java.util.concurrent.CompletableFuture<Chunk> getChunkAtAsync(int x, int z, boolean urgent) {
+        return getChunkAtAsync(x, z, true, urgent);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<Chunk> getChunkAtAsync(
+            int x, int z, boolean generate, boolean urgent) {
+        if (!generate && !isChunkGenerated(x, z)) return java.util.concurrent.CompletableFuture.completedFuture(null);
+        String request = Native.requestChunk(name, x, z);
+        if (request == null) return java.util.concurrent.CompletableFuture.completedFuture(null);
+        java.util.concurrent.CompletableFuture<Chunk> future = new java.util.concurrent.CompletableFuture<>();
+        FotonChunkRequests.watch(request, future, () -> getChunkAt(x, z));
+        return future;
+    }
+
     @Override
     public Chunk getChunkAt(Location location) {
         // A chunk is sixteen blocks wide, and the shift is an arithmetic one so

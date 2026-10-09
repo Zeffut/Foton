@@ -224,6 +224,7 @@ fn test_runtime_config() -> Arc<RuntimeConfig> {
         encryption: false,
         allow_flight: false,
         motd: String::new(),
+        tab_list_stats: true,
         use_favicon: false,
         favicon: String::new(),
         enforce_secure_chat: false,

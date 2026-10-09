@@ -16,6 +16,7 @@ mod attributes_profile;
 mod components;
 mod java_thread;
 mod migrated;
+mod serialization;
 mod unsupported;
 
 /// Runs in the host's one real JVM rather than treating lease IDs as portable strings.
@@ -55,6 +56,7 @@ pub(crate) fn check(vm: &JavaVM) {
     components::check(&mut env);
     migrated::check(&mut env);
     unsupported::check(&mut env);
+    serialization::check(&mut env);
     attributes_profile::check(&mut env);
     super::merchant::check(&mut env);
     java_thread::check(&mut env);
@@ -591,7 +593,6 @@ fn check_snapshot_metadata(env: &mut jni::JNIEnv<'_>, item: &JObject<'_>) {
         .expect("metadata");
     for (object, method, signature) in [
         (item, "serialize", "()Ljava/util/Map;"),
-        (item, "serializeAsBytes", "()[B"),
         (&meta, "serialize", "()Ljava/util/Map;"),
     ] {
         assert!(

@@ -15,6 +15,7 @@ pub(crate) mod mutation;
 mod preflight;
 pub(crate) mod public_components;
 pub(crate) mod queries;
+pub(crate) mod serialization;
 mod snapshot;
 pub(crate) mod transfer;
 pub(crate) mod transitions;

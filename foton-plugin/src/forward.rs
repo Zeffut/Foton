@@ -60,6 +60,9 @@ use std::ops::{Deref, DerefMut};
 use text_components::TextComponent;
 use uuid::Uuid;
 
+/// Bukkit's raw slot for a click outside the window (`InventoryView.OUTSIDE`).
+const OUTSIDE_RAW_SLOT: i32 = -999;
+
 /// The Java class that owns the handler lists.
 const BRIDGE: &str = "foton/EventBridge";
 
@@ -186,7 +189,11 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
             &cursor,
             event.click(),
             (
-                event.slot().map_or(-1, |slot| slot as i32),
+                if event.is_outside() {
+                    OUTSIDE_RAW_SLOT
+                } else {
+                    event.slot().map_or(-1, |slot| slot as i32)
+                },
                 event.hotbar_button(),
             ),
             (&recipe, &matrix),
