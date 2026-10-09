@@ -6,6 +6,7 @@ use super::{
 };
 
 use crate::event::{EventBus, PlayerCommandSendEvent, PlayerJoinEvent, PlayerQuitEvent};
+use crate::scoreboard::ScoreboardPacket;
 use crate::world::PlayerMap;
 use rustc_hash::FxHashSet;
 
@@ -290,26 +291,39 @@ impl Server {
         }
     }
 
-    /// Sends each domain's queued team packets to the players in that domain.
+    /// Sends each domain's queued scoreboard packets to the players in that domain.
     ///
-    /// Vanilla parity: `ServerScoreboard` broadcasting its team changes to
-    /// `PlayerList.broadcastAll`. Foton's scoreboards are per domain, so a
-    /// player sees the teams of the domain they are in.
+    /// Vanilla parity: `ServerScoreboard` broadcasting its team, objective and
+    /// score changes to `PlayerList.broadcastAll`. Foton's scoreboards are per
+    /// domain, so a player sees the scoreboard of the domain they are in.
     pub(super) fn flush_team_updates(&self) {
-        for (domain, scoreboard) in self.scoreboards.iter() {
-            let updates = scoreboard.take_team_updates();
-            if updates.is_empty() {
-                continue;
-            }
-            self.online_players.iter_players(|_, player| {
-                if player.get_world().domain() == domain {
-                    for update in &updates {
-                        player.send_packet(update.clone());
-                    }
-                }
-                true
-            });
+        for (domain, _) in self.scoreboards.iter() {
+            self.flush_domain_scoreboard(domain, None);
         }
+    }
+
+    /// Sends one domain's queued team and objective packets to its players,
+    /// leaving out `skip`.
+    fn flush_domain_scoreboard(&self, domain: &str, skip: Option<Uuid>) {
+        let Some(scoreboard) = self.scoreboards.get(domain) else {
+            return;
+        };
+        let teams = scoreboard.take_team_updates();
+        let objectives = scoreboard.take_objective_updates();
+        if teams.is_empty() && objectives.is_empty() {
+            return;
+        }
+        self.online_players.iter_players(|uuid, player| {
+            if Some(*uuid) != skip && player.get_world().domain() == domain {
+                for update in &teams {
+                    player.send_packet(update.clone());
+                }
+                for update in &objectives {
+                    send_scoreboard_packet(player, update);
+                }
+            }
+            true
+        });
     }
 
     /// Hands a player what their client keeps of the domain they have just
@@ -321,26 +335,45 @@ impl Server {
     /// client keeps its old copy across the respawn packet.
     pub(super) fn send_domain_state(&self, player: &Player, left: Option<&str>, entered: &str) {
         player.send_initial_recipe_book();
-        self.send_domain_teams(player, left, entered);
+        // What is queued is already in the snapshot below; everyone else in
+        // the domain still needs it, and in order.
+        self.flush_domain_scoreboard(entered, Some(player.gameprofile.id));
+        self.send_domain_scoreboard(player, left, entered);
     }
 
-    /// Sends a player every team of a domain they have just entered, after
-    /// taking off the teams of the one they left.
+    /// Sends a player every team and displayed objective of a domain they
+    /// have just entered, after taking off those of the one they left.
     ///
-    /// Vanilla parity: the team half of `PlayerList.updateEntireScoreboard`,
-    /// sent on login; on a domain switch the client still holds the previous
-    /// domain's teams, which would otherwise keep coloring names there.
-    fn send_domain_teams(&self, player: &Player, left: Option<&str>, entered: &str) {
+    /// Vanilla parity: `PlayerList.updateEntireScoreboard`, sent on login; on a
+    /// domain switch the client still holds the previous domain's teams and
+    /// objectives, which would otherwise keep coloring names and drawing
+    /// scores there.
+    fn send_domain_scoreboard(&self, player: &Player, left: Option<&str>, entered: &str) {
         if let Some(scoreboard) = left.and_then(|domain| self.scoreboards.get(domain)) {
             for removal in scoreboard.team_removals() {
                 player.send_packet(removal);
+            }
+            for removal in scoreboard.objective_removals() {
+                send_scoreboard_packet(player, &removal);
             }
         }
         if let Some(scoreboard) = self.scoreboards.get(entered) {
             for team in scoreboard.team_snapshot_packets() {
                 player.send_packet(team);
             }
+            for packet in scoreboard.objective_snapshot_packets() {
+                send_scoreboard_packet(player, &packet);
+            }
         }
+    }
+}
+
+fn send_scoreboard_packet(player: &Player, packet: &ScoreboardPacket) {
+    match packet {
+        ScoreboardPacket::Objective(packet) => player.send_packet(packet.clone()),
+        ScoreboardPacket::Score(packet) => player.send_packet(packet.clone()),
+        ScoreboardPacket::Reset(packet) => player.send_packet(packet.clone()),
+        ScoreboardPacket::Display(packet) => player.send_packet(packet.clone()),
     }
 }
 

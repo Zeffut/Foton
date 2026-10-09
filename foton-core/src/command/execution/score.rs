@@ -11,7 +11,7 @@ use crate::{
         },
         execution::selector::{EntitySelector, parse_entity_selector, suggest_entity_selector},
     },
-    entity::Entity as _,
+    entity::Entity,
     scoreboard::{ScoreHolder, Scoreboard},
 };
 use foton_utils::translations;
@@ -51,7 +51,7 @@ impl ScoreHolderArgument {
             Self::Selector(selector) => selector
                 .find_entities(source)?
                 .into_iter()
-                .map(|entity| ScoreHolder::new(entity.scoreboard_name()))
+                .map(|entity| entity_holder(entity.as_ref()))
                 .collect(),
             Self::Wildcard => match wildcard {
                 ScoreHolderWildcard::Empty => Vec::new(),
@@ -179,6 +179,12 @@ pub(super) fn parse_int_range(
     Ok(IntRange::new(minimum, maximum))
 }
 
+/// An entity as a score holder, with the display name vanilla's
+/// `Entity.getDisplayName` gives `displayautoupdate` objectives.
+fn entity_holder(entity: &dyn Entity) -> ScoreHolder {
+    ScoreHolder::new(entity.scoreboard_name()).with_display_name(entity.display_name())
+}
+
 fn resolve_name(name: &str, source: &CommandSource) -> ScoreHolder {
     if name.starts_with('#') {
         return ScoreHolder::new(name.to_owned());
@@ -191,7 +197,7 @@ fn resolve_name(name: &str, source: &CommandSource) -> ScoreHolder {
         .find(|player| player.gameprofile.name.eq_ignore_ascii_case(name))
         .map_or_else(
             || ScoreHolder::new(name.to_owned()),
-            |player| ScoreHolder::new(player.scoreboard_name()),
+            |player| entity_holder(player.as_ref()),
         )
 }
 
@@ -202,7 +208,7 @@ fn resolve_uuid(uuid: &Uuid, raw: &str, source: &CommandSource) -> Vec<ScoreHold
         .worlds_in_domain(source.world().domain())
         .into_iter()
         .filter_map(|world| world.get_entity_by_uuid(uuid))
-        .map(|entity| ScoreHolder::new(entity.scoreboard_name()))
+        .map(|entity| entity_holder(entity.as_ref()))
         .collect::<Vec<_>>();
     if holders.is_empty() {
         vec![ScoreHolder::new(raw.to_owned())]

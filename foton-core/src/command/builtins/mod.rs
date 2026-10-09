@@ -23,6 +23,7 @@ mod perms;
 mod raid;
 mod reload;
 mod return_command;
+mod scoreboard;
 mod seed;
 mod setblock;
 mod setworldspawn;
@@ -87,6 +88,7 @@ pub(crate) fn create_registered_dispatcher(
     builder.register(raid::registration())?;
     builder.register(reload::registration())?;
     builder.register(return_command::registration())?;
+    builder.register(scoreboard::registration())?;
     builder.register(seed::registration())?;
     builder.register(setblock::registration())?;
     builder.register(setworldspawn::registration())?;
@@ -168,6 +170,7 @@ mod tests {
                 "raid",
                 "reload",
                 "return",
+                "scoreboard",
                 "seed",
                 "setblock",
                 "setworldspawn",

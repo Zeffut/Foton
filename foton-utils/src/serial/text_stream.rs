@@ -6,7 +6,8 @@ use text_components::{
     TextComponent,
     content::{Content, NbtSource, Object, PlayerModel, Resolvable},
     custom::{CustomData, Payload},
-    interactivity::{ClickEvent, Dialog, HoverEvent},
+    format::Format,
+    interactivity::{ClickEvent, Dialog, HoverEvent, Interactivity},
 };
 
 /// Test-only observations of child-list classification work.
@@ -174,7 +175,29 @@ pub fn write_payload(value: &TextComponent, writer: &mut dyn NbtWrite, depth: us
         return write_utf(text, writer);
     }
     content(&value.content, writer, depth)?;
-    let format = &value.format;
+    style_fields(&value.format, &value.interactions, writer, depth)?;
+    if !value.children.is_empty() {
+        list("extra", &value.children, writer, depth)?;
+    }
+    end(writer)
+}
+/// Streams only the style of a component: `Style.Serializer.CODEC`'s compound.
+pub fn write_style(
+    format: &Format,
+    interactions: &Interactivity,
+    writer: &mut dyn NbtWrite,
+) -> Result<()> {
+    writer.write_all(&[10])?;
+    style_fields(format, interactions, writer, 0)?;
+    end(writer)
+}
+/// Streams the style fields of a component, without its content or its end tag.
+fn style_fields(
+    format: &Format,
+    interactions: &Interactivity,
+    writer: &mut dyn NbtWrite,
+    depth: usize,
+) -> Result<()> {
     if let Some(color) = &format.color {
         // Color's display uses the vanilla named/hex codec spelling.
         string("color", &color.to_string(), writer)?;
@@ -196,7 +219,6 @@ pub fn write_payload(value: &TextComponent, writer: &mut dyn NbtWrite, depth: us
     if let Some(color) = format.shadow_color {
         integer("shadow_color", color, writer)?;
     }
-    let interactions = &value.interactions;
     if let Some(insertion) = &interactions.insertion {
         string("insertion", insertion, writer)?;
     }
@@ -210,10 +232,7 @@ pub fn write_payload(value: &TextComponent, writer: &mut dyn NbtWrite, depth: us
         click_event(click, writer, depth + 1)?;
         end(writer)?;
     }
-    if !value.children.is_empty() {
-        list("extra", &value.children, writer, depth)?;
-    }
-    end(writer)
+    Ok(())
 }
 #[expect(
     clippy::too_many_lines,

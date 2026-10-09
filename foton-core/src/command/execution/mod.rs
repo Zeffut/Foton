@@ -13,6 +13,7 @@ mod profile;
 mod queue;
 mod runtime;
 mod score;
+mod scoreboard_args;
 mod selector;
 mod source;
 mod structure;
@@ -47,6 +48,7 @@ pub(crate) use runtime::{
     argument, literal,
 };
 pub(crate) use score::{IntRange, ScoreHolderArgument, ScoreHolderWildcard};
+pub(crate) use scoreboard_args::ScoreOperation;
 #[cfg(test)]
 pub(crate) use selector::parse_entity_selector_text;
 pub(crate) use source::{

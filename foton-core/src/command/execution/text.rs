@@ -40,6 +40,17 @@ pub(crate) struct CommandTextResolver<'a, S: ?Sized = CommandSource> {
 }
 
 impl<'a> CommandTextResolver<'a, CommandSource> {
+    /// Resolves against the source alone, for text with no recipient.
+    ///
+    /// Vanilla parity: `ComponentArgument.getResolvedComponent`, which passes no
+    /// entity to `ComponentUtils.updateForEntity`.
+    pub(crate) const fn new(source: &'a CommandSource) -> Self {
+        Self {
+            source,
+            default_scoreboard_name: None,
+        }
+    }
+
     pub(crate) fn with_entity_override(source: &'a CommandSource, entity: &dyn Entity) -> Self {
         Self {
             source,
