@@ -5,6 +5,10 @@ on:
     branches:
       - master
 
+# All publishers to gh-pages must share this group.
+concurrency:
+  group: github-pages-gh-pages
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -22,6 +26,9 @@ jobs:
       - name: Generate documentation
         run: |
           cargo doc --all --no-deps --document-private-items --all-features
+      - name: Exclude generated documentation from Vercel builds
+        run: |
+          printf '%s\n' '{"$schema":"https://openapi.vercel.sh/vercel.json","git":{"deploymentEnabled":{"gh-pages":false}}}' > target/doc/vercel.json
       - name: Deploy to GitHub Pages
         uses: JamesIves/github-pages-deploy-action@fa24774553152dd7873cd16ebd8d959b010c5445 # v4
         with:
