@@ -280,6 +280,11 @@ public final class FotonPlayer extends foton.entity.CraftPlayer implements org.b
     }
 
     @Override
+    public java.util.List<org.bukkit.entity.Entity> getNearbyEntities(double x, double y, double z) {
+        return FotonEntity.nearby(id, x, y, z);
+    }
+
+    @Override
     public org.bukkit.inventory.EntityEquipment getEquipment() {
         return new FotonEntityEquipment(id.toString());
     }

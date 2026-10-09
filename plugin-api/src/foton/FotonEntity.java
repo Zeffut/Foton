@@ -143,15 +143,17 @@ public class FotonEntity implements Entity, org.bukkit.projectiles.ProjectileSou
         catch (IllegalArgumentException ignored) { return org.bukkit.entity.SpawnCategory.MISC; }
     }
     @Override public java.util.List<Entity> getNearbyEntities(double x, double y, double z) {
-        String[] ids = Native.entityNearby(getUniqueId().toString(), x, y, z);
-        java.util.ArrayList<Entity> result = new java.util.ArrayList<>(
-            ids == null ? 0 : ids.length);
+        return nearby(getUniqueId(), x, y, z);
+    }
+    /** The entities within the box that is {@code x}, {@code y}, {@code z} around the entity's own, itself excluded. */
+    static java.util.List<Entity> nearby(UUID id, double x, double y, double z) {
+        String[] ids = Native.entityNearby(id.toString(), x, y, z);
+        java.util.ArrayList<Entity> result = new java.util.ArrayList<>(ids == null ? 0 : ids.length);
         if (ids == null) return result;
         for (String value : ids) {
             try {
-                UUID nearbyId = UUID.fromString(value);
-                Entity nearby = FotonEntity.handle(nearbyId);
-                if (nearby != null) result.add(nearby);
+                Entity found = FotonEntity.handle(UUID.fromString(value));
+                if (found != null) result.add(found);
             } catch (IllegalArgumentException ignored) { }
         }
         return result;

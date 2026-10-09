@@ -43,13 +43,6 @@ public class FotonLivingEntity extends FotonEntity implements LivingEntity {
     @Override public void setFreezeTicks(int ticks) { Native.setEntityFreezeTicks(getUniqueId().toString(), Math.max(0, ticks)); }
     @Override public int getMaxFreezeTicks() { return 140; }
     @Override public boolean isFrozen() { return getFreezeTicks() >= getMaxFreezeTicks(); }
-    @Override public java.util.List<org.bukkit.entity.Entity> getNearbyEntities(double x, double y, double z) {
-        String[] ids = Native.entityNearby(getUniqueId().toString(), x, y, z);
-        java.util.ArrayList<org.bukkit.entity.Entity> result = new java.util.ArrayList<>();
-        if (ids != null) for (String value : ids) try { result.add(FotonEntity.handle(UUID.fromString(value))); }
-        catch (IllegalArgumentException ignored) { }
-        return result;
-    }
     @Override public org.bukkit.attribute.AttributeInstance getAttribute(org.bukkit.attribute.Attribute attribute) {
         return FotonAttributeInstance.of(getUniqueId(), attribute);
     }
