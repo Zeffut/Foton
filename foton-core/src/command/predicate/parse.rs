@@ -273,7 +273,7 @@ fn equipment_predicate(path: &str, value: &Value) -> Parsed<EntityEquipmentPredi
 
 /// Vanilla parity: `ItemPredicate.CODEC`, decoded whole by the same code that
 /// reads item predicates out of lock components, so every `components` and
-/// `predicates` entry vanilla knows is honoured rather than the few that the
+/// `predicates` entry vanilla knows is honored rather than the few that the
 /// advancement model has fields for.
 fn item_predicate(path: &str, value: &Value) -> Parsed<ItemPredicate> {
     if !value.is_object() {
