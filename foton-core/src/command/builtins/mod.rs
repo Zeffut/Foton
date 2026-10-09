@@ -9,6 +9,7 @@ mod domain;
 mod enchant;
 mod execute;
 mod experience;
+mod fill;
 mod fly;
 mod function;
 pub(crate) mod gamemode;
@@ -74,6 +75,7 @@ pub(crate) fn create_registered_dispatcher(
     builder.register(enchant::registration())?;
     builder.register(execute::registration())?;
     builder.register(experience::registration())?;
+    builder.register(fill::registration())?;
     builder.register(fly::registration())?;
     builder.register(function::registration())?;
     builder.register(gamemode::registration()?)?;
@@ -155,6 +157,7 @@ mod tests {
                 "execute",
                 "experience",
                 "xp",
+                "fill",
                 "fly",
                 "function",
                 "gamemode",
