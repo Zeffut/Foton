@@ -20,6 +20,8 @@ const FUNCTION_EXTENSION: &str = "mcfunction";
 const FUNCTION_DIRECTORY: &str = "function";
 /// `Registries.tagsDirPath(function)`.
 const FUNCTION_TAG_DIRECTORY: [&str; 2] = ["tags", "function"];
+/// `Registries.elementsDirPath(item_modifier)`: the loot functions `/item modify` runs.
+const ITEM_MODIFIER_DIRECTORY: &str = "item_modifier";
 
 /// One entry of a function tag file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +43,8 @@ pub(super) struct DatapackContents {
     pub(super) functions: FxHashMap<Identifier, FunctionSource>,
     /// Tag entries keyed by tag id, accumulated in pack order.
     pub(super) tags: FxHashMap<Identifier, Vec<TagEntry>>,
+    /// Item modifier JSON keyed by id. A later pack replaces an earlier one.
+    pub(super) item_modifiers: FxHashMap<Identifier, FunctionSource>,
     /// Files that could not be read or understood, reported by the caller.
     pub(super) errors: Vec<String>,
 }
@@ -150,6 +154,12 @@ pub(super) fn collect(root: &Path) -> DatapackContents {
                 tag_dir.push(part);
             }
             collect_tags(&tag_dir, namespace, &pack_name, &mut contents);
+            collect_item_modifiers(
+                &namespace_dir.join(ITEM_MODIFIER_DIRECTORY),
+                namespace,
+                &pack_name,
+                &mut contents,
+            );
         }
     }
 
@@ -166,6 +176,30 @@ fn collect_functions(
         match fs::read_to_string(&path) {
             Ok(text) => {
                 contents.functions.insert(
+                    id,
+                    FunctionSource {
+                        text,
+                        source_pack: pack_name.to_owned(),
+                    },
+                );
+            }
+            Err(error) => contents
+                .errors
+                .push(format!("could not read {}: {error}", path.display())),
+        }
+    }
+}
+
+fn collect_item_modifiers(
+    directory: &Path,
+    namespace: &str,
+    pack_name: &str,
+    contents: &mut DatapackContents,
+) {
+    for (id, path) in resource_files(directory, namespace, "json", contents) {
+        match fs::read_to_string(&path) {
+            Ok(text) => {
+                contents.item_modifiers.insert(
                     id,
                     FunctionSource {
                         text,

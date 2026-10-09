@@ -6,10 +6,13 @@
 
 use std::slice;
 
+use std::sync::Arc;
+
 use foton_registry::item_stack::ItemStack;
 use foton_utils::{BlockPos, Identifier, translations};
-use text_components::TextComponent;
+use text_components::{TextComponent, translation::TranslatedMessage};
 
+use super::super::execution::ItemModifierArgument;
 use super::super::{
     brigadier::{ArgumentType, CommandNodeBuilder, CommandSyntaxError},
     execution::{
@@ -25,6 +28,7 @@ use crate::{
         lock::{ContainerLockGuard, ContainerRef},
         slot_ranges::container_slot_item,
     },
+    item_modifier::{ItemModifier, ModifierContext},
 };
 
 type Context<'a> = &'a FotonCommandContext<CommandSource>;
@@ -49,18 +53,43 @@ pub(super) fn registration() -> CommandRegistration<CommandSource> {
 }
 
 fn command() -> Builder {
-    literal("item").then(
-        literal("replace")
-            .then(literal("block").then(
-                argument("pos", FotonArgumentType::block_pos()).then(replace_branch(Target::Block)),
-            ))
-            .then(
-                literal("entity").then(
-                    argument("targets", FotonArgumentType::entities())
-                        .then(replace_branch(Target::Entity)),
+    literal("item")
+        .then(replace_command())
+        .then(modify_command())
+}
+
+fn replace_command() -> Builder {
+    literal("replace")
+        .then(literal("block").then(
+            argument("pos", FotonArgumentType::block_pos()).then(replace_branch(Target::Block)),
+        ))
+        .then(literal("entity").then(
+            argument("targets", FotonArgumentType::entities()).then(replace_branch(Target::Entity)),
+        ))
+}
+
+fn modify_command() -> Builder {
+    literal("modify")
+        .then(
+            literal("block").then(
+                argument("pos", FotonArgumentType::block_pos()).then(
+                    argument("slot", FotonArgumentType::slot()).then(
+                        argument("modifier", FotonArgumentType::item_modifier())
+                            .executes(modify_block_item),
+                    ),
                 ),
             ),
-    )
+        )
+        .then(
+            literal("entity").then(
+                argument("targets", FotonArgumentType::entities()).then(
+                    argument("slot", FotonArgumentType::slot()).then(
+                        argument("modifier", FotonArgumentType::item_modifier())
+                            .executes(modify_entity_item),
+                    ),
+                ),
+            ),
+        )
 }
 
 /// The `<slot> with ...` and `<slot> from ...` subtrees both targets share.
@@ -93,7 +122,11 @@ fn source_branch(target: Target, source: Source) -> Builder {
     literal(name).then(
         argument("source", source_argument).then(
             argument("sourceSlot", FotonArgumentType::slot())
-                .executes(move |context| replace_from(context, target, source)),
+                .executes(move |context| replace_from(context, target, source, false))
+                .then(
+                    argument("modifier", FotonArgumentType::item_modifier())
+                        .executes(move |context| replace_from(context, target, source, true)),
+                ),
         ),
     )
 }
@@ -119,8 +152,12 @@ fn replace_from(
     context: Context<'_>,
     target: Target,
     source: Source,
+    modified: bool,
 ) -> Result<i32, CommandSyntaxError> {
-    let stack = read_source(context, source)?;
+    let mut stack = read_source(context, source)?;
+    if modified {
+        stack = resolve_modifier(context)?.apply(stack, &modifier_context(context));
+    }
     set_item(context, target, stack)
 }
 
@@ -144,19 +181,21 @@ fn set_block_item(
 ) -> Result<i32, CommandSyntaxError> {
     let position = loaded_block_position(context, "pos")?;
     let container_ref = block_container(context, position, ContainerSide::Target)?;
-    let index = usize::try_from(slot)
-        .ok()
-        .filter(|&index| index < container_ref.container_size())
-        .ok_or_else(|| {
-            CommandSyntaxError::dynamic(
-                translations::COMMANDS_ITEM_TARGET_NO_SUCH_SLOT
-                    .message([slot.to_string()])
-                    .component(),
-            )
-        })?;
+    let index = target_slot_index(&container_ref, slot)?;
+    set_block_slot(context, &container_ref, index, position, stack)?;
+    Ok(1)
+}
 
+/// Puts the stack in the slot and says so.
+fn set_block_slot(
+    context: Context<'_>,
+    container_ref: &ContainerRef,
+    index: usize,
+    position: BlockPos,
+    stack: ItemStack,
+) -> Result<(), CommandSyntaxError> {
     let name = item_display_name(&stack);
-    let mut guard = ContainerLockGuard::lock_all(slice::from_ref(&container_ref));
+    let mut guard = ContainerLockGuard::lock_all(slice::from_ref(container_ref));
     guard.set_item(container_ref.container_id(), index, stack);
     drop(guard);
 
@@ -169,7 +208,24 @@ fn set_block_item(
         ])
         .component();
     context.source().send_success(&message, true);
-    Ok(1)
+    Ok(())
+}
+
+/// A slot id as an index into the container, or vanilla's
+/// `ERROR_TARGET_INAPPLICABLE_SLOT`.
+fn target_slot_index(container_ref: &ContainerRef, slot: i32) -> Result<usize, CommandSyntaxError> {
+    usize::try_from(slot)
+        .ok()
+        .filter(|&index| index < container_ref.container_size())
+        .ok_or_else(|| no_such_slot(slot))
+}
+
+fn no_such_slot(slot: i32) -> CommandSyntaxError {
+    CommandSyntaxError::dynamic(
+        translations::COMMANDS_ITEM_TARGET_NO_SUCH_SLOT
+            .message([slot.to_string()])
+            .component(),
+    )
 }
 
 /// Vanilla parity: `ItemCommands.setEntityItem`.
@@ -277,6 +333,100 @@ fn block_container(
                     .component(),
             )
         })
+}
+
+/// Vanilla parity: `ItemCommands.modifyBlockItem`.
+fn modify_block_item(context: Context<'_>) -> Result<i32, CommandSyntaxError> {
+    let slot = context.slot("slot")?;
+    let position = loaded_block_position(context, "pos")?;
+    let container_ref = block_container(context, position, ContainerSide::Target)?;
+    let index = target_slot_index(&container_ref, slot)?;
+    let modifier = resolve_modifier(context)?;
+
+    let current = ContainerLockGuard::lock_all(slice::from_ref(&container_ref))
+        .get(container_ref.container_id())
+        .and_then(|container| container_slot_item(container, slot))
+        .ok_or_else(|| no_such_slot(slot))?;
+    let stack = modifier.apply(current, &modifier_context(context));
+    set_block_slot(context, &container_ref, index, position, stack)?;
+    Ok(1)
+}
+
+/// Vanilla parity: `ItemCommands.modifyEntityItem`. Each entity is modified
+/// from what it holds, so a count of changed entities is also the count of
+/// distinct results.
+fn modify_entity_item(context: Context<'_>) -> Result<i32, CommandSyntaxError> {
+    let slot = context.slot("slot")?;
+    let targets = context.entities("targets")?;
+    let modifier = resolve_modifier(context)?;
+    let modifier_context = modifier_context(context);
+
+    let mut changed = Vec::new();
+    for entity in &targets {
+        let Some(current) = entity.slot_item(slot) else {
+            continue;
+        };
+        let stack = modifier.apply(current, &modifier_context);
+        if set_entity_slot(entity, slot, stack.clone()) {
+            changed.push((entity, stack));
+        }
+    }
+
+    let message = match changed.as_slice() {
+        [] => {
+            return Err(CommandSyntaxError::dynamic(
+                translations::COMMANDS_ITEM_TARGET_NO_CHANGES
+                    .message([slot.to_string()])
+                    .component(),
+            ));
+        }
+        [(entity, stack)] => translations::COMMANDS_ITEM_ENTITY_SET_SUCCESS_SINGLE
+            .message([entity.display_name(), item_display_name(stack)])
+            .component(),
+        _ => {
+            // Vanilla passes this two-placeholder message only the count, so
+            // the item name is left blank in the line a player reads.
+            let key = translations::COMMANDS_ITEM_ENTITY_SET_SUCCESS_MULTIPLE.0;
+            TranslatedMessage::new(
+                key,
+                Some(Box::new([TextComponent::from(changed.len().to_string())])),
+            )
+            .component()
+        }
+    };
+    context.source().send_success(&message, true);
+    i32::try_from(changed.len()).map_err(|_| count_overflow())
+}
+
+/// Reads the modifier argument, looking a named one up in the datapacks the
+/// server has loaded.
+fn resolve_modifier(context: Context<'_>) -> Result<Arc<ItemModifier>, CommandSyntaxError> {
+    match context.item_modifier("modifier")? {
+        ItemModifierArgument::Inline(modifier) => Ok(Arc::clone(modifier)),
+        ItemModifierArgument::Reference(id) => context
+            .source()
+            .server()
+            .functions
+            .library()
+            .item_modifier(id)
+            .map(Arc::clone)
+            .ok_or_else(|| {
+                CommandSyntaxError::dynamic(
+                    translations::ARGUMENT_RESOURCE_OR_ID_NO_SUCH_ELEMENT
+                        .message([id.to_string(), "minecraft:item_modifier".to_owned()])
+                        .component(),
+                )
+            }),
+    }
+}
+
+/// Vanilla parity: the `COMMAND` loot param set, an origin and no entity.
+fn modifier_context<'a>(context: Context<'a>) -> ModifierContext<'a> {
+    let position = context.source().position();
+    ModifierContext {
+        origin: (position.x, position.y, position.z),
+        world: &**context.source().world(),
+    }
 }
 
 fn count_overflow() -> CommandSyntaxError {

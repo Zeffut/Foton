@@ -10,6 +10,7 @@ use text_components::TextComponent;
 use super::super::brigadier::CommandDispatcher;
 use super::super::execution::{CommandSource, FotonCommandRuntime, FunctionEntries};
 use super::parser::FunctionBody;
+use crate::item_modifier::ItemModifier;
 
 /// One loaded `.mcfunction`.
 ///
@@ -55,14 +56,36 @@ impl CommandFunction {
 pub(crate) struct FunctionLibrary {
     functions: FxHashMap<Identifier, Arc<CommandFunction>>,
     tags: FxHashMap<Identifier, Arc<[Arc<CommandFunction>]>>,
+    item_modifiers: FxHashMap<Identifier, Arc<ItemModifier>>,
 }
 
 impl FunctionLibrary {
-    pub(crate) const fn new(
+    pub(crate) fn new(
         functions: FxHashMap<Identifier, Arc<CommandFunction>>,
         tags: FxHashMap<Identifier, Arc<[Arc<CommandFunction>]>>,
     ) -> Self {
-        Self { functions, tags }
+        Self {
+            functions,
+            tags,
+            item_modifiers: FxHashMap::default(),
+        }
+    }
+
+    /// Adds the item modifiers the same datapack load produced.
+    pub(crate) fn with_item_modifiers(
+        mut self,
+        item_modifiers: FxHashMap<Identifier, Arc<ItemModifier>>,
+    ) -> Self {
+        self.item_modifiers = item_modifiers;
+        self
+    }
+
+    pub(crate) fn item_modifier(&self, id: &Identifier) -> Option<&Arc<ItemModifier>> {
+        self.item_modifiers.get(id)
+    }
+
+    pub(crate) fn item_modifier_names(&self) -> impl Iterator<Item = &Identifier> {
+        self.item_modifiers.keys()
     }
 
     pub(crate) fn function(&self, id: &Identifier) -> Option<&Arc<CommandFunction>> {

@@ -24,8 +24,8 @@ use text_components::TextComponent;
 use super::{
     BiomeOrTag, BlockPredicate, ChainModifiers, CommandResultSuspension, CommandSource,
     Coordinates, ExecutionCommandSource, ExecutionControl, FotonArgumentType, FunctionOrTag,
-    GameProfileArgument, IntRange, ItemPredicate, PermissionGroupName, ScoreHolderArgument,
-    ScoreHolderWildcard, StructureOrTagKey, WorldArgument,
+    GameProfileArgument, IntRange, ItemModifierArgument, ItemPredicate, PermissionGroupName,
+    ScoreHolderArgument, ScoreHolderWildcard, StructureOrTagKey, WorldArgument,
     argument::{
         ComponentValue, CoordinateAxes, DomainValue, EnchantmentValue, EntityTypeValue,
         FotonArgumentValue, GameModeValue, IdentifierValue, ItemSlotsValue, ItemStackValue,
@@ -345,6 +345,13 @@ where
     pub(crate) fn item_slots(&self, name: &str) -> Result<&'static SlotRange, CommandSyntaxError> {
         self.typed_argument::<ItemSlotsValue>(name)
             .map(|value| value.0)
+    }
+
+    pub(crate) fn item_modifier(
+        &self,
+        name: &str,
+    ) -> Result<&ItemModifierArgument, CommandSyntaxError> {
+        self.typed_argument(name)
     }
 
     pub(crate) fn slot(&self, name: &str) -> Result<i32, CommandSyntaxError> {

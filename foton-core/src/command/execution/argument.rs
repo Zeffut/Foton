@@ -10,6 +10,7 @@ use super::{
     coordinates::{parse_block_pos, parse_rotation, parse_vec3, suggest_coordinates},
     function::{FunctionOrTag, parse_function_or_tag, suggest_functions},
     item::{parse_item_stack, suggest_item_stack},
+    item_modifier::{ItemModifierArgument, parse_item_modifier, suggest_item_modifiers},
     item_predicate::{parse_item_predicate, suggest_item_predicate},
     nbt::{parse_nbt_compound, parse_nbt_path},
     permission::{PermissionGroupParser, PermissionMetadataParser, PermissionRuleParser},
@@ -340,6 +341,10 @@ impl FotonArgumentType {
         Self::new(RecipeParser)
     }
 
+    pub(crate) fn item_modifier() -> Self {
+        Self::new(ItemModifierParser)
+    }
+
     pub(crate) fn component() -> Self {
         Self::new(ComponentParser)
     }
@@ -519,6 +524,7 @@ impl_downcast_type!(BlockPredicate, "foton:command/value/block_predicate");
 impl_downcast_type!(WorldArgument, "foton:command/value/world");
 impl_downcast_type!(ItemPredicate, "foton:command/value/item_predicate");
 impl_downcast_type!(FunctionOrTag, "foton:command/value/function");
+impl_downcast_type!(ItemModifierArgument, "foton:command/value/item_modifier");
 
 macro_rules! argument_value_wrapper {
     ($name:ident($value:ty), $key:literal) => {
@@ -1121,6 +1127,21 @@ unit_argument_parser!(
         suggest_slots(builder);
     },
     protocol(ProtocolArgumentType::ItemSlot, None)
+);
+unit_argument_parser!(
+    ItemModifierParser,
+    "foton:command/parser/item_modifier",
+    ItemModifierArgument,
+    parse | reader,
+    _source | { parse_item_modifier(reader) },
+    suggest | context,
+    builder | {
+        suggest_item_modifiers(context.source(), builder);
+    },
+    protocol(
+        ProtocolArgumentType::LootModifier,
+        Some(ProtocolSuggestionType::AskServer),
+    )
 );
 unit_argument_parser!(
     RecipeParser,
