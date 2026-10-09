@@ -1,5 +1,7 @@
 //! `/scoreboard players`.
 
+use std::mem;
+
 use foton_protocol::packets::game::NumberFormat;
 use foton_utils::translations;
 use text_components::TextComponent;
@@ -235,7 +237,7 @@ fn change_scores(context: Context<'_>, subtract: bool) -> Result<i32, CommandSyn
     let scoreboard = source_scoreboard(context)?;
     let mut result = 0_i32;
     for holder in &holders {
-        let current = scoreboard
+        let (current, created) = scoreboard
             .score_or_create(holder, &objective)
             .map_err(scoreboard_error)?;
         let updated = if subtract {
@@ -243,9 +245,12 @@ fn change_scores(context: Context<'_>, subtract: bool) -> Result<i32, CommandSyn
         } else {
             current.wrapping_add(delta)
         };
-        scoreboard
-            .set_score(holder, &objective, updated)
-            .map_err(scoreboard_error)?;
+        if created {
+            scoreboard.set_created_score(holder, &objective, updated)
+        } else {
+            scoreboard.set_score(holder, &objective, updated)
+        }
+        .map_err(scoreboard_error)?;
         result = result.wrapping_add(updated);
     }
 
@@ -504,11 +509,11 @@ fn perform_operation(context: Context<'_>) -> Result<i32, CommandSyntaxError> {
 
     let mut result = 0_i32;
     for target in &holders {
-        let mut current = scoreboard
+        let (mut current, mut unsent) = scoreboard
             .score_or_create(target, &target_objective)
             .map_err(scoreboard_error)?;
         for source in &sources {
-            let source_value = scoreboard
+            let (source_value, _) = scoreboard
                 .score_or_create(source, &source_objective)
                 .map_err(scoreboard_error)?;
             let (target_value, new_source_value) =
@@ -517,9 +522,13 @@ fn perform_operation(context: Context<'_>) -> Result<i32, CommandSyntaxError> {
                         &translations::ARGUMENTS_OPERATION_DIV0,
                     ))
                 })?;
-            scoreboard
-                .set_score(target, &target_objective, target_value)
-                .map_err(scoreboard_error)?;
+            // A score this command created is sent by its first write.
+            if mem::take(&mut unsent) {
+                scoreboard.set_created_score(target, &target_objective, target_value)
+            } else {
+                scoreboard.set_score(target, &target_objective, target_value)
+            }
+            .map_err(scoreboard_error)?;
             store_source(
                 scoreboard,
                 operation,
@@ -530,7 +539,8 @@ fn perform_operation(context: Context<'_>) -> Result<i32, CommandSyntaxError> {
             // A source that is the target itself changes what the next one sees.
             current = scoreboard
                 .score_or_create(target, &target_objective)
-                .map_err(scoreboard_error)?;
+                .map_err(scoreboard_error)?
+                .0;
         }
         result = result.wrapping_add(current);
     }

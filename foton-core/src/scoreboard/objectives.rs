@@ -497,6 +497,34 @@ impl Scoreboard {
         objective: &ScoreboardObjective,
         value: i32,
     ) -> Result<(), ScoreboardError> {
+        self.write_score(holder, objective, value, false)
+    }
+
+    /// Sets a score that [`Self::score_or_create`] has just created.
+    ///
+    /// Vanilla parity: a `ScoreAccess` made by `getOrCreatePlayerScore` for a
+    /// score that did not exist sends it on its first `set`, even when the
+    /// value is the default.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an empty holder, a missing objective, or a read-only objective.
+    pub fn set_created_score(
+        &self,
+        holder: &ScoreHolder,
+        objective: &ScoreboardObjective,
+        value: i32,
+    ) -> Result<(), ScoreboardError> {
+        self.write_score(holder, objective, value, true)
+    }
+
+    fn write_score(
+        &self,
+        holder: &ScoreHolder,
+        objective: &ScoreboardObjective,
+        value: i32,
+        force_sync: bool,
+    ) -> Result<(), ScoreboardError> {
         ensure_holder_name(holder.name())?;
         let mut state = self.state.write();
         ensure_writable_objective(&state, objective)?;
@@ -504,7 +532,7 @@ impl Scoreboard {
         let scores = state.scores.entry(holder.name().to_owned()).or_default();
         let (score, mut changed) = match scores.entry(objective.name().to_owned()) {
             Entry::Vacant(entry) => (entry.insert(ScoreboardScore::new(value)), true),
-            Entry::Occupied(entry) => (entry.into_mut(), false),
+            Entry::Occupied(entry) => (entry.into_mut(), force_sync),
         };
         if auto_update
             && let Some(name) = holder.display_name()
@@ -528,11 +556,13 @@ impl Scoreboard {
         Ok(())
     }
 
-    /// Returns a score, creating a default one first if it is absent.
+    /// Returns a score and whether this call created it, making a default one
+    /// first if it is absent.
     ///
     /// Vanilla parity: `ScoreAccess.get` of `Scoreboard.getOrCreatePlayerScore`.
     /// Creating alone sends nothing; `/scoreboard players operation` relies on
-    /// this to read a source it has never written.
+    /// this to read a source it has never written. A caller that goes on to
+    /// write the score it created uses [`Self::set_created_score`].
     ///
     /// # Errors
     ///
@@ -541,7 +571,7 @@ impl Scoreboard {
         &self,
         holder: &ScoreHolder,
         objective: &ScoreboardObjective,
-    ) -> Result<i32, ScoreboardError> {
+    ) -> Result<(i32, bool), ScoreboardError> {
         ensure_holder_name(holder.name())?;
         let mut state = self.state.write();
         ensure_objective_exists(&state, objective)?;
@@ -552,7 +582,7 @@ impl Scoreboard {
         if created {
             self.mark_dirty();
         }
-        Ok(value)
+        Ok((value, created))
     }
 
     /// Changes a score's trigger lock state.
@@ -869,6 +899,30 @@ mod tests {
             })]
         );
         assert!(scoreboard.tracked_holders().is_empty());
+    }
+
+    /// A score a command creates and writes at its default value is still new
+    /// to clients, so it is sent; the same write to a score they have is not.
+    #[test]
+    fn a_created_score_is_sent_even_at_its_default_value() {
+        let scoreboard = Scoreboard::new();
+        let kills = scoreboard.add_objective("kills").expect("objective");
+        scoreboard.set_display_objective(DisplaySlot::Sidebar, Some(&kills));
+        let _ = scoreboard.take_objective_updates();
+        let steve = ScoreHolder::new("Steve");
+
+        let (value, created) = scoreboard.score_or_create(&steve, &kills).expect("score");
+        assert_eq!((value, created), (0, true));
+        assert!(scoreboard.take_objective_updates().is_empty());
+        scoreboard
+            .set_created_score(&steve, &kills, 0)
+            .expect("score");
+        assert_eq!(kinds(&scoreboard.take_objective_updates()), ["score"]);
+
+        let (_, created) = scoreboard.score_or_create(&steve, &kills).expect("score");
+        assert!(!created);
+        scoreboard.set_score(&steve, &kills, 0).expect("score");
+        assert!(scoreboard.take_objective_updates().is_empty());
     }
 
     /// `displayautoupdate` copies an entity's display name into the score the
