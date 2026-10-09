@@ -126,6 +126,15 @@ impl Entity for SmallFireballEntity {
         self.entity_slot_item(slot)
     }
 
+    /// Vanilla parity: `Fireball.getSlot`, whose `set` is `Fireball.setItem`.
+    fn set_slot_item(&self, slot: i32, stack: ItemStack) -> bool {
+        if slot == CONTENTS_SLOT {
+            self.set_item(stack);
+            return true;
+        }
+        self.entity_set_slot_item(slot, stack)
+    }
+
     fn tick(&self) {
         self.hurting_projectile_tick();
     }

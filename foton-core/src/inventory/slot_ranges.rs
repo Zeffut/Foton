@@ -207,6 +207,22 @@ pub fn container_slot_item(container: &dyn Container, slot: i32) -> Option<ItemS
     (index < container.get_container_size()).then(|| container.get_item(index).clone())
 }
 
+/// Writes one slot of a container by a zero-based index.
+///
+/// Vanilla parity: the `SlotAccess` `Container.getSlot` hands out, whose `set`
+/// is `Container.setItem` and always succeeds. `false` is the null access of a
+/// slot the container does not have.
+pub fn set_container_slot_item(container: &mut dyn Container, slot: i32, stack: ItemStack) -> bool {
+    let Ok(index) = usize::try_from(slot) else {
+        return false;
+    };
+    if index >= container.get_container_size() {
+        return false;
+    }
+    container.set_item(index, stack);
+    true
+}
+
 /// The equipment slot a numeric command slot id names, if any.
 ///
 /// Vanilla parity: `LivingEntity.getEquipmentSlot(int)`, which is the inverse

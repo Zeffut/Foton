@@ -126,7 +126,7 @@ use crate::inventory::menu::kinds::chest;
 use crate::inventory::menu::kinds::inventory_menu;
 use crate::inventory::slot_ranges::{
     CURSOR_AND_MOUNT_CHEST_SLOT, ENDER_CHEST_SLOT_OFFSET, PLAYER_CRAFTING_SIZE,
-    PLAYER_CRAFTING_SLOT_OFFSET, container_slot_item,
+    PLAYER_CRAFTING_SLOT_OFFSET, container_slot_item, set_container_slot_item,
 };
 use crate::level_data::RespawnData;
 use crate::permission::{
@@ -1643,6 +1643,34 @@ impl Entity for Player {
         }
 
         self.entity_slot_item(slot)
+    }
+
+    /// Vanilla parity: `Player.getSlot`'s `SlotAccess.set`, in the same order
+    /// as [`Self::slot_item`]. The caller broadcasts the menu afterwards, as
+    /// `/item` does with `containerMenu.broadcastChanges()`.
+    fn set_slot_item(&self, slot: i32, stack: ItemStack) -> bool {
+        if slot == CURSOR_AND_MOUNT_CHEST_SLOT {
+            return self.set_carried_item(stack);
+        }
+
+        let crafting_slot = slot - PLAYER_CRAFTING_SLOT_OFFSET;
+        if (0..PLAYER_CRAFTING_SIZE).contains(&crafting_slot) {
+            return self
+                .inventory_menu
+                .lock()
+                .set_crafting_slot_item(crafting_slot, stack);
+        }
+
+        if (0..PlayerInventory::INVENTORY_SIZE as i32).contains(&slot) {
+            return set_container_slot_item(&mut *self.inventory.lock(), slot, stack);
+        }
+
+        let ender_slot = slot - ENDER_CHEST_SLOT_OFFSET;
+        if set_container_slot_item(&mut *self.ender_chest.lock(), ender_slot, stack.clone()) {
+            return true;
+        }
+
+        self.entity_set_slot_item(slot, stack)
     }
 
     fn base_tick(&self) {

@@ -555,6 +555,15 @@ impl Entity for ItemEntity {
         self.entity_slot_item(slot)
     }
 
+    /// Vanilla parity: `ItemEntity.getSlot`, whose `set` is `ItemEntity.setItem`.
+    fn set_slot_item(&self, slot: i32, stack: ItemStack) -> bool {
+        if slot == CONTENTS_SLOT {
+            self.set_item(stack);
+            return true;
+        }
+        self.entity_set_slot_item(slot, stack)
+    }
+
     /// Vanilla `ItemEntity.dampensVibrations`: wool lying on a sculk sensor silences the
     /// item, which is one half of how a player hides from the deep dark.
     fn dampens_vibrations(&self) -> bool {

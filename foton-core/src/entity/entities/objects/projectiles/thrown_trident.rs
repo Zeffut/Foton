@@ -305,7 +305,7 @@ impl ThrownTridentEntity {
     ///
     /// Vanilla parity: the `ThrownTrident` constructor, which sets `ID_LOYALTY`
     /// from `getLoyaltyFromItem` and `ID_FOIL` from `ItemStack.hasFoil`.
-    fn set_pickup_item_stack(&self, stack: ItemStack) {
+    pub(crate) fn set_pickup_item_stack(&self, stack: ItemStack) {
         let loyalty = enchantment_helper::get_trident_return_to_owner_acceleration(&stack);
         // Vanilla clamps to a signed byte before it reaches the synced value.
         let loyalty = loyalty.clamp(0, i32::from(i8::MAX)) as i8;
@@ -617,6 +617,15 @@ impl Entity for ThrownTridentEntity {
             return Some(self.pickup_item_stack());
         }
         self.entity_slot_item(slot)
+    }
+
+    /// Vanilla parity: `AbstractArrow.getSlot`, whose `set` is `setPickupItemStack`.
+    fn set_slot_item(&self, slot: i32, stack: ItemStack) -> bool {
+        if slot == CONTENTS_SLOT {
+            self.set_pickup_item_stack(stack);
+            return true;
+        }
+        self.entity_set_slot_item(slot, stack)
     }
 
     /// Vanilla parity: `ThrownTrident.tick`, which runs the return leg and then

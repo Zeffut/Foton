@@ -34,7 +34,7 @@ use crate::inventory::container::{Container as _, SimpleContainer};
 use crate::inventory::lock::{ContainerRef, SharedContainer};
 use crate::inventory::menu::MenuSource;
 use crate::inventory::menu::kinds::chest;
-use crate::inventory::slot_ranges::container_slot_item;
+use crate::inventory::slot_ranges::{container_slot_item, set_container_slot_item};
 use crate::player::Player;
 use crate::world::World;
 use crate::world::game_event::GameEventContext;
@@ -142,6 +142,13 @@ macro_rules! chest_boat_body {
             fn slot_item(&self, slot: i32) -> Option<ItemStack> {
                 self.unpack_loot_table(None);
                 container_slot_item(&*self.container.lock(), slot)
+            }
+
+            /// Vanilla parity: `ContainerEntity.getChestVehicleSlot`, the write half, which
+            /// unpacks a still-packed loot table first for the same reason the read does.
+            fn set_slot_item(&self, slot: i32, stack: ItemStack) -> bool {
+                self.unpack_loot_table(None);
+                set_container_slot_item(&mut *self.container.lock(), slot, stack)
             }
 
             fn synced_data(&self) -> Option<&dyn EntitySyncedData> {

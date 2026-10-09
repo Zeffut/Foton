@@ -38,7 +38,7 @@ use crate::inventory::container::{
 use crate::inventory::lock::{ContainerRef, SharedContainer};
 use crate::inventory::menu::MenuSource;
 use crate::inventory::menu::kinds::chest;
-use crate::inventory::slot_ranges::container_slot_item;
+use crate::inventory::slot_ranges::{container_slot_item, set_container_slot_item};
 use crate::player::Player;
 use crate::portal::portal_shape::PortalShape;
 use crate::world::World;
@@ -221,6 +221,13 @@ impl Entity for ChestMinecartEntity {
     fn slot_item(&self, slot: i32) -> Option<ItemStack> {
         self.unpack_loot_table(None);
         container_slot_item(&*self.container.lock(), slot)
+    }
+
+    /// Vanilla parity: `ContainerEntity.getChestVehicleSlot`, the write half, which
+    /// unpacks a still-packed loot table first for the same reason the read does.
+    fn set_slot_item(&self, slot: i32, stack: ItemStack) -> bool {
+        self.unpack_loot_table(None);
+        set_container_slot_item(&mut *self.container.lock(), slot, stack)
     }
 
     fn is_pickable(&self) -> bool {
