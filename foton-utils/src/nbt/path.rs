@@ -1891,7 +1891,7 @@ mod tests {
     }
 
     #[test]
-    fn insert_counts_lists_and_honours_negative_indices() {
+    fn insert_counts_lists_and_handles_negative_indices() {
         let path = parse_nbt_path("items").expect("path parses");
         let mut tag = compound([("items", list([NbtTag::Int(1), NbtTag::Int(2)]))]);
 
