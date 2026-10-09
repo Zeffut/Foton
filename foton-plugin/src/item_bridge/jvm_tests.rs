@@ -16,6 +16,7 @@ mod attributes_profile;
 mod components;
 mod java_thread;
 mod migrated;
+mod recipes;
 mod unsupported;
 
 /// Runs in the host's one real JVM rather than treating lease IDs as portable strings.
@@ -57,6 +58,7 @@ pub(crate) fn check(vm: &JavaVM) {
     unsupported::check(&mut env);
     attributes_profile::check(&mut env);
     super::merchant::check(&mut env);
+    recipes::check(&mut env);
     java_thread::check(&mut env);
     check_gc_shared_referent(&mut env);
     check_block_state_conversion(&mut env);

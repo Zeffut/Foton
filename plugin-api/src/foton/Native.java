@@ -686,8 +686,8 @@ public final class Native {
     public static native String[] recipeList();
     public static native String itemTranslationKey(String item);
     public static native boolean recipeRemove(String key);
-    public static native boolean recipeAddShapeless(String key, String result, int count, String[] ingredients);
-    public static native boolean recipeAddShaped(String key, String result, int count, String[] shape, String[] ingredients);
+    public static native boolean recipeAddShapeless(String key, foton.item.ItemMutation result, String[] ingredients);
+    public static native boolean recipeAddShaped(String key, foton.item.ItemMutation result, String[] shape, String[] ingredients);
     public static native byte blockLight(String world, int x, int y, int z);
     public static native boolean blockIndirectlyPowered(String world, int x, int y, int z);
     public static native byte skyLight(String world, int x, int y, int z);

@@ -247,7 +247,7 @@ public final class FotonServer implements Server {
 
     @Override public boolean addRecipe(org.bukkit.inventory.Recipe recipe) {
         if (recipe instanceof org.bukkit.inventory.ShapedRecipe shaped) {
-            if (shaped.getKey() == null || recipe.getResult() == null) return false;
+            if (shaped.getKey() == null || recipe.getResult() == null || recipe.getResult().isEmpty()) return false;
             java.util.ArrayList<String> ingredients = new java.util.ArrayList<>();
             for (java.util.Map.Entry<Character, org.bukkit.inventory.RecipeChoice> entry : shaped.getChoiceMap().entrySet()) {
                 org.bukkit.inventory.RecipeChoice choice = entry.getValue();
@@ -255,13 +255,12 @@ public final class FotonServer implements Server {
                         || materialChoice.getChoices().size() != 1) return false;
                 ingredients.add(entry.getKey() + "=minecraft:" + materialChoice.getChoices().get(0).getKeyName());
             }
-            org.bukkit.inventory.ItemStack result = recipe.getResult();
             return Native.recipeAddShaped(shaped.getKey().toString(),
-                "minecraft:" + result.getType().getKeyName(), result.getAmount(), shaped.getShape(),
+                FotonInventory.mutation(recipe.getResult()), shaped.getShape(),
                 ingredients.toArray(new String[0]));
         }
         if (!(recipe instanceof org.bukkit.inventory.ShapelessRecipe shapeless)
-                || shapeless.getKey() == null || recipe.getResult() == null) return false;
+                || shapeless.getKey() == null || recipe.getResult() == null || recipe.getResult().isEmpty()) return false;
         java.util.List<String> ingredients = new java.util.ArrayList<>();
         for (org.bukkit.inventory.RecipeChoice choice : shapeless.getChoiceList()) {
             if (!(choice instanceof org.bukkit.inventory.RecipeChoice.MaterialChoice materialChoice)
@@ -269,10 +268,8 @@ public final class FotonServer implements Server {
             org.bukkit.Material material = materialChoice.getChoices().get(0);
             ingredients.add("minecraft:" + material.getKeyName());
         }
-        org.bukkit.inventory.ItemStack result = recipe.getResult();
         return Native.recipeAddShapeless(shapeless.getKey().toString(),
-            "minecraft:" + result.getType().getKeyName(), result.getAmount(),
-            ingredients.toArray(new String[0]));
+            FotonInventory.mutation(recipe.getResult()), ingredients.toArray(new String[0]));
     }
 
     @Override
