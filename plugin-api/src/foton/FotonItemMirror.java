@@ -15,7 +15,7 @@ import org.bukkit.inventory.meta.ItemMeta;
  * up or been merged into by another plugin or by the player, the write is refused
  * and the mirror becomes an ordinary copy: it can neither put a stale stack back
  * (a duplicate) nor overwrite whatever now sits in the slot. After a write the
- * mirror re-reads the slot, so it follows the server's own normalisation and its
+ * mirror re-reads the slot, so it follows the server's own normalization and its
  * next edit is checked against what was just written.</p>
  *
  * <p>{@code clone()} and {@code new ItemStack(...)} give detached copies. Reads

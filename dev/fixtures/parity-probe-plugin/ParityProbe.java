@@ -29,7 +29,7 @@ import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /** A Paper-compiled plugin that checks, on a live server and a real player, the
- * behaviours ZeldaCiv relies on: canonical worlds, inventory-slot mirrors,
+ * behaviors ZeldaCiv relies on: canonical worlds, inventory-slot mirrors,
  * block data interfaces and plugin recipes that keep their result.
  *
  * <p>The client drives it: {@code /parityprobe} runs the checks that need only
