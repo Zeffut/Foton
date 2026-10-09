@@ -552,7 +552,8 @@ impl Player {
             } else {
                 -1
             })
-            .with_craft(craft);
+            .with_craft(craft)
+            .with_outside(matches!(click, Click::DropCarried { .. }));
             self.fire_event(&mut inventory_click);
             if inventory_click.is_cancelled() {
                 menu.behavior_mut().resume_remote_updates();

@@ -31,6 +31,46 @@ public interface BukkitScheduler {
 
     int scheduleSyncRepeatingTask(Plugin plugin, Runnable task, long delayTicks, long periodTicks);
 
+    /** The task itself is handed to its own body, so a repeating one can cancel itself. */
+    private static Runnable withTask(java.util.function.Consumer<? super BukkitTask> body,
+            java.util.concurrent.CompletableFuture<BukkitTask> self) {
+        if (body == null) throw new IllegalArgumentException("task");
+        return () -> body.accept(self.join());
+    }
+
+    default void runTask(Plugin plugin, java.util.function.Consumer<? super BukkitTask> task) {
+        java.util.concurrent.CompletableFuture<BukkitTask> self = new java.util.concurrent.CompletableFuture<>();
+        self.complete(runTask(plugin, withTask(task, self)));
+    }
+
+    default void runTaskAsynchronously(Plugin plugin, java.util.function.Consumer<? super BukkitTask> task) {
+        java.util.concurrent.CompletableFuture<BukkitTask> self = new java.util.concurrent.CompletableFuture<>();
+        self.complete(runTaskAsynchronously(plugin, withTask(task, self)));
+    }
+
+    default void runTaskLater(Plugin plugin, java.util.function.Consumer<? super BukkitTask> task, long delayTicks) {
+        java.util.concurrent.CompletableFuture<BukkitTask> self = new java.util.concurrent.CompletableFuture<>();
+        self.complete(runTaskLater(plugin, withTask(task, self), delayTicks));
+    }
+
+    default void runTaskLaterAsynchronously(Plugin plugin, java.util.function.Consumer<? super BukkitTask> task,
+            long delayTicks) {
+        java.util.concurrent.CompletableFuture<BukkitTask> self = new java.util.concurrent.CompletableFuture<>();
+        self.complete(runTaskLaterAsynchronously(plugin, withTask(task, self), delayTicks));
+    }
+
+    default void runTaskTimer(Plugin plugin, java.util.function.Consumer<? super BukkitTask> task,
+            long delayTicks, long periodTicks) {
+        java.util.concurrent.CompletableFuture<BukkitTask> self = new java.util.concurrent.CompletableFuture<>();
+        self.complete(runTaskTimer(plugin, withTask(task, self), delayTicks, periodTicks));
+    }
+
+    default void runTaskTimerAsynchronously(Plugin plugin, java.util.function.Consumer<? super BukkitTask> task,
+            long delayTicks, long periodTicks) {
+        java.util.concurrent.CompletableFuture<BukkitTask> self = new java.util.concurrent.CompletableFuture<>();
+        self.complete(runTaskTimerAsynchronously(plugin, withTask(task, self), delayTicks, periodTicks));
+    }
+
     void cancelTask(int taskId);
     void cancelTasks(Plugin plugin);
 

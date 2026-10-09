@@ -61,6 +61,11 @@ public class InventoryClickEvent extends InventoryEvent implements Cancellable {
     public int getHotbarButton() { return hotbarButton; }
     public int getSlot() { return rawSlot; }
     public InventoryAction getAction() {
+        if (rawSlot == org.bukkit.inventory.InventoryView.OUTSIDE) {
+            boolean holding = cursor != null && !cursor.getType().isAir();
+            if (!holding || (click != ClickType.LEFT && click != ClickType.RIGHT)) return InventoryAction.NOTHING;
+            return click == ClickType.LEFT ? InventoryAction.DROP_ALL_CURSOR : InventoryAction.DROP_ONE_CURSOR;
+        }
         switch (click) {
             case LEFT: return InventoryAction.PICKUP_ALL;
             case RIGHT: return InventoryAction.PICKUP_HALF;

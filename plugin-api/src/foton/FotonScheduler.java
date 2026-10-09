@@ -327,6 +327,7 @@ public final class FotonScheduler implements BukkitScheduler {
      * what the test asserts on.
      */
     public static int tick() {
+        FotonChunkRequests.tick();
         List<Scheduled> due = new ArrayList<>();
         List<Scheduled> keep = new ArrayList<>();
         Scheduled task;

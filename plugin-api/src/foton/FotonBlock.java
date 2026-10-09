@@ -74,9 +74,9 @@ public final class FotonBlock implements Block {
 
     @Override
     public void setBlockData(BlockData data, boolean applyPhysics) {
-        if (world != null && data != null) {
-            Native.setBlock(world.getName(), x, y, z, data.getAsString());
-        }
+        if (world == null || data == null) return;
+        if (applyPhysics) Native.setBlock(world.getName(), x, y, z, data.getAsString());
+        else Native.setBlockWithoutPhysics(world.getName(), x, y, z, data.getAsString());
     }
 
     @Override
@@ -86,7 +86,9 @@ public final class FotonBlock implements Block {
 
     @Override
     public void setType(Material type, boolean applyPhysics) {
-        setType(type);
+        if (type == null) return;
+        if (applyPhysics) setType(type);
+        else if (world != null) Native.setBlockWithoutPhysics(world.getName(), x, y, z, "minecraft:" + type.getKeyName());
     }
 
     @Override
