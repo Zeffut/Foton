@@ -1,6 +1,6 @@
 //! Vanilla command execution context composition.
 
-mod condition;
+pub(super) mod condition;
 mod source;
 mod store;
 

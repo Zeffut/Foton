@@ -15,12 +15,14 @@ pub(crate) mod gamemode;
 mod gamerule;
 mod give;
 mod invsee;
+mod item;
 mod kill;
 mod list;
 mod locate;
 mod operator;
 mod perms;
 mod raid;
+mod recipe;
 mod reload;
 mod return_command;
 mod seed;
@@ -79,12 +81,14 @@ pub(crate) fn create_registered_dispatcher(
     builder.register(gamemode::registration()?)?;
     builder.register(gamerule::registration())?;
     builder.register(give::registration())?;
+    builder.register(item::registration())?;
     builder.register(kill::registration())?;
     builder.register(list::registration())?;
     builder.register(locate::registration())?;
     builder.register(operator::op_registration())?;
     builder.register(perms::registration())?;
     builder.register(raid::registration())?;
+    builder.register(recipe::registration())?;
     builder.register(reload::registration())?;
     builder.register(return_command::registration())?;
     builder.register(seed::registration())?;
@@ -160,12 +164,14 @@ mod tests {
                 "gamemode",
                 "gamerule",
                 "give",
+                "item",
                 "kill",
                 "list",
                 "locate",
                 "op",
                 "perms",
                 "raid",
+                "recipe",
                 "reload",
                 "return",
                 "seed",

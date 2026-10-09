@@ -29,7 +29,8 @@ use super::{
     argument::{
         ComponentValue, CoordinateAxes, DomainValue, EnchantmentValue, EntityTypeValue,
         FotonArgumentValue, GameModeValue, IdentifierValue, ItemSlotsValue, ItemStackValue,
-        NbtCompoundValue, NbtPathValue, ObjectiveValue, TimeValue, TimelineValue, WorldClockValue,
+        NbtCompoundValue, NbtPathValue, ObjectiveValue, SlotValue, TimeValue, TimelineValue,
+        WorldClockValue,
     },
     selector::EntitySelector,
 };
@@ -344,6 +345,15 @@ where
     pub(crate) fn item_slots(&self, name: &str) -> Result<&'static SlotRange, CommandSyntaxError> {
         self.typed_argument::<ItemSlotsValue>(name)
             .map(|value| value.0)
+    }
+
+    pub(crate) fn slot(&self, name: &str) -> Result<i32, CommandSyntaxError> {
+        self.typed_argument::<SlotValue>(name).map(|value| value.0)
+    }
+
+    pub(crate) fn recipe_key(&self, name: &str) -> Result<&Identifier, CommandSyntaxError> {
+        self.typed_argument::<IdentifierValue>(name)
+            .map(|value| &value.0)
     }
 
     pub(crate) fn text_component(&self, name: &str) -> Result<&TextComponent, CommandSyntaxError> {

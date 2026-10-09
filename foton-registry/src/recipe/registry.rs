@@ -244,6 +244,37 @@ impl RecipeRegistry {
         index.recipe(key).cloned()
     }
 
+    /// The key of every enabled recipe, in no particular order.
+    ///
+    /// Vanilla parity: `RecipeManager.getRecipes`, which `/recipe give|take *`
+    /// walks. Plugin recipes registered after the display index was built are
+    /// numbered first, so the answer is complete.
+    #[must_use]
+    pub fn recipe_keys(&self) -> Vec<Identifier> {
+        let runtime = self
+            .runtime_shaped
+            .read()
+            .iter()
+            .map(|recipe| recipe.id.clone())
+            .chain(
+                self.runtime_shapeless
+                    .read()
+                    .iter()
+                    .map(|recipe| recipe.id.clone()),
+            )
+            .collect::<Vec<_>>();
+        for key in &runtime {
+            drop(self.book_recipe(key));
+        }
+        let disabled = self.disabled.read();
+        self.display_index()
+            .read()
+            .keys()
+            .filter(|key| !disabled.contains(*key))
+            .cloned()
+            .collect()
+    }
+
     /// The recipe a recipe book display id stands for.
     ///
     /// Vanilla parity: `RecipeManager.getRecipeFromDisplay(id).parent().id()`.

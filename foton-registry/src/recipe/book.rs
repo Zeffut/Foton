@@ -78,6 +78,11 @@ impl RecipeDisplayIndex {
         self.recipes.get(key)
     }
 
+    /// Every recipe key the index holds.
+    pub(crate) fn keys(&self) -> impl Iterator<Item = &Identifier> {
+        self.recipes.keys()
+    }
+
     /// The recipe a display id belongs to.
     ///
     /// Vanilla parity: `RecipeManager.getRecipeFromDisplay`, which answers
