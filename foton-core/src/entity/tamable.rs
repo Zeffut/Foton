@@ -226,11 +226,16 @@ pub trait TamableAnimal: Animal {
     }
 
     /// Returns vanilla `TamableAnimal.canAttack`.
+    ///
+    /// Its `super.canAttack` is `Mob.canAttack`, which is
+    /// [`Mob::mob_can_attack`]. `Mob::can_attack` would dispatch back to the
+    /// override that called this -- every tamable routes its `can_attack`
+    /// here -- and recurse until the stack ran out (#22).
     fn can_attack_tamable(&self, target: &dyn LivingEntity) -> bool {
         if self.is_owned_by(target.as_entity_event_source()) {
             return false;
         }
-        Mob::can_attack(self, target)
+        self.mob_can_attack(target)
     }
 
     /// Returns vanilla `TamableAnimal.wantsToAttack`.

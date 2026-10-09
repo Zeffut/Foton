@@ -7,7 +7,9 @@
 
 use super::*;
 use crate::behavior::init_behaviors;
-use crate::entity::entities::{CatEntity, FoxEntity, OcelotEntity, ParrotEntity, WolfEntity};
+use crate::entity::entities::{
+    CatEntity, FoxEntity, OcelotEntity, ParrotEntity, PigEntity, WolfEntity,
+};
 use crate::entity::{EntitySpawnReason, SharedEntity, next_entity_id};
 use crate::test_support::{fresh_test_world, insert_ready_full_chunk};
 use crate::world::World;
@@ -134,4 +136,22 @@ fn a_fox_runs_its_own_ai_in_a_live_world() {
     );
 
     run_ai(&world, &fox);
+}
+
+/// Vanilla parity: `TamableAnimal.canAttack` leaves what it does not decide to
+/// `Mob.canAttack`. It used to hand it back to the pet's own `can_attack`,
+/// which called it again until the tick thread's stack ran out (#22): one
+/// wolf sizing up a target killed the server.
+#[test]
+fn a_tamable_pet_decides_whether_it_can_attack() {
+    let world = pet_world("pets_can_attack");
+    let level = || Arc::downgrade(&world);
+    let pig = PigEntity::new(&vanilla_entities::PIG, next_entity_id(), SPAWN, level());
+    let wolf = WolfEntity::new(&vanilla_entities::WOLF, next_entity_id(), SPAWN, level());
+    let cat = CatEntity::new(&vanilla_entities::CAT, next_entity_id(), SPAWN, level());
+    let parrot = ParrotEntity::new(&vanilla_entities::PARROT, next_entity_id(), SPAWN, level());
+
+    assert!(Mob::can_attack(&wolf, &pig));
+    assert!(Mob::can_attack(&cat, &pig));
+    assert!(Mob::can_attack(&parrot, &pig));
 }
