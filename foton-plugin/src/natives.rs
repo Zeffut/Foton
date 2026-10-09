@@ -6009,7 +6009,12 @@ extern "system" fn entity_velocity(
     let Some((_, entity)) = entity_by_uuid(&id) else {
         return null_mut();
     };
-    let velocity = entity.velocity();
+    // A player's own motion lives on its client, so the server's estimate is the
+    // movement it last reported; a pending `setVelocity` still reads back as set.
+    let velocity = match entity.velocity() {
+        pushed if pushed != DVec3::ZERO => pushed,
+        _ => entity.known_movement(),
+    };
     let Ok(array) = env.new_double_array(3) else {
         return null_mut();
     };
@@ -7793,23 +7798,37 @@ extern "system" fn set_player_operator(
     server.queue_player_operator_update(uuid, operator != 0);
 }
 
+/// Bukkit reports a player's speeds at twice the abilities packet's scale:
+/// 0.2 walking and 0.1 flying are the defaults CraftPlayer shows plugins.
+const BUKKIT_SPEED_SCALE: f32 = 2.0;
+
 extern "system" fn player_walk_speed(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     uuid: JString<'_>,
 ) -> jfloat {
-    player(&mut env, &uuid).map_or(0.1, |player| player.get_walking_speed())
+    player(&mut env, &uuid).map_or(0.2, |player| {
+        player.get_walking_speed() * BUKKIT_SPEED_SCALE
+    })
 }
 
+/// CraftPlayer.setWalkSpeed: the abilities packet and the movement-speed
+/// attribute (SPIGOT-5833) both take the value, which the client moves by.
 extern "system" fn set_player_walk_speed(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     uuid: JString<'_>,
     speed: jfloat,
 ) {
-    if let Some(player) = player(&mut env, &uuid) {
-        player.set_walking_speed(speed.clamp(-1.0, 1.0));
-    }
+    let Some(player) = player(&mut env, &uuid) else {
+        return;
+    };
+    let speed = speed.clamp(-1.0, 1.0) / BUKKIT_SPEED_SCALE;
+    player.set_walking_speed(speed);
+    player
+        .attributes()
+        .lock()
+        .set_base_value(foton_registry::vanilla_attributes::MOVEMENT_SPEED, f64::from(speed));
 }
 
 extern "system" fn player_fly_speed(
@@ -7817,7 +7836,9 @@ extern "system" fn player_fly_speed(
     _class: JClass<'_>,
     uuid: JString<'_>,
 ) -> jfloat {
-    player(&mut env, &uuid).map_or(0.1, |player| player.get_flying_speed())
+    player(&mut env, &uuid).map_or(0.1, |player| {
+        player.get_flying_speed() * BUKKIT_SPEED_SCALE
+    })
 }
 
 extern "system" fn set_player_fly_speed(
@@ -7827,7 +7848,8 @@ extern "system" fn set_player_fly_speed(
     speed: jfloat,
 ) {
     if let Some(player) = player(&mut env, &uuid) {
-        player.set_flying_speed(speed.clamp(-1.0, 1.0));
+        player.set_flying_speed(speed.clamp(-1.0, 1.0) / BUKKIT_SPEED_SCALE);
+        player.send_abilities();
     }
 }
 
@@ -8311,6 +8333,7 @@ fn set_player_tab_list(
     let Some(player) = player(env, uuid) else {
         return;
     };
+    player.mark_plugin_tab_list();
     let mut lists = player_tab_lists().write();
     let entry = lists
         .entry(id)
@@ -8490,16 +8513,17 @@ extern "system" fn has_permission(
 static TICK_THREAD: SyncMutex<Option<ThreadId>> = SyncMutex::new(None);
 
 /// Block writes that arrived from somewhere other than the tick.
-static DEFERRED: SyncMutex<Vec<(Identifier, BlockPos, BlockStateId)>> = SyncMutex::new(Vec::new());
+static DEFERRED: SyncMutex<Vec<(Identifier, BlockPos, BlockStateId, UpdateFlags)>> =
+    SyncMutex::new(Vec::new());
 
 /// Records that this is the tick thread, and runs what was waiting for it.
 pub(crate) fn begin_tick(server: &Arc<Server>) {
     *TICK_THREAD.lock() = Some(thread::current().id());
 
     let pending = mem::take(&mut *DEFERRED.lock());
-    for (world, pos, state) in pending {
+    for (world, pos, state, flags) in pending {
         if let Some(world) = server.worlds.get_owned(&world) {
-            world.set_block(pos, state, UpdateFlags::UPDATE_ALL);
+            world.set_block(pos, state, flags);
         }
     }
 }
@@ -9824,7 +9848,7 @@ extern "system" fn lectern_clear_book(
 
 /// `foton.Native.setBlock`
 extern "system" fn set_block(
-    mut env: JNIEnv<'_>,
+    env: JNIEnv<'_>,
     _class: JClass<'_>,
     name: JString<'_>,
     x: jint,
@@ -9832,22 +9856,48 @@ extern "system" fn set_block(
     z: jint,
     state: JString<'_>,
 ) {
-    let Some(world) = world(&mut env, &name) else {
+    write_block(env, &name, BlockPos::new(x, y, z), &state, UpdateFlags::UPDATE_ALL);
+}
+
+/// `foton.Native.setBlockWithoutPhysics`: CraftBlock's `applyPhysics = false`,
+/// which tells the clients but neither updates neighbours nor runs `onPlace`.
+extern "system" fn set_block_without_physics(
+    env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name: JString<'_>,
+    x: jint,
+    y: jint,
+    z: jint,
+    state: JString<'_>,
+) {
+    let flags = UpdateFlags::UPDATE_CLIENTS
+        | UpdateFlags::UPDATE_KNOWN_SHAPE
+        | UpdateFlags::UPDATE_SKIP_ON_PLACE;
+    write_block(env, &name, BlockPos::new(x, y, z), &state, flags);
+}
+
+fn write_block(
+    mut env: JNIEnv<'_>,
+    name: &JString<'_>,
+    pos: BlockPos,
+    state: &JString<'_>,
+    flags: UpdateFlags,
+) {
+    let Some(world) = world(&mut env, name) else {
         return;
     };
-    let Ok(text) = env.get_string(&state) else {
+    let Ok(text) = env.get_string(state) else {
         return;
     };
     let text: String = text.into();
     let Some(state) = parse_state(&text) else {
         return;
     };
-    let pos = BlockPos::new(x, y, z);
     if on_tick() {
-        world.set_block(pos, state, UpdateFlags::UPDATE_ALL);
+        world.set_block(pos, state, flags);
     } else {
         // Off the tick. Writing here would race the palette, so it waits.
-        DEFERRED.lock().push((world.key.clone(), pos, state));
+        DEFERRED.lock().push((world.key.clone(), pos, state, flags));
     }
 }
 
@@ -11558,7 +11608,9 @@ extern "system" fn set_furnace_times(
     if on_tick() {
         world.set_block(pos, lit, UpdateFlags::UPDATE_ALL);
     } else {
-        DEFERRED.lock().push((world.key.clone(), pos, lit));
+        DEFERRED
+            .lock()
+            .push((world.key.clone(), pos, lit, UpdateFlags::UPDATE_ALL));
     }
 }
 
@@ -13726,6 +13778,16 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             "itemHasMeta",
             "(Lfoton/item/ItemMutation;)Z",
             bridge_item_bridge::queries::has_meta as *mut c_void,
+        ),
+        method(
+            "serializeItem",
+            "(Lfoton/item/ItemMutation;)[B",
+            bridge_item_bridge::serialization::serialize as *mut c_void,
+        ),
+        method(
+            "deserializeItem",
+            "([B)Lfoton/item/ItemTransfer;",
+            bridge_item_bridge::serialization::deserialize as *mut c_void,
         ),
         method(
             "itemsSimilar",
@@ -16216,6 +16278,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             set_block as *mut c_void,
         ),
         method(
+            "setBlockWithoutPhysics",
+            "(Ljava/lang/String;IIILjava/lang/String;)V",
+            set_block_without_physics as *mut c_void,
+        ),
+        method(
             "breakBlock",
             "(Ljava/lang/String;III)Z",
             break_block as *mut c_void,
@@ -16731,6 +16798,7 @@ pub(crate) mod entity_bridge_tests {
             encryption: false,
             allow_flight: false,
             motd: String::new(),
+            tab_list_stats: true,
             use_favicon: false,
             favicon: String::new(),
             enforce_secure_chat: false,

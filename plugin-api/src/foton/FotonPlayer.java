@@ -55,6 +55,9 @@ public final class FotonPlayer extends foton.entity.CraftPlayer implements org.b
         for (org.bukkit.NamespacedKey key : recipes) if (key != null) keys.add(key.toString());
         return keys.toArray(new String[0]);
     }
+    /** A connected player is not an entity a plugin may discard; kicking is how one leaves. */
+    @Override public void remove() { }
+    @Override public void updateCommands() { Native.updatePlayerCommands(id.toString()); }
     @Override public boolean isSprinting() { return Native.entitySprinting(id.toString()); }
     @Override public boolean isSwimming() { return Native.entitySwimming(id.toString()); }
     @Override public void hideEntity(Plugin plugin, org.bukkit.entity.Entity entity) {
@@ -101,32 +104,16 @@ public final class FotonPlayer extends foton.entity.CraftPlayer implements org.b
     private final long sessionGeneration;
     @Override public int getPing() { return Native.playerPing(id.toString()); }
     @Override public float getWalkSpeed() { return Native.playerWalkSpeed(id.toString()); }
-    @Override public void setWalkSpeed(float speed) { Native.setPlayerWalkSpeed(id.toString(), speed); }
+    @Override public void setWalkSpeed(float speed) { Native.setPlayerWalkSpeed(id.toString(), validSpeed(speed)); }
     @Override public float getFlySpeed() { return Native.playerFlySpeed(id.toString()); }
-    @Override public void setFlySpeed(float speed) { Native.setPlayerFlySpeed(id.toString(), speed); }
-    @Override public boolean addPotionEffect(org.bukkit.potion.PotionEffect effect) {
-        if (effect == null || effect.getType() == null) return false;
-        org.bukkit.potion.PotionEffect old = getPotionEffect(effect.getType());
-        String action = old == null ? "ADDED" : "CHANGED";
-        if (!EventBridge.firePotionEffect(id.toString(), effect.getType().getKey().getKey(),
-                old == null ? -1 : old.getDuration(), old == null ? -1 : old.getAmplifier(),
-                effect.getDuration(), effect.getAmplifier(), action)) return false;
-        return Native.addPotionEffect(id.toString(), effect.getType().getKey().getKey(), effect.getDuration(), effect.getAmplifier());
+    @Override public void setFlySpeed(float speed) { Native.setPlayerFlySpeed(id.toString(), validSpeed(speed)); }
+    /** CraftPlayer.validateSpeed: a speed is within -1..1. */
+    private static float validSpeed(float speed) {
+        if (!(speed >= -1.0f && speed <= 1.0f)) throw new IllegalArgumentException(speed + " is too " + (speed < 0 ? "low" : "high"));
+        return speed;
     }
-    @Override public void removePotionEffect(org.bukkit.potion.PotionEffectType type) {
-        if (type == null) return;
-        org.bukkit.potion.PotionEffect old = getPotionEffect(type);
-        if (old == null) return;
-        if (EventBridge.firePotionEffect(id.toString(), type.getKey().getKey(),
-                old.getDuration(), old.getAmplifier(), -1, -1, "REMOVED"))
-            Native.removePotionEffect(id.toString(), type.getKey().getKey());
-    }
-
-    @Override public org.bukkit.attribute.AttributeInstance getAttribute(org.bukkit.attribute.Attribute attribute) {
-        return FotonAttributeInstance.of(id, attribute);
-    }
-
     public FotonPlayer(UUID id) {
+        super(id);
         this.id = id;
         synchronized (SESSION_LIFECYCLE) {
             this.sessionGeneration = OPEN_SESSION_GENERATIONS.getOrDefault(id, 0L);
@@ -134,6 +121,7 @@ public final class FotonPlayer extends foton.entity.CraftPlayer implements org.b
     }
 
     private FotonPlayer(SessionKey session) {
+        super(session.playerId);
         this.id = session.playerId;
         this.sessionGeneration = session.generation;
     }
@@ -643,12 +631,12 @@ public final class FotonPlayer extends foton.entity.CraftPlayer implements org.b
     }
 
     @Override
-    public Spigot spigot() {
+    public Player.Spigot spigot() {
         return spigot;
     }
 
     /** Spigot's extra surface, which for Foton is the ordinary one. */
-    private final Spigot spigot = new Spigot(this) {
+    private final Player.Spigot spigot = new Player.Spigot(this) {
         @Override
         public void sendMessage(String message) {
             FotonPlayer.this.sendMessage(message);
