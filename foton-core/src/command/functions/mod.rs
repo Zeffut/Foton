@@ -10,6 +10,7 @@ mod library;
 mod loader;
 mod macros;
 mod manager;
+mod pack_resources;
 mod parser;
 
 #[cfg(test)]

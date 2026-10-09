@@ -5,14 +5,13 @@
 //! beside the save root because its function library is server-wide, the way
 //! vanilla's is, while Foton's worlds each have their own save directory.
 
-use std::{
-    fs, io,
-    path::{Path, PathBuf},
-};
+use std::{io, path::Path};
 
 use foton_utils::Identifier;
 use rustc_hash::FxHashMap;
 use serde::Deserialize;
+
+use super::pack_resources::{PackResources, Resource, read_sorted_entries};
 
 /// The file extension a function resource must have.
 const FUNCTION_EXTENSION: &str = "mcfunction";
@@ -20,6 +19,8 @@ const FUNCTION_EXTENSION: &str = "mcfunction";
 const FUNCTION_DIRECTORY: &str = "function";
 /// `Registries.tagsDirPath(function)`.
 const FUNCTION_TAG_DIRECTORY: [&str; 2] = ["tags", "function"];
+/// `Registries.elementsDirPath(predicate)`.
+const PREDICATE_DIRECTORY: &str = "predicate";
 
 /// One entry of a function tag file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,11 +42,13 @@ pub(super) struct DatapackContents {
     pub(super) functions: FxHashMap<Identifier, FunctionSource>,
     /// Tag entries keyed by tag id, accumulated in pack order.
     pub(super) tags: FxHashMap<Identifier, Vec<TagEntry>>,
+    /// Predicate JSON keyed by id. A later pack replaces an earlier one.
+    pub(super) predicates: FxHashMap<Identifier, PredicateSource>,
     /// Files that could not be read or understood, reported by the caller.
     pub(super) errors: Vec<String>,
 }
 
-/// A datapack directory accepted by the active resource loader.
+/// A datapack directory or archive accepted by the active resource loader.
 ///
 /// A pack is reported as compatible only after it has passed the same
 /// directory/resource scan used by the function loader. Foton currently has
@@ -60,6 +63,12 @@ pub(super) struct DatapackInfo {
 
 #[derive(Debug)]
 pub(super) struct FunctionSource {
+    pub(super) text: String,
+    pub(super) source_pack: String,
+}
+
+#[derive(Debug)]
+pub(super) struct PredicateSource {
     pub(super) text: String,
     pub(super) source_pack: String,
 }
@@ -86,14 +95,16 @@ const fn default_required() -> bool {
     true
 }
 
-/// Reads every enabled datapack under `root`.
+/// Reads every enabled datapack under `root`: folders with a `data/` directory
+/// and `.zip` archives with `pack.mcmeta` and `data/` at their root.
 ///
 /// A missing root is not an error: a server with no datapacks simply has no
-/// functions, exactly as an empty `<level>/datapacks` does in vanilla.
+/// functions, exactly as an empty `<level>/datapacks` does in vanilla. An
+/// archive that cannot be used is skipped with an error naming the file.
 pub(super) fn collect(root: &Path) -> DatapackContents {
     let mut contents = DatapackContents::default();
-    let packs = match pack_directories(root) {
-        Ok(packs) => packs,
+    let entries = match read_sorted_entries(root) {
+        Ok(entries) => entries,
         Err(error) => {
             if error.kind() != io::ErrorKind::NotFound {
                 contents
@@ -104,69 +115,89 @@ pub(super) fn collect(root: &Path) -> DatapackContents {
         }
     };
 
-    for pack in packs {
-        let Some(pack_name) = pack
+    for entry in entries {
+        let Some(pack_name) = entry
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
         else {
             continue;
         };
-        let data = pack.join("data");
-        if !data.is_dir() {
+        let resources = if entry.is_dir() {
+            PackResources::directory(&entry)
+        } else if entry.is_file()
+            && entry
+                .extension()
+                .is_some_and(|extension| extension == "zip")
+        {
+            match PackResources::archive(&entry) {
+                Ok(resources) => {
+                    log::info!("Reading datapack archive {pack_name}");
+                    Some(resources)
+                }
+                Err(reason) => {
+                    contents
+                        .errors
+                        .push(format!("skipped datapack archive {pack_name}: {reason}"));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let Some(mut resources) = resources else {
             continue;
-        }
+        };
         contents.packs.push(DatapackInfo {
             name: pack_name.clone(),
             compatibility: "COMPATIBLE",
             enabled: true,
         });
-        let namespaces = match read_sorted_directories(&data) {
-            Ok(namespaces) => namespaces,
-            Err(error) => {
-                contents
-                    .errors
-                    .push(format!("could not read {}: {error}", data.display()));
-                continue;
-            }
-        };
-        for namespace_dir in namespaces {
-            let Some(namespace) = namespace_dir.file_name().and_then(|name| name.to_str()) else {
-                continue;
-            };
-            if !Identifier::validate_namespace(namespace) {
-                contents.errors.push(format!(
-                    "datapack {pack_name} has an invalid namespace directory '{namespace}'"
-                ));
-                continue;
-            }
-            collect_functions(
-                &namespace_dir.join(FUNCTION_DIRECTORY),
-                namespace,
-                &pack_name,
-                &mut contents,
-            );
-            let mut tag_dir = namespace_dir.clone();
-            for part in FUNCTION_TAG_DIRECTORY {
-                tag_dir.push(part);
-            }
-            collect_tags(&tag_dir, namespace, &pack_name, &mut contents);
-        }
+        collect_pack(&mut resources, &pack_name, &mut contents);
     }
 
     contents
 }
 
+fn collect_pack(resources: &mut PackResources, pack_name: &str, contents: &mut DatapackContents) {
+    let namespaces = match resources.namespaces() {
+        Ok(namespaces) => namespaces,
+        Err(error) => {
+            contents
+                .errors
+                .push(format!("could not read data/ of {pack_name}: {error}"));
+            return;
+        }
+    };
+    for namespace in namespaces {
+        if !Identifier::validate_namespace(&namespace) {
+            contents.errors.push(format!(
+                "datapack {pack_name} has an invalid namespace directory '{namespace}'"
+            ));
+            continue;
+        }
+        collect_functions(resources, &namespace, pack_name, contents);
+        collect_tags(resources, &namespace, pack_name, contents);
+        collect_predicates(resources, &namespace, pack_name, contents);
+    }
+}
+
 fn collect_functions(
-    directory: &Path,
+    resources: &mut PackResources,
     namespace: &str,
     pack_name: &str,
     contents: &mut DatapackContents,
 ) {
-    for (id, path) in resource_files(directory, namespace, FUNCTION_EXTENSION, contents) {
-        match fs::read_to_string(&path) {
+    let listed = resources.resources(
+        namespace,
+        &[FUNCTION_DIRECTORY],
+        FUNCTION_EXTENSION,
+        &mut contents.errors,
+    );
+    for resource in listed {
+        match resources.read(&resource) {
             Ok(text) => {
                 contents.functions.insert(
-                    id,
+                    resource.id,
                     FunctionSource {
                         text,
                         source_pack: pack_name.to_owned(),
@@ -175,24 +206,61 @@ fn collect_functions(
             }
             Err(error) => contents
                 .errors
-                .push(format!("could not read {}: {error}", path.display())),
+                .push(read_error(pack_name, &resource, &error)),
+        }
+    }
+}
+
+fn collect_predicates(
+    resources: &mut PackResources,
+    namespace: &str,
+    pack_name: &str,
+    contents: &mut DatapackContents,
+) {
+    let listed = resources.resources(
+        namespace,
+        &[PREDICATE_DIRECTORY],
+        "json",
+        &mut contents.errors,
+    );
+    for resource in listed {
+        match resources.read(&resource) {
+            Ok(text) => {
+                contents.predicates.insert(
+                    resource.id,
+                    PredicateSource {
+                        text,
+                        source_pack: pack_name.to_owned(),
+                    },
+                );
+            }
+            Err(error) => contents
+                .errors
+                .push(read_error(pack_name, &resource, &error)),
         }
     }
 }
 
 fn collect_tags(
-    directory: &Path,
+    resources: &mut PackResources,
     namespace: &str,
     pack_name: &str,
     contents: &mut DatapackContents,
 ) {
-    for (id, path) in resource_files(directory, namespace, "json", contents) {
-        let text = match fs::read_to_string(&path) {
+    let listed = resources.resources(
+        namespace,
+        &FUNCTION_TAG_DIRECTORY,
+        "json",
+        &mut contents.errors,
+    );
+    for resource in listed {
+        let id = resource.id.clone();
+        let text = match resources.read(&resource) {
             Ok(text) => text,
             Err(error) => {
                 contents
                     .errors
-                    .push(format!("could not read {}: {error}", path.display()));
+                    .push(read_error(pack_name, &resource, &error));
                 continue;
             }
         };
@@ -200,8 +268,8 @@ fn collect_tags(
             Ok(parsed) => parsed,
             Err(error) => {
                 contents.errors.push(format!(
-                    "could not read function tag {id} from {}: {error}",
-                    path.display()
+                    "could not read function tag {id} from {pack_name}:{}: {error}",
+                    resource.location
                 ));
                 continue;
             }
@@ -232,75 +300,9 @@ fn collect_tags(
     }
 }
 
-/// Lists a resource directory's files with the wanted extension, deepest last.
-fn resource_files(
-    directory: &Path,
-    namespace: &str,
-    extension: &str,
-    contents: &mut DatapackContents,
-) -> Vec<(Identifier, PathBuf)> {
-    let mut found = Vec::new();
-    if !directory.is_dir() {
-        return found;
-    }
-    let mut pending = vec![(directory.to_path_buf(), String::new())];
-    while let Some((current, prefix)) = pending.pop() {
-        let entries = match read_sorted_entries(&current) {
-            Ok(entries) => entries,
-            Err(error) => {
-                contents
-                    .errors
-                    .push(format!("could not read {}: {error}", current.display()));
-                continue;
-            }
-        };
-        for entry in entries {
-            let Some(name) = entry.file_name().and_then(|name| name.to_str()) else {
-                continue;
-            };
-            if entry.is_dir() {
-                pending.push((entry.clone(), format!("{prefix}{name}/")));
-                continue;
-            }
-            let Some(stem) = name.strip_suffix(&format!(".{extension}")) else {
-                continue;
-            };
-            let path = format!("{prefix}{stem}");
-            if !Identifier::validate_path(&path) {
-                contents.errors.push(format!(
-                    "resource {} has an invalid identifier path '{path}'",
-                    entry.display()
-                ));
-                continue;
-            }
-            found.push((Identifier::new(namespace.to_owned(), path), entry.clone()));
-        }
-    }
-    found
-}
-
-/// Returns the pack directories under `root` in a stable order.
-fn pack_directories(root: &Path) -> io::Result<Vec<PathBuf>> {
-    read_sorted_directories(root)
-}
-
-fn read_sorted_directories(directory: &Path) -> io::Result<Vec<PathBuf>> {
-    Ok(read_sorted_entries(directory)?
-        .into_iter()
-        .filter(|entry| entry.is_dir())
-        .collect())
-}
-
-fn read_sorted_entries(directory: &Path) -> io::Result<Vec<PathBuf>> {
-    let mut entries = Vec::new();
-    for entry in fs::read_dir(directory)? {
-        let entry = entry?;
-        let name = entry.file_name();
-        if name.to_string_lossy().starts_with('.') {
-            continue;
-        }
-        entries.push(entry.path());
-    }
-    entries.sort();
-    Ok(entries)
+fn read_error(pack_name: &str, resource: &Resource, error: &io::Error) -> String {
+    format!(
+        "could not read {} from datapack {pack_name}: {error}",
+        resource.location
+    )
 }

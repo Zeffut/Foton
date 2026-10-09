@@ -72,6 +72,7 @@ md5.workspace = true
 # Compression
 zstd.workspace = true
 flate2.workspace = true
+zip.workspace = true
 lz4_flex.workspace = true
 
 # Utilities

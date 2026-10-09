@@ -558,6 +558,105 @@ fn an_unreadable_tag_file_is_reported_and_skipped() {
     assert!(contents.tags.is_empty());
 }
 
+/// Builds a zip whose entries are the given `(name, text)` pairs.
+fn write_zip(path: &PathBuf, entries: &[(&str, &str)]) {
+    use std::io::Write as _;
+
+    use zip::write::SimpleFileOptions;
+
+    let Some(parent) = path.parent() else {
+        panic!("archive path should have a parent");
+    };
+    fs::create_dir_all(parent).expect("create archive directory");
+    let mut writer = zip::ZipWriter::new(fs::File::create(path).expect("create archive"));
+    for (name, text) in entries {
+        writer
+            .start_file(*name, SimpleFileOptions::default())
+            .expect("start archive entry");
+        writer.write_all(text.as_bytes()).expect("write entry");
+    }
+    writer.finish().expect("finish archive");
+}
+
+#[test]
+fn a_zip_datapack_is_read_like_a_folder() {
+    let root = unique_root("zip");
+    write_zip(
+        &root.join("pack.zip"),
+        &[
+            ("pack.mcmeta", "{\"pack\":{\"pack_format\":1}}"),
+            ("data/test/function/nested/greet.mcfunction", "record 1\n"),
+            (
+                "data/minecraft/tags/function/tick.json",
+                "{\"values\": [\"test:nested/greet\"]}",
+            ),
+            ("data/test/predicate/holds.json", "{\"condition\":\"x\"}"),
+            ("data/test/function/readme.txt", "not a function"),
+        ],
+    );
+
+    let contents = loader::collect(&root);
+    let _ = fs::remove_dir_all(&root);
+
+    assert!(contents.errors.is_empty(), "{:?}", contents.errors);
+    assert_eq!(contents.packs.len(), 1);
+    assert_eq!(contents.packs[0].name, "pack.zip");
+    let Some(source) = contents.functions.get(&identifier("test:nested/greet")) else {
+        panic!("the archive's function should be loaded");
+    };
+    assert_eq!(source.source_pack, "pack.zip");
+    assert_eq!(source.text.trim(), "record 1");
+    assert_eq!(
+        contents.functions.len(),
+        1,
+        "only .mcfunction entries count"
+    );
+    let Some(tick) = contents.tags.get(&identifier("minecraft:tick")) else {
+        panic!("the archive's function tag should be read");
+    };
+    assert_eq!(tick.len(), 1);
+    assert!(contents.predicates.contains_key(&identifier("test:holds")));
+}
+
+#[test]
+fn a_zip_that_wraps_the_pack_in_a_folder_is_skipped_and_named() {
+    let root = unique_root("zip-nested");
+    write_zip(
+        &root.join("wrapped.zip"),
+        &[
+            ("Pack/pack.mcmeta", "{}"),
+            ("Pack/data/test/function/greet.mcfunction", "record 1\n"),
+        ],
+    );
+    write_zip(&root.join("empty.zip"), &[("pack.mcmeta", "{}")]);
+    write(&root.join("broken.zip"), "not a zip at all");
+
+    let contents = loader::collect(&root);
+    let _ = fs::remove_dir_all(&root);
+
+    assert!(contents.packs.is_empty());
+    assert!(contents.functions.is_empty());
+    assert_eq!(contents.errors.len(), 3, "{:?}", contents.errors);
+    let wrapped = contents
+        .errors
+        .iter()
+        .find(|error| error.contains("wrapped.zip"))
+        .expect("the wrapped archive should be named");
+    assert!(wrapped.contains("'Pack/'"), "{wrapped}");
+    assert!(
+        contents
+            .errors
+            .iter()
+            .any(|error| error.contains("empty.zip") && error.contains("data/")),
+    );
+    assert!(
+        contents
+            .errors
+            .iter()
+            .any(|error| error.contains("broken.zip"))
+    );
+}
+
 /// Every line of a function reports its own result, so a caller that sums them
 /// sees the total rather than only the last one.
 #[test]
