@@ -29,7 +29,7 @@ use uuid::Uuid;
 
 use crate::inventory::container::CraftingContainer;
 use crate::inventory::menu::kinds::InventoryKind;
-use crate::inventory::slot_ranges::container_slot_item;
+use crate::inventory::slot_ranges::{container_slot_item, set_container_slot_item};
 use crate::{
     inventory::lock::{ContainerId, ContainerLockGuard, ContainerRef},
     player::Player,
@@ -275,6 +275,28 @@ impl Menu {
         let guard = self.behavior.lock_all_containers();
         let crafting = guard.get(crafting_id)?;
         container_slot_item(crafting, slot)
+    }
+
+    /// Writes one slot of the base inventory menu's 2x2 crafting grid and
+    /// refreshes its result.
+    ///
+    /// Vanilla parity: `Player$2.set`, the `player.crafting.*` access, which
+    /// calls `slotsChanged` after `setItem`. `false` for any other menu and for
+    /// a slot the grid does not have.
+    pub(crate) fn set_crafting_slot_item(&mut self, slot: i32, stack: ItemStack) -> bool {
+        let Some(kind) = self.kind.downcast_mut::<InventoryKind>() else {
+            return false;
+        };
+        let crafting_id = kind.crafting_id();
+        let mut guard = self.behavior.lock_all_containers();
+        let Some(crafting) = guard.get_mut(crafting_id) else {
+            return false;
+        };
+        if !set_container_slot_item(crafting, slot, stack) {
+            return false;
+        }
+        kind.update_result(&mut guard);
+        true
     }
 
     /// A shared handle to the base inventory menu's 2x2 crafting grid, or `None`

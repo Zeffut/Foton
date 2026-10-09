@@ -1951,6 +1951,18 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         self.entity_slot_item(slot)
     }
 
+    /// Writes the stack in one of vanilla's numeric command slots.
+    ///
+    /// Vanilla parity: the write half of `SlotProvider.getSlot`, i.e.
+    /// `SlotAccess.set`. `false` is either vanilla's null access (this entity
+    /// has no such slot) or a `set` that refused the stack, and `/item` treats
+    /// the two alike: that entity is simply not counted as changed. A type with
+    /// a slot of its own overrides this beside [`Self::slot_item`] and calls
+    /// [`Self::entity_set_slot_item`] for the rest.
+    fn set_slot_item(&self, slot: i32, stack: ItemStack) -> bool {
+        self.entity_set_slot_item(slot, stack)
+    }
+
     /// Runs the shared body of [`Self::slot_item`].
     ///
     /// Every `getSlot` override an entity inherits rather than declares lives
@@ -2010,6 +2022,81 @@ pub trait Entity: EntityEventSource + ErasedType + Send + Sync + 'static {
         let living = self.as_living_entity()?;
         let equipment = equipment_slot_from_command_slot(slot)?;
         Some(living.get_item_by_slot(equipment))
+    }
+
+    /// Runs the shared body of [`Self::set_slot_item`], the write twin of
+    /// [`Self::entity_slot_item`] and in the same order.
+    fn entity_set_slot_item(&self, slot: i32, stack: ItemStack) -> bool {
+        // Vanilla `AbstractChestedHorse$1.set`: only a chest, or nothing, fits
+        // the chest slot, and either one resizes the mount's inventory.
+        if slot == CURSOR_AND_MOUNT_CHEST_SLOT
+            && let Some(chested) = self.as_abstract_chested_horse()
+        {
+            if stack.is_empty() {
+                if chested.has_chest() {
+                    chested.set_chest(false);
+                    chested.create_horse_inventory();
+                }
+                return true;
+            }
+            if stack.is(&vanilla_items::CHEST) {
+                if !chested.has_chest() {
+                    chested.set_chest(true);
+                    chested.create_horse_inventory();
+                }
+                return true;
+            }
+            return false;
+        }
+
+        if let Some(horse) = self.as_abstract_horse() {
+            let inventory = horse.abstract_horse_base().inventory();
+            if set_container_slot_item(
+                &mut *inventory.lock(),
+                slot - MOUNT_INVENTORY_SLOT_OFFSET,
+                stack.clone(),
+            ) {
+                return true;
+            }
+        }
+        if let Some(nautilus) = self.as_abstract_nautilus() {
+            let inventory = nautilus.abstract_nautilus_base().inventory();
+            if set_container_slot_item(
+                &mut *inventory.lock(),
+                slot - MOUNT_INVENTORY_SLOT_OFFSET,
+                stack.clone(),
+            ) {
+                return true;
+            }
+        }
+        if let Some(carrier) = self.as_inventory_carrier()
+            && set_container_slot_item(
+                &mut *carrier.carried_inventory().lock(),
+                slot - MOB_INVENTORY_SLOT_OFFSET,
+                stack.clone(),
+            )
+        {
+            return true;
+        }
+
+        // Vanilla `LivingEntity.createEquipmentSlotAccess`: head and hands take
+        // anything, every other slot only an empty stack or one that belongs
+        // there.
+        let Some(living) = self.as_living_entity() else {
+            return false;
+        };
+        let Some(equipment) = equipment_slot_from_command_slot(slot) else {
+            return false;
+        };
+        let free_slot = matches!(
+            equipment,
+            EquipmentSlot::Head | EquipmentSlot::MainHand | EquipmentSlot::OffHand
+        );
+        if !free_slot && !stack.is_empty() && living.equipment_slot_for_item(&stack) != equipment {
+            return false;
+        }
+        living.set_item_slot(equipment, stack);
+        true
     }
 
     /// Throws every passenger off.

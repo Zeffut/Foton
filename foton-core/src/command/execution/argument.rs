@@ -10,6 +10,7 @@ use super::{
     coordinates::{parse_block_pos, parse_rotation, parse_vec3, suggest_coordinates},
     function::{FunctionOrTag, parse_function_or_tag, suggest_functions},
     item::{parse_item_stack, suggest_item_stack},
+    item_modifier::{ItemModifierArgument, parse_item_modifier, suggest_item_modifiers},
     item_predicate::{parse_item_predicate, suggest_item_predicate},
     nbt::{parse_nbt_compound, parse_nbt_path},
     permission::{PermissionGroupParser, PermissionMetadataParser, PermissionRuleParser},
@@ -354,6 +355,18 @@ impl FotonArgumentType {
         Self::new(ItemSlotsParser)
     }
 
+    pub(crate) fn slot() -> Self {
+        Self::new(SlotParser)
+    }
+
+    pub(crate) fn recipe() -> Self {
+        Self::new(RecipeParser)
+    }
+
+    pub(crate) fn item_modifier() -> Self {
+        Self::new(ItemModifierParser)
+    }
+
     pub(crate) fn component() -> Self {
         Self::new(ComponentParser)
     }
@@ -541,6 +554,7 @@ impl_downcast_type!(BlockPredicate, "foton:command/value/block_predicate");
 impl_downcast_type!(WorldArgument, "foton:command/value/world");
 impl_downcast_type!(ItemPredicate, "foton:command/value/item_predicate");
 impl_downcast_type!(FunctionOrTag, "foton:command/value/function");
+impl_downcast_type!(ItemModifierArgument, "foton:command/value/item_modifier");
 
 macro_rules! argument_value_wrapper {
     ($name:ident($value:ty), $key:literal) => {
@@ -585,6 +599,7 @@ argument_value_wrapper!(
     ItemSlotsValue(&'static SlotRange),
     "foton:command/value/item_slots"
 );
+argument_value_wrapper!(SlotValue(i32), "foton:command/value/slot");
 argument_value_wrapper!(
     ComponentValue(TextComponent),
     "foton:command/value/component"
@@ -1191,6 +1206,50 @@ unit_argument_parser!(
     protocol(ProtocolArgumentType::ItemSlots, None)
 );
 unit_argument_parser!(
+    SlotParser,
+    "foton:command/parser/slot",
+    SlotValue,
+    parse | reader,
+    _source | { parse_slot(reader) },
+    suggest | _context,
+    builder | {
+        suggest_slots(builder);
+    },
+    protocol(ProtocolArgumentType::ItemSlot, None)
+);
+unit_argument_parser!(
+    ItemModifierParser,
+    "foton:command/parser/item_modifier",
+    ItemModifierArgument,
+    parse | reader,
+    _source | { parse_item_modifier(reader) },
+    suggest | context,
+    builder | {
+        suggest_item_modifiers(context.source(), builder);
+    },
+    protocol(
+        ProtocolArgumentType::LootModifier,
+        Some(ProtocolSuggestionType::AskServer),
+    )
+);
+unit_argument_parser!(
+    RecipeParser,
+    "foton:command/parser/recipe",
+    IdentifierValue,
+    parse | reader,
+    _source | { parse_identifier(reader).map(IdentifierValue) },
+    suggest | _context,
+    builder | {
+        suggest_recipes(builder);
+    },
+    protocol(
+        ProtocolArgumentType::ResourceKey {
+            identifier: "minecraft:recipe",
+        },
+        Some(ProtocolSuggestionType::AskServer),
+    )
+);
+unit_argument_parser!(
     ComponentParser,
     "foton:command/parser/component",
     ComponentValue,
@@ -1711,6 +1770,49 @@ fn parse_item_slots(reader: &mut StringReader<'_>) -> Result<ItemSlotsValue, Com
         return Err(reader.error(CommandSyntaxErrorKind::Dynamic(Box::new(message))));
     };
     Ok(ItemSlotsValue(range))
+}
+
+/// Vanilla parity: `SlotArgument.parse`, which takes everything up to the
+/// argument separator and wants exactly one slot out of it. A range such as
+/// `weapon.*` is its own error, not an unknown name.
+fn parse_slot(reader: &mut StringReader<'_>) -> Result<SlotValue, CommandSyntaxError> {
+    let name = reader.read_unquoted_token();
+    let Some(range) = SLOT_RANGES.name_to_ids(name) else {
+        let message = translations::SLOT_UNKNOWN
+            .message([name.to_owned()])
+            .component();
+        return Err(reader.error(CommandSyntaxErrorKind::Dynamic(Box::new(message))));
+    };
+    let [slot] = range.slots() else {
+        let message = translations::SLOT_ONLY_SINGLE_ALLOWED
+            .message([name.to_owned()])
+            .component();
+        return Err(reader.error(CommandSyntaxErrorKind::Dynamic(Box::new(message))));
+    };
+    Ok(SlotValue(*slot))
+}
+
+/// Vanilla parity: `SlotRanges.singleSlotNames`.
+fn suggest_slots(builder: &mut SuggestionsBuilder<'_>) {
+    let contents = builder.remaining_lowercase();
+    let names = SLOT_RANGES
+        .all_names()
+        .filter(|name| {
+            SLOT_RANGES
+                .name_to_ids(name)
+                .is_some_and(|range| range.slots().len() == 1)
+                && matches_substring(contents, name)
+        })
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    for name in names {
+        builder.suggest(name);
+    }
+}
+
+fn suggest_recipes(builder: &mut SuggestionsBuilder<'_>) {
+    let keys = REGISTRY.recipes.recipe_keys();
+    suggest_resources(keys.iter(), builder);
 }
 
 fn suggest_item_slots(builder: &mut SuggestionsBuilder<'_>) {

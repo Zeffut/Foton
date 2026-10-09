@@ -25,13 +25,13 @@ use text_components::TextComponent;
 use super::{
     BiomeOrTag, BlockPredicate, ChainModifiers, CommandResultSuspension, CommandSource,
     Coordinates, ExecutionCommandSource, ExecutionControl, FotonArgumentType, FunctionOrTag,
-    GameProfileArgument, IntRange, ItemPredicate, PermissionGroupName, ScoreHolderArgument,
-    ScoreHolderWildcard, ScoreOperation, StructureOrTagKey, WorldArgument,
+    GameProfileArgument, IntRange, ItemModifierArgument, ItemPredicate, PermissionGroupName,
+    ScoreHolderArgument, ScoreHolderWildcard, ScoreOperation, StructureOrTagKey, WorldArgument,
     argument::{
         ComponentValue, CoordinateAxes, DisplaySlotValue, DomainValue, EnchantmentValue,
         EntityTypeValue, FotonArgumentValue, GameModeValue, IdentifierValue, ItemSlotsValue,
         ItemStackValue, NbtCompoundValue, NbtPathValue, ObjectiveCriteriaValue, ObjectiveValue,
-        ScoreOperationValue, StyleValue, TimeValue, TimelineValue, WorldClockValue,
+        ScoreOperationValue, SlotValue, StyleValue, TimeValue, TimelineValue, WorldClockValue,
     },
     selector::EntitySelector,
 };
@@ -369,6 +369,22 @@ where
     pub(crate) fn item_slots(&self, name: &str) -> Result<&'static SlotRange, CommandSyntaxError> {
         self.typed_argument::<ItemSlotsValue>(name)
             .map(|value| value.0)
+    }
+
+    pub(crate) fn item_modifier(
+        &self,
+        name: &str,
+    ) -> Result<&ItemModifierArgument, CommandSyntaxError> {
+        self.typed_argument(name)
+    }
+
+    pub(crate) fn slot(&self, name: &str) -> Result<i32, CommandSyntaxError> {
+        self.typed_argument::<SlotValue>(name).map(|value| value.0)
+    }
+
+    pub(crate) fn recipe_key(&self, name: &str) -> Result<&Identifier, CommandSyntaxError> {
+        self.typed_argument::<IdentifierValue>(name)
+            .map(|value| &value.0)
     }
 
     pub(crate) fn text_component(&self, name: &str) -> Result<&TextComponent, CommandSyntaxError> {

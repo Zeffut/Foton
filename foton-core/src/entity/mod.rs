@@ -73,7 +73,7 @@ use crate::fluid::{LavaFluid, get_fluid_state, get_height};
 use crate::inventory::equipment::EquipmentSlot;
 use crate::inventory::slot_ranges::{
     CURSOR_AND_MOUNT_CHEST_SLOT, MOB_INVENTORY_SLOT_OFFSET, MOUNT_INVENTORY_SLOT_OFFSET,
-    container_slot_item, equipment_slot_from_command_slot,
+    container_slot_item, equipment_slot_from_command_slot, set_container_slot_item,
 };
 use crate::physics::{
     COLLISION_EPSILON, CollisionWorld, EntityPhysicsState, MoveResult, MoverType,

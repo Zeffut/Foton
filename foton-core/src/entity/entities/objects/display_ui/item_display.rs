@@ -249,6 +249,15 @@ impl Entity for ItemDisplayEntity {
         self.entity_slot_item(slot)
     }
 
+    /// Vanilla parity: `Display.ItemDisplay.getSlot`, whose `set` is `setItemStack`.
+    fn set_slot_item(&self, slot: i32, stack: ItemStack) -> bool {
+        if slot == CONTENTS_SLOT {
+            self.set_item_stack(stack);
+            return true;
+        }
+        self.entity_set_slot_item(slot, stack)
+    }
+
     fn synced_data(&self) -> Option<&dyn EntitySyncedData> {
         Some(&self.entity_data)
     }

@@ -526,7 +526,7 @@ fn biome_matches(context: &FotonCommandContext<CommandSource>) -> Result<bool, C
     Ok(expected.matches(biome))
 }
 
-pub(super) fn loaded_block_position(
+pub(in crate::command::builtins) fn loaded_block_position(
     context: &FotonCommandContext<CommandSource>,
     name: &str,
 ) -> Result<foton_utils::BlockPos, CommandSyntaxError> {

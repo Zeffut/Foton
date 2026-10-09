@@ -107,6 +107,10 @@ pub(crate) trait CommandArgumentSource: Send + Sync {
         Vec::new()
     }
 
+    fn item_modifier_names(&self) -> Vec<String> {
+        Vec::new()
+    }
+
     fn boss_bar_ids(&self) -> Vec<String> {
         Vec::new()
     }
@@ -662,6 +666,15 @@ impl CommandArgumentSource for CommandSource {
             .functions
             .predicates()
             .names()
+            .map(ToString::to_string)
+            .collect()
+    }
+
+    fn item_modifier_names(&self) -> Vec<String> {
+        self.server
+            .functions
+            .library()
+            .item_modifier_names()
             .map(ToString::to_string)
             .collect()
     }

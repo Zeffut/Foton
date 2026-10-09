@@ -14,6 +14,7 @@ use super::super::predicate::{PredicateLibrary, load_predicate};
 use super::library::{CommandFunction, FunctionLibrary};
 use super::loader::{self, DatapackInfo, TagEntry};
 use super::parser::parse_function;
+use crate::item_modifier;
 
 /// The tag whose functions run once after every load.
 pub(crate) const LOAD_FUNCTION_TAG: Identifier = Identifier::vanilla_static("load");
@@ -102,7 +103,20 @@ impl FunctionManager {
         }
 
         let tags = build_tags(&contents.tags, &functions, &mut errors);
-        let library = Arc::new(FunctionLibrary::new(functions, tags));
+        let mut item_modifiers = FxHashMap::default();
+        for (id, source) in contents.item_modifiers {
+            match item_modifier::from_json(&source.text) {
+                Ok(modifier) => {
+                    item_modifiers.insert(id, Arc::new(modifier));
+                }
+                Err(error) => errors.push(format!(
+                    "failed to load item modifier {id} from datapack {}: {error}",
+                    source.source_pack
+                )),
+            }
+        }
+        let library =
+            Arc::new(FunctionLibrary::new(functions, tags).with_item_modifiers(item_modifiers));
         let report = FunctionReloadReport {
             functions: library.function_count(),
             tags: library.tag_count(),

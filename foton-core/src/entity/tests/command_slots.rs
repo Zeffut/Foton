@@ -221,3 +221,70 @@ fn a_chest_vehicle_answers_for_the_container_range_up_to_its_own_size() {
         "a minecart is not a living entity"
     );
 }
+
+/// Hands and head take any stack, but every other equipment slot only takes an
+/// empty stack or one that belongs there. `/item replace entity @s armor.chest
+/// with stone` is refused by vanilla, and a refused write must leave the slot
+/// as it was.
+#[test]
+fn writing_an_equipment_slot_refuses_what_does_not_belong_in_it() {
+    let entity = fresh(&vanilla_entities::ZOMBIE);
+    let stone = ItemStack::new(&vanilla_items::STONE);
+    let chestplate = ItemStack::new(&vanilla_items::DIAMOND_CHESTPLATE);
+
+    assert!(entity.set_slot_item(only_slot("weapon.mainhand"), stone.clone()));
+    assert!(entity.set_slot_item(only_slot("armor.head"), stone.clone()));
+    assert_eq!(
+        entity.slot_item(only_slot("weapon.mainhand")),
+        Some(stone.clone())
+    );
+
+    assert!(!entity.set_slot_item(only_slot("armor.chest"), stone));
+    assert_eq!(
+        entity.slot_item(only_slot("armor.chest")),
+        Some(ItemStack::empty())
+    );
+    assert!(entity.set_slot_item(only_slot("armor.chest"), chestplate.clone()));
+    assert_eq!(entity.slot_item(only_slot("armor.chest")), Some(chestplate));
+    assert!(entity.set_slot_item(only_slot("armor.chest"), ItemStack::empty()));
+    assert!(!entity.set_slot_item(104, ItemStack::empty()));
+}
+
+/// The chest slot of a mount takes a chest or nothing, and flipping it is what
+/// makes the cargo slots appear or disappear.
+#[test]
+fn writing_a_mounts_chest_slot_grows_and_shrinks_its_cargo() {
+    let entity = fresh(&vanilla_entities::DONKEY);
+    let chest_slot = only_slot("horse.chest");
+    let cargo_slot = only_slot("horse.0");
+
+    assert!(!entity.set_slot_item(chest_slot, ItemStack::new(&vanilla_items::STONE)));
+    assert!(!entity.set_slot_item(cargo_slot, ItemStack::new(&vanilla_items::STONE)));
+
+    assert!(entity.set_slot_item(chest_slot, ItemStack::new(&vanilla_items::CHEST)));
+    let hay = ItemStack::new(&vanilla_items::HAY_BLOCK);
+    assert!(entity.set_slot_item(cargo_slot, hay.clone()));
+    assert_eq!(entity.slot_item(cargo_slot), Some(hay));
+
+    assert!(entity.set_slot_item(chest_slot, ItemStack::empty()));
+    assert_eq!(entity.slot_item(cargo_slot), None);
+}
+
+/// A write to a slot the entity does not have is a refusal, not a panic and not
+/// a silent write somewhere else.
+#[test]
+fn writing_a_slot_the_entity_lacks_is_refused() {
+    let stone = ItemStack::new(&vanilla_items::STONE);
+
+    let pig = fresh(&vanilla_entities::PIG);
+    assert!(!pig.set_slot_item(only_slot("contents"), stone.clone()));
+    assert!(!pig.set_slot_item(only_slot("horse.0"), stone.clone()));
+
+    let minecart = fresh(&vanilla_entities::CHEST_MINECART);
+    assert!(minecart.set_slot_item(only_slot("container.26"), stone.clone()));
+    assert_eq!(
+        minecart.slot_item(only_slot("container.26")),
+        Some(stone.clone())
+    );
+    assert!(!minecart.set_slot_item(only_slot("container.27"), stone));
+}

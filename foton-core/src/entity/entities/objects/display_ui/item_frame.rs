@@ -516,6 +516,15 @@ impl Entity for ItemFrameEntity {
         self.entity_slot_item(slot)
     }
 
+    /// Vanilla parity: `ItemFrame.getSlot`, whose `set` is `ItemFrame.setItem`.
+    fn set_slot_item(&self, slot: i32, stack: ItemStack) -> bool {
+        if slot == CONTENTS_SLOT {
+            self.set_item(stack);
+            return true;
+        }
+        self.entity_set_slot_item(slot, stack)
+    }
+
     fn spawn_data(&self) -> i32 {
         direction_3d_data_value(*self.entity_data.lock().hanging_entity.direction.get())
     }

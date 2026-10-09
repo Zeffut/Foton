@@ -527,6 +527,9 @@ a furnace has no behavior. These scripts can:
   rewritten file back up. Also `.zip` datapacks (a pack zipped inside a folder
   is skipped by name) and `execute if|unless predicate` over predicates read
   out of the archive.
+- `dev/item-recipe-test.sh` -- `/item replace|modify` and `/recipe give|take`
+  from the console line and from a datapack function, including a datapack
+  `item_modifier/*.json`.
 - `dev/nether-test.sh` -- a client crosses dimensions and sees Nether mobs.
 - `dev/sapling-test.sh` -- a planted sapling becomes a tree.
 - `dev/container-test.sh` -- placed container blocks have block entities.
@@ -693,3 +696,29 @@ has nothing to attach to: `NavigationKind` has `Ground`, `Flying` and
 `WaterBound` and no amphibious kind, so turtles and frogs still walk their path
 node by node. Land mobs are unaffected either way, which is vanilla's own
 behaviour.
+
+**`/item` and `/recipe` exist, with an item-modifier decoder that runs a named
+subset.** `item replace block|entity ... with|from ...` and `item modify` are
+`ItemCommands`, and `recipe give|take <targets> <recipe>|*` is `RecipeCommand`,
+so `item replace entity @s weapon.mainhand with air` and
+`execute ... run recipe give @a <id>` load inside a datapack function. Slots
+are written through `Entity::set_slot_item`, the write half of the
+`SlotAccess` that `execute if items` already read.
+
+An item modifier is read from `data/<ns>/item_modifier/*.json` or written
+inline as SNBT, which is what `ResourceOrIdArgument` takes in 26.2. The loot
+engine is generated `&'static` data, so a modifier read at run time cannot be
+expressed in it throughout; what is decoded today is `set_count`, `limit_count`,
+`set_damage`, `set_item`, `set_name`, `set_enchantments`, `set_potion`,
+`set_custom_data`, `enchant_randomly` and `enchant_with_levels` (tag options
+only), `set_ominous_bottle_amplifier`, `furnace_smelt` and `sequence`. Any other
+function, any `conditions`, and any `score`/`storage` number provider fails the
+decode with a message naming it -- never skipped. A named modifier is looked up
+when the command runs, not when it parses, because a function is compiled
+before the pack's modifiers are installed.
+
+Not covered: datapack **recipes** (the recipe registry is the built-in one plus
+plugin recipes, so `recipe give @a orbital:nuke_1_old` parses, as in vanilla,
+but answers `Unknown recipe` until a loader exists); the arrow family's `contents`
+slot is read but not written; and `set_lore` is a no-op inside the loot engine
+itself, so it is not offered here.

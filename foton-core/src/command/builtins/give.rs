@@ -130,7 +130,7 @@ fn play_pickup_sound(player: &Player) {
     );
 }
 
-fn item_display_name(stack: &ItemStack) -> TextComponent {
+pub(super) fn item_display_name(stack: &ItemStack) -> TextComponent {
     stack
         .get(CUSTOM_NAME)
         .or_else(|| stack.get(ITEM_NAME))
