@@ -22,6 +22,8 @@ mod invsee;
 mod kill;
 mod list;
 mod locate;
+#[cfg(test)]
+mod modification_commands_tests;
 mod operator;
 mod perms;
 mod raid;
