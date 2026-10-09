@@ -630,6 +630,9 @@ public final class Native {
 
     /** Writes one inventory slot. An empty string empties it. */
     public static native void setInventorySlot(String uuid, int slot, foton.item.ItemMutation item);
+    /** Writes the slot only if it still holds {@code expected}; false when it changed and nothing was written. */
+    public static native boolean setInventorySlotIfUnchanged(String uuid, int slot,
+        foton.item.ItemMutation expected, foton.item.ItemMutation item);
     public static native foton.item.ItemTransfer enderChestSlot(String uuid, int slot);
     public static native void setEnderChestSlot(String uuid, int slot, foton.item.ItemMutation item);
     public static native void setPlayerInventorySlots(String uuid, boolean ender, int[] slots, foton.item.ItemMutation[] items);
@@ -679,13 +682,15 @@ public final class Native {
     public static native String blockState(String world, int x, int y, int z);
     /** Every value a block's property can take, in registry order; null for an unknown block or property. */
     public static native String[] blockPropertyValues(String block, String property);
+    /** Block data written out in full, absent properties at their defaults; null when it names no block state. */
+    public static native String blockNormalize(String data);
     public static native String biomeKey(String world, int x, int y, int z);
     public static native String recipeResult(String key);
     public static native String[] recipeList();
     public static native String itemTranslationKey(String item);
     public static native boolean recipeRemove(String key);
-    public static native boolean recipeAddShapeless(String key, String result, int count, String[] ingredients);
-    public static native boolean recipeAddShaped(String key, String result, int count, String[] shape, String[] ingredients);
+    public static native boolean recipeAddShapeless(String key, foton.item.ItemMutation result, String[] ingredients);
+    public static native boolean recipeAddShaped(String key, foton.item.ItemMutation result, String[] shape, String[] ingredients);
     public static native byte blockLight(String world, int x, int y, int z);
     public static native boolean blockIndirectlyPowered(String world, int x, int y, int z);
     public static native byte skyLight(String world, int x, int y, int z);

@@ -12,4 +12,7 @@ public final class ItemTransfer {
 
     public NativeItemLease lease() { return lease; }
     public String projection() { return projection; }
+
+    /** This snapshot as an edit-free input, to say which stack a write expects to replace. */
+    public ItemMutation unchanged() { return new ItemMutation(lease, projection, new String[0], new String[0]); }
 }

@@ -12,11 +12,11 @@ use foton_utils::{BlockPos, Direction};
 use glam::DVec3;
 use jni::JNIEnv;
 use jni::objects::{JByteArray, JClass, JString};
-use jni::sys::{jboolean, jbyteArray, jdouble, jdoubleArray, jint};
+use jni::sys::{jboolean, jbyteArray, jdouble, jdoubleArray, jint, jstring};
 use simdnbt::owned::{BaseNbt, Nbt, read as read_nbt};
 
-use super::parse_state;
 use super::support::{doubles, method, text, world};
+use super::{describe_state, parse_state, to_java};
 
 const OUTLINE: jint = 0;
 const COLLISION: jint = 1;
@@ -83,6 +83,19 @@ extern "system" fn block_state_flags(
         flags |= OCCLUDING;
     }
     flags
+}
+
+/// Block data written out in full: a property the text leaves out takes its
+/// default, as in `BlockStateParser`. Null when the text names no block state.
+extern "system" fn block_normalize(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    data: JString<'_>,
+) -> jstring {
+    let described = text(&mut env, &data)
+        .and_then(|value| parse_state(&value))
+        .and_then(describe_state);
+    to_java(&mut env, described)
 }
 
 /// Bukkit's `BlockFace` ordinal for a hit face.
@@ -229,6 +242,11 @@ pub(super) fn bindings() -> Vec<jni::NativeMethod> {
             "blockStateFlags",
             "(Ljava/lang/String;)I",
             block_state_flags as *mut c_void,
+        ),
+        method(
+            "blockNormalize",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            block_normalize as *mut c_void,
         ),
         method(
             "rayTraceBlocks",

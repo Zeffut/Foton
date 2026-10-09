@@ -6,9 +6,6 @@ import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.block.data.BlockData;
-import org.bukkit.block.data.SimpleBlockData;
-import org.bukkit.block.data.SimpleWaterloggedData;
-import org.bukkit.block.data.type.SimpleTripwireData;
 
 /** A block, as a plugin holds one: a world and three coordinates.
  *
@@ -98,44 +95,7 @@ public final class FotonBlock implements Block {
 
     /** The typed Bukkit view of a block state written `minecraft:name[props]`. */
     static BlockData dataOf(String text) {
-        if (text != null && text.startsWith("minecraft:bell")) {
-            return new org.bukkit.block.data.type.SimpleBellData(text);
-        }
-        if (text != null && text.startsWith("minecraft:cake")) {
-            return new org.bukkit.block.data.type.SimpleCakeData(text);
-        }
-        if (text != null && text.startsWith("minecraft:piston_head")) {
-            return new org.bukkit.block.data.type.SimplePistonHeadData(text);
-        }
-        if (text != null && (text.contains("[age=") || text.contains(",age="))) {
-            return new org.bukkit.block.data.SimpleAgeableData(text);
-        }
-        if (text != null && text.contains("[rotation=")) {
-            return new org.bukkit.block.data.SimpleRotatableData(text);
-        }
-        if (text != null && text.contains("[face=")) {
-            return new org.bukkit.block.data.SimpleFaceAttachableData(text);
-        }
-        if (text != null && text.contains("[half=")) {
-            if (text.contains("_door[")) return new org.bukkit.block.data.type.SimpleDoorData(text);
-            return new org.bukkit.block.data.SimpleBisectedData(text);
-        }
-        if (text != null && text.contains("[level=")) {
-            return new org.bukkit.block.data.SimpleLevelledData(text);
-        }
-        if (text != null && text.contains("[lit=")) {
-            return new org.bukkit.block.data.SimpleLightableData(text);
-        }
-        if (text != null && text.startsWith("minecraft:tripwire")) {
-            return new SimpleTripwireData(text);
-        }
-        if (text != null && text.contains("facing=")) {
-            return new org.bukkit.block.data.SimpleDirectionalData(text);
-        }
-        if (text != null && text.contains("[waterlogged=")) {
-            return new SimpleWaterloggedData(text);
-        }
-        return new SimpleBlockData(text);
+        return org.bukkit.block.data.PropertyBlockData.of(text);
     }
 
     @Override

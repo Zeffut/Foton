@@ -1,0 +1,7 @@
+name: ParityProbe
+version: 1.0
+main: foton.fixture.parity.ParityProbe
+api-version: '1.21.11'
+commands:
+  parityprobe:
+    description: Check player-visible plugin API behaviour against Paper's

@@ -68,7 +68,7 @@ public final class Bukkit {
     public static java.io.File getUpdateFolderFile() { return server.getUpdateFolderFile(); }
     public static double getAverageTickTime() { return foton.Native.serverAverageTickTime(); }
     public static org.bukkit.block.data.BlockData createBlockData(String data) {
-        return new org.bukkit.block.data.SimpleBlockData(data);
+        return org.bukkit.block.data.PropertyBlockData.parse(data);
     }
 
     public static void shutdown() {

@@ -163,8 +163,8 @@ use foton_registry::vanilla_block_entity_types::BREWING_STAND as BREWING_STAND_B
 use foton_registry::vanilla_block_entity_types::SIGN;
 use foton_registry::vanilla_game_rules::TNT_EXPLOSION_DROP_DECAY;
 use foton_registry::{
-    REGISTRY, RegistryEntry as _, RegistryExt as _, RegistryReference, TaggedRegistryExt as _,
-    vanilla_blocks, vanilla_damage_types, vanilla_entities, vanilla_items,
+    ItemStackTemplate, REGISTRY, RegistryEntry as _, RegistryExt as _, RegistryReference,
+    TaggedRegistryExt as _, vanilla_blocks, vanilla_damage_types, vanilla_entities, vanilla_items,
 };
 use foton_utils::codec::VarInt;
 use foton_utils::entity_events::EntityStatus;
@@ -9577,12 +9577,25 @@ extern "system" fn recipe_remove(
     jboolean::from(removed)
 }
 
+/// The stack a plugin recipe produces, kept whole: its components and
+/// persistent data are part of the result, not just the item and count.
+fn read_recipe_result(env: &mut JNIEnv<'_>, mutation: &JObject<'_>) -> Option<RecipeResult> {
+    let candidate = match bridge_item_bridge::mutation::materialize(env, mutation) {
+        Ok(candidate) => candidate,
+        Err(error) => {
+            error.throw_java(env);
+            return None;
+        }
+    };
+    let template = ItemStackTemplate::from_stack(&candidate.stack).ok()?;
+    Some(RecipeResult::from_template(template))
+}
+
 extern "system" fn recipe_add_shapeless(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     key: JString<'_>,
-    result: JString<'_>,
-    count: jint,
+    result: JObject<'_>,
     ingredients: JObjectArray<'_>,
 ) -> jboolean {
     let Some(key) = env
@@ -9592,20 +9605,7 @@ extern "system" fn recipe_add_shapeless(
     else {
         return jboolean::from(false);
     };
-    let Some(result_key) = env
-        .get_string(&result)
-        .ok()
-        .and_then(|v| v.to_str().ok()?.parse().ok())
-    else {
-        return jboolean::from(false);
-    };
-    let Some(result_item) = REGISTRY.items.by_key(&result_key) else {
-        return jboolean::from(false);
-    };
-    if count <= 0 {
-        return jboolean::from(false);
-    }
-    let Ok(result) = RecipeResult::try_new(result_item, count) else {
+    let Some(result) = read_recipe_result(&mut env, &result) else {
         return jboolean::from(false);
     };
     let Ok(length) = env.get_array_length(&ingredients) else {
@@ -9649,8 +9649,7 @@ extern "system" fn recipe_add_shaped(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
     key: JString<'_>,
-    result: JString<'_>,
-    count: jint,
+    result: JObject<'_>,
     shape: JObjectArray<'_>,
     ingredients: JObjectArray<'_>,
 ) -> jboolean {
@@ -9661,20 +9660,7 @@ extern "system" fn recipe_add_shaped(
     else {
         return jboolean::from(false);
     };
-    let Some(result_key) = env
-        .get_string(&result)
-        .ok()
-        .and_then(|v| v.to_str().ok()?.parse().ok())
-    else {
-        return jboolean::from(false);
-    };
-    let Some(result_item) = REGISTRY.items.by_key(&result_key) else {
-        return jboolean::from(false);
-    };
-    if count <= 0 {
-        return jboolean::from(false);
-    }
-    let Ok(result) = RecipeResult::try_new(result_item, count) else {
+    let Some(result) = read_recipe_result(&mut env, &result) else {
         return jboolean::from(false);
     };
     let Some(rows) = read_string_array(&mut env, &shape) else {
@@ -16058,6 +16044,11 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
             bridge_item_bridge::inventory::set_inventory_slot as *mut c_void,
         ),
         method(
+            "setInventorySlotIfUnchanged",
+            "(Ljava/lang/String;ILfoton/item/ItemMutation;Lfoton/item/ItemMutation;)Z",
+            bridge_item_bridge::inventory::set_inventory_slot_if_unchanged as *mut c_void,
+        ),
+        method(
             "enderChestSlot",
             "(Ljava/lang/String;I)Lfoton/item/ItemTransfer;",
             bridge_item_bridge::inventory::ender_chest_slot as *mut c_void,
@@ -16249,12 +16240,12 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method(
             "recipeAddShapeless",
-            "(Ljava/lang/String;Ljava/lang/String;I[Ljava/lang/String;)Z",
+            "(Ljava/lang/String;Lfoton/item/ItemMutation;[Ljava/lang/String;)Z",
             recipe_add_shapeless as *mut c_void,
         ),
         method(
             "recipeAddShaped",
-            "(Ljava/lang/String;Ljava/lang/String;I[Ljava/lang/String;[Ljava/lang/String;)Z",
+            "(Ljava/lang/String;Lfoton/item/ItemMutation;[Ljava/lang/String;[Ljava/lang/String;)Z",
             recipe_add_shaped as *mut c_void,
         ),
         method(

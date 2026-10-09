@@ -216,7 +216,7 @@ public final class FotonPlayer extends foton.entity.CraftPlayer implements org.b
     @Override
     public World getWorld() {
         String name = Native.playerWorld(id.toString());
-        return name == null ? null : new FotonWorld(name);
+        return name == null ? null : FotonWorld.of(name);
     }
     @Override
     public java.net.InetSocketAddress getAddress() {
@@ -259,7 +259,7 @@ public final class FotonPlayer extends foton.entity.CraftPlayer implements org.b
         String world = Native.playerRespawnWorld(id.toString());
         double[] pos = Native.playerRespawnPosition(id.toString());
         if (world == null || pos == null || pos.length < 5) return null;
-        return new org.bukkit.Location(new FotonWorld(world), pos[0], pos[1], pos[2], (float) pos[3], (float) pos[4]);
+        return new org.bukkit.Location(FotonWorld.of(world), pos[0], pos[1], pos[2], (float) pos[3], (float) pos[4]);
     }
 
     @Override
@@ -268,8 +268,13 @@ public final class FotonPlayer extends foton.entity.CraftPlayer implements org.b
     }
 
     @Override
+    public java.util.List<org.bukkit.entity.Entity> getNearbyEntities(double x, double y, double z) {
+        return FotonEntity.nearby(id, x, y, z);
+    }
+
+    @Override
     public org.bukkit.inventory.EntityEquipment getEquipment() {
-        return new FotonEntityEquipment(id.toString());
+        return new FotonEntityEquipment(id.toString(), new FotonInventory(id.toString()));
     }
 
     @Override

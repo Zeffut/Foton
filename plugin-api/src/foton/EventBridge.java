@@ -362,7 +362,7 @@ public final class EventBridge {
     }
 
     public static String fireCrafterCraft(String world, int x, int y, int z, String recipeKey, String result, String remaining) {
-        org.bukkit.World bukkitWorld = new FotonWorld(world);
+        org.bukkit.World bukkitWorld = FotonWorld.of(world);
         org.bukkit.inventory.ItemStack crafted = FotonInventory.decode(result);
         org.bukkit.inventory.CraftingRecipe recipe = new FotonCraftingRecipe(
             org.bukkit.NamespacedKey.fromString(recipeKey), crafted);
@@ -392,7 +392,7 @@ public final class EventBridge {
             slots[slot] = FotonInventory.decode(
                 slot < encodedContents.length ? encodedContents[slot] : "");
         }
-        FotonBlock block = new FotonBlock(new FotonWorld(world), x, y, z);
+        FotonBlock block = new FotonBlock(FotonWorld.of(world), x, y, z);
         FotonBrewingStand holder = FotonBrewingStand.eventSnapshot(block, slots, fuelLevel);
         FotonBrewerInventory inventory = holder.getInventory();
         java.util.List<ItemStack> mutableResults = new java.util.ArrayList<>();
@@ -501,7 +501,7 @@ public final class EventBridge {
             double x, double y, double z, String item) {
         ItemSpawnEvent event = new ItemSpawnEvent(
             new FotonItem(Native.parse(entity)),
-            new org.bukkit.Location(new FotonWorld(world), x, y, z));
+            new org.bukkit.Location(FotonWorld.of(world), x, y, z));
         // The item stack is encoded for the native side; the entity handle
         // resolves it through the pending-spawn registry during dispatch.
         dispatch(event);
@@ -539,15 +539,15 @@ public final class EventBridge {
         org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason spawnReason = spawnReason(reason);
         com.destroystokyo.paper.event.entity.PreCreatureSpawnEvent event =
             new com.destroystokyo.paper.event.entity.PreCreatureSpawnEvent(
-                new org.bukkit.Location(new FotonWorld(world), x, y, z), entityType, spawnReason);
+                new org.bukkit.Location(FotonWorld.of(world), x, y, z), entityType, spawnReason);
         dispatch(event);
         return !event.isCancelled() && !event.shouldAbortSpawn();
     }
     public static String fireEntityPortal(String entity, String fromWorld, double fx, double fy, double fz, String toWorld, double tx, double ty, double tz, String portalType) {
         try {
             org.bukkit.entity.Entity value = FotonEntity.handle(java.util.UUID.fromString(entity));
-            org.bukkit.Location from = new org.bukkit.Location(new FotonWorld(fromWorld), fx, fy, fz);
-            org.bukkit.Location to = new org.bukkit.Location(new FotonWorld(toWorld), tx, ty, tz);
+            org.bukkit.Location from = new org.bukkit.Location(FotonWorld.of(fromWorld), fx, fy, fz);
+            org.bukkit.Location to = new org.bukkit.Location(FotonWorld.of(toWorld), tx, ty, tz);
             org.bukkit.PortalType type; try { type = org.bukkit.PortalType.valueOf(portalType); } catch (IllegalArgumentException ex) { type = org.bukkit.PortalType.CUSTOM; }
             org.bukkit.event.entity.EntityPortalEvent event = new org.bukkit.event.entity.EntityPortalEvent(value, from, to, 128, true, 16, type);
             dispatch(event);
@@ -561,7 +561,7 @@ public final class EventBridge {
         org.bukkit.entity.LivingEntity living = living(entity);
         org.bukkit.event.entity.CreatureSpawnEvent event =
             new org.bukkit.event.entity.CreatureSpawnEvent(
-                living, new org.bukkit.Location(new FotonWorld(world), x, y, z),
+                living, new org.bukkit.Location(FotonWorld.of(world), x, y, z),
                 spawnReason(reason));
         dispatch(event);
         return !event.isCancelled();
@@ -619,7 +619,7 @@ public final class EventBridge {
         org.bukkit.event.hanging.HangingPlaceEvent event =
             new org.bukkit.event.hanging.HangingPlaceEvent(
                 new FotonHanging(Native.parse(entity)), player(playerUuid),
-                new FotonBlock(new FotonWorld(world), x, y, z),
+                new FotonBlock(FotonWorld.of(world), x, y, z),
                 org.bukkit.block.BlockFace.valueOf(face.toUpperCase(java.util.Locale.ROOT)));
         dispatch(event);
         return !event.isCancelled();
@@ -802,7 +802,7 @@ public final class EventBridge {
     /** A player placed a block. Returns false when a plugin stopped it. */
     public static boolean fireBlockPlace(String uuid, int x, int y, int z, String world, String item,
             String replaced, int againstX, int againstY, int againstZ) {
-        FotonWorld where = new FotonWorld(world);
+        FotonWorld where = FotonWorld.of(world);
         FotonBlock block = new FotonBlock(where, x, y, z);
         BlockPlaceEvent event = new BlockPlaceEvent(block,
             new FotonBlockState(block, FotonBlock.dataOf(replaced)),
@@ -813,26 +813,26 @@ public final class EventBridge {
     }
 
     public static boolean fireBlockFromTo(String world, int x, int y, int z, int toX, int toY, int toZ) {
-        BlockFromToEvent event = new BlockFromToEvent(new FotonBlock(new FotonWorld(world), x, y, z), new FotonBlock(new FotonWorld(world), toX, toY, toZ));
+        BlockFromToEvent event = new BlockFromToEvent(new FotonBlock(FotonWorld.of(world), x, y, z), new FotonBlock(FotonWorld.of(world), toX, toY, toZ));
         dispatch(event); return !event.isCancelled();
     }
 
     public static String fireBlockExp(String world, int x, int y, int z, int exp) {
-        org.bukkit.event.block.BlockExpEvent event = new org.bukkit.event.block.BlockExpEvent(new FotonBlock(new FotonWorld(world), x, y, z), exp);
+        org.bukkit.event.block.BlockExpEvent event = new org.bukkit.event.block.BlockExpEvent(new FotonBlock(FotonWorld.of(world), x, y, z), exp);
         dispatch(event);
         return (event.isCancelled() ? "0" : "1") + "|" + event.getExpToDrop();
     }
 
     public static boolean fireBlockBurn(String world, int x, int y, int z) {
         org.bukkit.event.block.BlockBurnEvent event =
-            new org.bukkit.event.block.BlockBurnEvent(new FotonBlock(new FotonWorld(world), x, y, z));
+            new org.bukkit.event.block.BlockBurnEvent(new FotonBlock(FotonWorld.of(world), x, y, z));
         dispatch(event);
         return !event.isCancelled();
     }
 
     public static boolean fireBlockFade(String world, int x, int y, int z) {
         org.bukkit.event.block.BlockFadeEvent event =
-            new org.bukkit.event.block.BlockFadeEvent(new FotonBlock(new FotonWorld(world), x, y, z));
+            new org.bukkit.event.block.BlockFadeEvent(new FotonBlock(FotonWorld.of(world), x, y, z));
         dispatch(event);
         return !event.isCancelled();
     }
@@ -840,7 +840,7 @@ public final class EventBridge {
     /** A block is spreading onto a neighbour. Returns false when refused. */
     public static boolean fireBlockSpread(String world, int x, int y, int z,
             int sourceX, int sourceY, int sourceZ) {
-        FotonWorld level = new FotonWorld(world);
+        FotonWorld level = FotonWorld.of(world);
         org.bukkit.block.Block target = new FotonBlock(level, x, y, z);
         org.bukkit.event.block.BlockSpreadEvent event =
                 new org.bukkit.event.block.BlockSpreadEvent(
@@ -853,7 +853,7 @@ public final class EventBridge {
 
     public static boolean fireLeavesDecay(String world, int x, int y, int z) {
         org.bukkit.event.block.LeavesDecayEvent event =
-            new org.bukkit.event.block.LeavesDecayEvent(new FotonBlock(new FotonWorld(world), x, y, z));
+            new org.bukkit.event.block.LeavesDecayEvent(new FotonBlock(FotonWorld.of(world), x, y, z));
         dispatch(event);
         return !event.isCancelled();
     }
@@ -861,14 +861,14 @@ public final class EventBridge {
     public static boolean fireBlockIgnite(String world, int x, int y, int z, String cause, String playerUuid) {
         org.bukkit.event.block.BlockIgniteEvent event =
             new org.bukkit.event.block.BlockIgniteEvent(
-                new FotonBlock(new FotonWorld(world), x, y, z), igniteCause(cause),
+                new FotonBlock(FotonWorld.of(world), x, y, z), igniteCause(cause),
                 playerUuid == null ? null : new FotonPlayer(java.util.UUID.fromString(playerUuid)));
         dispatch(event);
         return !event.isCancelled();
     }
     public static boolean fireBlockFertilize(String world, int x, int y, int z, String playerUuid) {
         org.bukkit.event.block.BlockFertilizeEvent event = new org.bukkit.event.block.BlockFertilizeEvent(
-            new FotonBlock(new FotonWorld(world), x, y, z),
+            new FotonBlock(FotonWorld.of(world), x, y, z),
             playerUuid == null ? null : new FotonPlayer(java.util.UUID.fromString(playerUuid)));
         dispatch(event);
         return !event.isCancelled();
@@ -884,12 +884,12 @@ public final class EventBridge {
     }
 
     public static void fireWorldLoad(String world) {
-        FotonWorld value = new FotonWorld(world);
+        FotonWorld value = FotonWorld.of(world);
         dispatch(new org.bukkit.event.world.WorldInitEvent(value));
         dispatch(new org.bukkit.event.world.WorldLoadEvent(value));
     }
     public static boolean fireWorldUnload(String world) {
-        org.bukkit.event.world.WorldUnloadEvent event = new org.bukkit.event.world.WorldUnloadEvent(new FotonWorld(world));
+        org.bukkit.event.world.WorldUnloadEvent event = new org.bukkit.event.world.WorldUnloadEvent(FotonWorld.of(world));
         dispatch(event);
         return !event.isCancelled();
     }
@@ -918,7 +918,7 @@ public final class EventBridge {
     public static boolean firePlayerTakeLecternBook(String uuid, String world, int x, int y, int z) {
         org.bukkit.event.player.PlayerTakeLecternBookEvent event =
             new org.bukkit.event.player.PlayerTakeLecternBookEvent(new FotonPlayer(java.util.UUID.fromString(uuid)),
-                (org.bukkit.block.Lectern) new FotonBlock(new FotonWorld(world), x, y, z).getState());
+                (org.bukkit.block.Lectern) new FotonBlock(FotonWorld.of(world), x, y, z).getState());
         dispatch(event);
         return !event.isCancelled();
     }
@@ -947,7 +947,7 @@ public final class EventBridge {
 
     public static boolean firePlayerBucketFill(String player, String world, int x, int y, int z, String bucket) {
         org.bukkit.event.player.PlayerBucketFillEvent event = new org.bukkit.event.player.PlayerBucketFillEvent(
-            player(player), new FotonBlock(new FotonWorld(world), x, y, z),
+            player(player), new FotonBlock(FotonWorld.of(world), x, y, z),
             org.bukkit.Material.matchMaterial(bucket));
         dispatch(event);
         return !event.isCancelled();
@@ -991,7 +991,7 @@ public final class EventBridge {
         org.bukkit.Location location = null;
         try {
             if (fields.length == 6) {
-                location = new org.bukkit.Location(new FotonWorld(fields[0]),
+                location = new org.bukkit.Location(FotonWorld.of(fields[0]),
                     Double.parseDouble(fields[1]), Double.parseDouble(fields[2]),
                     Double.parseDouble(fields[3]), Float.parseFloat(fields[4]),
                     Float.parseFloat(fields[5]));
@@ -1010,7 +1010,7 @@ public final class EventBridge {
         String[] fields = encoded == null ? new String[0] : encoded.split("\\|", -1);
         org.bukkit.Location location = null;
         try {
-            if (fields.length == 6) location = new org.bukkit.Location(new FotonWorld(fields[0]),
+            if (fields.length == 6) location = new org.bukkit.Location(FotonWorld.of(fields[0]),
                 Double.parseDouble(fields[1]), Double.parseDouble(fields[2]), Double.parseDouble(fields[3]),
                 Float.parseFloat(fields[4]), Float.parseFloat(fields[5]));
         } catch (RuntimeException ignored) { }
@@ -1036,7 +1036,7 @@ public final class EventBridge {
 
     /** A crop is about to advance a stage. Returns false when refused. */
     public static boolean fireBlockGrow(String world, int x, int y, int z) {
-        org.bukkit.block.Block block = new FotonBlock(new FotonWorld(world), x, y, z);
+        org.bukkit.block.Block block = new FotonBlock(FotonWorld.of(world), x, y, z);
         org.bukkit.event.block.BlockGrowEvent event =
                 new org.bukkit.event.block.BlockGrowEvent(block, block.getState());
         dispatch(event);
@@ -1045,24 +1045,24 @@ public final class EventBridge {
 
     public static void fireChunkPopulate(String world, int x, int z) {
         dispatch(new org.bukkit.event.world.ChunkPopulateEvent(
-                new FotonChunk(new FotonWorld(world), x, z)));
+                new FotonChunk(FotonWorld.of(world), x, z)));
     }
 
     public static void fireChunkUnload(String world, int x, int z) {
         dispatch(new org.bukkit.event.world.ChunkUnloadEvent(
-                new FotonChunk(new FotonWorld(world), x, z)));
+                new FotonChunk(FotonWorld.of(world), x, z)));
     }
 
     public static void fireChunkLoad(String world, int x, int z, boolean newlyGenerated) {
-        dispatch(new org.bukkit.event.world.ChunkLoadEvent(new FotonChunk(new FotonWorld(world), x, z), newlyGenerated));
+        dispatch(new org.bukkit.event.world.ChunkLoadEvent(new FotonChunk(FotonWorld.of(world), x, z), newlyGenerated));
     }
 
     public static String firePlayerPortal(String uuid, String encoded) {
         String[] f = encoded == null ? new String[0] : encoded.split("\\|", -1);
         if (f.length < 13) return "1|" + (f.length > 6 ? f[6] : "") + "|0|0|0|0|0";
         try {
-            org.bukkit.Location from = new org.bukkit.Location(new FotonWorld(f[0]), Double.parseDouble(f[1]), Double.parseDouble(f[2]), Double.parseDouble(f[3]), Float.parseFloat(f[4]), Float.parseFloat(f[5]));
-            org.bukkit.Location to = new org.bukkit.Location(new FotonWorld(f[6]), Double.parseDouble(f[7]), Double.parseDouble(f[8]), Double.parseDouble(f[9]), Float.parseFloat(f[10]), Float.parseFloat(f[11]));
+            org.bukkit.Location from = new org.bukkit.Location(FotonWorld.of(f[0]), Double.parseDouble(f[1]), Double.parseDouble(f[2]), Double.parseDouble(f[3]), Float.parseFloat(f[4]), Float.parseFloat(f[5]));
+            org.bukkit.Location to = new org.bukkit.Location(FotonWorld.of(f[6]), Double.parseDouble(f[7]), Double.parseDouble(f[8]), Double.parseDouble(f[9]), Float.parseFloat(f[10]), Float.parseFloat(f[11]));
             org.bukkit.event.player.PlayerPortalEvent event = new org.bukkit.event.player.PlayerPortalEvent(player(uuid), from, to, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.valueOf(f[12]));
             dispatch(event);
             if (event.isCancelled()) return "0|";
@@ -1076,11 +1076,11 @@ public final class EventBridge {
         if (encoded != null) for (String value : encoded.split(";", -1)) {
             String[] xyz = value.split(",", -1);
             if (xyz.length != 3) continue;
-            try { blocks.add(new FotonBlock(new FotonWorld(world), Integer.parseInt(xyz[0]), Integer.parseInt(xyz[1]), Integer.parseInt(xyz[2])).getState()); }
+            try { blocks.add(new FotonBlock(FotonWorld.of(world), Integer.parseInt(xyz[0]), Integer.parseInt(xyz[1]), Integer.parseInt(xyz[2])).getState()); }
             catch (RuntimeException ignored) { }
         }
         org.bukkit.event.world.PortalCreateEvent event =
-            new org.bukkit.event.world.PortalCreateEvent(new FotonWorld(world), blocks);
+            new org.bukkit.event.world.PortalCreateEvent(FotonWorld.of(world), blocks);
         dispatch(event);
         if (event.isCancelled()) return "0|";
         StringBuilder result = new StringBuilder("1|");
@@ -1128,7 +1128,7 @@ public final class EventBridge {
     }
 
     public static boolean firePlayerOpenSign(String uuid, String world, int x, int y, int z, boolean front, String cause) {
-        org.bukkit.block.Block block = new FotonBlock(new FotonWorld(world), x, y, z);
+        org.bukkit.block.Block block = new FotonBlock(FotonWorld.of(world), x, y, z);
         org.bukkit.block.data.BlockData data = block.getBlockData();
         org.bukkit.block.Sign sign = new FotonSign(block, data);
         io.papermc.paper.event.player.PlayerOpenSignEvent event =
@@ -1143,7 +1143,7 @@ public final class EventBridge {
         String[] lines = encoded == null ? new String[] {"", "", "", ""} : encoded.split("\\u001f", -1);
         if (lines.length != 4) lines = new String[] {"", "", "", ""};
         org.bukkit.event.block.SignChangeEvent event = new org.bukkit.event.block.SignChangeEvent(
-            new FotonBlock(new FotonWorld(world), x, y, z), player(uuid), lines);
+            new FotonBlock(FotonWorld.of(world), x, y, z), player(uuid), lines);
         dispatch(event);
         StringBuilder answer = new StringBuilder(event.isCancelled() ? "1" : "0");
         for (String line : event.getLines()) answer.append('\u001f').append(line == null ? "" : line);
@@ -1151,13 +1151,13 @@ public final class EventBridge {
     }
 
     public static boolean fireWeatherChange(String world, boolean raining) {
-        org.bukkit.event.weather.WeatherChangeEvent event = new org.bukkit.event.weather.WeatherChangeEvent(new FotonWorld(world), raining);
+        org.bukkit.event.weather.WeatherChangeEvent event = new org.bukkit.event.weather.WeatherChangeEvent(FotonWorld.of(world), raining);
         dispatch(event);
         return !event.isCancelled();
     }
 
     public static boolean fireThunderChange(String world, boolean thundering) {
-        org.bukkit.event.weather.ThunderChangeEvent event = new org.bukkit.event.weather.ThunderChangeEvent(new FotonWorld(world), thundering);
+        org.bukkit.event.weather.ThunderChangeEvent event = new org.bukkit.event.weather.ThunderChangeEvent(FotonWorld.of(world), thundering);
         dispatch(event);
         return !event.isCancelled();
     }
@@ -1165,7 +1165,7 @@ public final class EventBridge {
     public static boolean fireLightningStrike(String entityUuid, String world, String cause) {
         org.bukkit.entity.Entity raw = FotonEntity.handle(Native.parse(entityUuid));
         if (!(raw instanceof org.bukkit.entity.LightningStrike lightning)) return true;
-        org.bukkit.World w = new FotonWorld(world);
+        org.bukkit.World w = FotonWorld.of(world);
         org.bukkit.event.weather.LightningStrikeEvent event = new org.bukkit.event.weather.LightningStrikeEvent(w, lightning, org.bukkit.event.weather.LightningStrikeEvent.Cause.valueOf(cause));
         dispatch(event);
         return !event.isCancelled();
@@ -1178,7 +1178,7 @@ public final class EventBridge {
                 String[] xyz = value.split(",");
                 if (xyz.length != 3) continue;
                 try {
-                    blocks.add(new FotonBlock(new FotonWorld(world), Integer.parseInt(xyz[0].trim()),
+                    blocks.add(new FotonBlock(FotonWorld.of(world), Integer.parseInt(xyz[0].trim()),
                         Integer.parseInt(xyz[1].trim()), Integer.parseInt(xyz[2].trim())));
                 } catch (NumberFormatException ignored) { }
             }
@@ -1198,11 +1198,11 @@ public final class EventBridge {
         if (encoded != null && !encoded.isEmpty()) for (String value : encoded.split(";")) {
             String[] xyz = value.split(",");
             if (xyz.length != 3) continue;
-            try { blocks.add(new FotonBlock(new FotonWorld(world), Integer.parseInt(xyz[0].trim()), Integer.parseInt(xyz[1].trim()), Integer.parseInt(xyz[2].trim()))); }
+            try { blocks.add(new FotonBlock(FotonWorld.of(world), Integer.parseInt(xyz[0].trim()), Integer.parseInt(xyz[1].trim()), Integer.parseInt(xyz[2].trim()))); }
             catch (NumberFormatException ignored) { }
         }
         org.bukkit.event.block.BlockExplodeEvent event = new org.bukkit.event.block.BlockExplodeEvent(
-            new FotonBlock(new FotonWorld(world), x, y, z), blocks, 1.0f);
+            new FotonBlock(FotonWorld.of(world), x, y, z), blocks, 1.0f);
         dispatch(event);
         StringBuilder answer = new StringBuilder(event.isCancelled() ? "1" : "0").append('\u001f');
         for (org.bukkit.block.Block block : event.blockList()) answer.append(block.getX()).append(',').append(block.getY()).append(',').append(block.getZ()).append(';');
@@ -1211,7 +1211,7 @@ public final class EventBridge {
 
     public static String fireBlockDispense(String world, int x, int y, int z, String item) {
         org.bukkit.event.block.BlockDispenseEvent event = new org.bukkit.event.block.BlockDispenseEvent(
-            new FotonBlock(new FotonWorld(world), x, y, z), FotonInventory.decode(item));
+            new FotonBlock(FotonWorld.of(world), x, y, z), FotonInventory.decode(item));
         dispatch(event);
         return (event.isCancelled() ? "1" : "0") + '\u001f' + FotonInventory.encode(event.getItem());
     }
@@ -1219,7 +1219,7 @@ public final class EventBridge {
     public static String fireBlockPreDispense(String world, int x, int y, int z, int slot, String item) {
         io.papermc.paper.event.block.BlockPreDispenseEvent event =
             new io.papermc.paper.event.block.BlockPreDispenseEvent(
-                new FotonBlock(new FotonWorld(world), x, y, z), slot, FotonInventory.decode(item));
+                new FotonBlock(FotonWorld.of(world), x, y, z), slot, FotonInventory.decode(item));
         dispatch(event);
         return (event.isCancelled() ? "1" : "0") + '\u001f' + FotonInventory.encode(event.getItem());
     }
@@ -1236,14 +1236,14 @@ public final class EventBridge {
         org.bukkit.Material material = org.bukkit.Material.matchMaterial(to);
         if (material == null) material = org.bukkit.Material.AIR;
         org.bukkit.event.entity.EntityChangeBlockEvent event = new org.bukkit.event.entity.EntityChangeBlockEvent(
-            FotonEntity.handle(Native.parse(entityUuid)), new FotonBlock(new FotonWorld(world), x, y, z), material);
+            FotonEntity.handle(Native.parse(entityUuid)), new FotonBlock(FotonWorld.of(world), x, y, z), material);
         dispatch(event);
         return !event.isCancelled();
     }
 
     public static boolean fireBlockDamage(String playerUuid, String world, int x, int y, int z) {
         org.bukkit.event.block.BlockDamageEvent event = new org.bukkit.event.block.BlockDamageEvent(
-            player(playerUuid), new FotonBlock(new FotonWorld(world), x, y, z));
+            player(playerUuid), new FotonBlock(FotonWorld.of(world), x, y, z));
         dispatch(event); return !event.isCancelled();
     }
 
@@ -1271,7 +1271,7 @@ public final class EventBridge {
         java.util.List<org.bukkit.block.Block> blocks = new java.util.ArrayList<>();
         if (encoded != null && !encoded.isEmpty()) for (String value : encoded.split(";")) {
             String[] xyz = value.split(","); if (xyz.length != 3) continue;
-            try { blocks.add(new FotonBlock(new FotonWorld(world), Integer.parseInt(xyz[0].trim()),
+            try { blocks.add(new FotonBlock(FotonWorld.of(world), Integer.parseInt(xyz[0].trim()),
                 Integer.parseInt(xyz[1].trim()), Integer.parseInt(xyz[2].trim()))); }
             catch (NumberFormatException ignored) { }
         }
@@ -1279,8 +1279,8 @@ public final class EventBridge {
         try { face = org.bukkit.block.BlockFace.valueOf(direction.toUpperCase(java.util.Locale.ROOT)); }
         catch (IllegalArgumentException error) { face = org.bukkit.block.BlockFace.SELF; }
         org.bukkit.event.block.PistonEvent event = extending
-            ? new org.bukkit.event.block.BlockPistonExtendEvent(new FotonBlock(new FotonWorld(world), x, y, z), face, blocks)
-            : new org.bukkit.event.block.BlockPistonRetractEvent(new FotonBlock(new FotonWorld(world), x, y, z), face, blocks);
+            ? new org.bukkit.event.block.BlockPistonExtendEvent(new FotonBlock(FotonWorld.of(world), x, y, z), face, blocks)
+            : new org.bukkit.event.block.BlockPistonRetractEvent(new FotonBlock(FotonWorld.of(world), x, y, z), face, blocks);
         dispatch(event);
         StringBuilder answer = new StringBuilder(event.isCancelled() ? "1" : "0").append('\u001f');
         for (org.bukkit.block.Block block : event.getBlocks()) answer.append(block.getX()).append(',')
@@ -1292,8 +1292,8 @@ public final class EventBridge {
             double fromX, double fromY, double fromZ,
             double toX, double toY, double toZ) {
         PlayerMoveEvent event = new PlayerMoveEvent(player(uuid),
-            new org.bukkit.Location(new FotonWorld(world), fromX, fromY, fromZ),
-            new org.bukkit.Location(new FotonWorld(world), toX, toY, toZ));
+            new org.bukkit.Location(FotonWorld.of(world), fromX, fromY, fromZ),
+            new org.bukkit.Location(FotonWorld.of(world), toX, toY, toZ));
         dispatch(event);
         if (event.isCancelled()) return null;
         Location to = event.getTo();

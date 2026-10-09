@@ -17,7 +17,7 @@ public class SimpleBlockData implements BlockData {
     }
 
     @Override
-    public BlockData clone() { return new SimpleBlockData(getAsString()); }
+    public BlockData clone() { return PropertyBlockData.of(getAsString()); }
 
     @Override
     public Material getMaterial() {
@@ -27,6 +27,18 @@ public class SimpleBlockData implements BlockData {
     @Override
     public String getAsString() {
         return text;
+    }
+
+    /** The properties the text lists, in the order it lists them. */
+    protected java.util.Map<String, String> properties() {
+        java.util.Map<String, String> result = new java.util.LinkedHashMap<>();
+        int start = text.indexOf('[');
+        if (start < 0) return result;
+        for (String entry : text.substring(start + 1, text.length() - 1).split(",")) {
+            String[] pair = entry.split("=", 2);
+            if (pair.length == 2) result.put(pair[0].trim(), pair[1].trim());
+        }
+        return result;
     }
 
     protected String propertyValue(String key) {
@@ -91,8 +103,8 @@ public class SimpleBlockData implements BlockData {
 
     @Override
     public boolean equals(Object other) {
-        return other instanceof SimpleBlockData data
-            && text.toLowerCase(Locale.ROOT).equals(data.text.toLowerCase(Locale.ROOT));
+        return other instanceof BlockData data
+            && text.equalsIgnoreCase(data.getAsString());
     }
 
     @Override

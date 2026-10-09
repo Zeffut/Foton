@@ -37,6 +37,9 @@ public final class FotonWorld implements World {
         try { return org.bukkit.Difficulty.valueOf(value.toUpperCase(java.util.Locale.ROOT)); }
         catch (IllegalArgumentException ignored) { return org.bukkit.Difficulty.NORMAL; }
     }
+    @Override public java.util.Collection<org.bukkit.entity.Entity> getNearbyEntities(Location location, double x, double y, double z) {
+        return getNearbyEntities(location, x, y, z, null);
+    }
     @Override public java.util.Collection<org.bukkit.entity.Entity> getNearbyEntities(Location location, double x, double y, double z, java.util.function.Predicate<org.bukkit.entity.Entity> filter) {
         if (location == null) return java.util.List.of();
         String[] ids = Native.worldNearby(name, location.getX(), location.getY(), location.getZ(), x, y, z);
@@ -49,8 +52,18 @@ public final class FotonWorld implements World {
     }
     private final String name;
 
-    public FotonWorld(String name) {
+    private static final java.util.concurrent.ConcurrentHashMap<String, FotonWorld> WORLDS =
+        new java.util.concurrent.ConcurrentHashMap<>();
+
+    private FotonWorld(String name) {
         this.name = name;
+    }
+
+    /** The one instance for a world name, so a plugin can compare worlds with
+     * {@code ==} as it can under Paper. The instance is only a name, so it is
+     * safe to keep after the world unloads. */
+    public static FotonWorld of(String name) {
+        return WORLDS.computeIfAbsent(name, FotonWorld::new);
     }
 
     @Override

@@ -20,8 +20,10 @@ import org.bukkit.inventory.meta.SimpleItemMeta;
  * plugins surveyed call `new ItemStack`.
  *
  * Mutable, like Bukkit's, and a plugin that hands one to the server is handing
- * over a description rather than a live reference into a chest -- reading an
- * inventory gives copies, and writing one takes them.
+ * over a description rather than a live reference into a chest -- writing an
+ * inventory takes copies. Reading a player's inventory slot gives a mirror
+ * that writes edits back (see {@code foton.FotonItemMirror}); every other
+ * read, and {@code clone()}, gives a detached copy.
  */
 public class ItemStack implements Cloneable {
     private Material type;
@@ -75,13 +77,18 @@ public class ItemStack implements Cloneable {
             ItemStack rebased = foton.FotonInventory.decodeTransfer(foton.Native.rebaseItem(nativeMutation(),
                 "minecraft:" + target.getKeyName(), false));
             if (rebased == null) throw new IllegalStateException("nonempty item rebase returned empty state");
-            this.type = rebased.type;
-            this.amount = rebased.amount;
-            this.meta = rebased.meta;
-            this.opaqueNbt = rebased.opaqueNbt;
+            adopt(rebased);
             return;
         }
         this.type = target;
+    }
+
+    /** Takes on another stack's content, keeping this object: a rebase or a mirror refresh. */
+    public void adopt(ItemStack other) {
+        this.type = other.type;
+        this.amount = other.amount;
+        this.meta = other.meta;
+        this.opaqueNbt = other.opaqueNbt;
     }
 
     public int getAmount() {

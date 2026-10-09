@@ -66,7 +66,7 @@ public final class EventRelay {
     /** Answers `allowed, logWarning`. */
     public static String fireFailMove(String uuid, String world, String reason, String from,
             String to, String logWarning) {
-        World in = new FotonWorld(world);
+        World in = FotonWorld.of(world);
         io.papermc.paper.event.player.PlayerFailMoveEvent event =
             new io.papermc.paper.event.player.PlayerFailMoveEvent(player(uuid),
                 io.papermc.paper.event.player.PlayerFailMoveEvent.FailReason.valueOf(reason),
@@ -86,7 +86,7 @@ public final class EventRelay {
     /** Answers nothing: the vehicle has already moved, and a plugin that objects teleports it back. */
     public static String fireVehicleMove(String vehicle, String world, String from, String to) {
         if (!(FotonEntity.handle(Native.parse(vehicle)) instanceof org.bukkit.entity.Vehicle handle)) return "";
-        World in = new FotonWorld(world);
+        World in = FotonWorld.of(world);
         EventBridge.dispatch(new org.bukkit.event.vehicle.VehicleMoveEvent(handle, location(in, from),
             location(in, to)));
         return "";
@@ -156,7 +156,7 @@ public final class EventRelay {
 
     static FotonBlock block(String world, String position) {
         String[] parts = position.split(" ");
-        return new FotonBlock(new FotonWorld(world), Integer.parseInt(parts[0]),
+        return new FotonBlock(FotonWorld.of(world), Integer.parseInt(parts[0]),
             Integer.parseInt(parts[1]), Integer.parseInt(parts[2]));
     }
 
@@ -197,7 +197,7 @@ public final class EventRelay {
     public static String fireEntitiesLoad(String world, String chunk, String uuids) {
         String[] at = chunk.split(" ");
         EventBridge.dispatch(new org.bukkit.event.world.EntitiesLoadEvent(
-            new FotonChunk(new FotonWorld(world), Integer.parseInt(at[0]), Integer.parseInt(at[1])),
+            new FotonChunk(FotonWorld.of(world), Integer.parseInt(at[0]), Integer.parseInt(at[1])),
             entities(uuids)));
         return "";
     }
@@ -206,7 +206,7 @@ public final class EventRelay {
     public static String fireEntitiesUnload(String world, String chunk, String uuids) {
         String[] at = chunk.split(" ");
         EventBridge.dispatch(new org.bukkit.event.world.EntitiesUnloadEvent(
-            new FotonChunk(new FotonWorld(world), Integer.parseInt(at[0]), Integer.parseInt(at[1])),
+            new FotonChunk(FotonWorld.of(world), Integer.parseInt(at[0]), Integer.parseInt(at[1])),
             entities(uuids)));
         return "";
     }
@@ -565,8 +565,8 @@ public final class EventRelay {
     /** Answers `cancelled, world, x y z yaw pitch`. */
     public static String fireTeleport(String uuid, String fromWorld, String from, String toWorld,
             String to, String cause) {
-        Location origin = location(new FotonWorld(fromWorld), from);
-        Location destination = location(new FotonWorld(toWorld), to);
+        Location origin = location(FotonWorld.of(fromWorld), from);
+        Location destination = location(FotonWorld.of(toWorld), to);
         org.bukkit.event.player.PlayerTeleportEvent event = new org.bukkit.event.player.PlayerTeleportEvent(
             player(uuid), origin, destination, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.valueOf(cause));
         EventBridge.dispatch(event);
@@ -582,6 +582,11 @@ public final class EventRelay {
             String item, String block, String face, String location) {
         org.bukkit.inventory.ItemStack held = FotonInventory.decode(item);
         if (held != null && held.getType().isAir()) held = null;
+        if (held != null) {
+            // The stack in use is the player's own: edits to it reach the slot.
+            org.bukkit.inventory.ItemStack inSlot = new FotonInventory(uuid).hand(hand.equals("OFF_HAND"));
+            if (inSlot != null && inSlot.isSimilar(held)) held = inSlot;
+        }
         org.bukkit.block.Block clicked = block.isEmpty() ? null : block(world, block);
         org.bukkit.util.Vector point = null;
         if (clicked != null && !location.isEmpty()) {

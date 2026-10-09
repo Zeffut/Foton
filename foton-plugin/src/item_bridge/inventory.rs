@@ -2,6 +2,7 @@
 
 use crate::natives as bridge_native_bridge;
 use foton_core::inventory::container::Container;
+use foton_registry::item_stack::ItemStack;
 use jni::{
     JNIEnv,
     objects::{JClass, JIntArray, JObject, JObjectArray, JString},
@@ -159,6 +160,59 @@ fn write(
     Ok(())
 }
 
+/// Replaces a slot with `candidate` only while it still holds `expected`, the
+/// stack a mirror was read from. False means the slot changed and was left alone.
+fn commit_if_unchanged(
+    container: &mut (impl Container + ?Sized),
+    slot: usize,
+    expected: &ItemStack,
+    candidate: Candidate,
+) -> Result<bool, ItemBridgeError> {
+    if slot >= container.get_container_size() {
+        return Err(ItemBridgeError::InvalidEdit("inventory slot out of range"));
+    }
+    if !ItemStack::matches(container.get_item(slot), expected) {
+        return Ok(false);
+    }
+    candidate.commit(|stack| container.set_item(slot, stack));
+    Ok(true)
+}
+
+fn write_if_unchanged(
+    env: &mut JNIEnv<'_>,
+    uuid: &JString<'_>,
+    slot: jint,
+    expected: &JObject<'_>,
+    item: &JObject<'_>,
+) -> Result<bool, ItemBridgeError> {
+    let expected = mutation::materialize(env, expected)?;
+    let candidate = mutation::materialize(env, item)?;
+    let slot = usize::try_from(slot)
+        .map_err(|_| ItemBridgeError::InvalidEdit("negative inventory slot"))?;
+    let Some(player) = bridge_native_bridge::player(env, uuid) else {
+        return Ok(false);
+    };
+    let mut container = player.inventory.lock();
+    commit_if_unchanged(&mut *container, slot, &expected.stack, candidate)
+}
+
+pub(crate) extern "system" fn set_inventory_slot_if_unchanged(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+    slot: jint,
+    expected: JObject<'_>,
+    item: JObject<'_>,
+) -> jboolean {
+    match write_if_unchanged(&mut env, &uuid, slot, &expected, &item) {
+        Ok(written) => jboolean::from(written),
+        Err(error) => {
+            error.throw_java(&mut env);
+            0
+        }
+    }
+}
+
 pub(crate) extern "system" fn inventory_slot(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
@@ -252,5 +306,32 @@ mod tests {
                 .iter()
                 .all(|item| item.item() == &*vanilla_items::DIAMOND)
         );
+    }
+
+    #[test]
+    fn a_slot_that_changed_since_the_read_is_not_overwritten() {
+        init_vanilla_registry();
+        let store = super::super::SnapshotStore::new(NonZeroUsize::new(4).expect("limit"));
+        let read = ItemStack::with_count(&vanilla_items::STONE, 8);
+        let mut container = SimpleContainer::from_items(vec![read.clone()]);
+        let written = || {
+            store
+                .candidate(ItemStack::with_count(&vanilla_items::STONE, 7))
+                .expect("candidate")
+        };
+        // Another plugin or the player merged into the stack after the read.
+        container.set_item(0, ItemStack::with_count(&vanilla_items::STONE, 12));
+        assert!(!commit_if_unchanged(&mut container, 0, &read, written()).expect("compare"));
+        assert_eq!(container.get_item(0).count, 12);
+
+        // The item moved away and a different one took its place.
+        container.set_item(0, ItemStack::with_count(&vanilla_items::DIAMOND, 8));
+        assert!(!commit_if_unchanged(&mut container, 0, &read, written()).expect("compare"));
+        assert_eq!(container.get_item(0).item(), &*vanilla_items::DIAMOND);
+
+        container.set_item(0, read.clone());
+        assert!(commit_if_unchanged(&mut container, 0, &read, written()).expect("compare"));
+        assert_eq!(container.get_item(0).count, 7);
+        assert!(commit_if_unchanged(&mut container, 5, &read, written()).is_err());
     }
 }

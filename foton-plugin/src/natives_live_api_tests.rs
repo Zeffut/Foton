@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Weak;
 
-use jni::objects::JValue;
+use jni::JNIEnv;
+use jni::objects::{JObject, JValue};
 
 use crate::{PluginHost, PluginHostConfig};
 
@@ -230,4 +231,98 @@ fn generated_java_apis_reach_live_registry_natives() -> Result<(), Box<dyn Error
         .z()?;
     assert!(!conflicts);
     Ok(())
+}
+
+#[test]
+#[ignore = "requires the built plugin API jar and a JDK"]
+fn block_data_follows_the_registry_properties() -> Result<(), Box<dyn Error>> {
+    let java_home = java_home().ok_or("Java installation required for live JNI API test")?;
+    let root = repo();
+    let api_jar = root.join("plugin-api/build/foton-plugin-api.jar");
+    if !api_jar.is_file() {
+        return Err("run dev/build-plugin-api.sh before the live JNI API test".into());
+    }
+    foton_registry::init_vanilla_registry();
+    let host = PluginHost::start(
+        &PluginHostConfig {
+            java_home,
+            api_jar,
+            item_snapshot_limit: PluginHostConfig::DEFAULT_ITEM_SNAPSHOT_LIMIT,
+            library_directories: vec![root.join("plugin-api/lib")],
+            plugin_directory: root.join("plugin-api/build/no-plugins"),
+        },
+        &Weak::new(),
+    )?;
+    let mut env = host.vm.attach_current_thread()?;
+    // A property the text leaves out takes the registry default.
+    let campfire = create_block_data(&mut env, "campfire")?;
+    let text = env
+        .call_method(&campfire, "getAsString", "()Ljava/lang/String;", &[])?
+        .l()?;
+    let text: String = env.get_string(&text.into())?.into();
+    assert_eq!(
+        text,
+        "minecraft:campfire[facing=north,lit=true,signal_fire=false,waterlogged=false]"
+    );
+    for interface in [
+        "org/bukkit/block/data/type/Campfire",
+        "org/bukkit/block/data/Lightable",
+        "org/bukkit/block/data/Directional",
+        "org/bukkit/block/data/Waterlogged",
+    ] {
+        assert!(env.is_instance_of(&campfire, interface)?, "{interface}");
+    }
+
+    // Setters check the value against what the block allows for the property.
+    let face = env
+        .get_static_field(
+            "org/bukkit/block/BlockFace",
+            "UP",
+            "Lorg/bukkit/block/BlockFace;",
+        )?
+        .l()?;
+    let rejected = env.call_method(
+        &campfire,
+        "setFacing",
+        "(Lorg/bukkit/block/BlockFace;)V",
+        &[JValue::Object(&face)],
+    );
+    assert!(rejected.is_err(), "a campfire cannot face up");
+    let thrown = env.exception_occurred()?;
+    env.exception_clear()?;
+    assert!(env.is_instance_of(&thrown, "java/lang/IllegalArgumentException")?);
+
+    let wheat = create_block_data(&mut env, "minecraft:wheat[age=2]")?;
+    let maximum = env.call_method(&wheat, "getMaximumAge", "()I", &[])?.i()?;
+    assert_eq!(maximum, 7);
+    assert!(
+        env.call_method(&wheat, "setAge", "(I)V", &[JValue::Int(8)])
+            .is_err()
+    );
+    env.exception_clear()?;
+    env.call_method(&wheat, "setAge", "(I)V", &[JValue::Int(5)])?;
+    let age = env.call_method(&wheat, "getAge", "()I", &[])?.i()?;
+    assert_eq!(age, 5);
+
+    let log = create_block_data(&mut env, "minecraft:oak_log")?;
+    let axes = env
+        .call_method(&log, "getAxes", "()Ljava/util/Set;", &[])?
+        .l()?;
+    assert_eq!(env.call_method(&axes, "size", "()I", &[])?.i()?, 3);
+    Ok(())
+}
+
+fn create_block_data<'local>(
+    env: &mut JNIEnv<'local>,
+    text: &str,
+) -> Result<JObject<'local>, Box<dyn Error>> {
+    let text = env.new_string(text)?;
+    Ok(env
+        .call_static_method(
+            "org/bukkit/Bukkit",
+            "createBlockData",
+            "(Ljava/lang/String;)Lorg/bukkit/block/data/BlockData;",
+            &[JValue::Object(&text)],
+        )?
+        .l()?)
 }
