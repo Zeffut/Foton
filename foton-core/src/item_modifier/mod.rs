@@ -19,12 +19,11 @@ mod decode;
 mod tests;
 
 use foton_registry::{
+    data_components::CustomData,
     item_stack::ItemStack,
-    loot_table::{
-        EnchantmentOptions, LootContext, LootFunction, LootWorldView, NameTarget, NumberProvider,
-    },
+    loot_table::{LootContext, LootFunction, LootWorldView, NameTarget, NumberProvider},
 };
-use foton_utils::Identifier;
+use foton_utils::{Identifier, nbt::nbt_collection_values};
 use simdnbt::owned::{NbtCompound, NbtTag};
 use text_components::TextComponent;
 
@@ -54,7 +53,7 @@ enum ModifierFunction {
     Loot(LootFunction),
     /// `SetNameFunction`, whose component cannot live in the engine's `fn()`.
     SetName {
-        name: TextComponent,
+        name: Box<TextComponent>,
         target: NameTarget,
     },
     /// `SetEnchantmentsFunction`, whose map the engine holds as `&'static`.
@@ -81,7 +80,7 @@ impl ItemModifier {
             match function {
                 ModifierFunction::Loot(function) => function.apply(&mut stack, &mut loot),
                 ModifierFunction::SetName { name, target } => {
-                    stack.set_name(name.clone(), *target);
+                    stack.set_name(TextComponent::clone(name), *target);
                 }
                 ModifierFunction::SetEnchantments { enchantments, add } => {
                     let resolved = enchantments
@@ -94,9 +93,7 @@ impl ItemModifier {
                     stack.set_enchantments(&resolved, *add);
                 }
                 ModifierFunction::SetCustomData(tag) => {
-                    if let Some(data) =
-                        foton_registry::data_components::CustomData::try_from_compound(tag.clone())
-                    {
+                    if let Some(data) = CustomData::try_from_compound(tag.clone()) {
                         stack.set_custom_data(&data);
                     }
                 }
@@ -105,13 +102,6 @@ impl ItemModifier {
         stack.count = stack.count.min(stack.max_stack_size());
         stack
     }
-}
-
-/// The options an `enchant_*` function draws from, when the modifier names a
-/// tag. A list of explicit enchantments is not supported by the engine at run
-/// time, and decoding says so.
-fn tag_options(tag: Identifier) -> EnchantmentOptions {
-    EnchantmentOptions::Tag(tag)
 }
 
 /// Reads a value's `NbtTag` as the JSON the codec decoder works on.
@@ -135,7 +125,7 @@ fn nbt_to_json(tag: &NbtTag) -> serde_json::Value {
                 .map(|(key, value)| (key.to_str().into_owned(), nbt_to_json(value)))
                 .collect(),
         ),
-        other => foton_utils::nbt::nbt_collection_values(other).map_or(Value::Null, |values| {
+        other => nbt_collection_values(other).map_or(Value::Null, |values| {
             Value::Array(values.iter().map(nbt_to_json).collect())
         }),
     }

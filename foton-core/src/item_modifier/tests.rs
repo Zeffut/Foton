@@ -1,7 +1,8 @@
 //! What a modifier written in a datapack or on a command line means.
 
 use foton_registry::{
-    init_vanilla_registry, item_stack::ItemStack, loot_table::LootWorldView, vanilla_items,
+    biome::BiomeRef, data_components::vanilla_components::CUSTOM_DATA, init_vanilla_registry,
+    item_stack::ItemStack, loot_table::LootWorldView, vanilla_items,
 };
 use foton_utils::nbt::parse_snbt;
 
@@ -14,7 +15,7 @@ impl LootWorldView for NoWorld {
         None
     }
 
-    fn loaded_biome(&self, _x: i32, _y: i32, _z: i32) -> Option<foton_registry::biome::BiomeRef> {
+    fn loaded_biome(&self, _x: i32, _y: i32, _z: i32) -> Option<BiomeRef> {
         None
     }
 }
@@ -129,8 +130,7 @@ fn enchant_randomly_defaults_to_compatible_enchantments() {
 fn set_custom_data_reads_its_tag_as_snbt() {
     let modifier = json(r#"{"function":"set_custom_data","tag":"{orbital:1b}"}"#);
     let result = run(&modifier, ItemStack::new(&vanilla_items::STONE));
-    let Some(data) = result.get(foton_registry::data_components::vanilla_components::CUSTOM_DATA)
-    else {
+    let Some(data) = result.get(CUSTOM_DATA) else {
         panic!("the tag should land in custom_data");
     };
     assert!(data.as_compound().contains("orbital"));

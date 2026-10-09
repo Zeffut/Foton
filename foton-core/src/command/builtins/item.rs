@@ -6,7 +6,7 @@
 
 use std::slice;
 
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 
 use foton_registry::item_stack::ItemStack;
 use foton_utils::{BlockPos, Identifier, translations};
@@ -182,7 +182,7 @@ fn set_block_item(
     let position = loaded_block_position(context, "pos")?;
     let container_ref = block_container(context, position, ContainerSide::Target)?;
     let index = target_slot_index(&container_ref, slot)?;
-    set_block_slot(context, &container_ref, index, position, stack)?;
+    set_block_slot(context, &container_ref, index, position, stack);
     Ok(1)
 }
 
@@ -193,7 +193,7 @@ fn set_block_slot(
     index: usize,
     position: BlockPos,
     stack: ItemStack,
-) -> Result<(), CommandSyntaxError> {
+) {
     let name = item_display_name(&stack);
     let mut guard = ContainerLockGuard::lock_all(slice::from_ref(container_ref));
     guard.set_item(container_ref.container_id(), index, stack);
@@ -208,7 +208,6 @@ fn set_block_slot(
         ])
         .component();
     context.source().send_success(&message, true);
-    Ok(())
 }
 
 /// A slot id as an index into the container, or vanilla's
@@ -348,7 +347,7 @@ fn modify_block_item(context: Context<'_>) -> Result<i32, CommandSyntaxError> {
         .and_then(|container| container_slot_item(container, slot))
         .ok_or_else(|| no_such_slot(slot))?;
     let stack = modifier.apply(current, &modifier_context(context));
-    set_block_slot(context, &container_ref, index, position, stack)?;
+    set_block_slot(context, &container_ref, index, position, stack);
     Ok(1)
 }
 
@@ -386,11 +385,11 @@ fn modify_entity_item(context: Context<'_>) -> Result<i32, CommandSyntaxError> {
         _ => {
             // Vanilla passes this two-placeholder message only the count, so
             // the item name is left blank in the line a player reads.
-            let key = translations::COMMANDS_ITEM_ENTITY_SET_SUCCESS_MULTIPLE.0;
-            TranslatedMessage::new(
-                key,
-                Some(Box::new([TextComponent::from(changed.len().to_string())])),
-            )
+            TranslatedMessage {
+                key: Cow::Borrowed(translations::COMMANDS_ITEM_ENTITY_SET_SUCCESS_MULTIPLE.0),
+                args: Some(Box::new([TextComponent::from(changed.len().to_string())])),
+                fallback: None,
+            }
             .component()
         }
     };
@@ -421,7 +420,7 @@ fn resolve_modifier(context: Context<'_>) -> Result<Arc<ItemModifier>, CommandSy
 }
 
 /// Vanilla parity: the `COMMAND` loot param set, an origin and no entity.
-fn modifier_context<'a>(context: Context<'a>) -> ModifierContext<'a> {
+fn modifier_context(context: Context<'_>) -> ModifierContext<'_> {
     let position = context.source().position();
     ModifierContext {
         origin: (position.x, position.y, position.z),

@@ -6,13 +6,13 @@
 
 use foton_registry::{
     REGISTRY, RegistryExt as _,
-    loot_table::{LootFunction, NameTarget, NumberProvider},
+    loot_table::{EnchantmentOptions, LootFunction, NameTarget, NumberProvider},
 };
-use foton_utils::Identifier;
+use foton_utils::{Identifier, nbt::parse_snbt_compound};
 use serde_json::{Map, Value};
 use simdnbt::owned::NbtTag;
 
-use super::{ItemModifier, ModifierFunction, nbt_to_json, tag_options};
+use super::{ItemModifier, ModifierFunction, nbt_to_json};
 use crate::text_json::parse_component;
 
 /// Decodes a datapack `item_modifier/*.json` file.
@@ -144,7 +144,10 @@ fn decode_set_name(
         Some("item_name") => NameTarget::ItemName,
         Some(other) => return Err(format!("unknown name target '{other}'")),
     };
-    out.push(ModifierFunction::SetName { name, target });
+    out.push(ModifierFunction::SetName {
+        name: Box::new(name),
+        target,
+    });
     Ok(())
 }
 
@@ -179,7 +182,7 @@ fn decode_set_custom_data(
     let tag = required(object, "tag")?
         .as_str()
         .ok_or("'tag' is a string of SNBT")?;
-    let compound = foton_utils::nbt::parse_snbt_compound(tag)
+    let compound = parse_snbt_compound(tag)
         .map_err(|error| format!("'tag' is not an SNBT compound: {}", error.component()))?;
     out.push(ModifierFunction::SetCustomData(compound));
     Ok(())
@@ -211,9 +214,7 @@ fn identifier(value: &Value) -> Result<Identifier, String> {
 
 /// `options` is optional; only a tag (`#minecraft:on_random_loot`) can be held
 /// at run time, since the engine keeps explicit lists as `&'static`.
-fn options(
-    object: &Map<String, Value>,
-) -> Result<Option<foton_registry::loot_table::EnchantmentOptions>, String> {
+fn options(object: &Map<String, Value>) -> Result<Option<EnchantmentOptions>, String> {
     let Some(value) = object.get("options") else {
         return Ok(None);
     };
@@ -224,7 +225,7 @@ fn options(
     let id = tag
         .parse::<Identifier>()
         .map_err(|error| format!("invalid tag '{tag}': {error}"))?;
-    Ok(Some(tag_options(id)))
+    Ok(Some(EnchantmentOptions::Tag(id)))
 }
 
 /// Vanilla parity: `IntRange`, a number being the exact value and an object
