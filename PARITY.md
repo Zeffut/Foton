@@ -484,6 +484,18 @@ mobs that need it.
   scoreboard objectives, and advancement function/loot rewards remain to be
   implemented; those are functional gaps rather than missing extractor data.
 
+- [~] **Scoreboard objectives.** `/scoreboard` is complete -- objectives (`add`,
+  `remove`, `list`, `modify`, `setdisplay`) and players (`set`, `add`,
+  `remove`, `reset`, `get`, `list`, `enable`, `operation`, `display`) -- and
+  shares one per-domain store with `execute if score` and `execute store`.
+  Display slots, display names, render types and number formats reach clients
+  through the four score packets, on join, on a domain switch and as they
+  change. What is missing is the game writing scores itself: criteria such as
+  `deathCount`, `playerKillCount`, `health`, `xp`, `teamkill.*` and every
+  statistic are accepted, stored and synchronized, but nothing yet drives them,
+  and there is no `/trigger` for a `trigger` objective a player has been
+  `enable`d on.
+
 ## Running all of it
 
 `bash dev/all-tests.sh` runs every in-world test once, in sequence, and prints

@@ -15,6 +15,10 @@ use super::{
     permission::{PermissionGroupParser, PermissionMetadataParser, PermissionRuleParser},
     profile::{GameProfileParser, GameProfileSuggestionMode},
     score::{parse_int_range, parse_score_holder, suggest_score_holders},
+    scoreboard_args::{
+        ScoreOperation, parse_display_slot, parse_objective_criteria, parse_operation, parse_style,
+        suggest_display_slot, suggest_objective_criteria, suggest_operation,
+    },
     selector::{EntitySelector, parse_entity_selector, suggest_entity_selector},
     structure::{parse_structure_or_tag_key, suggest_structures},
     text::validate_component_syntax,
@@ -30,8 +34,10 @@ use crate::command::incorrectly_typed_argument;
 use crate::command::protocol::protocol_argument_type;
 use crate::entity::{ENTITIES, EntityAnchor};
 use crate::inventory::slot_ranges::{SLOT_RANGES, SlotRange};
+use crate::scoreboard::ObjectiveCriteria;
 use foton_protocol::packets::game::{
-    ArgumentType as ProtocolArgumentType, SuggestionType as ProtocolSuggestionType,
+    ArgumentType as ProtocolArgumentType, DisplaySlot, SuggestionType as ProtocolSuggestionType,
+    TextStyle,
 };
 use foton_registry::damage_type::DamageTypeRef;
 use foton_registry::{
@@ -275,6 +281,22 @@ impl FotonArgumentType {
 
     pub(crate) fn objective() -> Self {
         Self::new(ObjectiveParser)
+    }
+
+    pub(crate) fn objective_criteria() -> Self {
+        Self::new(ObjectiveCriteriaParser)
+    }
+
+    pub(crate) fn display_slot() -> Self {
+        Self::new(DisplaySlotParser)
+    }
+
+    pub(crate) fn score_operation() -> Self {
+        Self::new(ScoreOperationParser)
+    }
+
+    pub(crate) fn style() -> Self {
+        Self::new(StyleParser)
     }
 
     pub(crate) fn int_range() -> Self {
@@ -522,6 +544,19 @@ macro_rules! argument_value_wrapper {
 }
 
 argument_value_wrapper!(TimeValue(i32), "foton:command/value/time");
+argument_value_wrapper!(
+    ObjectiveCriteriaValue(ObjectiveCriteria),
+    "foton:command/value/objective_criteria"
+);
+argument_value_wrapper!(
+    DisplaySlotValue(DisplaySlot),
+    "foton:command/value/display_slot"
+);
+argument_value_wrapper!(
+    ScoreOperationValue(ScoreOperation),
+    "foton:command/value/score_operation"
+);
+argument_value_wrapper!(StyleValue(TextStyle), "foton:command/value/style");
 argument_value_wrapper!(ObjectiveValue(Box<str>), "foton:command/value/objective");
 argument_value_wrapper!(GameModeValue(GameType), "foton:command/value/game_mode");
 argument_value_wrapper!(DomainValue(Box<str>), "foton:command/value/domain");
@@ -843,6 +878,52 @@ unit_argument_parser!(
         ProtocolArgumentType::Objective,
         Some(ProtocolSuggestionType::AskServer),
     )
+);
+unit_argument_parser!(
+    ObjectiveCriteriaParser,
+    "foton:command/parser/objective_criteria",
+    ObjectiveCriteriaValue,
+    parse | reader,
+    _source | { parse_objective_criteria(reader).map(ObjectiveCriteriaValue) },
+    suggest | _context,
+    builder | {
+        suggest_objective_criteria(builder);
+    },
+    protocol(ProtocolArgumentType::ObjectiveCriteria, None)
+);
+unit_argument_parser!(
+    DisplaySlotParser,
+    "foton:command/parser/display_slot",
+    DisplaySlotValue,
+    parse | reader,
+    _source | { parse_display_slot(reader).map(DisplaySlotValue) },
+    suggest | _context,
+    builder | {
+        suggest_display_slot(builder);
+    },
+    protocol(ProtocolArgumentType::ScoreboardSlot, None)
+);
+unit_argument_parser!(
+    ScoreOperationParser,
+    "foton:command/parser/score_operation",
+    ScoreOperationValue,
+    parse | reader,
+    _source | { parse_operation(reader).map(ScoreOperationValue) },
+    suggest | _context,
+    builder | {
+        suggest_operation(builder);
+    },
+    protocol(ProtocolArgumentType::Operation, None)
+);
+unit_argument_parser!(
+    StyleParser,
+    "foton:command/parser/style",
+    StyleValue,
+    parse | reader,
+    _source | { parse_style(reader).map(StyleValue) },
+    suggest | _context,
+    _builder | {},
+    protocol(ProtocolArgumentType::Style, None)
 );
 unit_argument_parser!(
     IntRangeParser,

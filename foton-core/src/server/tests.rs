@@ -102,6 +102,7 @@ use tokio::sync::oneshot::channel;
 
 mod beehive_spawn;
 mod creature_spawn_gates;
+mod scoreboard_command;
 
 struct TestConnection {
     sent_packets: Arc<SyncMutex<Vec<EncodedPacket>>>,

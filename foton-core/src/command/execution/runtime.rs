@@ -12,6 +12,7 @@ use crate::command::brigadier::{
     CommandContext, CommandNodeBuilder, CommandRedirectTarget, CommandRuntime, CommandSyntaxError,
     ContextChain,
 };
+use foton_protocol::packets::game::{DisplaySlot, TextStyle};
 use foton_registry::damage_type::DamageTypeRef;
 use foton_registry::{
     enchantment::EnchantmentRef, entity_type::EntityTypeRef, item_stack::ItemStack,
@@ -25,11 +26,12 @@ use super::{
     BiomeOrTag, BlockPredicate, ChainModifiers, CommandResultSuspension, CommandSource,
     Coordinates, ExecutionCommandSource, ExecutionControl, FotonArgumentType, FunctionOrTag,
     GameProfileArgument, IntRange, ItemPredicate, PermissionGroupName, ScoreHolderArgument,
-    ScoreHolderWildcard, StructureOrTagKey, WorldArgument,
+    ScoreHolderWildcard, ScoreOperation, StructureOrTagKey, WorldArgument,
     argument::{
-        ComponentValue, CoordinateAxes, DomainValue, EnchantmentValue, EntityTypeValue,
-        FotonArgumentValue, GameModeValue, IdentifierValue, ItemSlotsValue, ItemStackValue,
-        NbtCompoundValue, NbtPathValue, ObjectiveValue, TimeValue, TimelineValue, WorldClockValue,
+        ComponentValue, CoordinateAxes, DisplaySlotValue, DomainValue, EnchantmentValue,
+        EntityTypeValue, FotonArgumentValue, GameModeValue, IdentifierValue, ItemSlotsValue,
+        ItemStackValue, NbtCompoundValue, NbtPathValue, ObjectiveCriteriaValue, ObjectiveValue,
+        ScoreOperationValue, StyleValue, TimeValue, TimelineValue, WorldClockValue,
     },
     selector::EntitySelector,
 };
@@ -41,7 +43,7 @@ use crate::{
     entity::{EntityAnchor, SharedEntity},
     permission::{PermissionMetadataExpression, PermissionRuleExpression},
     player::Player,
-    scoreboard::ScoreHolder,
+    scoreboard::{ObjectiveCriteria, ScoreHolder},
 };
 
 /// Runtime model interpreted by Foton's tick-owned command scheduler.
@@ -268,6 +270,29 @@ where
     pub(crate) fn objective_name(&self, name: &str) -> Result<&str, CommandSyntaxError> {
         self.typed_argument::<ObjectiveValue>(name)
             .map(|value| value.0.as_ref())
+    }
+
+    pub(crate) fn objective_criteria(
+        &self,
+        name: &str,
+    ) -> Result<&ObjectiveCriteria, CommandSyntaxError> {
+        self.typed_argument::<ObjectiveCriteriaValue>(name)
+            .map(|value| &value.0)
+    }
+
+    pub(crate) fn display_slot(&self, name: &str) -> Result<DisplaySlot, CommandSyntaxError> {
+        self.typed_argument::<DisplaySlotValue>(name)
+            .map(|value| value.0)
+    }
+
+    pub(crate) fn score_operation(&self, name: &str) -> Result<ScoreOperation, CommandSyntaxError> {
+        self.typed_argument::<ScoreOperationValue>(name)
+            .map(|value| value.0)
+    }
+
+    pub(crate) fn style(&self, name: &str) -> Result<&TextStyle, CommandSyntaxError> {
+        self.typed_argument::<StyleValue>(name)
+            .map(|value| &value.0)
     }
 
     pub(crate) fn int_range(&self, name: &str) -> Result<IntRange, CommandSyntaxError> {
