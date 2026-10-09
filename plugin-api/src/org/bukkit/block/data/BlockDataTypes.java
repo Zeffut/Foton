@@ -42,8 +42,9 @@ final class BlockDataTypes {
         if (p.containsKey("bites")) types.add(Cake.class);
         if (p.containsKey("hinge")) types.add(Door.class);
         if (p.containsKey("extended")) types.add(Piston.class);
-        if (p.containsKey("hanging")) types.add(Lantern.class);
+        if (p.containsKey("hanging")) types.add(Hangable.class);
         if (p.containsKey("thickness")) types.add(PointedDripstone.class);
+        if (oneOf(p.get("type"), "normal", "sticky")) types.add(TechnicalPiston.class);
         if (p.containsKey("signal_fire")) types.add(Campfire.class);
         if (oneOf(p.get("type"), "single", "left", "right")) types.add(Chest.class);
         if (oneOf(p.get("part"), "head", "foot")) types.add(Bed.class);
@@ -51,8 +52,8 @@ final class BlockDataTypes {
         if (FURNACES.contains(block)) types.add(Furnace.class);
         switch (block) {
             case "dispenser", "dropper" -> types.add(Dispenser.class);
+            case "lantern", "soul_lantern" -> types.add(Lantern.class);
             case "piston_head" -> types.add(PistonHead.class);
-            case "moving_piston" -> types.add(TechnicalPiston.class);
             case "tripwire" -> types.add(Tripwire.class);
             default -> { }
         }

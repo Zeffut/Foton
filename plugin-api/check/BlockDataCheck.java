@@ -66,6 +66,22 @@ final class BlockDataCheck {
         Checks.expect(wallSign instanceof WallSign && !(wallSign instanceof Rotatable),
             "wall sign is Directional, not Rotatable");
 
+        BlockData hangingSign = PropertyBlockData.of(
+            "minecraft:oak_hanging_sign[attached=false,rotation=0,waterlogged=false]");
+        Checks.expect(hangingSign instanceof HangingSign && hangingSign instanceof Attachable
+            && hangingSign instanceof Rotatable && !(hangingSign instanceof Sign),
+            "hanging sign is Attachable + Rotatable, and not a standing Sign");
+        BlockData lantern = PropertyBlockData.of("minecraft:lantern[hanging=true,waterlogged=false]");
+        Checks.expect(lantern instanceof Lantern && lantern instanceof Hangable
+            && lantern instanceof Waterlogged, "lantern is Hangable + Waterlogged");
+        ((Hangable) lantern).setHanging(false);
+        Checks.expect(!((Lantern) lantern).isHanging(), "setHanging writes back");
+        BlockData tripwire = PropertyBlockData.of(
+            "minecraft:tripwire[attached=false,disarmed=false,east=false,north=false,powered=true,south=false,west=false]");
+        Checks.expect(tripwire instanceof Tripwire && tripwire instanceof Attachable
+            && tripwire instanceof MultipleFacing && ((Powerable) tripwire).isPowered(),
+            "tripwire is Attachable + MultipleFacing + Powerable");
+
         Checks.expect(!(PropertyBlockData.of("minecraft:stone") instanceof Lightable),
             "a block without properties implements no state interface");
 
