@@ -1,5 +1,6 @@
 //! Foton-owned built-in command declarations.
 
+mod attribute;
 pub(crate) mod bossbar;
 mod bug;
 mod clear;
@@ -66,6 +67,7 @@ pub(crate) fn create_registered_dispatcher(
     builder.declare_permission(perms::MANAGE_ALL_PERMISSION)?;
     builder.declare_permission(perms::GROUP_ALL_PERMISSION)?;
     builder.declare_permission(perms::METADATA_PERMISSION)?;
+    builder.register(attribute::registration())?;
     builder.register(bossbar::registration())?;
     builder.register(bug::registration())?;
     builder.register(clear::registration())?;
@@ -146,6 +148,7 @@ mod tests {
         assert_eq!(
             names,
             [
+                "attribute",
                 "bossbar",
                 "bug",
                 "report",
