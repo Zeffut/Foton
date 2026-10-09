@@ -90,6 +90,7 @@ PLAY_C_PLAYER_CHAT = 65
 PLAY_C_ANIMATE = 2
 PLAY_C_LEVEL_PARTICLES = 47
 PLAY_C_EXPLODE = 36
+PLAY_C_LEVEL_EVENT = 46
 PLAY_C_GAME_EVENT = 38
 PLAY_C_HURT_ANIMATION = 42
 PLAY_C_SET_ENTITY_DATA = 99
@@ -177,7 +178,8 @@ WATCH_SECONDS = int(os.environ.get("JOIN_WATCH_SECONDS", "0"))
 # and `!sawparticle <name>` / `!forgetparticles` do the same for the particles
 # the server has asked for, which is how the puff a hard landing kicks up is
 # read back. `!sawexplosion` reports the pushes
-# `ClientboundExplodePacket` handed this client and `!forgetexplosions`
+# `ClientboundExplodePacket` handed this client, and where it was played a
+# block-break effect, and `!forgetexplosions`
 # clears them -- the server's own copy of a player's velocity is not
 # something the player feels, so that packet is the only place a blast that
 # launched the player differs from one that only moved a number;
@@ -273,6 +275,8 @@ class Connection:
         # How many explosion packets arrived, and the pushes they carried.
         self.explosions = 0
         self.explosion_knockbacks = []
+        # Where the server played a block-break sound and particles.
+        self.block_breaks = []
         # Every angle the server has tilted this player's screen by.
         self.hurt_directions = []
         # The last absorption the player's own synchronized data carried.
@@ -735,6 +739,8 @@ def run_play(connection, watch_seconds=0):
             note_particles(connection, payload)
         elif packet_id == PLAY_C_EXPLODE:
             note_explosion(connection, payload)
+        elif packet_id == PLAY_C_LEVEL_EVENT:
+            note_level_event(connection, payload)
         elif packet_id == PLAY_C_GAME_EVENT:
             note_game_event(connection, payload)
         elif packet_id == PLAY_C_HURT_ANIMATION:
@@ -896,6 +902,29 @@ def note_explosion(connection, payload):
     if len(rest) < 24:
         return
     connection.explosion_knockbacks.append(struct.unpack(">ddd", rest[:24]))
+
+
+# Vanilla `LevelEvent.PARTICLES_DESTROY_BLOCK`: the break sound and particles.
+LEVEL_EVENT_DESTROY_BLOCK = 2001
+
+
+def note_level_event(connection, payload):
+    """Records where the server played a block-break effect for this client.
+
+    `ClientboundLevelEventPacket` is an int type, a packed block position, an
+    int of data and a boolean. A block a player breaks, or one that loses its
+    support, plays `LEVEL_EVENT_DESTROY_BLOCK`; a block an explosion removes
+    plays nothing, because `BlockBehaviour.onExplosionHit` only sets air.
+    """
+    if len(payload) < 16:
+        return
+    event_type, packed = struct.unpack(">iq", payload[:12])
+    if event_type != LEVEL_EVENT_DESTROY_BLOCK:
+        return
+    x = packed >> 38
+    y = ((packed & 0xFFF) ^ 0x800) - 0x800
+    z = (((packed >> 12) & 0x3FFFFFF) ^ 0x2000000) - 0x2000000
+    connection.block_breaks.append((x, y, z))
 
 
 # Vanilla `ClientboundGameEventPacket`'s type ids. Only the ones a test reads
@@ -1094,6 +1123,8 @@ def pump(connection, seconds, spawned):
             note_particles(connection, payload)
         elif packet_id == PLAY_C_EXPLODE:
             note_explosion(connection, payload)
+        elif packet_id == PLAY_C_LEVEL_EVENT:
+            note_level_event(connection, payload)
         elif packet_id == PLAY_C_GAME_EVENT:
             note_game_event(connection, payload)
         elif packet_id == PLAY_C_HURT_ANIMATION:
@@ -1470,9 +1501,13 @@ def run_directive(connection, directive):
             print(f"  the blast pushed the client by {x:.4f} {y:.4f} {z:.4f}")
         if not connection.explosion_knockbacks:
             print("  no explosion knockback reached the client")
+        print(f"  the client was told {len(connection.block_breaks)} blocks broke")
+        for x, y, z in connection.block_breaks:
+            print(f"  a block broke at {x} {y} {z}")
     elif parts[0] == "forgetexplosions":
         connection.explosions = 0
         connection.explosion_knockbacks.clear()
+        connection.block_breaks.clear()
         print("  forgot the explosions seen so far")
     elif parts[0] == "hurtdirections":
         if connection.hurt_directions:
@@ -2435,6 +2470,8 @@ def watch_for_spawns(connection, seconds, spawned):
             note_particles(connection, payload)
         elif packet_id == PLAY_C_EXPLODE:
             note_explosion(connection, payload)
+        elif packet_id == PLAY_C_LEVEL_EVENT:
+            note_level_event(connection, payload)
         elif packet_id == PLAY_C_GAME_EVENT:
             note_game_event(connection, payload)
         elif packet_id == PLAY_C_HURT_ANIMATION:

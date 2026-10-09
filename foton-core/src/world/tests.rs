@@ -711,6 +711,42 @@ fn breaking_a_chest_scatters_what_it_held() {
     );
 }
 
+/// Vanilla parity: `BlockBehaviour.onExplosionHit` only sets air. A blown-up
+/// waterlogged block leaves no water, unlike one a player breaks, and its loot
+/// goes back to the blast to be merged instead of dropping on the spot.
+#[test]
+fn an_exploded_waterlogged_block_leaves_air_and_hands_back_its_loot() {
+    init_vanilla_registry();
+    init_behaviors();
+    init_block_entities();
+
+    let world = fresh_test_world("explode_waterlogged_block");
+    let pos = BlockPos::new(8, 64, 8);
+    insert_ready_full_chunk(&world, ChunkPos::from_block_pos(pos));
+    world.set_block(
+        pos,
+        vanilla_blocks::OAK_SLAB
+            .default_state()
+            .set_value(&BlockStateProperties::WATERLOGGED, true),
+        UpdateFlags::UPDATE_ALL,
+    );
+
+    let mut loot = Vec::new();
+    world.explode_block(pos, None, None, None, false, &mut |stack, at| {
+        loot.push((stack.item.key.to_string(), stack.count(), at));
+    });
+
+    assert!(world.get_block_state(pos).is_air());
+    assert_eq!(loot, vec![("minecraft:oak_slab".to_owned(), 1, pos)]);
+    let dropped = world
+        .entity_manager
+        .get_accessible_entities()
+        .into_iter()
+        .filter(|entity| entity.as_ref().downcast_ref::<ItemEntity>().is_some())
+        .count();
+    assert_eq!(dropped, 0, "the blast, not the block, drops the loot");
+}
+
 #[test]
 fn conditional_block_entity_replacement_installs_the_exact_prepared_instance() {
     init_vanilla_registry();

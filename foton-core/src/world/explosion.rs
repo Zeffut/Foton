@@ -9,6 +9,7 @@ use std::sync::Arc;
 use foton_protocol::packets::game::CExplode;
 use foton_registry::blocks::block_state_ext::BlockStateExt;
 use foton_registry::game_rules::GameRule;
+use foton_registry::item_stack::ItemStack;
 use foton_registry::particle_type::{ExplosionParticleInfo, ParticleData};
 use foton_registry::sound_event::SoundEventRef;
 use foton_registry::{
@@ -18,9 +19,11 @@ use foton_utils::random::weighted_list::{Weighted, WeightedList};
 use foton_utils::types::UpdateFlags;
 use foton_utils::{BlockPos, BlockStateId, WorldAabb};
 use glam::DVec3;
+use rand::seq::SliceRandom;
 
 use crate::entity::Entity;
 use crate::entity::damage::DamageSource;
+use crate::entity::entities::ItemEntity;
 use crate::event::{BlockExplodeEvent, EntityExplodeEvent};
 use crate::fluid::get_fluid_state;
 use crate::world::World;
@@ -311,13 +314,28 @@ impl World {
             let source_entity = spec
                 .direct_entity_id
                 .and_then(|entity_id| self.get_entity_by_id(entity_id));
+            // Vanilla's `doDropExperienceHack`: ore experience only when a
+            // player is to blame.
+            let give_xp = spec
+                .causing_entity_id
+                .and_then(|entity_id| self.get_entity_by_id(entity_id))
+                .is_some_and(|entity| entity.as_player().is_some());
+            // Vanilla parity: `ServerExplosion.interactWithBlocks` -- shuffle,
+            // explode each block, then drop the merged stacks.
+            to_blow.shuffle(&mut rand::rng());
+            let mut stacks: Vec<StackCollector> = Vec::new();
             for pos in &to_blow {
-                self.destroy_block_from_explosion(
+                self.explode_block(
                     *pos,
                     source_entity.as_deref(),
                     loot_radius,
                     spec.causing_entity_id,
+                    give_xp,
+                    &mut |stack, position| add_or_append_stack(&mut stacks, stack, position),
                 );
+            }
+            for collector in stacks {
+                self.pop_resource(collector.pos, collector.stack);
             }
         }
 
@@ -621,6 +639,38 @@ impl World {
             );
         }
     }
+}
+
+/// One pile of loot an explosion drops, merged from several blocks.
+///
+/// Vanilla parity: `ServerExplosion.StackCollector`.
+struct StackCollector {
+    pos: BlockPos,
+    stack: ItemStack,
+}
+
+impl StackCollector {
+    /// Vanilla parity: `StackCollector.tryMerge`, which merges with
+    /// `ItemEntity.merge(stack, input, 16)`.
+    fn try_merge(&mut self, input: &mut ItemStack) {
+        if !ItemEntity::are_mergeable(&self.stack, input) {
+            return;
+        }
+        let delta = (self.stack.max_stack_size().min(16) - self.stack.count()).min(input.count());
+        self.stack = self.stack.copy_with_count(self.stack.count() + delta);
+        input.shrink(delta);
+    }
+}
+
+/// Vanilla parity: `ServerExplosion.addOrAppendStack`.
+fn add_or_append_stack(stacks: &mut Vec<StackCollector>, mut stack: ItemStack, pos: BlockPos) {
+    for collector in stacks.iter_mut() {
+        collector.try_merge(&mut stack);
+        if stack.is_empty() {
+            return;
+        }
+    }
+    stacks.push(StackCollector { pos, stack });
 }
 
 #[cfg(test)]

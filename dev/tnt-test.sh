@@ -132,6 +132,13 @@ add "execute if block 0 100 0 minecraft:air run tellraw @s \"FIRSTSTICKGONE\""
 add "execute if block 8 100 0 minecraft:air run tellraw @s \"ROWWENTUP\""
 add "execute if entity @e[type=minecraft:zombie,tag=far] run tellraw @s \"CONTROLSURVIVED\""
 add "execute unless entity @e[type=minecraft:zombie,tag=witness] run tellraw @s \"CHAINREACHEDTHEWITNESS\""
+# Every block this script places, at y 99 and 100, goes by explosion, and an
+# exploded block makes no break sound: `BlockBehaviour.onExplosionHit` only sets
+# air. A player heard one per block when Foton broke them like a player would
+# (#23). Terrain far below can still break for real: primed TNT flung off the
+# row lands and blows the ground out from under leaf litter, which pops off
+# with its sound as it does in vanilla.
+add "!sawexplosion"
 
 export JOIN_COMMANDS="$CMDS"
 JOIN_COMMAND_SETTLE_SECONDS=0.5 JOIN_WATCH_SECONDS=2 \
@@ -159,4 +166,12 @@ for marker in ARROWTARGETPLACED ARROWTOOKTHEBLOCK ARROWLITTHETNT ROWBUILT \
     exit 1
   fi
 done
+if ! grep -q "blocks broke" join.log; then
+  echo "########## TNT TEST FAILED (the client never reported its block breaks) ##########"
+  exit 1
+fi
+if grep -E "a block broke at -?[0-9]+ (99|100) " join.log; then
+  echo "########## TNT TEST FAILED (an exploded block played the break sound) ##########"
+  exit 1
+fi
 echo "########## TNT TEST PASSED ##########"

@@ -266,36 +266,48 @@ impl World {
         self.destroy_block_with_limit_and_entity(pos, drop_items, recursion_left, None)
     }
 
-    /// Destroys a block as part of an explosion, thinning its drops when the
-    /// blast decays them.
+    /// Removes a block hit by an explosion, handing each drop to `on_hit`.
     ///
-    /// Vanilla parity: `BlockBehaviour.onExplosionHit`. `explosion_radius` is
-    /// `Some` only for `DESTROY_WITH_DECAY`, and `causing_entity_id` is the
-    /// blast's indirect source, which is what a block lit by the blast blames.
+    /// Vanilla parity: `BlockBehaviour.onExplosionHit`. The block is set to air
+    /// and nothing else: no break sound or particles, no `block_destroy` game
+    /// event, and a waterlogged block leaves no water. `explosion_radius` is
+    /// `Some` only for `DESTROY_WITH_DECAY`; `give_xp` is whether the blast's
+    /// indirect source is a player; `causing_entity_id` is that source, which
+    /// is what a block lit by the blast blames.
     ///
     /// The air guard is vanilla's `!state.isAir()`: a blast that reaches an
     /// empty position neither drops nor tells anything it was exploded.
-    pub(super) fn destroy_block_from_explosion(
+    pub(super) fn explode_block(
         self: &Arc<Self>,
         pos: BlockPos,
         entity: Option<&dyn Entity>,
         explosion_radius: Option<f32>,
         causing_entity_id: Option<i32>,
-    ) -> bool {
+        give_xp: bool,
+        on_hit: &mut dyn FnMut(ItemStack, BlockPos),
+    ) {
         let state = self.get_block_state(pos);
         if state.is_air() {
-            return false;
+            return;
         }
         let behavior = BLOCK_BEHAVIORS.get_behavior(state.get_block());
-        let destroyed = self.destroy_block_inner(
+        if behavior.drop_from_explosion() {
+            let block_entity = self.get_block_entity(pos);
+            let context = BlockLootContext::new(self, pos)
+                .with_entity(entity)
+                .with_block_entity(block_entity.as_ref())
+                .with_explosion_radius(explosion_radius);
+            behavior.spawn_after_break(state, self, pos, &ItemStack::empty(), give_xp);
+            for item in context.get_drops(state) {
+                on_hit(item, pos);
+            }
+        }
+        self.set_block(
             pos,
-            behavior.drop_from_explosion(),
-            512,
-            entity,
-            explosion_radius,
+            vanilla_blocks::AIR.default_state(),
+            UpdateFlags::UPDATE_ALL,
         );
         behavior.was_exploded(self, pos, causing_entity_id);
-        destroyed
     }
 
     pub(super) fn destroy_block_with_limit_and_entity(
