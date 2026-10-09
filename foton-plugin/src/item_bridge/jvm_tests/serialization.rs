@@ -12,7 +12,7 @@ use jni::{
     objects::{JByteArray, JValue},
 };
 
-/// A stack the legacy byte layout cannot hold (ZeldaCiv's wings carry native
+/// A stack the legacy byte layout cannot hold (`ZeldaCiv`'s wings carry native
 /// components) serializes as the server's item NBT and comes back identical.
 pub(super) fn check(env: &mut JNIEnv<'_>) {
     let mut wings = ItemStack::new(&vanilla_items::IRON_CHESTPLATE);

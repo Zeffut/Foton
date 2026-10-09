@@ -307,7 +307,11 @@ extern "system" fn set_player_list_header_footer_components(
 
 /// `Player#updateCommands`: the command tree and the permission level the
 /// client shows, projected again for what the player may use now.
-extern "system" fn update_player_commands(mut env: JNIEnv<'_>, _class: JClass<'_>, uuid: JString<'_>) {
+extern "system" fn update_player_commands(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    uuid: JString<'_>,
+) {
     let (Some(server), Some(player)) = (super::server(), player(&mut env, &uuid)) else {
         return;
     };

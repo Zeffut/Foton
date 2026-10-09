@@ -593,7 +593,6 @@ fn check_snapshot_metadata(env: &mut jni::JNIEnv<'_>, item: &JObject<'_>) {
         .expect("metadata");
     for (object, method, signature) in [
         (item, "serialize", "()Ljava/util/Map;"),
-        (item, "serializeAsBytes", "()[B"),
         (&meta, "serialize", "()Ljava/util/Map;"),
     ] {
         assert!(

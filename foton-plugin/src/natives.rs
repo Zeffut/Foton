@@ -158,6 +158,7 @@ use foton_registry::recipe::{
 };
 use foton_registry::stat::{CustomStatRef, Stat};
 use foton_registry::trading::MerchantOffer;
+use foton_registry::vanilla_attributes;
 use foton_registry::vanilla_block_entity_types::BREWING_STAND as BREWING_STAND_BLOCK_ENTITY;
 use foton_registry::vanilla_block_entity_types::SIGN;
 use foton_registry::vanilla_game_rules::TNT_EXPLOSION_DROP_DECAY;
@@ -7799,7 +7800,7 @@ extern "system" fn set_player_operator(
 }
 
 /// Bukkit reports a player's speeds at twice the abilities packet's scale:
-/// 0.2 walking and 0.1 flying are the defaults CraftPlayer shows plugins.
+/// 0.2 walking and 0.1 flying are the defaults `CraftPlayer` shows plugins.
 const BUKKIT_SPEED_SCALE: f32 = 2.0;
 
 extern "system" fn player_walk_speed(
@@ -7828,7 +7829,7 @@ extern "system" fn set_player_walk_speed(
     player
         .attributes()
         .lock()
-        .set_base_value(foton_registry::vanilla_attributes::MOVEMENT_SPEED, f64::from(speed));
+        .set_base_value(vanilla_attributes::MOVEMENT_SPEED, f64::from(speed));
 }
 
 extern "system" fn player_fly_speed(
@@ -7836,9 +7837,7 @@ extern "system" fn player_fly_speed(
     _class: JClass<'_>,
     uuid: JString<'_>,
 ) -> jfloat {
-    player(&mut env, &uuid).map_or(0.1, |player| {
-        player.get_flying_speed() * BUKKIT_SPEED_SCALE
-    })
+    player(&mut env, &uuid).map_or(0.1, |player| player.get_flying_speed() * BUKKIT_SPEED_SCALE)
 }
 
 extern "system" fn set_player_fly_speed(
@@ -9856,10 +9855,16 @@ extern "system" fn set_block(
     z: jint,
     state: JString<'_>,
 ) {
-    write_block(env, &name, BlockPos::new(x, y, z), &state, UpdateFlags::UPDATE_ALL);
+    write_block(
+        env,
+        &name,
+        BlockPos::new(x, y, z),
+        &state,
+        UpdateFlags::UPDATE_ALL,
+    );
 }
 
-/// `foton.Native.setBlockWithoutPhysics`: CraftBlock's `applyPhysics = false`,
+/// `foton.Native.setBlockWithoutPhysics`: `CraftBlock`'s `applyPhysics = false`,
 /// which tells the clients but neither updates neighbours nor runs `onPlace`.
 extern "system" fn set_block_without_physics(
     env: JNIEnv<'_>,

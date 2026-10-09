@@ -26,7 +26,9 @@ pub(crate) extern "system" fn serialize(
     let result = (|| -> Result<jbyteArray, ItemBridgeError> {
         let candidate = mutation::materialize(&mut env, &value)?;
         if candidate.stack.is_empty() {
-            return Err(ItemBridgeError::InvalidEdit("cannot serialize an empty item"));
+            return Err(ItemBridgeError::InvalidEdit(
+                "cannot serialize an empty item",
+            ));
         }
         candidate
             .stack
