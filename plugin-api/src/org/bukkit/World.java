@@ -217,7 +217,7 @@ public interface World extends org.bukkit.generator.WorldInfo, RegionAccessor, o
 
     default java.util.Collection<org.bukkit.entity.Entity> getNearbyEntities(
             Location location, double x, double y, double z) {
-        if (location == null || location.getWorld() != this || x < 0 || y < 0 || z < 0) {
+        if (location == null || x < 0 || y < 0 || z < 0) {
             return java.util.Collections.emptyList();
         }
         java.util.ArrayList<org.bukkit.entity.Entity> result = new java.util.ArrayList<>();

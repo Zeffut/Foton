@@ -27,14 +27,14 @@ public final class EnchantmentEventBridge {
         if (encoded == null) return new FotonInventoryView(player);
         String[] table = encoded.substring(0, encoded.indexOf('\u001f')).split(" ");
         long instance = Long.parseUnsignedLong(table[0]);
-        Block block = new FotonBlock(new FotonWorld(table[1]), Integer.parseInt(table[2]), Integer.parseInt(table[3]), Integer.parseInt(table[4]));
+        Block block = new FotonBlock(FotonWorld.of(table[1]), Integer.parseInt(table[2]), Integer.parseInt(table[3]), Integer.parseInt(table[4]));
         return new FotonEnchantmentView(player, instance, block);
     }
 
     public static String prepare(String uuid, String world, int x, int y, int z,
             String input, String lapis, int bonus, String encodedState, boolean cancelled) {
         FotonPlayer player = new FotonPlayer(java.util.UUID.fromString(uuid));
-        Block block = new FotonBlock(new FotonWorld(world), x, y, z);
+        Block block = new FotonBlock(FotonWorld.of(world), x, y, z);
         ItemStack[] items = { FotonInventory.decode(input), FotonInventory.decode(lapis) };
         int separator = encodedState.indexOf('|');
         long instance = Long.parseUnsignedLong(encodedState.substring(0, separator));

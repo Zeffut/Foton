@@ -46,7 +46,7 @@ public final class FotonVillager extends AbstractVillager implements org.bukkit.
         String[] value = Native.villagerMemory(getUniqueId().toString(), memoryKey.getKey().getKey());
         if (value == null || value.length != 4 || memoryKey.getMemoryClass() != org.bukkit.Location.class) return null;
         try {
-            return (T) new org.bukkit.Location(new FotonWorld(value[0]),
+            return (T) new org.bukkit.Location(FotonWorld.of(value[0]),
                 Double.parseDouble(value[1]), Double.parseDouble(value[2]), Double.parseDouble(value[3]));
         } catch (NumberFormatException ignored) { return null; }
     }

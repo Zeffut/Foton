@@ -364,7 +364,7 @@ public final class FotonServer implements Server {
         String[] names = Native.worldNames();
         if (names == null) return worlds;
         for (String name : names) {
-            worlds.add(new FotonWorld(name));
+            worlds.add(FotonWorld.of(name));
         }
         return java.util.Collections.unmodifiableList(worlds);
     }
@@ -383,7 +383,7 @@ public final class FotonServer implements Server {
         if (names == null) return null;
         for (String candidate : names) {
             if (candidate.equals(name)) {
-                return new FotonWorld(candidate);
+                return FotonWorld.of(candidate);
             }
         }
         return null;

@@ -85,7 +85,7 @@ public final class SpawnBridgeCheck {
     }
 
     public static void assertClassSpawnContracts(String worldName) {
-        var world = new foton.FotonWorld(worldName);
+        var world = foton.FotonWorld.of(worldName);
         var location = new org.bukkit.Location(world, 8.5, 64.0, 8.5);
         if (!org.bukkit.potion.PotionEffectType.INSTANT_HEALTH.isInstant()
                 || !org.bukkit.potion.PotionEffectType.INSTANT_DAMAGE.isInstant()

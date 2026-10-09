@@ -1,7 +1,7 @@
 /** Runs without native bindings: invalid input must never reach JNI. */
 public final class SpawnCoordinatesCheck {
     public static void main(String[] args) {
-        var world = new foton.FotonWorld("minecraft:overworld");
+        var world = foton.FotonWorld.of("minecraft:overworld");
         int rejected = 0;
         for (int axis = 0; axis < 3; axis++) {
             for (double value : new double[] { Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY }) {
