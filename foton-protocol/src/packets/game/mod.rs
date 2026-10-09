@@ -44,6 +44,7 @@ mod c_recipe_book_settings;
 mod c_remove_entities;
 mod c_remove_mob_effect;
 mod c_remove_player_info;
+mod c_reset_score;
 mod c_respawn;
 mod c_rotate_head;
 mod c_section_blocks_update;
@@ -51,6 +52,7 @@ mod c_select_advancements_tab;
 mod c_set_camera;
 mod c_set_cursor_item;
 mod c_set_default_spawn_position;
+mod c_set_display_objective;
 mod c_set_entity_data;
 mod c_set_entity_link;
 mod c_set_entity_motion;
@@ -58,9 +60,11 @@ mod c_set_equipment;
 mod c_set_experience;
 mod c_set_health;
 mod c_set_held_slot;
+mod c_set_objective;
 mod c_set_passengers;
 mod c_set_player_inventory;
 mod c_set_player_team;
+mod c_set_score;
 mod c_set_time;
 mod c_sound;
 mod c_stop_sound;
@@ -116,6 +120,7 @@ mod s_spectator_action;
 mod s_swing;
 mod s_use_item;
 mod s_use_item_on;
+mod scoreboard_types;
 mod world_border;
 
 pub use c_add_entity::{CAddEntity, write_lp_vec3};
@@ -177,6 +182,7 @@ pub use c_recipe_book_settings::{
 pub use c_remove_entities::CRemoveEntities;
 pub use c_remove_mob_effect::CRemoveMobEffect;
 pub use c_remove_player_info::CRemovePlayerInfo;
+pub use c_reset_score::CResetScore;
 pub use c_respawn::CRespawn;
 pub use c_rotate_head::CRotateHead;
 pub use c_section_blocks_update::{BlockChange, CSectionBlocksUpdate};
@@ -184,6 +190,7 @@ pub use c_select_advancements_tab::CSelectAdvancementsTab;
 pub use c_set_camera::CSetCamera;
 pub use c_set_cursor_item::CSetCursorItem;
 pub use c_set_default_spawn_position::CSetDefaultSpawnPosition;
+pub use c_set_display_objective::CSetDisplayObjective;
 pub use c_set_entity_data::CSetEntityData;
 pub use c_set_entity_link::CSetEntityLink;
 pub use c_set_entity_motion::CSetEntityMotion;
@@ -191,11 +198,13 @@ pub use c_set_equipment::{CSetEquipment, EquipmentSlotItem};
 pub use c_set_experience::CSetExperience;
 pub use c_set_health::CSetHealth;
 pub use c_set_held_slot::CSetHeldSlot;
+pub use c_set_objective::{CSetObjective, ObjectiveLook, ObjectiveMethod};
 pub use c_set_passengers::CSetPassengers;
 pub use c_set_player_inventory::CSetPlayerInventory;
 pub use c_set_player_team::{
     CSetPlayerTeam, TeamCollisionRule, TeamColor, TeamMethod, TeamParameters, TeamVisibility,
 };
+pub use c_set_score::CSetScore;
 pub use c_set_time::CSetTime;
 pub use c_sound::{CSound, SoundSource};
 pub use c_stop_sound::CStopSound;
@@ -265,6 +274,7 @@ pub use s_spectator_action::SSpectatorAction;
 pub use s_swing::SSwing;
 pub use s_use_item::SUseItem;
 pub use s_use_item_on::SUseItemOn;
+pub use scoreboard_types::{DisplaySlot, NumberFormat, ObjectiveRenderType, TextStyle};
 pub use world_border::{
     CInitializeBorder, CSetBorderCenter, CSetBorderLerpSize, CSetBorderSize,
     CSetBorderWarningDelay, CSetBorderWarningDistance,
