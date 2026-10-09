@@ -9,6 +9,16 @@ use tokio::sync::oneshot;
 use crate::server::worlds::WorldMapSnapshot;
 use crate::world::WorldGameTickTimings;
 
+/// Stack reserved for each `world-tick-N` thread.
+///
+/// The world tick runs the whole simulation and, synchronously, every plugin
+/// handler for the events it fires -- a `ChunkLoadEvent` per chunk, so a
+/// player joining brings a burst of them. Java plugin code is deep (loading
+/// `ViaBackwards` alone needs the plugin bootstrap's 32 MiB), and the platform
+/// default of 2 MiB overflowed in play (#22). Only the pages a thread touches
+/// are committed, so the reservation costs address space, not memory.
+const WORLD_TICK_STACK_SIZE: usize = 32 * 1024 * 1024;
+
 struct WorldTickRequest {
     tick_count: u64,
     runs_normally: bool,
@@ -28,6 +38,7 @@ impl WorldTickWorker {
         let (request_sender, request_receiver) = channel::bounded::<WorldTickRequest>(1);
         let thread = thread::Builder::new()
             .name(format!("world-tick-{index}"))
+            .stack_size(WORLD_TICK_STACK_SIZE)
             .spawn(move || {
                 while let Ok(request) = request_receiver.recv() {
                     if request.runs_normally {
