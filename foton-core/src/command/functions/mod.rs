@@ -12,6 +12,7 @@ mod macros;
 mod manager;
 mod pack_resources;
 mod parser;
+mod recipes;
 
 #[cfg(test)]
 mod tests;

@@ -23,6 +23,8 @@ const FUNCTION_TAG_DIRECTORY: [&str; 2] = ["tags", "function"];
 const PREDICATE_DIRECTORY: &str = "predicate";
 /// `Registries.elementsDirPath(item_modifier)`: the loot functions `/item modify` runs.
 const ITEM_MODIFIER_DIRECTORY: &str = "item_modifier";
+/// `Registries.elementsDirPath(recipe)`.
+const RECIPE_DIRECTORY: &str = "recipe";
 
 /// One entry of a function tag file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,6 +50,8 @@ pub(super) struct DatapackContents {
     pub(super) predicates: FxHashMap<Identifier, PredicateSource>,
     /// Item modifier JSON keyed by id. A later pack replaces an earlier one.
     pub(super) item_modifiers: FxHashMap<Identifier, FunctionSource>,
+    /// Recipe JSON keyed by id. A later pack replaces an earlier one.
+    pub(super) recipes: FxHashMap<Identifier, FunctionSource>,
     /// Files that could not be read or understood, reported by the caller.
     pub(super) errors: Vec<String>,
 }
@@ -183,6 +187,7 @@ fn collect_pack(resources: &mut PackResources, pack_name: &str, contents: &mut D
         collect_tags(resources, &namespace, pack_name, contents);
         collect_predicates(resources, &namespace, pack_name, contents);
         collect_item_modifiers(resources, &namespace, pack_name, contents);
+        collect_recipes(resources, &namespace, pack_name, contents);
     }
 }
 
@@ -262,6 +267,31 @@ fn collect_item_modifiers(
         match resources.read(&resource) {
             Ok(text) => {
                 contents.item_modifiers.insert(
+                    resource.id,
+                    FunctionSource {
+                        text,
+                        source_pack: pack_name.to_owned(),
+                    },
+                );
+            }
+            Err(error) => contents
+                .errors
+                .push(read_error(pack_name, &resource, &error)),
+        }
+    }
+}
+
+fn collect_recipes(
+    resources: &mut PackResources,
+    namespace: &str,
+    pack_name: &str,
+    contents: &mut DatapackContents,
+) {
+    let listed = resources.resources(namespace, &[RECIPE_DIRECTORY], "json", &mut contents.errors);
+    for resource in listed {
+        match resources.read(&resource) {
+            Ok(text) => {
+                contents.recipes.insert(
                     resource.id,
                     FunctionSource {
                         text,

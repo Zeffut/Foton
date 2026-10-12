@@ -51,10 +51,11 @@ impl Server {
             log::error!("Datapack load: {error}");
         }
         log::info!(
-            "Loaded {} function(s), {} function tag(s) and {} predicate(s) from {}",
+            "Loaded {} function(s), {} function tag(s), {} predicate(s) and {} recipe(s) from {}",
             report.functions,
             report.tags,
             report.predicates,
+            report.recipes,
             self.functions.root().display()
         );
         self.packet_processor.open_after_tick();

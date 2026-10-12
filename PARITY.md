@@ -717,8 +717,26 @@ decode with a message naming it -- never skipped. A named modifier is looked up
 when the command runs, not when it parses, because a function is compiled
 before the pack's modifiers are installed.
 
-Not covered: datapack **recipes** (the recipe registry is the built-in one plus
-plugin recipes, so `recipe give @a orbital:nuke_1_old` parses, as in vanilla,
-but answers `Unknown recipe` until a loader exists); the arrow family's `contents`
-slot is read but not written; and `set_lore` is a no-op inside the loot engine
-itself, so it is not offered here.
+Not covered: the arrow family's `contents` slot is read but not written; and
+`set_lore` is a no-op inside the loot engine itself, so it is not offered here.
+
+**Datapack recipes load, for two types.** `data/<ns>/recipe/*.json` (folders and
+`.zip` packs) is read at start-up and on `/reload`: `minecraft:crafting_shaped`
+and `minecraft:crafting_shapeless`, with `Ingredient.CODEC` (an item id, a `#tag`
+or a list of item ids), a category and group, and a result whose `components`
+reach the stack (`custom_data` as a compound or as SNBT text). They go through the
+runtime registry plugin recipes use. Any other type -- smelting, blasting,
+smoking, campfire, stonecutting, smithing, the special crafting types -- is
+refused at load with its name, not skipped. The pre-1.21.2 `{"item": ...}`
+ingredient form is refused too, as vanilla refuses it: Orbital Strike Cannon V7
+ships twelve `_old` recipes in that form and they fail here as they do there.
+Two limits come from the runtime registry: a recipe whose id already exists
+(vanilla's, a plugin's, or one loaded by an earlier `/reload`) is left as it is
+instead of being replaced, and a recipe that a reload would remove stays
+registered until the server restarts.
+
+**`/playsound` and `/stopsound` exist.** `PlaySoundCommand` and `StopSoundCommand`,
+with every `SoundSource` word, targets, position, volume, pitch and minimum
+volume. The sound is a free identifier, not a registry entry, so it travels as a
+direct sound event (holder id 0 then the identifier), which is what vanilla
+sends and what lets a resource pack's own sounds play.

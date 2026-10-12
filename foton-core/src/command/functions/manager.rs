@@ -14,6 +14,7 @@ use super::super::predicate::{PredicateLibrary, load_predicate};
 use super::library::{CommandFunction, FunctionLibrary};
 use super::loader::{self, DatapackInfo, TagEntry};
 use super::parser::parse_function;
+use super::recipes;
 use crate::item_modifier;
 
 /// The tag whose functions run once after every load.
@@ -27,6 +28,7 @@ pub(crate) struct FunctionReloadReport {
     pub(crate) functions: usize,
     pub(crate) tags: usize,
     pub(crate) predicates: usize,
+    pub(crate) recipes: usize,
     pub(crate) errors: Vec<String>,
 }
 
@@ -115,12 +117,23 @@ impl FunctionManager {
                 )),
             }
         }
+        let mut recipes = 0;
+        for (id, source) in contents.recipes {
+            match recipes::register(id.clone(), &source.text) {
+                Ok(_) => recipes += 1,
+                Err(error) => errors.push(format!(
+                    "failed to load recipe {id} from datapack {}: {error}",
+                    source.source_pack
+                )),
+            }
+        }
         let library =
             Arc::new(FunctionLibrary::new(functions, tags).with_item_modifiers(item_modifiers));
         let report = FunctionReloadReport {
             functions: library.function_count(),
             tags: library.tag_count(),
             predicates: predicates.len(),
+            recipes,
             errors,
         };
 

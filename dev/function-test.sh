@@ -114,6 +114,13 @@ tellraw @a {"text":"FN_MACRO_PLAIN_LINE"}
 $tellraw @a {"text":"FN_MACRO_$(word)"}
 EOF
 
+# The two sound lines are the ones Orbital Strike Cannon's rod effects hang on.
+cat > "$FN/sound.mcfunction" <<'EOF'
+execute at @s run playsound minecraft:item.shield.break master @a ~ ~ ~
+stopsound @a master minecraft:item.shield.break
+tellraw @s {"text":"FN_SOUND_RAN"}
+EOF
+
 cat > "$FN/cond_true.mcfunction" <<'EOF'
 return 1
 EOF
@@ -194,6 +201,19 @@ files = {
     "pack.mcmeta": json.dumps({"pack": {"description": "zip", "pack_format": 96}}),
     "data/zip/function/from_zip.mcfunction": 'tellraw @a {"text":"FN_ZIP_RAN"}\n',
     "data/zip/tags/function/group.json": json.dumps({"values": ["zip:from_zip"]}),
+    # A recipe read out of the archive, with components on its result like Orbital Strike
+    # Cannon's, and the function that hands it to the player: `recipe give` stops the
+    # function when the id is unknown, so the line after it only runs if the recipe loaded.
+    "data/zip/recipe/rod_recipe.json": json.dumps({
+        "type": "minecraft:crafting_shaped",
+        "pattern": [" T ", "TFT", " T "],
+        "key": {"T": ["minecraft:tnt"], "F": ["minecraft:fishing_rod"]},
+        "result": {"id": "minecraft:knowledge_book", "components": {
+            "minecraft:custom_data": "{zip_recipe:1b}",
+            "minecraft:custom_name": {"text": "ZIP RECIPE", "italic": False}}},
+    }),
+    "data/zip/function/give_recipe.mcfunction":
+        'recipe give @s zip:rod_recipe\ntellraw @s {"text":"FN_RECIPE_GIVEN"}\n',
     "data/zip/predicate/rod_marker.json": json.dumps(rod("zip_probe")),
     "data/zip/predicate/other_marker.json": json.dumps(rod("zip_other")),
     # A predicate that cannot be modeled must be refused, not loaded weaker.
@@ -293,6 +313,10 @@ CMDS="$CMDS;;!wait 1"
 CMDS="$CMDS;;function test:macro"
 CMDS="$CMDS;;!wait 1"
 
+# --- playsound and stopsound inside a function ---------------------------
+CMDS="$CMDS;;function test:sound"
+CMDS="$CMDS;;!wait 1"
+
 # --- execute if|unless function ------------------------------------------
 CMDS="$CMDS;;execute if function test:cond_true run tellraw @s {\"text\":\"FN_IF_TRUE\"}"
 CMDS="$CMDS;;execute if function test:cond_false run tellraw @s {\"text\":\"FN_IF_FALSE_RAN\"}"
@@ -331,6 +355,8 @@ CMDS="$CMDS;;execute if entity @e[tag=fn_probe,nbt={data:{ret:5}},distance=..20]
 CMDS="$CMDS;;function zip:from_zip"
 CMDS="$CMDS;;!wait 1"
 CMDS="$CMDS;;function #zip:group"
+CMDS="$CMDS;;!wait 1"
+CMDS="$CMDS;;function zip:give_recipe"
 CMDS="$CMDS;;!wait 1"
 
 # --- execute if|unless predicate, with predicates read out of the .zip ---
@@ -400,6 +426,9 @@ said FN_BROKEN_FIRST_LINE && fail "a file that does not compile kept the lines b
 said FN_MACRO_FILLED || fail "a macro line never had its argument substituted in"
 [ "$(said_times FN_MACRO_PLAIN_LINE)" = "1" ] \
   || fail "a macro function ran its plain line the wrong number of times"
+
+said FN_RECIPE_GIVEN || fail "a recipe read out of a .zip datapack could not be given"
+said FN_SOUND_RAN || fail "a function with playsound and stopsound lines never ran to its end"
 
 said FN_IF_TRUE || fail "execute if function never ran the command after a passing function"
 said FN_IF_FALSE_RAN && fail "execute if function ran the command after a function that returned 0"
