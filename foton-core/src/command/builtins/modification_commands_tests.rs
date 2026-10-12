@@ -1,4 +1,4 @@
-//! Graph-shape checks for `/attribute`, `/effect`, `/data` and `/fill`.
+//! Graph-shape checks for `/attribute`, `/effect`, `/data`, `/fill`, `/playsound` and `/stopsound`.
 //!
 //! These trees are assembled by hand from vanilla's builders, so the
 //! regression worth catching is a branch that lost its executor or its place.
@@ -302,4 +302,51 @@ fn data_modify_reaches_every_operation_source_and_provider() {
             }
         }
     }
+}
+
+#[test]
+fn playsound_reaches_the_datapack_line_and_every_source() {
+    let dispatcher = dispatcher();
+    // `playsound minecraft:item.shield.break master @a ~ ~ ~` from Orbital Strike Cannon.
+    assert_executable(&dispatcher, &["playsound", "sound"], true);
+    assert_executable(
+        &dispatcher,
+        &["playsound", "sound", "master", "targets", "pos"],
+        true,
+    );
+    assert_executable(
+        &dispatcher,
+        &[
+            "playsound",
+            "sound",
+            "player",
+            "targets",
+            "pos",
+            "volume",
+            "pitch",
+            "minVolume",
+        ],
+        true,
+    );
+    let sources = names(&dispatcher, walk(&dispatcher, &["playsound", "sound"]));
+    assert_eq!(
+        sources,
+        [
+            "master", "music", "record", "weather", "block", "hostile", "neutral", "player",
+            "ambient", "voice", "ui"
+        ]
+    );
+}
+
+#[test]
+fn stopsound_takes_a_source_a_wildcard_and_a_sound() {
+    let dispatcher = dispatcher();
+    assert_executable(&dispatcher, &["stopsound", "targets"], true);
+    assert_executable(&dispatcher, &["stopsound", "targets", "*", "sound"], true);
+    assert_executable(&dispatcher, &["stopsound", "targets", "block"], true);
+    assert_executable(
+        &dispatcher,
+        &["stopsound", "targets", "block", "sound"],
+        true,
+    );
 }

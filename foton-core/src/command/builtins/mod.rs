@@ -27,6 +27,7 @@ mod locate;
 mod modification_commands_tests;
 mod operator;
 mod perms;
+mod playsound;
 mod raid;
 mod recipe;
 mod reload;
@@ -36,6 +37,7 @@ mod seed;
 mod setblock;
 mod setworldspawn;
 mod stop;
+mod stopsound;
 mod summon;
 pub(crate) mod team;
 mod teleport;
@@ -98,6 +100,7 @@ pub(crate) fn create_registered_dispatcher(
     builder.register(locate::registration())?;
     builder.register(operator::op_registration())?;
     builder.register(perms::registration())?;
+    builder.register(playsound::registration())?;
     builder.register(raid::registration())?;
     builder.register(recipe::registration())?;
     builder.register(reload::registration())?;
@@ -107,6 +110,7 @@ pub(crate) fn create_registered_dispatcher(
     builder.register(setblock::registration())?;
     builder.register(setworldspawn::registration())?;
     builder.register(stop::registration())?;
+    builder.register(stopsound::registration())?;
     builder.register(summon::registration())?;
     builder.register(team::registration())?;
     builder.register(teleport::registration())?;
@@ -186,6 +190,7 @@ mod tests {
                 "locate",
                 "op",
                 "perms",
+                "playsound",
                 "raid",
                 "recipe",
                 "reload",
@@ -195,6 +200,7 @@ mod tests {
                 "setblock",
                 "setworldspawn",
                 "stop",
+                "stopsound",
                 "summon",
                 "team",
                 "teleport",

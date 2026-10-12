@@ -206,7 +206,7 @@ pub use c_set_player_team::{
 };
 pub use c_set_score::CSetScore;
 pub use c_set_time::CSetTime;
-pub use c_sound::{CSound, SoundSource};
+pub use c_sound::{CSound, CSoundDirect, SoundSource};
 pub use c_stop_sound::CStopSound;
 pub use c_tab_list::CTabList;
 pub use c_take_item_entity::CTakeItemEntity;
