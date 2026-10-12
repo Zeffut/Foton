@@ -239,10 +239,15 @@ fn foton_main() {
         .build()
         .unwrap();
 
-    main_runtime.block_on(main_async(chunk_runtime.clone(), foton_config));
+    let started = main_runtime.block_on(main_async(chunk_runtime.clone(), foton_config));
 
     drop(main_runtime);
     drop(chunk_runtime);
+
+    // A service manager reads exit code 0 as an orderly stop, so a failed startup must not use it.
+    if !started {
+        process::exit(1);
+    }
 }
 
 fn configured_worker_threads(configured_threads: Option<usize>) -> usize {
@@ -253,14 +258,15 @@ fn available_worker_threads() -> usize {
     thread::available_parallelism().map_or(4, NonZero::get)
 }
 
-async fn main_async(chunk_runtime: Arc<Runtime>, foton_config: config::FotonConfig) {
+/// Returns `false` when the server failed to start, so the process can exit non-zero.
+async fn main_async(chunk_runtime: Arc<Runtime>, foton_config: config::FotonConfig) -> bool {
     let cancel_token = CancellationToken::new();
 
     let logger = match init_tracing(cancel_token.clone(), foton_config.log.clone()).await {
         Ok(logger) => logger,
         Err(error) => {
             eprintln!("{error}");
-            return;
+            return false;
         }
     };
     spawn_shutdown_signal_listener(cancel_token.clone());
@@ -328,13 +334,13 @@ async fn main_async(chunk_runtime: Arc<Runtime>, foton_config: config::FotonConf
     let run_result = AssertUnwindSafe(run_server(chunk_runtime, cancel_token, foton_config))
         .catch_unwind()
         .await;
-    let panic_payload = match run_result {
-        Ok(Ok(())) => None,
+    let (started, panic_payload) = match run_result {
+        Ok(Ok(())) => (true, None),
         Ok(Err(error)) => {
             log::error!("Server startup failed: {error}");
-            None
+            (false, None)
         }
-        Err(payload) => Some(payload),
+        Err(payload) => (false, Some(payload)),
     };
 
     logger.stop().await;
@@ -342,6 +348,7 @@ async fn main_async(chunk_runtime: Arc<Runtime>, foton_config: config::FotonConf
     if let Some(payload) = panic_payload {
         panic::resume_unwind(payload);
     }
+    started
 }
 
 fn spawn_shutdown_signal_listener(cancel_token: CancellationToken) {
