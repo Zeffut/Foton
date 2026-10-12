@@ -9,7 +9,8 @@ package foton.entity;
  * ViaVersion looks for it at login. Every player Foton hands out is one.
  *
  * <p>Only what CraftBukkit itself offers here, and only what Foton can honor,
- * is declared: there is no Minecraft server object behind it to hand out.
+ * is declared: there is no Minecraft server object behind it, so {@link #getHandle()} hands out
+ * only the connection path plugins reach for.
  *
  * <p>It extends {@link foton.FotonLivingEntity}, so a player answers every
  * entity and living-entity query through the same natives as any other mob.
@@ -17,6 +18,13 @@ package foton.entity;
 public abstract class CraftPlayer extends foton.FotonLivingEntity
         implements org.bukkit.entity.Player, net.kyori.adventure.audience.Audience {
     protected CraftPlayer(java.util.UUID id) { super(id); }
+
+    /** CraftBukkit's {@code getHandle()}, narrowed to the one thing plugins take from it: the path
+     * {@code connection.connection.channel} to the player's Netty channel, which ViaVersion uses to
+     * pair a joining player with the connection it already tracks. */
+    public foton.network.ServerPlayerHandle getHandle() {
+        return new foton.network.ServerPlayerHandle(getUniqueId());
+    }
 
     // Declared by both Player and Audience; every player implements its own.
     @Override public abstract void resetTitle();

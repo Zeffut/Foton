@@ -178,6 +178,10 @@ impl JavaTcpClient {
             return ConnectionAction::none();
         }
         self.protocol.store(ConnectionProtocol::Play);
+        // Before the player exists, so a plugin that hears the join can already find the connection.
+        if let Some(translation) = &self.translation {
+            translation.bind_player(gameprofile.id);
+        }
 
         let client_info = self.client_information.lock().await.clone();
         let resource_pack_answers = mem::take(&mut *self.resource_pack_answers.lock());

@@ -15,6 +15,7 @@ use jni::{
     errors::Error as JniError,
     objects::{GlobalRef, JByteArray, JObjectArray, JValue, JValueOwned},
 };
+use uuid::Uuid;
 
 const BRIDGE_CLASS: &str = "foton/network/FotonViaBridge";
 const MAX_EXCHANGE_PACKETS: usize = 256;
@@ -160,6 +161,35 @@ impl PacketTranslator for ViaTranslator {
 
     fn poll(&self) -> Result<TranslationBatch, PacketError> {
         self.invoke("poll", None)
+    }
+
+    fn bind_player(&self, player: Uuid) {
+        if self.closed.load(Ordering::Acquire) {
+            return;
+        }
+        let Ok(mut env) = self.vm.attach_current_thread() else {
+            log::warn!("Could not attach the JVM to bind player {player} to its Via channel");
+            return;
+        };
+        let channel = self.channel.lock();
+        let Some(channel) = channel.as_ref() else {
+            return;
+        };
+        let Ok(player_text) = env.new_string(player.to_string()) else {
+            return;
+        };
+        if let Err(error) = env.call_static_method(
+            BRIDGE_CLASS,
+            "bind",
+            "(Ljava/lang/String;Lfoton/network/FotonViaChannel;)V",
+            &[
+                JValue::Object(&player_text),
+                JValue::Object(channel.as_obj()),
+            ],
+        ) {
+            Self::clear_exception(&mut env);
+            log::warn!("Could not bind player {player} to its Via channel: {error}");
+        }
     }
 
     fn close(&self) -> Result<(), PacketError> {

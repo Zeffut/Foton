@@ -19,6 +19,7 @@ public final class FotonViaChannel implements AutoCloseable {
 
     private final EmbeddedChannel channel;
     private boolean closed;
+    private volatile java.util.UUID player;
 
     FotonViaChannel() {
         channel = new EmbeddedChannel();
@@ -32,6 +33,12 @@ public final class FotonViaChannel implements AutoCloseable {
             throw error;
         }
     }
+
+    /** Records the player this connection belongs to, so close can unregister it. */
+    void bindTo(java.util.UUID player) { this.player = player; }
+
+    /** The pipeline Via injected its handlers into. */
+    io.netty.channel.Channel nettyChannel() { return channel; }
 
     /** Runs one unframed, decompressed serverbound Minecraft packet through Via. */
     public synchronized byte[][] serverbound(byte[] packet) {
@@ -148,6 +155,8 @@ public final class FotonViaChannel implements AutoCloseable {
     public synchronized void close() {
         if (closed) return;
         closed = true;
+        java.util.UUID owner = player;
+        if (owner != null) FotonViaBridge.unbind(owner, this);
         channel.finishAndReleaseAll();
     }
 

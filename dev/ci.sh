@@ -72,6 +72,7 @@ fi
 run "Paper-compiled shapeless recipes"            bash dev/shapeless-recipe-test.sh "${FOTON_PAPER_API_JAR:-}"
 run "Paper-compiled prepare enchant"              bash dev/prepare-enchant-test.sh "${FOTON_PAPER_API_JAR:-}"
 run "plugin runtime dependency closure"            bash dev/plugin-runtime-test.sh
+run "Via finds the player's channel"             bash dev/via-handle-test.sh
 # This fixture is compiled against exact official Paper bytes, not Foton's own
 # API. It checks DriverManager visibility and executes a real SQLite query.
 # FOTON_PAPER_API_JAR can point to an already downloaded copy; the test still

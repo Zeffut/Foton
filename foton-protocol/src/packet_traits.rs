@@ -416,6 +416,13 @@ pub trait PacketTranslator: Send + Sync {
     /// Runs scheduled work and drains resulting packets.
     fn poll(&self) -> Result<TranslationBatch, PacketError>;
 
+    /// Tells the translator which player owns this connection, once login has named them.
+    ///
+    /// Plugins on the translator's side look a player's connection up by identity (`ViaVersion` pairs
+    /// a joining player with the connection it already tracks), which the connection cannot know
+    /// before login ends. A translator that has no use for it keeps the default.
+    fn bind_player(&self, _player: uuid::Uuid) {}
+
     /// Releases the translator's per-connection resources.
     fn close(&self) -> Result<(), PacketError>;
 }
@@ -450,6 +457,11 @@ impl Drop for TranslationCallCompletion {
 }
 
 impl PacketTranslation {
+    /// Tells the translator which player this connection belongs to.
+    pub fn bind_player(&self, player: uuid::Uuid) {
+        self.inner.bind_player(player);
+    }
+
     /// Wraps a translator implementation.
     #[must_use]
     pub fn new(inner: Arc<dyn PacketTranslator>) -> Self {
