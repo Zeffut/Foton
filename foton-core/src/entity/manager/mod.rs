@@ -1311,14 +1311,18 @@ impl WorldEntityManager {
     ) -> Vec<WorldAabb> {
         let state = self.state.read();
         let mut result = Vec::new();
-        for entry in Self::entity_query_entries(&state, aabb) {
+        // Collision boxes are combined order-free, so this skips the sorted,
+        // deduplicated entry list of `entity_query_entries`. Every moving
+        // entity asks this each tick; with a few thousand primed TNT in a few
+        // cells, building and sorting that list was most of the tick.
+        Self::for_each_query_entry(&state, aabb, |entry| {
             if Self::is_accessible(&state, entry)
                 && entry.bounding_box.intersects(*aabb)
                 && predicate(entry.entity.as_ref())
             {
                 result.push(entry.bounding_box);
             }
-        }
+        });
 
         result
     }
@@ -1378,6 +1382,50 @@ impl WorldEntityManager {
             .filter(|entry| Self::is_accessible(&state, entry))
             .map(|entry| Arc::clone(&entry.entity))
             .collect()
+    }
+
+    /// Visits each live entry indexed in a cell `aabb` touches, once, in no particular order.
+    ///
+    /// An entry spanning several cells is visited from the first of its cells the query covers.
+    fn for_each_query_entry<'a>(
+        state: &'a ManagerState,
+        aabb: &WorldAabb,
+        mut visit: impl FnMut(&'a EntityEntry),
+    ) {
+        let bounds = EntitySpatialCellBounds::from_aabb(aabb);
+        let mut visit_cell = |cell: EntitySpatialCell, cell_ids: &'a OrderedEntityIds| {
+            for entity_id in cell_ids.iter() {
+                let Some(entry) = state.live_by_id.get(entity_id) else {
+                    continue;
+                };
+                let first_covered = entry
+                    .spatial_cells
+                    .iter()
+                    .find(|indexed| bounds.contains(**indexed));
+                if first_covered == Some(&cell) {
+                    visit(entry);
+                }
+            }
+        };
+
+        if bounds.direct_probe_count() <= MAX_DIRECT_SPATIAL_CELL_PROBES {
+            for x in bounds.minimum.x..=bounds.maximum.x {
+                for y in bounds.minimum.y..=bounds.maximum.y {
+                    for z in bounds.minimum.z..=bounds.maximum.z {
+                        let cell = EntitySpatialCell { x, y, z };
+                        if let Some(cell_ids) = state.by_spatial_cell.get(&cell) {
+                            visit_cell(cell, cell_ids);
+                        }
+                    }
+                }
+            }
+        } else {
+            for (cell, cell_ids) in &state.by_spatial_cell {
+                if bounds.contains(*cell) {
+                    visit_cell(*cell, cell_ids);
+                }
+            }
+        }
     }
 
     fn entity_query_entries<'a>(state: &'a ManagerState, aabb: &WorldAabb) -> Vec<&'a EntityEntry> {

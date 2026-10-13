@@ -142,6 +142,36 @@ fn aabb_matching_bounding_box_query_returns_only_matching_intersections() {
 }
 
 #[test]
+fn bounding_box_query_reports_an_entity_spanning_several_cells_once() {
+    let manager = WorldEntityManager::new();
+    load_chunk(&manager, ChunkPos::new(0, 0));
+
+    // Cells are 4 blocks wide with borders at 2 (mod 4): this item sits
+    // across eight of them.
+    let straddling = entity(1, 1, DVec3::new(2.0, 61.9, 2.0));
+    let expected_box = straddling.bounding_box();
+    assert!(
+        manager
+            .add_live_entity(straddling, EntityOwnership::ManagerOwned)
+            .is_ok()
+    );
+
+    for aabb in [
+        WorldAabb::new(0.0, 60.0, 0.0, 4.0, 64.0, 4.0),
+        WorldAabb::new(2.0, 62.0, 2.0, 4.0, 64.0, 4.0),
+        WorldAabb::new(-40.0, 0.0, -40.0, 40.0, 100.0, 40.0),
+    ] {
+        let mut asked = 0;
+        let result = manager.get_entity_bounding_boxes_in_aabb_matching(&aabb, |_| {
+            asked += 1;
+            true
+        });
+        assert_eq!(result, vec![expected_box], "{aabb:?}");
+        assert_eq!(asked, 1, "{aabb:?}");
+    }
+}
+
+#[test]
 fn nearest_aabb_matching_query_returns_closest_match() {
     let manager = WorldEntityManager::new();
     load_chunk(&manager, ChunkPos::new(0, 0));

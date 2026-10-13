@@ -4,7 +4,9 @@
 //! spends power against the blocks it crosses, damages and pushes nearby
 //! entities by how much of them the blast can see, and optionally leaves fire.
 
+use std::mem;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use foton_protocol::packets::game::CExplode;
 use foton_registry::blocks::block_state_ext::BlockStateExt;
@@ -13,7 +15,8 @@ use foton_registry::item_stack::ItemStack;
 use foton_registry::particle_type::{ExplosionParticleInfo, ParticleData};
 use foton_registry::sound_event::SoundEventRef;
 use foton_registry::{
-    sound_events, vanilla_attributes, vanilla_blocks, vanilla_damage_types, vanilla_particle_types,
+    sound_events, vanilla_attributes, vanilla_blocks, vanilla_damage_types, vanilla_entities,
+    vanilla_particle_types,
 };
 use foton_utils::random::weighted_list::{Weighted, WeightedList};
 use foton_utils::types::UpdateFlags;
@@ -25,10 +28,10 @@ use crate::entity::Entity;
 use crate::entity::damage::DamageSource;
 use crate::entity::entities::ItemEntity;
 use crate::event::{BlockExplodeEvent, EntityExplodeEvent};
-use crate::fluid::get_fluid_state;
-use crate::world::World;
-use crate::world::explosion_rays::cast_rays;
+use crate::world::explosion_exposure::ExposureStates;
+use crate::world::explosion_rays::{Blast, blast_half_width, cast_rays};
 use crate::world::raycast::{ClipBlockShape, ClipFluid};
+use crate::world::{BlockRegionBounds, World};
 
 /// How far a player can be from a blast and still be told about it.
 ///
@@ -262,7 +265,9 @@ impl World {
         center: DVec3,
         should_explode: &dyn Fn(BlockPos) -> bool,
     ) -> Vec<BlockPos> {
-        let mut to_blow = self.calculate_exploded_positions(center, spec.radius);
+        let mut blast = self.calculate_exploded_positions(center, spec.radius);
+        let filling_writes_at_cast = self.filling_block_writes.load(Ordering::Relaxed);
+        let mut to_blow = mem::take(&mut blast.to_blow);
         to_blow.retain(|pos| should_explode(*pos));
         if spec.direct_entity_id.is_some() {
             let entity = spec
@@ -319,6 +324,14 @@ impl World {
             to_blow.shuffle(&mut rand::rng());
             let mut stacks: Vec<StackCollector> = Vec::new();
             for pos in &to_blow {
+                // Air the rays crossed is still air while no block has been
+                // placed since: no need to read it again. Breaking blocks,
+                // which is all this loop normally does, places none.
+                if blast.was_empty(*pos)
+                    && self.filling_block_writes.load(Ordering::Relaxed) == filling_writes_at_cast
+                {
+                    continue;
+                }
                 self.explode_block(
                     *pos,
                     source_entity.as_deref(),
@@ -385,30 +398,46 @@ impl World {
     /// Casts the rays that decide which blocks the blast breaks.
     ///
     /// Vanilla parity: `ServerExplosion.calculateExplodedPositions`. The loop itself is in
-    /// [`cast_rays`], which looks each distinct block up once.
-    fn calculate_exploded_positions(self: &Arc<Self>, center: DVec3, radius: f32) -> Vec<BlockPos> {
-        cast_rays(
-            center,
-            radius,
-            rand::random::<f32>,
-            |y| !self.is_outside_build_height(y),
-            |pos| {
-                let state = self.get_block_state(pos);
-                self.explosion_resistance_at(pos, state)
-            },
-        )
+    /// [`cast_rays`], which looks each distinct block up once. Those lookups go through sections
+    /// locked once for the whole blast rather than through the chunk table one by one; a nuke
+    /// fires two thousand of these in one tick.
+    fn calculate_exploded_positions(self: &Arc<Self>, center: DVec3, radius: f32) -> Blast {
+        let cast = |state_at: &mut dyn FnMut(BlockPos) -> BlockStateId| {
+            cast_rays(
+                center,
+                radius,
+                rand::random::<f32>,
+                |y| !self.is_outside_build_height(y),
+                |pos| Self::explosion_resistance(state_at(pos)),
+            )
+        };
+        let origin = BlockPos::new(
+            center.x.floor() as i32,
+            center.y.floor() as i32,
+            center.z.floor() as i32,
+        );
+        let half = blast_half_width(radius);
+        let bounds = BlockRegionBounds::from_corners(
+            BlockPos::new(origin.x() - half, origin.y() - half, origin.z() - half),
+            BlockPos::new(origin.x() + half, origin.y() + half, origin.z() + half),
+        );
+        // No ray gets past `half`, so every read stays in the locked region.
+        self.try_with_block_region(bounds, |region| {
+            cast(&mut |pos| {
+                region
+                    .get_block_state(pos)
+                    .unwrap_or_else(|| self.get_block_state(pos))
+            })
+        })
+        .unwrap_or_else(|| cast(&mut |pos| self.get_block_state(pos)))
     }
 
     /// Returns the resistance a block and its fluid oppose to a blast.
     ///
     /// Vanilla parity: `ExplosionDamageCalculator.getBlockExplosionResistance`.
     /// Air with no fluid offers nothing and costs the ray only its step price.
-    fn explosion_resistance_at(
-        self: &Arc<Self>,
-        pos: BlockPos,
-        state: BlockStateId,
-    ) -> Option<f32> {
-        let fluid = get_fluid_state(self, pos);
+    fn explosion_resistance(state: BlockStateId) -> Option<f32> {
+        let fluid = state.get_fluid_state();
         if state.is_air() && fluid.is_empty() {
             return None;
         }
@@ -461,6 +490,11 @@ impl World {
         // `ServerPlayer` needs its type to tell a wind charge from anything
         // else. Resolved once rather than per affected entity.
         let source_entity = direct_entity_id.and_then(|id| self.get_entity_by_id(id));
+        let mut states = ExposureStates::around(
+            center,
+            reach + 1.0,
+            self.block_writes.load(Ordering::Relaxed),
+        );
 
         for entity in self.get_entities_in_aabb(&aabb) {
             // Vanilla parity: `hurtEntities` asks the level for everything
@@ -473,7 +507,14 @@ impl World {
                 continue;
             }
 
-            let exposure = f64::from(self.seen_percent(center, entity.as_ref()));
+            // Vanilla parity: exposure is not measured when the blast neither
+            // damages nor pushes.
+            let exposure = if !spec.damages_entities && spec.knockback_multiplier == 0.0 {
+                0.0
+            } else {
+                states.sync(self.block_writes.load(Ordering::Relaxed));
+                f64::from(self.seen_percent(center, entity.as_ref(), &mut states))
+            };
 
             // Vanilla parity: `ExplosionDamageCalculator.getEntityDamageAmount`.
             let impact = (1.0 - distance) * exposure;
@@ -482,8 +523,14 @@ impl World {
                 entity.hurt(self, &damage_source, damage as f32);
             }
 
-            // Vanilla pushes from the blast toward the entity's eyes.
-            let origin = entity.position().with_y(entity.get_eye_y());
+            // Vanilla pushes from the blast toward the entity's eyes, except a
+            // primed TNT, which it pushes toward its feet -- the direction TNT
+            // cannons are built around.
+            let origin = if entity.entity_type() == &vanilla_entities::TNT {
+                entity.position()
+            } else {
+                entity.position().with_y(entity.get_eye_y())
+            };
             let direction = origin - center;
             if direction.length_squared() > 0.0 {
                 let resistance = entity.as_living_entity().map_or(0.0, |living| {
@@ -522,7 +569,7 @@ impl World {
     /// Vanilla parity: `ServerExplosion.getSeenPercent`. Vanilla samples a grid of
     /// points across the entity's bounding box and counts how many reach the center
     /// without crossing a block.
-    fn seen_percent(&self, center: DVec3, entity: &dyn Entity) -> f32 {
+    fn seen_percent(&self, center: DVec3, entity: &dyn Entity, states: &mut ExposureStates) -> f32 {
         let bb = entity.bounding_box();
         let step_x = 1.0 / ((bb.max_x() - bb.min_x()) * 2.0 + 1.0);
         let step_y = 1.0 / ((bb.max_y() - bb.min_y()) * 2.0 + 1.0);
@@ -548,7 +595,13 @@ impl World {
                         bb.min_y() + (bb.max_y() - bb.min_y()) * fy,
                         bb.min_z() + (bb.max_z() - bb.min_z()) * fz + offset_z,
                     );
-                    let hit = self.clip(from, center, ClipBlockShape::Collider, ClipFluid::None);
+                    let hit = self.clip_with_states(
+                        from,
+                        center,
+                        ClipBlockShape::Collider,
+                        ClipFluid::None,
+                        &mut |pos| states.state_at(pos, |pos| self.get_block_state(pos)),
+                    );
                     if hit.is_miss() {
                         hits += 1;
                     }

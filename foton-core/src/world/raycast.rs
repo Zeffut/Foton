@@ -93,6 +93,24 @@ impl World {
         block_shape: ClipBlockShape,
         fluid: ClipFluid,
     ) -> ClipHitResult {
+        self.clip_with_states(start_pos, end_pos, block_shape, fluid, &mut |pos| {
+            self.get_block_state(pos)
+        })
+    }
+
+    /// [`Self::clip`], reading block states through `state_at`.
+    ///
+    /// For a caller that clips many rays through one small region -- an
+    /// explosion measuring how exposed each entity is -- and would otherwise
+    /// look the same blocks up in the chunk map again for every ray.
+    pub(crate) fn clip_with_states(
+        &self,
+        start_pos: DVec3,
+        end_pos: DVec3,
+        block_shape: ClipBlockShape,
+        fluid: ClipFluid,
+        state_at: &mut dyn FnMut(BlockPos) -> BlockStateId,
+    ) -> ClipHitResult {
         if start_pos == end_pos {
             return Self::clip_miss(start_pos, end_pos);
         }
@@ -107,7 +125,8 @@ impl World {
             from.z.floor() as i32,
         );
 
-        if let Some(hit) = self.clip_block_and_fluid(block, start_pos, end_pos, block_shape, fluid)
+        if let Some(hit) =
+            self.clip_block_and_fluid(block, start_pos, end_pos, block_shape, fluid, state_at)
         {
             return hit;
         }
@@ -168,7 +187,7 @@ impl World {
             }
 
             if let Some(hit) =
-                self.clip_block_and_fluid(block, start_pos, end_pos, block_shape, fluid)
+                self.clip_block_and_fluid(block, start_pos, end_pos, block_shape, fluid, state_at)
             {
                 return hit;
             }
@@ -212,8 +231,9 @@ impl World {
         to: DVec3,
         block_shape: ClipBlockShape,
         fluid: ClipFluid,
+        state_at: &mut dyn FnMut(BlockPos) -> BlockStateId,
     ) -> Option<ClipHitResult> {
-        let state = self.get_block_state(pos);
+        let state = state_at(pos);
         let block_result = Self::clip_shape(
             pos,
             from,
@@ -221,7 +241,7 @@ impl World {
             self.clip_block_shape(state, pos, block_shape),
         )
         .map(|hit| Self::clip_with_interaction_override(pos, from, to, state, hit));
-        let fluid_result = self.clip_fluid_shape(pos, from, to, state, fluid);
+        let fluid_result = Self::clip_fluid_shape(pos, from, to, state, fluid, state_at);
 
         match (block_result, fluid_result) {
             (Some(block_hit), Some(fluid_hit)) => {
@@ -308,12 +328,12 @@ impl World {
     }
 
     pub(super) fn clip_fluid_shape(
-        &self,
         pos: BlockPos,
         from: DVec3,
         to: DVec3,
         state: BlockStateId,
         fluid: ClipFluid,
+        state_at: &mut dyn FnMut(BlockPos) -> BlockStateId,
     ) -> Option<ClipHitResult> {
         let fluid_state = state.get_fluid_state();
         let can_pick = match fluid {
@@ -326,18 +346,14 @@ impl World {
             return None;
         }
 
-        let height = self.fluid_clip_height(pos, fluid_state);
+        let above_fluid = state_at(pos.above()).get_fluid_state();
+        let height = Self::fluid_clip_height_from_above(fluid_state, above_fluid);
         Self::clip_local_aabb(
             pos,
             from,
             to,
             BlockLocalAabb::new(0.0, 0.0, 0.0, 1.0, height, 1.0),
         )
-    }
-
-    pub(super) fn fluid_clip_height(&self, pos: BlockPos, fluid_state: FluidState) -> f64 {
-        let above_fluid = self.get_block_state(pos.above()).get_fluid_state();
-        Self::fluid_clip_height_from_above(fluid_state, above_fluid)
     }
 
     pub(super) fn fluid_clip_height_from_above(

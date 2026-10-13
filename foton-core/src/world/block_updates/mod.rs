@@ -350,6 +350,10 @@ impl World {
         flags: UpdateFlags,
         update_limit: i32,
     ) {
+        self.block_writes.fetch_add(1, Ordering::Relaxed);
+        if !block_state.is_air() || !block_state.get_fluid_state().is_empty() {
+            self.filling_block_writes.fetch_add(1, Ordering::Relaxed);
+        }
         let new_state = self.get_block_state(pos);
         if new_state != block_state {
             return;
@@ -408,7 +412,13 @@ impl World {
         old_state: BlockStateId,
         new_state: BlockStateId,
     ) {
-        let collision_shape_changed = self.block_collision_shape_changed(pos, old_state, new_state);
+        self.path_type_cache.lock().invalidate(pos);
+        // Vanilla parity: `sendBlockUpdated` visits the navigating mobs only
+        // when the collision shape changed. Breaking a block of air, or
+        // swapping one leaf state for another, costs no walk over every mob.
+        if !self.block_collision_shape_changed(pos, old_state, new_state) {
+            return;
+        }
         let game_time = self.game_time();
         for entity_id in self.navigating_mob_ids() {
             let Some(entity) = self.entity_manager.get_by_id(entity_id) else {
@@ -419,13 +429,6 @@ impl World {
                 self.untrack_navigating_mob(entity_id);
                 continue;
             };
-            {
-                let mut navigation = pathfinder.mob_base().navigation().lock();
-                navigation.invalidate_path_type(pos);
-            }
-            if !collision_shape_changed {
-                continue;
-            }
             if !pathfinder.is_path_finding() {
                 continue;
             }

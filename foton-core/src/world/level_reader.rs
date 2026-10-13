@@ -13,9 +13,10 @@ use foton_registry::blocks::shapes::SupportType;
 use foton_registry::fluid::FluidRef;
 use foton_registry::game_events::GameEventRef;
 use foton_registry::sound_event::SoundEventRef;
-use foton_utils::{BlockPos, BlockStateId, types::UpdateFlags};
+use foton_utils::{BlockPos, BlockStateId, locks::SyncMutex, types::UpdateFlags};
 
 use crate::block_entity::SharedBlockEntity;
+use crate::entity::ai::path::PathTypeCache;
 use crate::world::game_event::GameEventContext;
 
 const VANILLA_HORIZONTAL_LIMIT: i32 = 30_000_000;
@@ -24,6 +25,15 @@ const VANILLA_HORIZONTAL_LIMIT: i32 = 30_000_000;
 pub trait LevelReader {
     /// Gets the block state at a position.
     fn get_block_state(&self, pos: BlockPos) -> BlockStateId;
+
+    /// The level's shared cache of path types, if it keeps one.
+    ///
+    /// Vanilla parity: `ServerLevel.pathTypesByPosCache`, which every mob's
+    /// pathfinding reads and a block change invalidates once. Views without one
+    /// let each navigation keep its own.
+    fn path_type_cache(&self) -> Option<&SyncMutex<PathTypeCache>> {
+        None
+    }
 
     /// Gets the block entity at a position when this level surface supports it
     #[expect(

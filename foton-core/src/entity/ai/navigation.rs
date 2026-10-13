@@ -229,10 +229,6 @@ impl PathNavigation {
         self.tick = self.tick.wrapping_add(1);
     }
 
-    pub fn invalidate_path_type(&mut self, pos: BlockPos) {
-        self.path_type_cache.invalidate(pos);
-    }
-
     pub fn stop(&mut self) {
         self.path = None;
         self.done = true;
@@ -264,19 +260,27 @@ impl PathNavigation {
             return Some(path.clone());
         }
 
-        let mut context =
-            PathfindingContext::with_cache(level, request.mob_position, &mut self.path_type_cache);
-        let path = self.path_finder.find_path(
-            evaluator,
-            &mut context,
-            collision,
-            PathRequest {
-                targets: request.targets,
-                max_path_length: request.max_path_length,
-                reach_range: request.reach_range,
-                max_visited_nodes_multiplier: self.max_visited_nodes_multiplier,
-            },
-        )?;
+        let path_request = PathRequest {
+            targets: request.targets,
+            max_path_length: request.max_path_length,
+            reach_range: request.reach_range,
+            max_visited_nodes_multiplier: self.max_visited_nodes_multiplier,
+        };
+        let path = if let Some(shared) = level.path_type_cache() {
+            let mut cache = shared.lock();
+            let mut context =
+                PathfindingContext::with_cache(level, request.mob_position, &mut cache);
+            self.path_finder
+                .find_path(evaluator, &mut context, collision, path_request)
+        } else {
+            let mut context = PathfindingContext::with_cache(
+                level,
+                request.mob_position,
+                &mut self.path_type_cache,
+            );
+            self.path_finder
+                .find_path(evaluator, &mut context, collision, path_request)
+        }?;
         self.target_pos = Some(path.target());
         self.reach_range = request.reach_range;
         self.reset_stuck_timeout();

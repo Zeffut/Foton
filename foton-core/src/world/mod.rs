@@ -6,7 +6,7 @@ use std::{
     path::Path,
     sync::{
         Arc, LazyLock, OnceLock, Weak,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -20,6 +20,7 @@ use crate::chunk::light::{
 use crate::chunk::status::ChunkStatus;
 use crate::dimension::end::EnderDragonFight;
 use crate::dimension::end::fight::PersistentEnderDragonFight;
+use crate::entity::ai::path::PathTypeCache;
 use crate::level_data::write_level_data;
 use crate::poi::OccupationStatus;
 use crate::portal::WorldChangeRequest;
@@ -128,6 +129,7 @@ mod entity_management;
 mod environment;
 mod events;
 pub mod explosion;
+mod explosion_exposure;
 mod explosion_rays;
 /// Vanilla game-event contexts, listeners, and dispatch storage.
 pub mod game_event;
@@ -376,12 +378,21 @@ pub struct World {
     pending_spawn_entities: SyncMutex<FxHashMap<uuid::Uuid, SharedEntity>>,
     /// World-global ordered block-entity ticker phase.
     block_entity_tickers: block_entity_ticker::WorldBlockEntityTickers,
+    /// Counts committed block changes, so a reader caching states over many
+    /// lookups (an explosion measuring exposure) can tell its cache went stale.
+    block_writes: AtomicU64,
+    /// Counts committed block changes that left anything but empty air behind.
+    /// An explosion skips re-reading the air its rays crossed while this holds.
+    filling_block_writes: AtomicU64,
     /// Physical entries retained by this world's chunk-owned game-event registries.
     game_event_listener_count: Arc<GameEventListenerCount>,
     /// Entity tracker for managing which players can see which entities.
     entity_tracker: EntityTracker,
     /// Runtime IDs for pathfinder mobs currently visible to the active world.
     navigating_mobs: NavigatingMobTracker,
+    /// Vanilla parity: `ServerLevel.pathTypesByPosCache`, shared by every
+    /// mob's pathfinding and invalidated once per block change.
+    path_type_cache: SyncMutex<PathTypeCache>,
     /// Weather Data needed for animating starting and stopping of rain clientside
     pub weather: SyncMutex<Weather>,
     /// Per-level recent toggle history used by vanilla redstone-torch burnout.
@@ -749,9 +760,12 @@ impl World {
                 entity_manager: WorldEntityManager::new(),
                 pending_spawn_entities: SyncMutex::new(FxHashMap::default()),
                 block_entity_tickers: block_entity_ticker::WorldBlockEntityTickers::new(),
+                block_writes: AtomicU64::new(0),
+                filling_block_writes: AtomicU64::new(0),
                 game_event_listener_count: GameEventListenerCount::shared(),
                 entity_tracker: EntityTracker::new(),
                 navigating_mobs: NavigatingMobTracker::new(),
+                path_type_cache: SyncMutex::new(PathTypeCache::new()),
                 weather: SyncMutex::new(weather),
                 redstone_torch_toggles: SyncMutex::new(
                     redstone::RedstoneTorchToggleTracker::default(),
@@ -1242,6 +1256,10 @@ impl LevelReader for World {
         Self::get_block_state(self, pos)
     }
 
+    fn path_type_cache(&self) -> Option<&SyncMutex<PathTypeCache>> {
+        Some(&self.path_type_cache)
+    }
+
     fn get_block_entity(&self, pos: BlockPos) -> Option<SharedBlockEntity> {
         Self::get_block_entity(self, pos)
     }
@@ -1293,6 +1311,10 @@ impl LevelReader for World {
 impl LevelReader for Arc<World> {
     fn get_block_state(&self, pos: BlockPos) -> BlockStateId {
         self.as_ref().get_block_state(pos)
+    }
+
+    fn path_type_cache(&self) -> Option<&SyncMutex<PathTypeCache>> {
+        Some(&self.path_type_cache)
     }
 
     fn get_block_entity(&self, pos: BlockPos) -> Option<SharedBlockEntity> {

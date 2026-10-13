@@ -12,6 +12,7 @@
 
 use std::mem;
 
+use foton_math::fast_floor;
 use foton_utils::BlockPos;
 use glam::DVec3;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -35,6 +36,16 @@ const UNKNOWN: f32 = f32::NAN;
 /// A resistance cell for a position that opposes the blast with nothing.
 const NO_RESISTANCE: f32 = -1.0;
 
+/// How far from its center's block a blast of `radius` can reach, in blocks.
+///
+/// A ray's power is at most 1.3 times the radius and every step costs at least `RAY_STEP_COST`
+/// while moving `RAY_STEP`, which bounds how far from the center it can get.
+pub(super) fn blast_half_width(radius: f32) -> i32 {
+    let power = f64::from(radius.max(0.0)) * 1.3;
+    let reach = (power / f64::from(RAY_STEP_COST) + 1.0) * f64::from(RAY_STEP);
+    reach.ceil() as i32 + 2
+}
+
 /// What one explosion has already learned about the blocks around it.
 struct BlastCache {
     origin: BlockPos,
@@ -53,9 +64,7 @@ impl BlastCache {
     /// while moving `RAY_STEP`, which bounds how far from the center it can get. Positions outside
     /// the bound are still correct; they just use the hash maps.
     fn new(origin: BlockPos, radius: f32) -> Self {
-        let power = f64::from(radius.max(0.0)) * 1.3;
-        let reach = (power / f64::from(RAY_STEP_COST) + 1.0) * f64::from(RAY_STEP);
-        let half = reach.ceil() as i32 + 2;
+        let half = blast_half_width(radius);
         let side = (half as usize) * 2 + 1;
         let cells = side.saturating_mul(side).saturating_mul(side);
         let dense = cells <= MAX_DENSE_CELLS;
@@ -93,13 +102,14 @@ impl BlastCache {
         Some(((dx + half) as usize * side + (dy + half) as usize) * side + (dz + half) as usize)
     }
 
-    /// The resistance at `pos`, asking `lookup` only the first time.
+    /// The resistance at `pos`, whose dense cell is `index`, asking `lookup` only the first time.
     fn resistance(
         &mut self,
         pos: BlockPos,
+        index: Option<usize>,
         lookup: &mut impl FnMut(BlockPos) -> Option<f32>,
     ) -> Option<f32> {
-        if let Some(index) = self.dense_index(pos) {
+        if let Some(index) = index {
             let cached = self.resistance[index];
             if !cached.is_nan() {
                 return (cached != NO_RESISTANCE).then_some(cached);
@@ -114,17 +124,39 @@ impl BlastCache {
             .or_insert_with(|| lookup(pos))
     }
 
-    /// Marks `pos` as taken by the blast. True the first time only.
-    fn take(&mut self, pos: BlockPos) -> bool {
+    /// Whether `pos` held air with no fluid when the rays crossed it.
+    fn was_empty(&self, pos: BlockPos) -> bool {
         match self.dense_index(pos) {
+            Some(index) => self.resistance[index] == NO_RESISTANCE,
+            None => matches!(self.sparse_resistance.get(&pos), Some(None)),
+        }
+    }
+
+    /// Marks `pos`, whose dense cell is `index`, as taken by the blast. True the first time only.
+    fn take(&mut self, pos: BlockPos, index: Option<usize>) -> bool {
+        match index {
             Some(index) => !mem::replace(&mut self.taken[index], true),
             None => self.sparse_taken.insert(pos),
         }
     }
 }
 
-/// Casts the rays of a blast and returns the blocks they reach with power left, in the order they
-/// first reached them.
+/// The blocks a blast reaches, and what it saw of them on the way.
+pub(super) struct Blast {
+    /// The blocks the rays reached with power left, in the order they first reached them.
+    pub(super) to_blow: Vec<BlockPos>,
+    cache: BlastCache,
+}
+
+impl Blast {
+    /// Whether `pos` held air with no fluid when the rays crossed it. Only meaningful while the
+    /// world has not changed a block since.
+    pub(super) fn was_empty(&self, pos: BlockPos) -> bool {
+        self.cache.was_empty(pos)
+    }
+}
+
+/// Casts the rays of a blast and returns the blocks they reach with power left.
 ///
 /// `roll` supplies each ray's random power factor in `0..1`, `in_world` says whether a height is
 /// inside the build limits, and `resistance_at` is what a block and its fluid oppose to the blast, or
@@ -135,7 +167,7 @@ pub(super) fn cast_rays(
     mut roll: impl FnMut() -> f32,
     mut in_world: impl FnMut(i32) -> bool,
     mut resistance_at: impl FnMut(BlockPos) -> Option<f32>,
-) -> Vec<BlockPos> {
+) -> Blast {
     let mut to_blow = Vec::new();
     let mut cache = BlastCache::new(
         BlockPos::new(
@@ -172,20 +204,23 @@ pub(super) fn cast_rays(
                 let mut position = center;
 
                 while power > 0.0 {
+                    // `Mth.floor`, as vanilla's `BlockPos.containing`; the libm
+                    // call `f64::floor` compiles to costs a third of the step.
                     let pos = BlockPos::new(
-                        position.x.floor() as i32,
-                        position.y.floor() as i32,
-                        position.z.floor() as i32,
+                        fast_floor(position.x),
+                        fast_floor(position.y),
+                        fast_floor(position.z),
                     );
                     if !in_world(pos.y()) {
                         break;
                     }
 
-                    if let Some(resistance) = cache.resistance(pos, &mut resistance_at) {
+                    let index = cache.dense_index(pos);
+                    if let Some(resistance) = cache.resistance(pos, index, &mut resistance_at) {
                         power -= (resistance + 0.3) * RAY_STEP;
                     }
 
-                    if power > 0.0 && cache.take(pos) {
+                    if power > 0.0 && cache.take(pos, index) {
                         to_blow.push(pos);
                     }
 
@@ -198,7 +233,7 @@ pub(super) fn cast_rays(
         }
     }
 
-    to_blow
+    Blast { to_blow, cache }
 }
 
 #[cfg(test)]
@@ -299,7 +334,8 @@ mod tests {
                 rolls(),
                 |y| (-64..320).contains(&y),
                 terrain,
-            );
+            )
+            .to_blow;
             assert_eq!(actual, expected, "radius {radius}");
             assert!(!actual.is_empty(), "radius {radius} should reach something");
         }
@@ -318,7 +354,8 @@ mod tests {
                 *calls.entry(pos).or_default() += 1;
                 terrain(pos)
             },
-        );
+        )
+        .to_blow;
         assert!(!broken.is_empty());
         assert!(
             calls.values().all(|&n| n == 1),
@@ -326,5 +363,39 @@ mod tests {
         );
         // The old loop made one lookup per step: thousands for a TNT. Distinct blocks are few.
         assert!(calls.len() < 3000, "{} distinct lookups", calls.len());
+    }
+
+    #[test]
+    fn the_blast_remembers_which_reached_blocks_were_empty() {
+        for radius in [4.0_f32, 40.0] {
+            let blast = cast_rays(
+                DVec3::new(0.5, 61.0, 0.5),
+                radius,
+                rolls(),
+                |y| (-64..320).contains(&y),
+                terrain,
+            );
+            for pos in &blast.to_blow {
+                assert_eq!(blast.was_empty(*pos), terrain(*pos).is_none(), "{pos:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn no_ray_leaves_the_half_width() {
+        for radius in [0.5_f32, 4.0, 10.0, 40.0] {
+            let center = DVec3::new(7.99, 70.01, -0.01);
+            let origin = BlockPos::new(7, 70, -1);
+            let half = super::blast_half_width(radius);
+            let blast = cast_rays(center, radius, || 1.0, |_| true, |_| None);
+            for pos in &blast.to_blow {
+                assert!(
+                    (pos.x() - origin.x()).abs() <= half
+                        && (pos.y() - origin.y()).abs() <= half
+                        && (pos.z() - origin.z()).abs() <= half,
+                    "radius {radius}: {pos:?} beyond {half}"
+                );
+            }
+        }
     }
 }
