@@ -86,7 +86,12 @@ struct OfferedOutboundPacket {
 const OUTBOUND_PACKET_QUEUE_BYTE_BUDGET: usize = MAX_PACKET_DATA_SIZE * 2;
 
 /// Secondary bound for empty and tiny reliable packets, whose allocation overhead is not encoded bytes.
-const OUTBOUND_PACKET_QUEUE_ENTRY_CAPACITY: usize = 4096;
+///
+/// A burst that one tick queues for one player has to fit, because a full queue closes the
+/// connection. Each entity that appears costs five entries (a bundle's two delimiters, the
+/// spawn, its metadata and its velocity), so the old 4096 cut a player off at about 800 new
+/// entities: a datapack that summons 1200 TNT at once disconnected everyone near it.
+const OUTBOUND_PACKET_QUEUE_ENTRY_CAPACITY: usize = 32 * 1024;
 
 /// Entry bound for atomic chunk batches.
 const OUTBOUND_CHUNK_QUEUE_ENTRY_CAPACITY: usize = 256;
@@ -419,6 +424,18 @@ fn outbound_packet_channel_with_budgets(
 }
 
 impl OutboundPacketSender {
+    /// Packets queued for this client and not yet written, for the log line of a saturated queue.
+    fn queued_entries(&self) -> usize {
+        OUTBOUND_PACKET_QUEUE_ENTRY_CAPACITY
+            .saturating_sub(self.budgets.reliable_entry_budget.available_permits())
+    }
+
+    /// Encoded bytes queued for this client and not yet written.
+    fn queued_bytes(&self) -> usize {
+        OUTBOUND_PACKET_QUEUE_BYTE_BUDGET
+            .saturating_sub(self.budgets.byte_budget.available_permits())
+    }
+
     /// Attempts to enqueue a packet without waiting for queue capacity.
     #[expect(
         clippy::too_many_lines,
@@ -1652,9 +1669,8 @@ impl JavaConnection {
             .try_send(OutboundPacket::Packet(packet))
         {
             Ok(()) => {}
-            Err(mpsc::error::TrySendError::Full(_) | mpsc::error::TrySendError::Closed(_)) => {
-                self.close();
-            }
+            Err(mpsc::error::TrySendError::Full(_)) => self.close_saturated(),
+            Err(mpsc::error::TrySendError::Closed(_)) => self.close(),
         }
     }
 
@@ -1684,9 +1700,8 @@ impl JavaConnection {
             .try_send(OutboundPacket::Packet(packet))
         {
             Ok(()) => {}
-            Err(mpsc::error::TrySendError::Full(_) | mpsc::error::TrySendError::Closed(_)) => {
-                self.close();
-            }
+            Err(mpsc::error::TrySendError::Full(_)) => self.close_saturated(),
+            Err(mpsc::error::TrySendError::Closed(_)) => self.close(),
         }
     }
 
@@ -1732,6 +1747,23 @@ impl JavaConnection {
     /// Closes the connection.
     pub fn close(&self) {
         self.cancel_token.cancel();
+    }
+
+    /// Closes the connection because its outbound queue is full, and says so.
+    ///
+    /// This used to close without a word, so a burst that a slow client could not drain (hundreds
+    /// of entities spawned in one tick) looked to the player like a crash and to the operator
+    /// like nothing at all.
+    fn close_saturated(&self) {
+        if !self.cancel_token.is_cancelled() {
+            log::warn!(
+                "Client {}: disconnecting, its outbound packet queue is full ({} entries, {} bytes held)",
+                self.id,
+                self.outgoing_packets.queued_entries(),
+                self.outgoing_packets.queued_bytes(),
+            );
+        }
+        self.close();
     }
 
     /// The id this connection was given at accept time.
@@ -2797,7 +2829,8 @@ mod tests {
 
     #[tokio::test]
     async fn generic_packet_saturation_closes_instead_of_losing_state() {
-        let (sender, _receiver) = outbound_packet_channel_with_budget(8192);
+        let (sender, _receiver) =
+            outbound_packet_channel_with_budget(OUTBOUND_PACKET_QUEUE_ENTRY_CAPACITY * 4);
         for _ in 0..OUTBOUND_PACKET_QUEUE_ENTRY_CAPACITY {
             assert!(
                 sender
@@ -2814,7 +2847,8 @@ mod tests {
 
     #[tokio::test]
     async fn saturated_bundle_closes_without_enqueuing_either_delimiter() {
-        let (sender, mut receiver) = outbound_packet_channel_with_budget(8192);
+        let (sender, mut receiver) =
+            outbound_packet_channel_with_budget(OUTBOUND_PACKET_QUEUE_ENTRY_CAPACITY * 4);
         for _ in 0..OUTBOUND_PACKET_QUEUE_ENTRY_CAPACITY - 1 {
             assert!(
                 sender
@@ -2833,6 +2867,35 @@ mod tests {
             drop(packet);
         }
         assert_eq!(queued, OUTBOUND_PACKET_QUEUE_ENTRY_CAPACITY - 1);
+    }
+
+    /// `/function orbital:nuke_power_3` summons 1956 TNT in one tick. Each spawns for a nearby
+    /// player as a five-entry bundle, and a queue that cannot hold them closes the connection
+    /// with nothing in the log: the player sees a crash.
+    #[tokio::test]
+    async fn a_burst_of_entity_spawns_in_one_tick_fits_the_queue() {
+        const TNT_IN_A_NUKE: usize = 1956;
+        let (sender, _receiver) = outbound_packet_channel_with_budgets(
+            OUTBOUND_PACKET_QUEUE_BYTE_BUDGET,
+            Arc::new(GlobalOutboundBudget {
+                entry_budget: Arc::new(Semaphore::new(Semaphore::MAX_PERMITS)),
+                non_control_entry_budget: Arc::new(Semaphore::new(Semaphore::MAX_PERMITS)),
+                byte_budget: Arc::new(Semaphore::new(Semaphore::MAX_PERMITS)),
+                non_control_byte_budget: Arc::new(Semaphore::new(Semaphore::MAX_PERMITS)),
+                chunk_byte_budget: Arc::new(Semaphore::new(Semaphore::MAX_PERMITS)),
+            }),
+        );
+        let (connection, _client) = test_java_connection(sender).await;
+
+        for _ in 0..TNT_IN_A_NUKE {
+            connection.send_encoded_packet_bundle(vec![
+                encoded_packet(40),
+                encoded_packet(60),
+                encoded_packet(16),
+            ]);
+        }
+
+        assert!(!connection.closed());
     }
 
     fn decode(packet: RawPacket) -> DecodedPlayPacket {
