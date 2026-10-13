@@ -12,9 +12,13 @@ use foton_registry::vanilla_entity_data::PrimedTntEntityData;
 use foton_registry::vanilla_game_rules::TNT_EXPLOSION_DROP_DECAY;
 use foton_registry::{vanilla_blocks, vanilla_entities};
 use foton_utils::locks::SyncMutex;
+use foton_utils::nbt::NbtNumeric as _;
 use foton_utils::{BlockPos, BlockStateId, DowncastType, DowncastTypeKey};
 use glam::DVec3;
+use simdnbt::borrow::NbtCompound as BorrowedNbtCompoundView;
+use simdnbt::owned::NbtCompound;
 
+use crate::block_entity::block_state_nbt;
 use crate::entity::{
     Entity, EntityBase, EntityBaseLoad, EntitySyncedData, RemovalReason, next_entity_id,
 };
@@ -29,6 +33,9 @@ pub const DEFAULT_FUSE_TIME: i32 = 80;
 
 /// Blast radius of a single TNT.
 const DEFAULT_EXPLOSION_POWER: f32 = 4.0;
+
+/// Largest blast radius `readAdditionalSaveData` accepts.
+const MAX_EXPLOSION_POWER: f32 = 128.0;
 
 /// Vanilla parity: `PrimedTnt.getDefaultGravity`.
 const DEFAULT_GRAVITY: f64 = 0.04;
@@ -232,6 +239,40 @@ impl Entity for PrimedTntEntity {
         self.set_removed(RemovalReason::Discarded);
     }
 
+    /// Vanilla parity: `PrimedTnt.addAdditionalSaveData`. The owner is not saved: Foton keeps
+    /// it as an entity id, which means nothing in the next session.
+    fn save_additional(&self, nbt: &mut NbtCompound) {
+        // `putShort`: a fuse outside the short range wraps, as the Java cast does.
+        nbt.insert("fuse", self.fuse() as i16);
+        nbt.insert("block_state", block_state_nbt::save(self.block_state()));
+        let power = self.state.lock().explosion_power;
+        if (power - DEFAULT_EXPLOSION_POWER).abs() > f32::EPSILON {
+            nbt.insert("explosion_power", power);
+        }
+    }
+
+    /// Vanilla parity: `PrimedTnt.readAdditionalSaveData`. `fuse` is read as a short from any
+    /// numeric tag, so `/summon tnt ~ ~ ~ {fuse:0}` (an int) and a saved short both work.
+    fn load_additional(&self, nbt: BorrowedNbtCompoundView<'_, '_>) {
+        let fuse = nbt
+            .get("fuse")
+            .and_then(|tag| tag.codec_i32())
+            .map_or(DEFAULT_FUSE_TIME, |fuse| i32::from(fuse as i16));
+        self.set_fuse(fuse);
+
+        let block_state = nbt
+            .compound("block_state")
+            .and_then(block_state_nbt::load)
+            .unwrap_or_else(|| vanilla_blocks::TNT.default_state());
+        self.entity_data.lock().block_state.set(block_state);
+
+        self.state.lock().explosion_power = nbt
+            .get("explosion_power")
+            .and_then(|tag| tag.codec_f32())
+            .unwrap_or(DEFAULT_EXPLOSION_POWER)
+            .clamp(0.0, MAX_EXPLOSION_POWER);
+    }
+
     fn get_default_gravity(&self) -> f64 {
         DEFAULT_GRAVITY
     }
@@ -242,5 +283,79 @@ impl Entity for PrimedTntEntity {
 
     fn is_pickable(&self) -> bool {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+    use std::sync::Weak;
+
+    use foton_registry::{init_vanilla_registry, vanilla_entities};
+    use glam::DVec3;
+    use simdnbt::borrow::{NbtCompound as BorrowedNbtCompound, read_compound};
+    use simdnbt::owned::NbtCompound;
+
+    use super::{DEFAULT_FUSE_TIME, PrimedTntEntity};
+    use crate::entity::Entity as _;
+
+    fn tnt() -> PrimedTntEntity {
+        init_vanilla_registry();
+        PrimedTntEntity::new(&vanilla_entities::TNT, 1, DVec3::ZERO, Weak::new())
+    }
+
+    fn load(entity: &PrimedTntEntity, saved: &NbtCompound) {
+        let mut bytes = Vec::new();
+        saved.write(&mut bytes);
+        let Ok(borrowed) = read_compound(&mut Cursor::new(bytes.as_slice())) else {
+            panic!("test NBT should reborrow");
+        };
+        entity.load_additional(BorrowedNbtCompound::from(&borrowed));
+    }
+
+    #[test]
+    fn a_saved_fuse_and_blast_survive_a_reload() {
+        let original = tnt();
+        original.set_fuse(33);
+        original.state.lock().explosion_power = 9.0;
+        let mut saved = NbtCompound::new();
+        original.save_additional(&mut saved);
+
+        let reloaded = tnt();
+        load(&reloaded, &saved);
+        assert_eq!(reloaded.fuse(), 33);
+        assert!((reloaded.state.lock().explosion_power - 9.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn a_summoned_fuse_is_read_from_any_numeric_tag_as_a_short() {
+        let entity = tnt();
+        // A fresh compound per case: an owned compound keeps the first value of a repeated key.
+        let with_fuse = |fuse: i32| {
+            let mut nbt = NbtCompound::new();
+            nbt.insert("fuse", fuse);
+            nbt
+        };
+
+        // `/summon tnt ~ ~ ~ {fuse:0}` writes an int, and the field is a short in vanilla.
+        load(&entity, &with_fuse(0));
+        assert_eq!(entity.fuse(), 0);
+
+        // `getShortOr` converts with Java's `(short)` cast, which wraps.
+        load(&entity, &with_fuse(70_000));
+        assert_eq!(entity.fuse(), 4464);
+
+        // No fuse at all is the default one, not whatever was there before.
+        load(&entity, &NbtCompound::new());
+        assert_eq!(entity.fuse(), DEFAULT_FUSE_TIME);
+    }
+
+    #[test]
+    fn the_blast_radius_is_clamped_like_vanilla() {
+        let entity = tnt();
+        let mut nbt = NbtCompound::new();
+        nbt.insert("explosion_power", 500.0_f32);
+        load(&entity, &nbt);
+        assert!((entity.state.lock().explosion_power - 128.0).abs() < f32::EPSILON);
     }
 }

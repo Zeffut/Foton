@@ -121,6 +121,21 @@ stopsound @a master minecraft:item.shield.break
 tellraw @s {"text":"FN_SOUND_RAN"}
 EOF
 
+# High above the player, so a short fuse goes off in the air. Each fuse is read back through the
+# entity's saved data in the tick it was summoned, before it has burned at all: the console
+# throttles commands to about five seconds apart, longer than the default fuse, so a TNT that is
+# merely still there later says nothing about which fuse it was given.
+cat > "$FN/tnt.mcfunction" <<'EOF'
+summon tnt ~ ~40 ~ {fuse:0,Tags:["fz_zero"]}
+execute if entity @e[tag=fz_zero,nbt={fuse:0s}] run tellraw @s {"text":"FN_TNT_ZERO_READ"}
+summon tnt ~ ~40 ~ {fuse:5,Tags:["fz_short"]}
+execute if entity @e[tag=fz_short,nbt={fuse:5s}] run tellraw @s {"text":"FN_TNT_SHORT_READ"}
+summon tnt ~ ~40 ~ {fuse:400,Tags:["fz_long"]}
+execute if entity @e[tag=fz_long,nbt={fuse:400s}] run tellraw @s {"text":"FN_TNT_LONG_READ"}
+summon tnt ~ ~40 ~ {Tags:["fz_default"]}
+execute if entity @e[tag=fz_default,nbt={fuse:80s}] run tellraw @s {"text":"FN_TNT_DEFAULT_READ"}
+EOF
+
 cat > "$FN/cond_true.mcfunction" <<'EOF'
 return 1
 EOF
@@ -317,6 +332,15 @@ CMDS="$CMDS;;!wait 1"
 CMDS="$CMDS;;function test:sound"
 CMDS="$CMDS;;!wait 1"
 
+# --- summon tnt {fuse:N}: the fuse reaches the entity (issue #42) --------
+CMDS="$CMDS;;function test:tnt"
+CMDS="$CMDS;;!wait 1"
+# Five seconds on, a 5-tick fuse has long gone off and a 400-tick one (20 s) has not: a fuse that
+# ignored the request and burned 80 ticks would have taken both.
+CMDS="$CMDS;;execute unless entity @e[tag=fz_short] run tellraw @s {\"text\":\"FN_TNT_SHORT_GONE\"}"
+CMDS="$CMDS;;execute if entity @e[tag=fz_long] run tellraw @s {\"text\":\"FN_TNT_LONG_KEPT\"}"
+CMDS="$CMDS;;!wait 1"
+
 # --- execute if|unless function ------------------------------------------
 CMDS="$CMDS;;execute if function test:cond_true run tellraw @s {\"text\":\"FN_IF_TRUE\"}"
 CMDS="$CMDS;;execute if function test:cond_false run tellraw @s {\"text\":\"FN_IF_FALSE_RAN\"}"
@@ -428,6 +452,11 @@ said FN_MACRO_FILLED || fail "a macro line never had its argument substituted in
   || fail "a macro function ran its plain line the wrong number of times"
 
 said FN_RECIPE_GIVEN || fail "a recipe read out of a .zip datapack could not be given"
+for read in ZERO SHORT LONG DEFAULT; do
+  said "FN_TNT_${read}_READ" || fail "summon tnt did not keep its ${read} fuse (issue #42)"
+done
+said FN_TNT_SHORT_GONE || fail "summon tnt {fuse:5} was still there long after five ticks"
+said FN_TNT_LONG_KEPT || fail "summon tnt {fuse:400} exploded long before twenty seconds"
 said FN_SOUND_RAN || fail "a function with playsound and stopsound lines never ran to its end"
 
 said FN_IF_TRUE || fail "execute if function never ran the command after a passing function"
