@@ -27,6 +27,7 @@ use crate::entity::entities::ItemEntity;
 use crate::event::{BlockExplodeEvent, EntityExplodeEvent};
 use crate::fluid::get_fluid_state;
 use crate::world::World;
+use crate::world::explosion_rays::cast_rays;
 use crate::world::raycast::{ClipBlockShape, ClipFluid};
 
 /// How far a player can be from a blast and still be told about it.
@@ -69,13 +70,6 @@ impl ExplosionBlockInteraction {
         }
     }
 }
-
-/// Rays are cast from a 16x16x16 grid, using only its outer shell.
-const RAY_GRID_SIZE: i32 = 16;
-/// Distance each ray advances per step.
-const RAY_STEP: f32 = 0.3;
-/// Power every ray loses per step regardless of what it crosses.
-const RAY_STEP_COST: f32 = 0.225_000_01;
 
 /// An explosion, apart from where it lands.
 ///
@@ -390,65 +384,19 @@ impl World {
 
     /// Casts the rays that decide which blocks the blast breaks.
     ///
-    /// Vanilla parity: `ServerExplosion.calculateExplodedPositions`.
+    /// Vanilla parity: `ServerExplosion.calculateExplodedPositions`. The loop itself is in
+    /// [`cast_rays`], which looks each distinct block up once.
     fn calculate_exploded_positions(self: &Arc<Self>, center: DVec3, radius: f32) -> Vec<BlockPos> {
-        let mut to_blow = Vec::new();
-        let last = RAY_GRID_SIZE - 1;
-
-        for x in 0..RAY_GRID_SIZE {
-            for y in 0..RAY_GRID_SIZE {
-                for z in 0..RAY_GRID_SIZE {
-                    // Only the shell of the grid produces rays; the interior would
-                    // duplicate directions already covered.
-                    if x != 0 && x != last && y != 0 && y != last && z != 0 && z != last {
-                        continue;
-                    }
-
-                    let mut dx = f64::from(x) / f64::from(last) * 2.0 - 1.0;
-                    let mut dy = f64::from(y) / f64::from(last) * 2.0 - 1.0;
-                    let mut dz = f64::from(z) / f64::from(last) * 2.0 - 1.0;
-                    let length = dx.mul_add(dx, dy.mul_add(dy, dz * dz)).sqrt();
-                    if length == 0.0 {
-                        continue;
-                    }
-                    dx /= length;
-                    dy /= length;
-                    dz /= length;
-
-                    // Vanilla varies each ray's power between 70% and 130%.
-                    let mut power = radius * 0.6f32.mul_add(rand::random::<f32>(), 0.7);
-                    let mut position = center;
-
-                    while power > 0.0 {
-                        let pos = BlockPos::new(
-                            position.x.floor() as i32,
-                            position.y.floor() as i32,
-                            position.z.floor() as i32,
-                        );
-                        if self.is_outside_build_height(pos.y()) {
-                            break;
-                        }
-
-                        let state = self.get_block_state(pos);
-                        let resistance = self.explosion_resistance_at(pos, state);
-                        if let Some(resistance) = resistance {
-                            power -= (resistance + 0.3) * RAY_STEP;
-                        }
-
-                        if power > 0.0 && !to_blow.contains(&pos) {
-                            to_blow.push(pos);
-                        }
-
-                        position.x += dx * f64::from(RAY_STEP);
-                        position.y += dy * f64::from(RAY_STEP);
-                        position.z += dz * f64::from(RAY_STEP);
-                        power -= RAY_STEP_COST;
-                    }
-                }
-            }
-        }
-
-        to_blow
+        cast_rays(
+            center,
+            radius,
+            rand::random::<f32>,
+            |y| !self.is_outside_build_height(y),
+            |pos| {
+                let state = self.get_block_state(pos);
+                self.explosion_resistance_at(pos, state)
+            },
+        )
     }
 
     /// Returns the resistance a block and its fluid oppose to a blast.

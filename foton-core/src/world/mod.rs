@@ -128,6 +128,7 @@ mod entity_management;
 mod environment;
 mod events;
 pub mod explosion;
+mod explosion_rays;
 /// Vanilla game-event contexts, listeners, and dispatch storage.
 pub mod game_event;
 mod level_effects;
