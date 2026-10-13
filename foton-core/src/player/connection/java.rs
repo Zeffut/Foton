@@ -87,11 +87,17 @@ const OUTBOUND_PACKET_QUEUE_BYTE_BUDGET: usize = MAX_PACKET_DATA_SIZE * 2;
 
 /// Secondary bound for empty and tiny reliable packets, whose allocation overhead is not encoded bytes.
 ///
-/// A burst that one tick queues for one player has to fit, because a full queue closes the
-/// connection. Each entity that appears costs five entries (a bundle's two delimiters, the
-/// spawn, its metadata and its velocity), so the old 4096 cut a player off at about 800 new
-/// entities: a datapack that summons 1200 TNT at once disconnected everyone near it.
-const OUTBOUND_PACKET_QUEUE_ENTRY_CAPACITY: usize = 32 * 1024;
+/// What a burst leaves in the queue has to fit, because a full queue closes the connection, and
+/// vanilla never does: Netty buffers what a slow client has not read. Each entity that appears costs
+/// five entries (a bundle's two delimiters, the spawn, its metadata and its velocity), and each
+/// primed TNT then costs three a tick (its fuse, its position and its velocity) until it goes off.
+/// Orbital Strike Cannon's biggest nuke is 1956 TNT on a 60 tick fuse, about 352000 entries for
+/// each player in range; a client on a home connection, or one that Via translates, drains that
+/// in seconds and the queue is full before it does. 393216 holds it.
+///
+/// An entry costs about 400 bytes in memory (measured), so this is up to ~150 MB for one client that
+/// has stopped reading; [`GLOBAL_OUTBOUND_ENTRY_BUDGET`] bounds all of them together.
+const OUTBOUND_PACKET_QUEUE_ENTRY_CAPACITY: usize = 384 * 1024;
 
 /// Entry bound for atomic chunk batches.
 const OUTBOUND_CHUNK_QUEUE_ENTRY_CAPACITY: usize = 256;
@@ -104,7 +110,11 @@ const OUTBOUND_ENVELOPE_QUEUE_CAPACITY: usize =
     OUTBOUND_PACKET_QUEUE_ENTRY_CAPACITY + OUTBOUND_CHUNK_QUEUE_ENTRY_CAPACITY;
 
 /// Process-wide ceiling for retained packet entries, including tiny packets.
-const GLOBAL_OUTBOUND_ENTRY_BUDGET: usize = OUTBOUND_PACKET_QUEUE_ENTRY_CAPACITY * 16;
+///
+/// Not a multiple of the per-connection bound: a server of hundreds of players cannot afford sixteen
+/// connections' worth of ~400 byte entries, and this is the number that keeps a few stalled clients
+/// from taking the machine's memory. About 800 MB when full.
+const GLOBAL_OUTBOUND_ENTRY_BUDGET: usize = 2 * 1024 * 1024;
 
 /// Global entries inaccessible to ordinary and chunk traffic.
 const GLOBAL_OUTBOUND_CONTROL_ENTRY_RESERVE: usize = OUTBOUND_CONTROL_ENTRY_RESERVE * 16;
@@ -2897,6 +2907,37 @@ mod tests {
 
         assert!(!connection.closed());
     }
+
+    /// 1956 primed TNT send a player their fuse, position and velocity every tick for sixty ticks, and a
+    /// slow client reads none of it until the burst is over. Vanilla's Netty buffers all of it; so must
+    /// this queue, or the player is disconnected and sees a crash.
+    #[tokio::test]
+    async fn the_per_tick_updates_of_a_whole_nuke_fit_the_queue() {
+        const UPDATES_OF_A_NUKE: usize = 1956 * 60 * 3;
+        let (sender, _receiver) = outbound_packet_channel_with_budgets(
+            OUTBOUND_PACKET_QUEUE_BYTE_BUDGET,
+            Arc::new(GlobalOutboundBudget {
+                entry_budget: Arc::new(Semaphore::new(Semaphore::MAX_PERMITS)),
+                non_control_entry_budget: Arc::new(Semaphore::new(Semaphore::MAX_PERMITS)),
+                byte_budget: Arc::new(Semaphore::new(Semaphore::MAX_PERMITS)),
+                non_control_byte_budget: Arc::new(Semaphore::new(Semaphore::MAX_PERMITS)),
+                chunk_byte_budget: Arc::new(Semaphore::new(Semaphore::MAX_PERMITS)),
+            }),
+        );
+        let (connection, _client) = test_java_connection(sender).await;
+
+        for _ in 0..UPDATES_OF_A_NUKE {
+            connection.send_encoded_packet(encoded_packet(25));
+        }
+
+        assert!(!connection.closed());
+    }
+
+    // Checked when the crate is built: sixteen full connections would be 6 million entries, a couple of
+    // gigabytes, so the process-wide bound must stay below that; and one full connection has to fit in
+    // it, or the per-connection bound is fiction.
+    const _: () = assert!(GLOBAL_OUTBOUND_ENTRY_BUDGET < OUTBOUND_PACKET_QUEUE_ENTRY_CAPACITY * 16);
+    const _: () = assert!(GLOBAL_OUTBOUND_ENTRY_BUDGET >= OUTBOUND_PACKET_QUEUE_ENTRY_CAPACITY);
 
     fn decode(packet: RawPacket) -> DecodedPlayPacket {
         let Ok(decoded) = JavaConnection::decode_play_packet(packet) else {
