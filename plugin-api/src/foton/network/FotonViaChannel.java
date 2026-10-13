@@ -24,6 +24,10 @@ public final class FotonViaChannel implements AutoCloseable {
     FotonViaChannel() {
         channel = new EmbeddedChannel();
         try {
+            // Vanilla's pipeline has the frame splitter ahead of the decoder, and Via relies on a handler
+            // being in front of its own: sendToServer re-injects a packet from the context before Via's
+            // decoder, and ViaVersion 5.12 throws when that decoder is the first handler (issue #44).
+            channel.pipeline().addLast("splitter", new IdentityInboundHandler());
             channel.pipeline().addLast("decoder", new IdentityInboundHandler());
             channel.pipeline().addLast("encoder", new IdentityOutboundHandler());
             io.papermc.paper.network.ChannelInitializeListenerHolder.callListeners(channel);
