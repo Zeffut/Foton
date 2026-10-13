@@ -1,3 +1,4 @@
+use super::startup_gate::{self, GateOpening};
 use super::world_tick_workers::{WorldTickWorkerError, WorldTickWorkers};
 use super::{
     AUTOSAVE_INTERVAL, Arc, CCommandSuggestions, CHUNK_SENDING_TPS, COMMAND_REQUESTS_PER_TICK,
@@ -248,10 +249,10 @@ impl Server {
                 &mut command_data_autosaves,
             );
 
-            let tab_list_tick_stats = self.record_tick_and_capture_tab_stats(
-                tick_count,
-                tick_start.elapsed().as_nanos() as u64,
-            );
+            let tick_nanos = tick_start.elapsed().as_nanos() as u64;
+            let tab_list_tick_stats =
+                self.record_tick_and_capture_tab_stats(tick_count, tick_nanos);
+            self.record_startup_tick(tick_nanos, nanoseconds_per_tick);
 
             if self.config.tab_list_stats
                 && let Some(tick_stats) = tab_list_tick_stats
@@ -317,6 +318,25 @@ impl Server {
             player.connection.tick();
             true
         });
+    }
+
+    fn record_startup_tick(&self, tick_nanos: u64, budget_nanos: u64) {
+        let Some(opening) = self
+            .startup_gate
+            .record_tick(tick_nanos, budget_nanos, Instant::now())
+        else {
+            return;
+        };
+        let tick_count = self.tick_rate_manager.read().tick_count;
+        match opening {
+            GateOpening::Stable => {
+                log::info!("Server is keeping up after {tick_count} ticks; accepting connections");
+            }
+            GateOpening::TimedOut => log::warn!(
+                "Server still behind after {}s of ticks; accepting connections anyway",
+                startup_gate::MAX_WAIT.as_secs()
+            ),
+        }
     }
 
     fn record_tick_and_capture_tab_stats(

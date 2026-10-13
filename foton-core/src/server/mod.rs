@@ -8,6 +8,8 @@ mod pregen;
 pub mod registry_cache;
 mod run_loop;
 mod service_keys;
+/// Keeps players out until a freshly started server keeps up.
+pub mod startup_gate;
 /// The tick rate manager for the server.
 pub mod tick_rate_manager;
 /// Paper's one, five and fifteen minute TPS averages.
@@ -521,6 +523,8 @@ pub struct Server {
     player_admissions: SyncMutex<FxHashMap<Uuid, PlayerAdmissionState>>,
     /// The tick rate manager for the server.
     pub tick_rate_manager: SyncRwLock<TickRateManager>,
+    /// Opens once the server keeps up with its ticks after boot.
+    pub startup_gate: startup_gate::StartupGate,
     /// Command scoreboards isolated by Foton domain.
     pub scoreboards: DomainScoreboards,
     /// Command NBT storage isolated by Foton domain.
@@ -1252,6 +1256,7 @@ impl Server {
             player_admissions: SyncMutex::new(FxHashMap::default()),
             registry_cache,
             tick_rate_manager: SyncRwLock::new(TickRateManager::new()),
+            startup_gate: startup_gate::StartupGate::new(),
             scoreboards,
             command_storage,
             map_data,

@@ -135,8 +135,9 @@ impl Drop for SourceConnectionPermit {
 
 /// The main server struct.
 pub struct FotonServer {
-    /// The TCP listener for incoming connections.
-    pub tcp_listener: TcpListener,
+    /// The Java port. It is checked free at construction but only listened on once the
+    /// server has settled after boot; see [`foton_core::server::startup_gate`].
+    pub server_port: u16,
     /// The cancellation token for graceful shutdown.
     pub cancel_token: CancellationToken,
     /// The next client ID to be assigned.
@@ -365,7 +366,9 @@ impl FotonServer {
             }
         }
 
-        let tcp_listener =
+        // Fail now, before anything else starts, if the port is taken; `start` binds it again
+        // once the server has settled.
+        let port_check =
             match TcpListener::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, server_port)).await {
                 Ok(listener) => listener,
                 Err(source) => {
@@ -472,8 +475,10 @@ impl FotonServer {
         )
         .await;
 
+        drop(port_check);
+
         Ok(Self {
-            tcp_listener,
+            server_port,
             cancel_token,
             client_id: 0,
             server,
@@ -502,6 +507,30 @@ impl FotonServer {
         mark_plugin_host_stopping(self.plugin_host.as_ref())
     }
 
+    /// Opens the Java port once the server keeps up with its ticks, or `None` if it is shutting
+    /// down first or the port cannot be bound.
+    ///
+    /// A player let in during the first seconds after boot joins a server that is still
+    /// generating chunks and seconds behind; until then the port refuses connections.
+    async fn listen_once_settled(&self) -> Option<TcpListener> {
+        log::info!("Waiting for the server to keep up before accepting connections");
+        select! {
+            () = self.cancel_token.cancelled() => return None,
+            () = self.server.startup_gate.wait_open() => {}
+        }
+        match TcpListener::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, self.server_port)).await {
+            Ok(listener) => {
+                log::info!("Listening on port {}", self.server_port);
+                Some(listener)
+            }
+            Err(source) => {
+                log::error!("Could not listen on port {}: {source}", self.server_port);
+                self.cancel_token.cancel();
+                None
+            }
+        }
+    }
+
     /// Starts the server and begins accepting connections.
     pub async fn start(&mut self, task_tracker: TaskTracker) -> Result<(), FotonServerError> {
         log::info!("Started Foton Server");
@@ -528,14 +557,16 @@ impl FotonServer {
             task_tracker.spawn(supervisor.wait());
         }
 
+        let tcp_listener = self.listen_once_settled().await;
+
         let java_connection_limiter = JavaTcpClient::connection_limiter();
         let java_source_limiter = SourceConnectionLimiter::new(MAX_PRE_PLAY_CONNECTIONS_PER_IP);
-        loop {
+        while let Some(tcp_listener) = &tcp_listener {
             select! {
                 () = self.cancel_token.cancelled() => {
                     break;
                 }
-                accept_result = self.tcp_listener.accept() => {
+                accept_result = tcp_listener.accept() => {
                     let Some((connection, address)) =
                         accept_or_backoff(accept_result, ACCEPT_ERROR_BACKOFF).await
                     else {

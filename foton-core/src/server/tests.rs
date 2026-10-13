@@ -338,6 +338,7 @@ async fn test_server_with_worlds(
         global_player_data: SyncRwLock::new(FxHashMap::default()),
         player_admissions: SyncMutex::new(FxHashMap::default()),
         tick_rate_manager: SyncRwLock::new(TickRateManager::new()),
+        startup_gate: super::startup_gate::StartupGate::new(),
         scoreboards,
         command_storage,
         map_data,
