@@ -181,6 +181,13 @@ public class FotonEntity implements Entity, org.bukkit.projectiles.ProjectileSou
         if (!dismount && getVehicle() != null && !sameWorld) return false;
         if ((!retainPassengers && vehicle) || isDead()) return false;
         if (dismount) leaveVehicle();
+        return performTeleport(location, cause);
+    }
+
+    /** The move itself, once {@link #teleport(Location, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause,
+     * io.papermc.paper.entity.TeleportFlag...)} has applied the vehicle and passenger rules. A connected
+     * player overrides it: only the player path sends the client its new position. */
+    protected boolean performTeleport(Location location, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause) {
         return Native.teleportEntity(id.toString(), location.getWorld().getName(), location.getX(), location.getY(), location.getZ(), location.getYaw(), location.getPitch());
     }
 
@@ -188,6 +195,12 @@ public class FotonEntity implements Entity, org.bukkit.projectiles.ProjectileSou
 
     @Override public java.util.concurrent.CompletableFuture<Boolean> teleportAsync(Location location, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause) {
         return java.util.concurrent.CompletableFuture.completedFuture(teleport(location, cause));
+    }
+
+    /** Keeps the flags: the interface's default drops them on the way to the two-argument form. */
+    @Override public java.util.concurrent.CompletableFuture<Boolean> teleportAsync(Location location,
+            org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause, io.papermc.paper.entity.TeleportFlag... flags) {
+        return java.util.concurrent.CompletableFuture.completedFuture(teleport(location, cause, flags));
     }
 
     @Override public boolean isDead() { return Native.entityWorld(id.toString()) == null; }

@@ -45,6 +45,28 @@ final class EntityCheck {
         assertImplemented("hasPotionEffect", org.bukkit.potion.PotionEffectType.class);
         assertImplemented("getPotionEffect", org.bukkit.potion.PotionEffectType.class);
         assertImplemented("removePotionEffect", org.bukkit.potion.PotionEffectType.class);
+        everyTeleportFormEndsAtThePlayerPath();
+    }
+
+    /** Sharing FotonEntity's implementation made the cause and flag forms of teleport, and teleportAsync,
+     * end at Native.teleportEntity, which does not move a connected player: the client got no position
+     * and no PlayerTeleportEvent fired (issue #43). Every form must end in the player's own step. */
+    private static void everyTeleportFormEndsAtThePlayerPath() {
+        Class<?> cause = org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.class;
+        Class<?> flags = io.papermc.paper.entity.TeleportFlag[].class;
+        assertImplemented("teleport", org.bukkit.Location.class);
+        assertImplemented("teleport", org.bukkit.Location.class, cause);
+        assertImplemented("teleport", org.bukkit.Location.class, cause, flags);
+        assertImplemented("teleportAsync", org.bukkit.Location.class, cause);
+        assertImplemented("teleportAsync", org.bukkit.Location.class, cause, flags);
+        try {
+            java.lang.reflect.Method step = foton.FotonPlayer.class.getDeclaredMethod("performTeleport",
+                org.bukkit.Location.class, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.class);
+            Checks.expect(step.getDeclaringClass() == foton.FotonPlayer.class,
+                "a player must override the final teleport step");
+        } catch (NoSuchMethodException error) {
+            throw new AssertionError("FotonPlayer must override performTeleport, or a player is never moved", error);
+        }
     }
 
     private static void assertImplemented(String name, Class<?>... parameterTypes) {

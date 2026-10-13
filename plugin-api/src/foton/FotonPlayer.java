@@ -697,11 +697,13 @@ public final class FotonPlayer extends foton.entity.CraftPlayer implements org.b
         if (book != null) Native.openBook(id.toString());
     }
 
-    @Override public boolean teleport(org.bukkit.Location location) {
-        if (location == null || location.getWorld() == null) return false;
+    /** Every teleport form (with or without a cause or flags, sync or async) ends here, so each one
+     * fires {@link org.bukkit.event.player.PlayerTeleportEvent} with its own cause and sends the
+     * client its position. {@link FotonEntity#teleport} applies the vehicle rules first. */
+    @Override protected boolean performTeleport(org.bukkit.Location location,
+            org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause) {
         org.bukkit.event.player.PlayerTeleportEvent event =
-            new org.bukkit.event.player.PlayerTeleportEvent(this, getLocation(), location,
-                org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.PLUGIN);
+            new org.bukkit.event.player.PlayerTeleportEvent(this, getLocation(), location, cause);
         EventBridge.dispatch(event);
         if (event.isCancelled() || event.getTo() == null || event.getTo().getWorld() == null) return false;
         location = event.getTo();
