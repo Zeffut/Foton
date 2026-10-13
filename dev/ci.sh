@@ -31,6 +31,11 @@ run() {
     echo "PASS ($(($(date +%s) - START))s)"
   else
     echo "FAIL ($(($(date +%s) - START))s)"
+    # The next step overwrites the log, so keep a copy of this one whole. A test binary that
+    # aborts leaves nothing in the tail to name the cause, and the harness captures what a
+    # failing test printed, so the full output is the only place to look afterwards.
+    FAILED_LOG="${TMPDIR:-/tmp}/foton-ci-failed-$(date +%s).log"
+    cp /tmp/foton-ci.log "$FAILED_LOG" 2>/dev/null && echo "full output kept in $FAILED_LOG"
     # Show the errors first, then the tail. Tailing alone hid a javac failure
     # behind forty-four warnings that came after it, and the log on a CI runner
     # is the only copy anyone gets.
