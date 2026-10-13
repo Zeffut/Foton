@@ -19,8 +19,19 @@ import io.papermc.paper.command.brigadier.Commands;
 public final class CommandMap {
     private static final Map<String, Command> byName = new LinkedHashMap<>();
     private static final Map<Plugin, Commands> brigadierByPlugin = new java.util.IdentityHashMap<>();
+    /** What Foton answers itself, as Bukkit and Paper do. A plugin that claims the same name wins, and a
+     * {@link #clear()} does not take these away. */
+    private static final Map<String, Command> host = hostCommands();
 
     private CommandMap() {}
+
+    private static Map<String, Command> hostCommands() {
+        Map<String, Command> commands = new LinkedHashMap<>();
+        Command plugins = new PluginsCommand();
+        commands.put(key(plugins.getName()), plugins);
+        for (String alias : plugins.getAliases()) commands.put(key(alias), plugins);
+        return commands;
+    }
 
     /** Claims a name, and its aliases, for a plugin's command.
      *
@@ -88,7 +99,8 @@ public final class CommandMap {
     }
 
     public static Command get(String name) {
-        return byName.get(key(name));
+        Command claimed = byName.get(key(name));
+        return claimed != null ? claimed : host.get(key(name));
     }
     public static java.util.List<String> tabComplete(CommandSender sender, String buffer) {
         String line = buffer == null ? "" : buffer;
@@ -97,6 +109,8 @@ public final class CommandMap {
             String prefix = trimmed.toLowerCase(Locale.ROOT);
             java.util.List<String> result = new java.util.ArrayList<>();
             for (String name : byName.keySet()) if (name.startsWith(prefix)) result.add(name);
+            for (String name : host.keySet())
+                if (name.startsWith(prefix) && !result.contains(name)) result.add(name);
             return result;
         }
         String[] parts = trimmed.split("\\s+");

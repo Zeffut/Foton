@@ -75,6 +75,8 @@ public final class Checks {
         foton.BootstrapCommandSeedCheck.check();
         MetadataJournalCheck.check();
         assertHostIsEmpty();
+        // Last, because it empties the command map to prove the host's own commands survive that.
+        HostCommandsCheck.check();
         PluginLifecycle.checkTerminalShutdown();
         System.out.println(
             "plugin API checked: services, events, scheduler, lifecycle, network hooks, YAML,\n"
