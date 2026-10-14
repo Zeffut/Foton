@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["boolean","click_event","compound_field","content","custom","end","field","hover_event","integer","invalid","list","nbt","nested","plain","string","style_fields","tag_id","write","write_bounded","write_payload","write_style","write_utf"],"mod":["child_classification_work"]};

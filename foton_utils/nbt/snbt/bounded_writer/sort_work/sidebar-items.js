@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["COMPARISONS"],"fn":["compare","measure"]};

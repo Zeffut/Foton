@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DECREASE_WARNING_LEVEL_EVERY_INTERVAL","MAX_WARNING_LEVEL","PLAYER_SEARCH_RADIUS","WARNING_CHECK_DIAMETER","WARNING_LEVEL_INCREASE_COOLDOWN"],"fn":["has_nearby_warden","nearby_player_handle","nearby_players","try_warn"],"struct":["WardenSpawnTracker"]};

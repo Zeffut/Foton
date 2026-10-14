@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DISPLAY_CYCLE_TICK_RATE","INSERT_FAIL_SOUND_BUFFER_TICKS","UNLOCKING_DELAY_TICKS"],"fn":["is_valid_to_insert","play_insert_fail_sound","resolve_items_to_eject","set_vault_state"],"struct":["VaultBlockEntity","VaultData"]};

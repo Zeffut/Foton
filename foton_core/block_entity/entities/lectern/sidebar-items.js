@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SIGNAL_RANGE"],"fn":["page_count_of"],"struct":["LecternBlockEntity","LecternState"]};

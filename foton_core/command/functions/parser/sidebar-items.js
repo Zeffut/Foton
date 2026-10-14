@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_COMMAND_LINE_LENGTH"],"enum":["FunctionBody"],"fn":["check_line_length","ends_with_continuation","join_continuations","parse_body","parse_command_line","parse_function","slash_prefix_error"],"struct":["BodyBuilder","FunctionParseError"]};

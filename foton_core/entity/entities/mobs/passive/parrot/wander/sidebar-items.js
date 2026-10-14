@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["TREE_SEARCH_HORIZONTAL","TREE_SEARCH_VERTICAL","WATER_ESCAPE_RANGE"],"fn":["parrot_wander_position","tree_position"]};

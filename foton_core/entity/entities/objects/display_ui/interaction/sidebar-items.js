@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_EYE_HEIGHT_RATIO","DEFAULT_HEIGHT","DEFAULT_WIDTH"],"struct":["InteractionEntity","InteractionState","PlayerAction"]};

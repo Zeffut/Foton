@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_LIVE_JAVA_CONNECTIONS","NETWORK_WRITE_TIMEOUT","PRE_PLAY_LIFETIME_TIMEOUT","PRE_PLAY_READ_TIMEOUT","TRANSLATED_SERVERBOUND_CAPACITY","TRANSLATION_POLL_INTERVAL"],"enum":["ConnectionUpdate"],"fn":["translation_handoff"],"struct":["ConnectionAction","ConnectionLifetimePermit","JavaTcpClient","OfferedPacket","ServerConnectionSession"]};

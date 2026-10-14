@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["damage","durability","has_meta","similar"]};

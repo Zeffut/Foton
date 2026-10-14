@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["capture_slot","commit_batch","commit_if_unchanged","ender_chest_slot","inventory_slot","read","set_ender_chest_slot","set_inventory_slot","set_inventory_slot_if_unchanged","set_slots","validate_slots","write","write_batch","write_if_unchanged"]};

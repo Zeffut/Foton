@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["bindings","chunk_persistent_data","decode","encode","entity_persistent_data","set_chunk_persistent_data","set_entity_persistent_data","to_java"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["PreparedPublicationError","SpawnEntityInitialization","SpawnStrategy"],"fn":["create_entity_at","create_entity_at_initialized","is_refused_underfoot","move_to_possible_spawn_position","prepare_then_publish","spawn_entity_at","spawn_entity_at_initialized","try_spawn_mob"]};

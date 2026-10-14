@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FACING_STEP","MAX_DROP","PLACE_PITCH","PLACE_VOLUME"],"fn":["placement_yaw","resting_y_offset"],"struct":["ArmorStandItem"]};

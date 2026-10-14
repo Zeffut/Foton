@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["from_json","rgb_to_hex","to_json","to_model"]};

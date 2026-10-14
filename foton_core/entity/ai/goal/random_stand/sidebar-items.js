@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["STAND_CONFIRM_SIDES","STAND_ROLL_SIDES"],"struct":["RandomStandGoal"]};

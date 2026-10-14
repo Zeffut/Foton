@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["imitated_sound","is_imitable"],"static":["MOB_SOUND_MAP"]};

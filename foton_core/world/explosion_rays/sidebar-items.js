@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_DENSE_CELLS","NO_RESISTANCE","RAY_GRID_SIZE","RAY_STEP","RAY_STEP_COST","UNKNOWN"],"fn":["blast_half_width","cast_rays"],"struct":["Blast","BlastCache"]};

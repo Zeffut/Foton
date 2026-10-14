@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CARTOGRAPHY_INPUT_SLOTS","RESULT_SLOT"],"fn":["cartography"],"struct":["CartographyKind"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["can_hold_item","load_zombie","save_zombie","wants_to_pick_up"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["NANOS_PER_SECOND","SAMPLE_INTERVAL"],"struct":["RollingAverage","TpsAverages"]};

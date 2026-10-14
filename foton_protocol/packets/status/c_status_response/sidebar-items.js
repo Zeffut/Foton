@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["minecraft_json"],"struct":["CStatusResponse","Players","Sample","Status","Version"]};

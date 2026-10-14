@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["PartialPredicate"],"fn":["collection_matches","double_bounds_matches","firework_matches","int_bounds_matches","matches","matches_view","registered_attribute_modifier_matches","registered_enchantment_matches","registered_partial_matches"],"trait":["ItemInstanceView"]};

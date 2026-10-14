@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ItemModifierArgument"],"fn":["parse_item_modifier","suggest_item_modifiers"]};

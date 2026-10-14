@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["XP_REWARD"],"struct":["GiantEntity"]};

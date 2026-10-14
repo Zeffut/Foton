@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["fire_if_moved","placement_of"],"type":["Placement"]};

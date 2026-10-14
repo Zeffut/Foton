@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ATTACK_ANIMATION_DURATION","ATTACK_ANIMATION_EVENT","PROBABILITY_OF_SPAWNING_AS_BABY"],"fn":["hurt_and_throw_target","throw_target"],"trait":["HoglinBase"]};

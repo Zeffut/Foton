@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ABANDONED_ENTITY_TIMEOUT"],"fn":["bindings","deserialize_entity_native","discard_pending","entity_is_pending","pending","pending_entity","serialize_entity_native","spawn_pending_entity"],"static":["PENDING"],"type":["Pending"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["decode_attribute_edit","decode_edit","decode_potion_edit","group_prefixes","header","materialize","string_field","text"]};

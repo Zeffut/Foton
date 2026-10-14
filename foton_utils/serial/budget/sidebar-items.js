@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ACTIVE","DEFAULT_COLLECTION_ALLOCATION_BUDGET"],"fn":["charge","charge_map","check_collection_input","collection_capacity","is_active","read_collection_count","read_vec"],"struct":["DecodeBudget"]};

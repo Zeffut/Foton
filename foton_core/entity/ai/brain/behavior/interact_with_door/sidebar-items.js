@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["COOLDOWN_BEFORE_RERUNNING_IN_SAME_NODE","MAX_DISTANCE_TO_HOLD_DOOR_OPEN_FOR_OTHER_MOBS","SKIP_CLOSING_DOOR_IF_FURTHER_AWAY_THAN"],"fn":["close_doors_behind","interactable_door","is_door_too_far_away","is_mob_coming_through_door","is_open","open_door","other_mobs_coming_through_door","remember_door"],"struct":["InteractWithDoor"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_LINE_OF_SIGHT_TEST_RANGE","MAX_RADIUS","MIN_RADIUS","SPREAD_DEGREES"],"fn":["direction_from_yaw","has_line_of_sight","max_line_of_sight_test_range","next_gaussian","random_point_behind_target"]};

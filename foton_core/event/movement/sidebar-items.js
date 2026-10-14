@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["FailMoveReason","TeleportCause"],"struct":["PlayerFailMoveEvent","PlayerTeleportEvent","PlayerToggleFlightEvent","PlayerVelocityEvent","TeleportPoint","VehicleMoveEvent"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["command","display_name","give","give_all","give_one","named_recipe","registration","result","take","take_all","take_one","targets_then_recipes"]};

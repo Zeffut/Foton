@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["AXIS","NATURAL","NATURAL_BREAK_EXPERIENCE","STATE"],"fn":["awake_or_dormant","axis_directions"],"struct":["CreakingHeartBlock"]};

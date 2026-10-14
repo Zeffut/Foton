@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_ACTIVATION_RANGE","DEFAULT_DEACTIVATION_RANGE"],"mod":["block_entity","config","server_data","shared_data","state"],"struct":["VaultBlockEntity","VaultConfig","VaultServerData","VaultSharedData"],"trait":["VaultStateExt"]};

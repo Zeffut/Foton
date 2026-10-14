@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["bindings","fields_data","particle_data","player_particles","requested","spawn_particles"]};

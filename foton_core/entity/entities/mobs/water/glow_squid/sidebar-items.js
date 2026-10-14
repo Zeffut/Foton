@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BABY_DIMENSIONS","DARK_TICKS_ON_HURT","GRAVITY","SOUND_VOLUME"],"struct":["GlowSquidEntity"]};

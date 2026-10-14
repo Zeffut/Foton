@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["OutboundPacket","PlayerConnection"],"fn":["outbound_packet_channel","write_final_disconnect"],"mod":["java"],"struct":["BundleBuilder","ClientInformation","JavaConnection","OutboundPacketReceiver","OutboundPacketSender"],"trait":["NetworkConnection"],"type":["JavaNetworkWriter"]};

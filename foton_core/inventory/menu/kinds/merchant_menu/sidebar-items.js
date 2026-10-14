@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["RESULT_SLOT"],"fn":["merchant_menu"],"struct":["MerchantKind"]};

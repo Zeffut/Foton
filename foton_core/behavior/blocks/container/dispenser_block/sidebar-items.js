@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_ACCURACY","DISPENSE_OFFSET","FACING","TRIGGERED","TRIGGER_DURATION"],"fn":["analog_output_signal","dispense_from","dispense_position","drop_from","play_dispense_effects","spawn_dispensed_item"],"macro":[["dispenser_variant",1]],"struct":["DispenserBase","DispenserBlock","DropperBlock"]};

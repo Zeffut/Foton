@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_REWARD_PLAYERS"],"struct":["VaultServerData"]};

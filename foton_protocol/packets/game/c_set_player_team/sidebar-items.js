@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["TeamCollisionRule","TeamColor","TeamMethod","TeamVisibility"],"struct":["CSetPlayerTeam","TeamParameters"]};

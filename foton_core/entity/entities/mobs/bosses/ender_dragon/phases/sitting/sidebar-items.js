@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ATTACK_VIEW_RANGE","ATTACK_Y_VIEW_RANGE","CHARGE_VIEW_RANGE","FLAME_ATTACKS_COUNT","FLAME_DURATION","FLAME_RADIUS","ROAR_DURATION","SCANNING_IDLE_TICKS","SCAN_TICKS_BEFORE_ATTACK","WARMUP_TIME"],"struct":["DragonSittingAttackingPhase","DragonSittingFlamingPhase","DragonSittingScanningPhase","FlamingState"]};

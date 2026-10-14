@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["abstract_piglin","behaviors","entity","piglin_ai","piglin_brute","piglin_brute_ai"]};

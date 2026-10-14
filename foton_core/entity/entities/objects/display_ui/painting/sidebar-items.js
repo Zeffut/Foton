@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEPTH","SHIFT_TO_BLOCK_WALL","SUPPORT_BOX_EPSILON"],"fn":["direction_2d_data_value","direction_from_2d_data_value","hanging_entity_direction","is_diode","offset_for_painting_size","variant_area"],"struct":["PaintingEntity"]};

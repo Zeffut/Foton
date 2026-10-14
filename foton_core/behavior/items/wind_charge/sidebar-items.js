@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SHOOT_POWER","SHOOT_UNCERTAINTY"],"struct":["WindChargeItem"]};

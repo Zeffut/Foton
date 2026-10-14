@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["add_team_entry","apply_display","component_json","deserialized","parse_component","register_team","remove_team_entry","serialized","set_team_property","team_names","team_property","text","unregister_team","with_scoreboard"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_DURATION_TICKS","INFINITE_DURATION","TICKS_PER_SECOND"],"fn":["amplifier_node","clear_all","clear_effects","clear_one","clear_self","command","effect_display_name","effect_duration","give","registration","seconds"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["EJECT_ACCURACY","EJECT_HEIGHT","STATE_UPDATE_TICK_RATE"],"fn":["can_eject_reward","cycle_display_item_from_loot_table","eject_result_item","on_transition","random_display_item","tick_and_get_next","update_state_for_connected_players"],"trait":["VaultStateExt"]};

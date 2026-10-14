@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["LEGACY_FOLDERS"],"fn":["discover_dimensions","list_region_files","sorted_subdirectories"],"struct":["SourceDimension"]};

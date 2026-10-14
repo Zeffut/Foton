@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["HIDE_TIMEOUT","TICKS_PER_SECOND"],"fn":["is_home_poi"],"struct":["LocateHidingPlace","SetHiddenState"]};

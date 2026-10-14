@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["LOOK_TURN_RATE","SIGHT_TICKS_BEFORE_HOLDING"],"struct":["RangedAttackGoal"],"type":["FireAtTarget"]};

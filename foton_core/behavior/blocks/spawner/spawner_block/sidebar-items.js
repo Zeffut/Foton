@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["EXPERIENCE_BASE","EXPERIENCE_ROLL"],"struct":["SpawnerBlock"]};

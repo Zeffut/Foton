@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["book_resolved","describe","describe_name","field","field_bytes","native_book","parse","push_book_raw","unhex","unhex_bytes"],"mod":["extensions"]};

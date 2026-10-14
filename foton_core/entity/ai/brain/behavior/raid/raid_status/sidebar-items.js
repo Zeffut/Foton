@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["RAID_LOOKUP_CHANCE_IN"],"struct":["ResetRaidStatus","SetRaidStatus"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["LIGHT_RANGE"],"fn":["load_light_limit","load_loot_table_list","save_light_limit","save_loot_table_list"],"struct":["CustomSpawnRules","EquipmentTable","SpawnData"]};

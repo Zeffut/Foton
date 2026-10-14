@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FACING","ROTATION_16"],"fn":["new_banner_block_entity"],"struct":["BannerBlock","WallBannerBlock"]};

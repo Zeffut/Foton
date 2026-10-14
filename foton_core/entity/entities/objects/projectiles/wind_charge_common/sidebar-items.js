@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BLOCK_HIT_NORMAL_OFFSET","DEFLECTED_ACCELERATION_POWER","IMPACT_DAMAGE","INERTIA","MAX_Y_OVERSHOOT","PASSIVE_DEFLECTION_SCALE"],"fn":["block_burst_center","inertia_applied","is_wind_charge"],"struct":["AbstractWindChargeBase"],"trait":["AbstractWindCharge"]};

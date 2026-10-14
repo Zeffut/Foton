@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["bred_animals","context_for","entity_hurt_player","entity_killed_player","hurt","interacted","kill_mob_near_sculk_catalyst","killed","player_hurt_entity","player_killed_entity","player_sheared_equipment","started_riding","tame_animal"]};

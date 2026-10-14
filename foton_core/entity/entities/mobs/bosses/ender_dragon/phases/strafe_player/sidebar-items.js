@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FIREBALL_AIM_TOLERANCE_DEGREES","FIREBALL_CHARGE_AMOUNT","FIREBALL_RANGE_SQR","FIREBALL_SPAWN_OFFSET"],"fn":["strafe_height_offset"],"struct":["DragonStrafePlayerPhase","StrafeState"]};

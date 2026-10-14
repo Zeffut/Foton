@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_SPIKE_BUDGETS","MAX_WAIT","WINDOW_TICKS"],"enum":["GateOpening"],"struct":["Progress","StartupGate"]};

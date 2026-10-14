@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CUSTOM_DATA","MAX_GRID"],"fn":["category","group","ingredient","item","not_an_ingredient","notification","parse_id","read_component","register","result","shaped","shapeless","to_list","to_nbt"]};

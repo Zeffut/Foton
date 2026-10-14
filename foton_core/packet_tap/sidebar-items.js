@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["TapPhase","TapVerdict"],"struct":["PacketTaps","TapOutcome"],"trait":["PacketTap"]};

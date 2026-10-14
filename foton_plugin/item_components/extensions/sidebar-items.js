@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SEPARATOR"],"fn":["armor_trim","attribute_modifier","banner_layer","describe","describe_profile","field","hex","holder_key","parse","unhex"],"struct":["ProfileFields"]};

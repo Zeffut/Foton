@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["capture","jukebox","lectern","pages","read","set_jukebox","set_lectern"]};

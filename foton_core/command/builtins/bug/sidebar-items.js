@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["LIST_LIMIT"],"fn":["command","file_report","first_line","list_reports","open_form","registration"]};

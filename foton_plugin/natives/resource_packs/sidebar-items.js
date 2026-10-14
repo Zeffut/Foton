@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_PACK_URL_LENGTH"],"fn":["bindings","remove_resource_packs","resource_pack_status","send_resource_pack"]};

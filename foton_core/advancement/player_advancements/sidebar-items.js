@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["TabSelection"],"fn":["criterion_progress"],"struct":["AdvancementUpdate","AwardOutcome","CriterionRef","PlayerAdvancements"]};

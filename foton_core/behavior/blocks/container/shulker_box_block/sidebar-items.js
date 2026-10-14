@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FACING","MENU_ROWS"],"struct":["ShulkerBoxBlock"]};

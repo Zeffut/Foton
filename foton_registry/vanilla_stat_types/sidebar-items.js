@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["register_stat_types"],"static":["BROKEN","CRAFTED","CUSTOM","DROPPED","KILLED","KILLED_BY","MINED","PICKED_UP","USED"]};

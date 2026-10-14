@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["FloodgateLoginError"],"fn":["is_trusted","resolve_floodgate","resolve_floodgate_login"]};

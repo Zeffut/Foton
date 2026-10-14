@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SHULKER_BOX_SLOTS"],"struct":["ShulkerBoxBlockEntity","ShulkerBoxContainer"]};

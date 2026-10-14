@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["default_can_be_replaced","drop_from_block_interact_loot_table","offer_harvest","pop_block_experience","sample_block_experience","update_from_neighbour_shapes"],"mod":["collision","context","registry","waterlogging"],"struct":["BrushableData"],"trait":["BlockBehavior"]};

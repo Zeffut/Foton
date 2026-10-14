@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["argument","biome","block","coordinates","function","item","item_modifier","item_predicate","nbt","permission","profile","queue","runtime","score","scoreboard_args","selector","source","structure","text","world"]};

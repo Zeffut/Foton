@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["FeatureEntry","FeatureIdentity"],"struct":["BiomeFeatures","FeatureSorter","FeatureStepData","FeatureVertex"]};

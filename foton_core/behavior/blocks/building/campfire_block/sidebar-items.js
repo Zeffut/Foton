@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["HORIZONTAL_FACING","LIT","SIGNAL_FIRE","SMOKE_REACH","WATERLOGGED"],"fn":["is_lit_campfire","is_smokey_pos"],"struct":["CampfireBlock"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["KEPT_TICKS","SWEEP_AT"],"fn":["forget","remember","take"],"static":["UNHEARD"],"type":["DamageArgs"]};

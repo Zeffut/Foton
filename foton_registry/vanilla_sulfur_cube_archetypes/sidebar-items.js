@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["register_sulfur_cube_archetypes"],"static":["BOUNCY","EXPLOSIVE","FAST_FLAT","FAST_SLIDING","HIGH_RESISTANCE","HOT","LIGHT","REGULAR","SLOW_BOUNCY","SLOW_FLAT","SLOW_SLIDING","STICKY"]};

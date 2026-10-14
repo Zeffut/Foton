@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["count_enchanting_power","is_valid_bookshelf"],"static":["BOOKSHELF_OFFSETS"],"struct":["EnchantingTableBlock"]};

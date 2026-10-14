@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["AVERAGE_WAIT_TIME_BETWEEN_RUNS","FLEE_ATTEMPTS","MAX_CHASERS_PER_TARGET","MAX_FLEE_XZ_DIST","MAX_FLEE_Y_DIST","PLAY_SPEED_MODIFIER"],"fn":["being_chased","chase_kid","chasing","run_away"],"struct":["PlayTagWithOtherKids"]};

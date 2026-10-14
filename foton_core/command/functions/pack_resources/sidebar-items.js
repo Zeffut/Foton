@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_RESOURCE_BYTES"],"enum":["PackResources"],"fn":["directory_resources","missing_root_entry","read_capped","read_sorted_entries"],"struct":["ArchivePack","Resource"]};

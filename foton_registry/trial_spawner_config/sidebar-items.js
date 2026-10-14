@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_SIMULTANEOUS_MOBS","DEFAULT_SIMULTANEOUS_MOBS_ADDED_PER_PLAYER","DEFAULT_SPAWN_RANGE","DEFAULT_TICKS_BETWEEN_SPAWN","DEFAULT_TOTAL_MOBS","DEFAULT_TOTAL_MOBS_ADDED_PER_PLAYER","TICKS_BETWEEN_ITEM_SPAWNERS"],"enum":["TrialSpawnerConfigHolder"],"fn":["default_loot_tables_to_eject","float_or","numeric_or"],"struct":["TrialSpawnerConfig"]};

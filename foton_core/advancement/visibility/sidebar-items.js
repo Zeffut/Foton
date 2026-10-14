@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["VISIBILITY_DEPTH"],"enum":["VisibilityRule"],"fn":["evaluate","revealed_from_above","rule_for","walk"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["add_objective","clear_display_slot","list_objectives","modify_subcommands","remove_objective","set_display_auto_update","set_display_name","set_display_slot","set_objective_format","set_render_type","subcommands"],"type":["Node"]};

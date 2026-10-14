@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DELAY_BETWEEN_PLAYER_SCANS","TRIAL_OMEN_PER_BAD_OMEN_LEVEL"],"struct":["TrialSpawnerStateData"]};

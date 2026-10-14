@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CLOUD_LAYER_THICKNESS","FIRE_IGNITE_SECONDS","LAVA_IGNITE_SECONDS","MAX_PLAYER_JUMP_CHARGE"],"enum":["AcceptedClientMovementOutcome"],"fn":["apply_entity_look_at","look_at_rotation","wrap_look_at_degrees"],"struct":["AcceptedClientMovement"],"trait":["Entity","EntityEventSource"]};

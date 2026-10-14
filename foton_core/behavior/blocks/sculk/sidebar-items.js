@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["sculk_block","sculk_catalyst_block","sculk_sensor_block","sculk_shrieker_block","spreader"]};
