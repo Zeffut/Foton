@@ -205,6 +205,9 @@ use simdnbt::owned::{NbtCompound, read_tag};
 use text_components::{TextComponent, content::Content as TextContent};
 use uuid::Uuid;
 
+use crate::forward::forget_heard_events;
+use crate::unheard_damage;
+
 mod attributes;
 mod blocks;
 mod displays;
@@ -8619,6 +8622,28 @@ extern "system" fn save_players(_env: JNIEnv<'_>, _class: JClass<'_>) {
     }
 }
 
+/// `foton.Native.unheardDamage`: the last hit no plugin heard, as `tick` then the
+/// `fireEntityDamage` arguments, unit-separated; null when there is none. Taking it forgets it.
+extern "system" fn unheard_damage(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    entity: JString<'_>,
+) -> jstring {
+    let kept = env
+        .get_string(&entity)
+        .ok()
+        .map(String::from)
+        .and_then(|entity| Uuid::parse_str(&entity).ok())
+        .and_then(unheard_damage::take)
+        .map(|(tick, args)| format!("{tick}\u{1f}{}", args.join("\u{1f}")));
+    to_java(&mut env, kept)
+}
+
+/// `foton.Native.handlersChanged`
+extern "system" fn handlers_changed(_env: JNIEnv<'_>, _class: JClass<'_>) {
+    forget_heard_events();
+}
+
 /// `foton.Native.shutdown`
 extern "system" fn shutdown(_env: JNIEnv<'_>, _class: JClass<'_>) {
     if let Some(server) = server() {
@@ -13905,6 +13930,12 @@ pub(crate) fn bindings() -> Vec<jni::NativeMethod> {
         ),
         method("isPrimaryThread", "()Z", is_primary_thread as *mut c_void),
         method("shutdown", "()V", shutdown as *mut c_void),
+        method("handlersChanged", "()V", handlers_changed as *mut c_void),
+        method(
+            "unheardDamage",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            unheard_damage as *mut c_void,
+        ),
         method("savePlayers", "()V", save_players as *mut c_void),
         method(
             "experienceProgress",

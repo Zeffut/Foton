@@ -79,6 +79,7 @@ public final class EventBridge {
                     annotation.ignoreCancelled(), plugin));
                 list.sort(Comparator.comparing(handler -> handler.priority));
             }
+            handlersMoved();
         }
     }
 
@@ -140,6 +141,7 @@ public final class EventBridge {
                 list.removeIf(handler -> handler.plugin == plugin);
                 if (list.isEmpty()) handlers.remove(entry.getKey(), list);
             }
+            handlersMoved();
         }
     }
 
@@ -152,6 +154,7 @@ public final class EventBridge {
                 list.removeIf(handler -> handler.listener == listener);
                 if (list.isEmpty()) handlers.remove(entry.getKey(), list);
             }
+            handlersMoved();
         }
     }
 
@@ -159,6 +162,7 @@ public final class EventBridge {
     public static void unregisterAll() {
         synchronized (PluginHost.lifecycleLock()) {
             handlers.clear();
+            handlersMoved();
         }
     }
 
@@ -180,6 +184,7 @@ public final class EventBridge {
                 handlers.computeIfAbsent(event, key -> new CopyOnWriteArrayList<>());
             list.add(new Handler(listener, null, executor, priority, ignoreCancelled, plugin));
             list.sort(Comparator.comparing(handler -> handler.priority));
+            handlersMoved();
         }
     }
 
@@ -215,6 +220,41 @@ public final class EventBridge {
         } finally {
             REPORTING.set(false);
         }
+    }
+
+    /** Tells the native side the handlers changed. Without a server -- the offline checks --
+     * there is nobody to tell. */
+    private static void handlersMoved() {
+        try {
+            Native.handlersChanged();
+        } catch (UnsatisfiedLinkError noServer) {
+            // No native library is bound.
+        }
+    }
+
+    private static final Map<String, Class<?>> LISTENED_TYPES = new ConcurrentHashMap<>();
+
+    /** Whether any handler would receive an event of this class. The native side asks before
+     * building an event nobody hears -- every TNT of a nuke fires several -- and keeps the
+     * answer until {@link Native#handlersChanged} says the handlers moved. A class it cannot
+     * resolve counts as heard. */
+    public static boolean listens(String className) {
+        Class<?> type = LISTENED_TYPES.computeIfAbsent(className, name -> {
+            try {
+                return Class.forName(name, false, EventBridge.class.getClassLoader());
+            } catch (ClassNotFoundException error) {
+                return null;
+            }
+        });
+        if (type == null) {
+            return true;
+        }
+        for (Map.Entry<Class<?>, CopyOnWriteArrayList<Handler>> entry : handlers.entrySet()) {
+            if (!entry.getValue().isEmpty() && entry.getKey().isAssignableFrom(type)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static void dispatch(Object event) {
@@ -576,11 +616,37 @@ public final class EventBridge {
 
     public static void setLastDamageCause(java.util.UUID entity, org.bukkit.event.entity.EntityDamageEvent event) {
         if (entity == null) return;
+        // Whatever hit the native side kept unheard is older than this one.
+        unheardDamage(entity);
         if (event == null) LAST_DAMAGE.remove(entity);
         else LAST_DAMAGE.put(entity, new DamageRecord(event, Bukkit.getCurrentTick()));
     }
 
+    /** Takes the last hit no handler heard, if the native side kept one. Without a server --
+     * the offline checks -- there is none. */
+    private static String unheardDamage(java.util.UUID entity) {
+        try {
+            return Native.unheardDamage(entity.toString());
+        } catch (UnsatisfiedLinkError noServer) {
+            return null;
+        }
+    }
+
     public static org.bukkit.event.entity.EntityDamageEvent lastDamageCause(java.util.UUID entity) {
+        // A hit nobody listened to was kept as facts; build its event now that someone asks.
+        String unheard = unheardDamage(entity);
+        if (unheard != null) {
+            String[] parts = unheard.split("\u001f", -1);
+            if (parts.length == 7) {
+                try {
+                    LAST_DAMAGE.put(entity, new DamageRecord(EventRelay.damageEvent(
+                        parts[1], parts[2], parts[3], parts[4], parts[5], parts[6]),
+                        Long.parseLong(parts[0])));
+                } catch (RuntimeException malformed) {
+                    // A hit that cannot be rebuilt is no last damage at all.
+                }
+            }
+        }
         DamageRecord record = LAST_DAMAGE.get(entity);
         if (record == null || Bukkit.getCurrentTick() - record.tick() > 40) {
             LAST_DAMAGE.remove(entity, record);

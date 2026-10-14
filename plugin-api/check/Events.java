@@ -85,8 +85,31 @@ final class Events {
         Checks.same(ignoredCancellation[0], 1,
             "registerEvent(ignoreCancelled=false) should receive a cancelled event");
 
+        listensOnlyForHandledEvents(owner, listener);
         pluginMessages(owner);
         scheduler();
+    }
+
+    /** The native side skips building events nobody hears; it must still build one a handler
+     * of the event's own class or of a superclass would receive. */
+    private static void listensOnlyForHandledEvents(org.bukkit.plugin.Plugin owner,
+            org.bukkit.event.Listener listener) {
+        String explode = "org.bukkit.event.entity.EntityExplodeEvent";
+        Checks.expect(!foton.EventBridge.listens(explode),
+            "an explosion nobody listens to was reported as heard");
+        Checks.expect(foton.EventBridge.listens("not.a.real.Event"),
+            "an event class the bridge cannot resolve must count as heard");
+        org.bukkit.Bukkit.getPluginManager().registerEvent(
+            org.bukkit.event.entity.EntityEvent.class,
+            listener,
+            org.bukkit.event.EventPriority.NORMAL,
+            (registered, event) -> { },
+            owner,
+            false);
+        Checks.expect(foton.EventBridge.listens(explode),
+            "a handler of a superclass did not make the explosion heard");
+        Checks.expect(!foton.EventBridge.listens("org.bukkit.event.block.BlockExplodeEvent"),
+            "a handler of entity events made a block event heard");
     }
 
     private static void pluginMessages(org.bukkit.plugin.Plugin owner) {

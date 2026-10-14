@@ -60,6 +60,7 @@ mod natives_live_api_tests;
 mod packet_tap;
 mod relay;
 mod scoreboard_natives;
+mod unheard_damage;
 mod via;
 
 /// The class the Java side exposes to this one.

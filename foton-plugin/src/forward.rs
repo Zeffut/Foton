@@ -9,11 +9,16 @@
 //! Nothing on either side holds a reference to the other's objects past the
 //! call, which is the only reason the lifetimes work at all.
 
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock};
+
+use foton_utils::locks::SyncMutex as Mutex;
+use rustc_hash::FxHashMap;
 
 use crate::natives::describe_slot;
 use crate::natives::parse_slot;
 use crate::relay::{self, component};
+use crate::unheard_damage;
 use crate::{enchantment, natives};
 use foton_core::entity::Entity as _;
 use foton_core::entity::PluginSpawnReason;
@@ -422,6 +427,9 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     });
     let jvm = Arc::clone(&vm);
     events.on::<EntityExplodeEvent, _>(owner(), move |event| {
+        if !heard(&jvm, &["org.bukkit.event.entity.EntityExplodeEvent"]) {
+            return;
+        }
         let Some(entity) = event.entity() else {
             return;
         };
@@ -441,6 +449,9 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     });
     let jvm = Arc::clone(&vm);
     events.on::<BlockExplodeEvent, _>(owner(), move |event| {
+        if !heard(&jvm, &["org.bukkit.event.block.BlockExplodeEvent"]) {
+            return;
+        }
         let Some((cancelled, blocks)) =
             block_explode_call(&jvm, event.world(), event.source(), event.blocks())
         else {
@@ -487,6 +498,9 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     });
     let jvm = Arc::clone(&vm);
     events.on::<ExplosionPrimeEvent, _>(owner(), move |event| {
+        if !heard(&jvm, &["org.bukkit.event.entity.ExplosionPrimeEvent"]) {
+            return;
+        }
         match explosion_prime_call(&jvm, event.entity(), event.radius(), event.fire()) {
             None => {}
             Some(radius) if radius < 0.0 => event.set_cancelled(true),
@@ -620,12 +634,24 @@ pub(crate) fn subscribe(server: &Arc<Server>, vm: Arc<JavaVM>) {
     let jvm = Arc::clone(&vm);
     events.on::<EntityRemoveFromWorldEvent, _>(owner(), move |event| {
         let entity = event.entity();
-        remove_call(&jvm, &entity.to_string());
+        unheard_damage::forget(entity);
+        if heard(
+            &jvm,
+            &[
+                "org.bukkit.event.entity.EntityRemoveFromWorldEvent",
+                "com.destroystokyo.paper.event.entity.EntityRemoveFromWorldEvent",
+            ],
+        ) {
+            remove_call(&jvm, &entity.to_string());
+        }
         natives::remove_projectile_source(&entity);
     });
 
     let jvm = Arc::clone(&vm);
     events.on::<ItemSpawnEvent, _>(owner(), move |event| {
+        if !heard(&jvm, &["org.bukkit.event.entity.ItemSpawnEvent"]) {
+            return;
+        }
         let (x, y, z) = event.position();
         let item = format!("{} {}", event.item().item.key, event.item().count());
         if !item_spawn_call(
@@ -2480,6 +2506,54 @@ fn lightning_strike_call(vm: &JavaVM, entity: &str, world: &str, cause: &str) ->
     .ok()
     .and_then(|v| v.z().ok())
     .unwrap_or(true)
+}
+
+/// Bumped by Java each time a plugin handler is added or removed.
+static HANDLERS_VERSION: AtomicU64 = AtomicU64::new(0);
+
+/// Whether each event class list was heard, and at which handler version it was asked.
+static HEARD: LazyLock<Mutex<FxHashMap<&'static str, (u64, bool)>>> =
+    LazyLock::new(|| Mutex::new(FxHashMap::default()));
+
+/// Forgets which events are heard; Java calls this whenever its handlers change.
+pub(crate) fn forget_heard_events() {
+    HANDLERS_VERSION.fetch_add(1, Ordering::AcqRel);
+}
+
+/// Whether any plugin handler would receive one of these Bukkit events.
+///
+/// The host bridges every event Foton fires, so without this every TNT of a nuke marshals a
+/// thousand blocks to Java and back -- and builds the event there -- for an event nobody listens
+/// to. The answer is asked of Java once and kept until its handlers change. An answer Java
+/// cannot give counts as heard.
+pub(crate) fn heard(vm: &JavaVM, classes: &'static [&'static str]) -> bool {
+    let Some(&key) = classes.first() else {
+        return false;
+    };
+    let version = HANDLERS_VERSION.load(Ordering::Acquire);
+    if let Some(&(asked_at, heard)) = HEARD.lock().get(key)
+        && asked_at == version
+    {
+        return heard;
+    }
+    let Some(mut env) = BridgeEnv::attach(vm) else {
+        return true;
+    };
+    let heard = classes.iter().any(|class| {
+        let Ok(class) = env.new_string(class) else {
+            return true;
+        };
+        env.call_static_method(
+            BRIDGE,
+            "listens",
+            "(Ljava/lang/String;)Z",
+            &[JValue::Object(&class)],
+        )
+        .and_then(JValueGen::z)
+        .unwrap_or(true)
+    });
+    HEARD.lock().insert(key, (version, heard));
+    heard
 }
 
 fn explode_call(

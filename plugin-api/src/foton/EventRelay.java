@@ -219,6 +219,18 @@ public final class EventRelay {
      * changes it, which is exact for every one but armor. */
     public static String fireEntityDamage(String entity, String damager, String cause, String damage,
             String modifiers, String critical) {
+        org.bukkit.event.entity.EntityDamageEvent event =
+            damageEvent(entity, damager, cause, damage, modifiers, critical);
+        org.bukkit.entity.Entity victim = event.getEntity();
+        EventBridge.dispatch(event);
+        // Paper parity: only a hit that went through becomes the last damage.
+        if (!event.isCancelled() && victim != null) EventBridge.setLastDamageCause(victim.getUniqueId(), event);
+        return answer(event.isCancelled(), event.getDamage());
+    }
+
+    /** Builds the damage event a hit stands for, from the arguments of {@link #fireEntityDamage}. */
+    static org.bukkit.event.entity.EntityDamageEvent damageEvent(String entity, String damager,
+            String cause, String damage, String modifiers, String critical) {
         org.bukkit.entity.Entity victim = FotonEntity.handle(Native.parse(entity));
         org.bukkit.event.entity.EntityDamageEvent.DamageCause reason =
             org.bukkit.event.entity.EntityDamageEvent.DamageCause.valueOf(cause);
@@ -239,10 +251,7 @@ public final class EventRelay {
         } else {
             event = new org.bukkit.event.entity.EntityDamageEvent(victim, reason, values, functions);
         }
-        EventBridge.dispatch(event);
-        // Paper parity: only a hit that went through becomes the last damage.
-        if (!event.isCancelled() && victim != null) EventBridge.setLastDamageCause(victim.getUniqueId(), event);
-        return answer(event.isCancelled(), event.getDamage());
+        return event;
     }
 
     /** Fills Paper's modifier maps from `NAME=amount` pairs, in Paper's order.

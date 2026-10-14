@@ -74,6 +74,11 @@ public final class Native {
 
     /** Requests the server's normal graceful shutdown sequence. */
     public static native void shutdown();
+    /** Event handlers were added or removed; the native side forgets which events are heard. */
+    public static native void handlersChanged();
+    /** The last hit of an entity no plugin heard, as the tick then the {@code fireEntityDamage}
+     * arguments, unit-separated; null when there is none. Taking it forgets it. */
+    public static native String unheardDamage(String entity);
     public static native void savePlayers();
 
     /** The UUIDs of everyone online, in no promised order. */

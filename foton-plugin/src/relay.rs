@@ -36,8 +36,9 @@ use jni::objects::{JObject, JString, JValue};
 use text_components::TextComponent;
 use uuid::Uuid;
 
-use crate::forward::{BridgeEnv, owner};
+use crate::forward::{BridgeEnv, heard, owner};
 use crate::natives::{describe_slot, describe_state, parse_slot};
+use crate::unheard_damage;
 
 /// The Java class these events are built in.
 const RELAY: &str = "foton/EventRelay";
@@ -520,11 +521,19 @@ fn subscribe_entities(server: &Arc<Server>, vm: &Arc<JavaVM>) {
     });
 }
 
+/// The Bukkit classes a damage crossing builds; any handler of one of them hears it.
+const DAMAGE_EVENTS: &[&str] = &[
+    "org.bukkit.event.entity.EntityDamageEvent",
+    "org.bukkit.event.entity.EntityDamageByEntityEvent",
+    "org.bukkit.event.entity.EntityDamageByBlockEvent",
+];
+
 /// Damage about to be dealt, and entities about to catch fire.
 fn subscribe_combat(server: &Arc<Server>, vm: &Arc<JavaVM>) {
     let events = server.events();
 
     let jvm = Arc::clone(vm);
+    let damage_server = Arc::downgrade(server);
     events.on::<EntityDamageEvent, _>(owner(), move |event| {
         let damager = match event.damager() {
             Damager::Nothing => String::new(),
@@ -533,17 +542,28 @@ fn subscribe_combat(server: &Arc<Server>, vm: &Arc<JavaVM>) {
                 format!("block:{}", pos.map_or_else(String::new, block_position))
             }
         };
+        let args = [
+            event.entity().to_string(),
+            damager,
+            event.cause().to_owned(),
+            event.damage().to_string(),
+            modifier_list(event.modifiers()),
+            bit(event.critical()).to_owned(),
+        ];
+        if !heard(&jvm, DAMAGE_EVENTS) {
+            // Nobody hears it, but `getLastDamageCause` must still answer with it: Java
+            // builds it from these facts only if a plugin asks.
+            let tick = damage_server
+                .upgrade()
+                .map_or(0, |server| server.overworld().game_time());
+            unheard_damage::remember(event.entity(), tick, args);
+            return;
+        }
+        unheard_damage::forget(event.entity());
         let Some(answer) = text_call(
             &jvm,
             "fireEntityDamage",
-            &[
-                &event.entity().to_string(),
-                &damager,
-                event.cause(),
-                &event.damage().to_string(),
-                &modifier_list(event.modifiers()),
-                bit(event.critical()),
-            ],
+            &args.each_ref().map(String::as_str),
         ) else {
             return;
         };
