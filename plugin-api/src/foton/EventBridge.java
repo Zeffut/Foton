@@ -258,6 +258,15 @@ public final class EventBridge {
     }
 
     public static void dispatch(Object event) {
+        try {
+            dispatchToHandlers(event);
+        } finally {
+            // Blocks an event carried with their states answer from them only while it runs.
+            FotonBlock.forgetKnownStates();
+        }
+    }
+
+    private static void dispatchToHandlers(Object event) {
         List<Handler> list = new ArrayList<>();
         for (Map.Entry<Class<?>, CopyOnWriteArrayList<Handler>> entry : handlers.entrySet()) {
             if (entry.getKey().isAssignableFrom(event.getClass())) {
@@ -1237,18 +1246,27 @@ public final class EventBridge {
         return !event.isCancelled();
     }
 
-    public static String fireEntityExplode(String entityUuid, String world, String encoded, String result) {
+    /** The blocks of an explosion, written {@code x,y,z|state;...} by the native side, each
+     * carrying the state it already read. */
+    public static java.util.List<org.bukkit.block.Block> blastBlocks(String world, String encoded) {
         java.util.List<org.bukkit.block.Block> blocks = new java.util.ArrayList<>();
-        if (encoded != null && !encoded.isEmpty()) {
-            for (String value : encoded.split(";")) {
-                String[] xyz = value.split(",");
-                if (xyz.length != 3) continue;
-                try {
-                    blocks.add(new FotonBlock(FotonWorld.of(world), Integer.parseInt(xyz[0].trim()),
-                        Integer.parseInt(xyz[1].trim()), Integer.parseInt(xyz[2].trim())));
-                } catch (NumberFormatException ignored) { }
-            }
+        if (encoded == null || encoded.isEmpty()) return blocks;
+        org.bukkit.World where = FotonWorld.of(world);
+        for (String value : encoded.split(";")) {
+            int bar = value.indexOf('|');
+            String[] xyz = (bar < 0 ? value : value.substring(0, bar)).split(",");
+            if (xyz.length != 3) continue;
+            try {
+                blocks.add(new FotonBlock(where, Integer.parseInt(xyz[0].trim()),
+                    Integer.parseInt(xyz[1].trim()), Integer.parseInt(xyz[2].trim()),
+                    bar < 0 ? null : value.substring(bar + 1)));
+            } catch (NumberFormatException ignored) { }
         }
+        return blocks;
+    }
+
+    public static String fireEntityExplode(String entityUuid, String world, String encoded, String result) {
+        java.util.List<org.bukkit.block.Block> blocks = blastBlocks(world, encoded);
         org.bukkit.event.entity.EntityExplodeEvent event = new org.bukkit.event.entity.EntityExplodeEvent(
             FotonEntity.handle(Native.parse(entityUuid)), blocks, 1.0f, org.bukkit.ExplosionResult.valueOf(result));
         dispatch(event);
@@ -1260,13 +1278,7 @@ public final class EventBridge {
     }
 
     public static String fireBlockExplode(String world, int x, int y, int z, String encoded) {
-        java.util.List<org.bukkit.block.Block> blocks = new java.util.ArrayList<>();
-        if (encoded != null && !encoded.isEmpty()) for (String value : encoded.split(";")) {
-            String[] xyz = value.split(",");
-            if (xyz.length != 3) continue;
-            try { blocks.add(new FotonBlock(FotonWorld.of(world), Integer.parseInt(xyz[0].trim()), Integer.parseInt(xyz[1].trim()), Integer.parseInt(xyz[2].trim()))); }
-            catch (NumberFormatException ignored) { }
-        }
+        java.util.List<org.bukkit.block.Block> blocks = blastBlocks(world, encoded);
         org.bukkit.event.block.BlockExplodeEvent event = new org.bukkit.event.block.BlockExplodeEvent(
             new FotonBlock(FotonWorld.of(world), x, y, z), blocks, 1.0f);
         dispatch(event);

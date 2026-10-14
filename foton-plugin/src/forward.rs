@@ -9,6 +9,7 @@
 //! Nothing on either side holds a reference to the other's objects past the
 //! call, which is the only reason the lifetimes work at all.
 
+use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
 
@@ -54,6 +55,7 @@ use foton_core::event::{
     PlayerChangedWorldEvent, PlayerCommandSendEvent, PlayerGameModeChangeEvent, PlayerItemHeldEvent,
 };
 use foton_core::server::Server;
+use foton_registry::blocks::block_state_ext::BlockStateExt as _;
 use foton_registry::item_stack::ItemStack;
 use foton_utils::text::json;
 use foton_utils::types::InteractionHand;
@@ -2556,6 +2558,34 @@ pub(crate) fn heard(vm: &JavaVM, classes: &'static [&'static str]) -> bool {
     heard
 }
 
+/// The blocks of an explosion as Java reads them, each with its state: `x,y,z|state;...`.
+///
+/// Plugins walk `blockList()` asking each block its type; without the state here every one of
+/// those questions crossed the JNI again, a million of them for a nuke. Air is left out, as Paper
+/// leaves it out of `blockList()` -- and, as there, out of what the explosion keeps afterwards.
+fn encode_blast(world: &str, blocks: &[BlockPos]) -> String {
+    let world = world
+        .parse::<Identifier>()
+        .ok()
+        .and_then(|key| natives::server()?.worlds.get_owned(&key));
+    let mut encoded = String::new();
+    for pos in blocks {
+        let state = world.as_ref().map(|world| world.get_block_state(*pos));
+        if state.is_some_and(|state| state.is_air()) {
+            continue;
+        }
+        if !encoded.is_empty() {
+            encoded.push(';');
+        }
+        let _ = write!(encoded, "{},{},{}", pos.x(), pos.y(), pos.z());
+        if let Some(described) = state.and_then(natives::describe_state) {
+            encoded.push('|');
+            encoded.push_str(&described);
+        }
+    }
+    encoded
+}
+
 fn explode_call(
     vm: &JavaVM,
     entity: &str,
@@ -2564,13 +2594,9 @@ fn explode_call(
     explosion_result: &str,
 ) -> Option<(bool, Vec<BlockPos>)> {
     let mut env = BridgeEnv::attach(vm)?;
+    let encoded = encode_blast(world, blocks);
     let entity = env.new_string(entity).ok()?;
     let world = env.new_string(world).ok()?;
-    let encoded = blocks
-        .iter()
-        .map(|pos| format!("{}, {}, {}", pos.x(), pos.y(), pos.z()))
-        .collect::<Vec<_>>()
-        .join(";");
     let blocks = env.new_string(encoded).ok()?;
     let explosion_result = env.new_string(explosion_result).ok()?;
     let answer = env
@@ -2616,12 +2642,8 @@ fn block_explode_call(
     blocks: &[BlockPos],
 ) -> Option<(bool, Vec<BlockPos>)> {
     let mut env = BridgeEnv::attach(vm)?;
+    let encoded = encode_blast(world, blocks);
     let world = env.new_string(world).ok()?;
-    let encoded = blocks
-        .iter()
-        .map(|pos| format!("{}, {}, {}", pos.x(), pos.y(), pos.z()))
-        .collect::<Vec<_>>()
-        .join(";");
     let encoded = env.new_string(encoded).ok()?;
     let answer = env
         .call_static_method(

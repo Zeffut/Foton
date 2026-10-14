@@ -86,8 +86,29 @@ final class Events {
             "registerEvent(ignoreCancelled=false) should receive a cancelled event");
 
         listensOnlyForHandledEvents(owner, listener);
+        blastBlocksCarryTheirState();
         pluginMessages(owner);
         scheduler();
+    }
+
+    /** The blocks of an explosion answer their type from the state the server sent with them,
+     * without crossing back -- here there is no server to cross to -- until the event ends. */
+    private static void blastBlocksCarryTheirState() {
+        java.util.List<org.bukkit.block.Block> blocks = foton.EventBridge.blastBlocks(
+            "minecraft:overworld",
+            "1,2,3|minecraft:lodestone;4,5,6|minecraft:oak_stairs[facing=east,half=top,shape=straight,waterlogged=false]");
+        Checks.same(blocks.size(), 2, "blast blocks were dropped");
+        Checks.same(blocks.get(0).getType(), org.bukkit.Material.LODESTONE, "a known state gave the wrong type");
+        Checks.same(blocks.get(1).getType(), org.bukkit.Material.OAK_STAIRS, "a state with properties gave the wrong type");
+        Checks.same(blocks.get(1).getX(), 4, "a blast block lost its position");
+        foton.EventBridge.dispatch(new Object());
+        boolean asked = false;
+        try {
+            blocks.get(0).getType();
+        } catch (UnsatisfiedLinkError expected) {
+            asked = true;
+        }
+        Checks.expect(asked, "a block kept answering from its state after the event ended");
     }
 
     /** The native side skips building events nobody hears; it must still build one a handler

@@ -14,16 +14,48 @@ import org.bukkit.block.data.BlockData;
  * does and the reason BlockState exists separately as a snapshot.
  */
 public final class FotonBlock implements Block {
+    /** Bumped whenever states handed out with blocks may have gone stale: after each event
+     * dispatch, and on every block change made through this API. */
+    private static final java.util.concurrent.atomic.AtomicLong KNOWN_EPOCH =
+        new java.util.concurrent.atomic.AtomicLong();
+
+    /** The material of each block name, so a known state answers {@link #getType} without
+     * parsing its properties again. */
+    private static final java.util.Map<String, Material> MATERIALS =
+        new java.util.concurrent.ConcurrentHashMap<>();
+
     private final World world;
     private final int x;
     private final int y;
     private final int z;
+    private final String knownState;
+    private final long knownEpoch;
 
     public FotonBlock(World world, int x, int y, int z) {
+        this(world, x, y, z, null);
+    }
+
+    /** A block whose state the server already read and sent along -- the blocks of an
+     * explosion. Until the event that carried it finishes, the state answers {@link #getType}
+     * and {@link #getBlockData} without asking the server again; a plugin walking a thousand
+     * blocks of {@code blockList()} would otherwise cross to it a thousand times. */
+    public FotonBlock(World world, int x, int y, int z, String knownState) {
         this.world = world;
         this.x = x;
         this.y = y;
         this.z = z;
+        this.knownState = knownState;
+        this.knownEpoch = KNOWN_EPOCH.get();
+    }
+
+    /** States handed out with blocks may no longer hold. */
+    static void forgetKnownStates() {
+        KNOWN_EPOCH.incrementAndGet();
+    }
+
+    private String state() {
+        if (knownState != null && knownEpoch == KNOWN_EPOCH.get()) return knownState;
+        return world == null ? null : Native.blockState(world.getName(), x, y, z);
     }
 
     @Override
@@ -59,12 +91,17 @@ public final class FotonBlock implements Block {
 
     @Override
     public Material getType() {
-        return getBlockData().getMaterial();
+        String state = state();
+        if (state == null) return getBlockData().getMaterial();
+        int properties = state.indexOf('[');
+        String name = properties < 0 ? state : state.substring(0, properties);
+        return MATERIALS.computeIfAbsent(name, ignored -> dataOf(state).getMaterial());
     }
 
     @Override
     public void setType(Material type) {
         if (world != null && type != null) {
+            forgetKnownStates();
             Native.setBlock(world.getName(), x, y, z, "minecraft:" + type.getKeyName());
         }
     }
@@ -72,6 +109,7 @@ public final class FotonBlock implements Block {
     @Override
     public void setBlockData(BlockData data, boolean applyPhysics) {
         if (world == null || data == null) return;
+        forgetKnownStates();
         if (applyPhysics) Native.setBlock(world.getName(), x, y, z, data.getAsString());
         else Native.setBlockWithoutPhysics(world.getName(), x, y, z, data.getAsString());
     }
@@ -85,12 +123,15 @@ public final class FotonBlock implements Block {
     public void setType(Material type, boolean applyPhysics) {
         if (type == null) return;
         if (applyPhysics) setType(type);
-        else if (world != null) Native.setBlockWithoutPhysics(world.getName(), x, y, z, "minecraft:" + type.getKeyName());
+        else if (world != null) {
+            forgetKnownStates();
+            Native.setBlockWithoutPhysics(world.getName(), x, y, z, "minecraft:" + type.getKeyName());
+        }
     }
 
     @Override
     public BlockData getBlockData() {
-        return dataOf(world == null ? null : Native.blockState(world.getName(), x, y, z));
+        return dataOf(state());
     }
 
     /** The typed Bukkit view of a block state written `minecraft:name[props]`. */
